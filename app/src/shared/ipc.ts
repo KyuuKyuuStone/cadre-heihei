@@ -43,6 +43,26 @@ export const IPC_FORBIDDEN_INPUT_FIELDS = ['projectId', 'channel'] as const
 /** 请求体上限（U-IPC-10）。 */
 export const IPC_MAX_PAYLOAD_BYTES = 1024 * 1024
 
+/** preload 暴露在 `window.cadre` 上的方法全集（frontend/02 §2，15 个）。 */
+export const CADRE_BRIDGE_METHODS = [
+  'whoami',
+  'dispatchTask',
+  'reportTask',
+  'listTasks',
+  'getTask',
+  'listRoster',
+  'reviewTask',
+  'subscribeSession',
+  'unsubscribeSession',
+  'sendMessage',
+  'interruptSession',
+  'reconnectSession',
+  'onSessionEvent',
+  'getPreferences',
+  'setPreferences',
+] as const
+export type CadreBridgeMethod = (typeof CADRE_BRIDGE_METHODS)[number]
+
 export type IpcRole = 'supervisor' | 'worker'
 
 export interface IpcIdentity {
