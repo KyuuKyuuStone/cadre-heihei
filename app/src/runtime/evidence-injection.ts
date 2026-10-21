@@ -123,14 +123,48 @@ export class EvidenceInjectionRuntime {
     prompt: string,
     sendOptions?: SendOptions,
   ): AsyncIterable<EngineEvent> {
+    let completed = false
+    let failed = false
     try {
       for await (const event of session.send(prompt, sendOptions)) {
         if (event.kind === 'compaction.summary') this.handleCompactionSummary(event.raw)
         yield event
       }
+      completed = true
+    } catch (error) {
+      failed = true
+      this.discardPending('stream-error', error)
+      throw error
     } finally {
-      await this.flush(session)
+      // 只有正常遍历完成才发送恢复块；消费者 break/取消与流异常都不得触发新 run。
+      if (completed) {
+        await this.flush(session)
+      } else if (!failed) {
+        this.discardPending('consumer-cancelled')
+      }
     }
+  }
+
+  /**
+   * 取消/异常时清空待发送块，只留诊断。
+   *
+   * 注意：注入器在观察阶段已写幂等账本，故取消后同键不会重试——
+   * 发送失败/取消均为 at-most-once，这是为避免重复膨胀的有意取舍。
+   */
+  private discardPending(reason: 'consumer-cancelled' | 'stream-error', error?: unknown): void {
+    const dropped = this.pending.splice(0, this.pending.length)
+    const last = dropped.at(-1)
+    this.emit({
+      stage: 'event',
+      outcome: 'skipped',
+      reason,
+      compactionId: last?.compactionId ?? '',
+      ...(last === undefined ? {} : { taskId: last.taskId, revision: last.revision }),
+      detail: {
+        droppedInjections: dropped.length,
+        ...(error === undefined ? {} : { error: errorText(error) }),
+      },
+    })
   }
 
   private now(): IsoTimestamp {
@@ -308,7 +342,12 @@ export class EvidenceInjectionRuntime {
     }
   }
 
-  /** 在本次 send 结束后按 user-role 发送排队的恢复块。 */
+  /**
+   * 在本次 send 正常结束后按 user-role 发送排队的恢复块。
+   *
+   * 发送失败为 at-most-once：注入器在观察阶段已写幂等记录，失败后同键不重试，
+   * 以避免重复膨胀（有意取舍，与取消语义一致）。
+   */
   private async flush(session: EngineSession): Promise<void> {
     const pending = this.pending.splice(0, this.pending.length)
     for (const item of pending) {

@@ -558,6 +558,117 @@ test('包装会话不改变事件流且委托其它方法', async () => {
   }
 })
 
+test('消费者提前 break：清空 pending，不发送恢复块，诊断 consumer-cancelled', async () => {
+  const { project, ledger, diagnostics, session } = prepare()
+  const delivered: string[] = []
+  try {
+    setScripts(session, [
+      [
+        { kind: 'message.complete', sessionId: EMP, at: AT } as never,
+        summaryEvent('comp-cancel'),
+        { kind: 'message.complete', sessionId: EMP, at: AT } as never,
+      ],
+    ])
+    const wrapped = wrapSessionWithEvidenceInjection(session, {
+      sessionId: EMP,
+      projectId: PROJECT,
+      projectRoot: project.root,
+      ledger,
+      deliver: (text) => {
+        delivered.push(text)
+      },
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+    let seen = 0
+    for await (const _event of wrapped.send('继续')) {
+      seen += 1
+      if (seen === 2) break
+    }
+    assert.equal(seen, 2)
+    assert.deepEqual(delivered, [], '取消后不得发送恢复块')
+    assert.equal(diagnostics.some((diagnostic) => diagnostic.stage === 'delivery'), false)
+    const cancelled = findDiagnostic(diagnostics, 'event', 'skipped')
+    assert.ok(cancelled !== undefined)
+    assert.equal(cancelled.reason, 'consumer-cancelled')
+    assert.equal(cancelled.detail?.droppedInjections, 1)
+  } finally {
+    project.cleanup()
+  }
+})
+
+test('事件流抛错：不发送恢复块，诊断 stream-error 且错误继续抛出', async () => {
+  const project = makeProject()
+  project.write('src/api.ts', `${API_LINE}\n`)
+  const ledger = makeLedger()
+  createTask(ledger, TASK_A)
+  writeCard(project, makeEvidence(project, TASK_A))
+  const diagnostics: EvidenceInjectionDiagnostic[] = []
+  const delivered: string[] = []
+  const throwingSession: EngineSession = {
+    sessionId: EMP,
+    runtimeId: 'runtime-throw',
+    send: () =>
+      (async function* () {
+        yield summaryEvent('comp-throw')
+        throw new Error('stream boom')
+      })(),
+    async setWorkingDirectory() {},
+    async getWorkingDirectory() {
+      return '/work'
+    },
+    async close() {},
+  }
+  try {
+    const wrapped = wrapSessionWithEvidenceInjection(throwingSession, {
+      sessionId: EMP,
+      projectId: PROJECT,
+      projectRoot: project.root,
+      ledger,
+      deliver: (text) => {
+        delivered.push(text)
+      },
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+    await assert.rejects(async () => {
+      for await (const _event of wrapped.send('继续')) {
+        // 消费到抛错。
+      }
+    }, /stream boom/)
+    assert.deepEqual(delivered, [], '流异常后不得发送恢复块')
+    assert.equal(diagnostics.some((diagnostic) => diagnostic.stage === 'delivery'), false)
+    const failed = findDiagnostic(diagnostics, 'event', 'skipped')
+    assert.ok(failed !== undefined)
+    assert.equal(failed.reason, 'stream-error')
+    assert.match(String(failed.detail?.error), /stream boom/)
+  } finally {
+    project.cleanup()
+  }
+})
+
+test('正常完成：恢复块仍注入且只发送一次', async () => {
+  const { project, ledger, session } = prepare()
+  const delivered: string[] = []
+  try {
+    setScripts(session, [
+      [summaryEvent('comp-normal'), { kind: 'message.complete', sessionId: EMP, at: AT } as never],
+    ])
+    const wrapped = wrapSessionWithEvidenceInjection(session, {
+      sessionId: EMP,
+      projectId: PROJECT,
+      projectRoot: project.root,
+      ledger,
+      deliver: (text) => {
+        delivered.push(text)
+      },
+    })
+    await collect(wrapped.send('继续'))
+    assert.equal(delivered.length, 1)
+    assert.ok((delivered[0] as string).startsWith(RECOVERY_MARKER))
+  } finally {
+    project.cleanup()
+  }
+})
+
 test('onDiagnostic 抛错不打断事件流', async () => {
   const { project, ledger, session } = prepare({ withCard: false })
   try {
