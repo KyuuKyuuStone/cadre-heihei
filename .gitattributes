@@ -1,0 +1,9 @@
+# 历史原件与只读快照：禁用换行转换，保证 SHA256 可复算
+docs/01-*.md -text
+docs/02-*.md -text
+docs/03-*.md -text
+docs/04-*.md -text
+docs/05-*.md -text
+docs/06-*.md -text
+docs/blessings/** -text
+docs/handover/** -text
