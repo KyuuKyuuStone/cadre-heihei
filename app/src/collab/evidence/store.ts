@@ -14,6 +14,8 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmdirSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -40,15 +42,22 @@ export interface AcquireLeaseInput {
 
 export type AcquireLeaseOutcome =
   | { readonly ok: true; readonly lease: EvidenceLease; readonly status: 'acquired' | 'renewed' | 'takeover' }
-  | { readonly ok: false; readonly code: 'LEASE_HELD'; readonly lease: EvidenceLease }
+  /** 竞争失败；不返回 fencingToken，避免多头持有同一 token 的歧义。 */
+  | { readonly ok: false; readonly code: 'LEASE_HELD' }
 
 export interface CardWriteOptions {
   readonly renameFile?: (from: string, to: string) => void
   readonly lease?: Pick<EvidenceLease, 'ownerInstanceId' | 'fencingToken'>
+  /**
+   * 显式放弃租约保护（默认 false）。仅允许初次建卡/离线修复等单写者场景；
+   * 并发下会绕过 fencing，可能丢更新——调用方必须在注释中说明风险。
+   */
+  readonly allowUnsafeNoLease?: boolean
   readonly nowMs?: () => number
 }
 
 const DEFAULT_TTL_MS = 30_000
+const GATE_STALE_MS = 5_000
 let tempSeq = 0
 
 export function cardPath(projectRoot: string, taskId: string): string {
@@ -93,6 +102,9 @@ export function writeEvidenceCard(
   const now = (options.nowMs ?? Date.now)()
   if (options.lease !== undefined) {
     assertLeaseValid(projectRoot, card.taskId, options.lease, now)
+  } else if (options.allowUnsafeNoLease !== true) {
+    // 默认强制单写者租约；并发下绕过 fencing 会丢更新。
+    throw new EvidenceError('LEASE_REQUIRED', '写入证据卡必须持有租约（或显式 allowUnsafeNoLease）')
   }
 
   const path = cardPath(projectRoot, card.taskId)
@@ -159,6 +171,75 @@ function leaseExpired(lease: EvidenceLease, nowMs: number): boolean {
   return Date.parse(lease.expiresAt) <= nowMs
 }
 
+function gateIsStale(gatePath: string): boolean {
+  try {
+    return Date.now() - statSync(gatePath).mtimeMs > GATE_STALE_MS
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 所有 acquire 共用一把目录门闩（mkdir 原子），把「读旧锁 → 抢占 → 写新锁」
+ * 收进临界区，避免接管者在 rename 间隙互相覆盖。
+ * 门闩由持锁进程在 finally 删除；异常崩溃留下的门闩超过 5s 视为陈旧。
+ */
+function withLeaseGate<T>(
+  dir: string,
+  fn: () => T,
+): { readonly ok: true; readonly value: T } | { readonly ok: false } {
+  const gatePath = `${dir}/card.lock.gate`
+  let acquired = false
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      mkdirSync(gatePath)
+      acquired = true
+      break
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EEXIST') {
+        throw new EvidenceError('WRITE_FAILED', '租约门闩创建失败', {
+          cause: String((error as Error).message),
+        })
+      }
+      if (attempt === 0 && gateIsStale(gatePath)) {
+        try {
+          rmdirSync(gatePath)
+        } catch {
+          // 其他进程可能已清理；继续重试一次。
+        }
+        continue
+      }
+      return { ok: false }
+    }
+  }
+  if (!acquired) return { ok: false }
+  try {
+    return { ok: true, value: fn() }
+  } finally {
+    try {
+      rmdirSync(gatePath)
+    } catch {
+      // 临界区已完成；门闩清理失败不应改写业务结果。
+    }
+  }
+}
+
+function writeLockAtomic(path: string, lease: EvidenceLease): void {
+  const temp = `${path}.new-${process.pid}-${++tempSeq}`
+  try {
+    writeFileSync(temp, JSON.stringify(lease), 'utf8')
+    renameSync(temp, path)
+  } catch (error) {
+    try {
+      if (existsSync(temp)) unlinkSync(temp)
+    } catch {
+      // 清理失败不覆盖原始错误。
+    }
+    throw error
+  }
+}
+
 export function acquireLease(
   projectRoot: string,
   taskId: string,
@@ -169,64 +250,73 @@ export function acquireLease(
   const dir = ensureTaskDir(projectRoot, taskId)
   const path = `${dir}/card.lock`
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const gated = withLeaseGate(dir, (): AcquireLeaseOutcome => {
     const existing = readLease(projectRoot, taskId)
-    if (existing !== undefined) {
-      if (!leaseExpired(existing, nowMs)) {
-        if (existing.ownerInstanceId === input.ownerInstanceId) {
-          const renewed: EvidenceLease = {
-            ...existing,
-            expiresAt: new Date(nowMs + ttlMs).toISOString(),
-          }
-          writeFileSync(path, JSON.stringify(renewed), 'utf8')
-          return { ok: true, lease: renewed, status: 'renewed' }
+
+    if (existing !== undefined && !leaseExpired(existing, nowMs)) {
+      if (existing.ownerInstanceId === input.ownerInstanceId) {
+        const renewed: EvidenceLease = {
+          ...existing,
+          expiresAt: new Date(nowMs + ttlMs).toISOString(),
         }
-        return { ok: false, code: 'LEASE_HELD', lease: existing }
+        writeLockAtomic(path, renewed)
+        return { ok: true, lease: renewed, status: 'renewed' }
       }
+      return { ok: false, code: 'LEASE_HELD' }
     }
 
-    const fencingToken = (existing?.fencingToken ?? 0) + 1
-    const lease: EvidenceLease = {
-      ownerInstanceId: input.ownerInstanceId,
-      sessionId: input.sessionId,
-      ownerEpoch: fencingToken,
-      fencingToken,
-      acquiredAt: new Date(nowMs).toISOString(),
-      expiresAt: new Date(nowMs + ttlMs).toISOString(),
-    }
-    try {
-      const fd = openSync(path, 'wx')
+    if (existing !== undefined) {
+      // 过期接管：先把旧锁 rename 到唯一 backup（rename 原子）。
+      // 门闩保证同一时刻只有一个接管者进入；rename 仍作为最终仲裁。
+      const backup = `${path}.stale-${process.pid}-${++tempSeq}`
       try {
-        writeFileSync(fd, JSON.stringify(lease), 'utf8')
-      } finally {
-        closeSync(fd)
+        renameSync(path, backup)
+      } catch {
+        return { ok: false, code: 'LEASE_HELD' }
       }
-      return { ok: true, lease, status: existing === undefined ? 'acquired' : 'takeover' }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        throw new EvidenceError('WRITE_FAILED', '租约写入失败', {
+      const fencingToken = existing.fencingToken + 1
+      const lease: EvidenceLease = {
+        ownerInstanceId: input.ownerInstanceId,
+        sessionId: input.sessionId,
+        ownerEpoch: fencingToken,
+        fencingToken,
+        acquiredAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + ttlMs).toISOString(),
+      }
+      try {
+        writeLockAtomic(path, lease)
+      } catch (error) {
+        // 新锁写入失败：尽量恢复旧锁，绝不返回成功。
+        try {
+          renameSync(backup, path)
+        } catch {
+          // 恢复失败时保留 backup 供人工处理。
+        }
+        throw new EvidenceError('WRITE_FAILED', '接管租约写入失败', {
           cause: String((error as Error).message),
         })
       }
-      // 竞争：重新读取后按持有者/过期状态决定；过期则用 rename 抢占。
-      const raced = readLease(projectRoot, taskId)
-      if (raced !== undefined && leaseExpired(raced, nowMs)) {
-        const temp = `${dir}/.card.lock.tmp-${process.pid}-${++tempSeq}`
-        const takeover: EvidenceLease = {
-          ...lease,
-          fencingToken: raced.fencingToken + 1,
-          ownerEpoch: raced.fencingToken + 1,
-        }
-        writeFileSync(temp, JSON.stringify(takeover), 'utf8')
-        renameSync(temp, path)
-        return { ok: true, lease: takeover, status: 'takeover' }
+      try {
+        unlinkSync(backup)
+      } catch {
+        // backup 只是旧锁副本，清理失败不影响 fencing。
       }
-      if (raced !== undefined) return { ok: false, code: 'LEASE_HELD', lease: raced }
+      return { ok: true, lease, status: 'takeover' }
     }
-  }
-  const lease = readLease(projectRoot, taskId)
-  if (lease !== undefined) return { ok: false, code: 'LEASE_HELD', lease }
-  throw new EvidenceError('WRITE_FAILED', '租约竞争未能解决')
+
+    const lease: EvidenceLease = {
+      ownerInstanceId: input.ownerInstanceId,
+      sessionId: input.sessionId,
+      ownerEpoch: 1,
+      fencingToken: 1,
+      acquiredAt: new Date(nowMs).toISOString(),
+      expiresAt: new Date(nowMs + ttlMs).toISOString(),
+    }
+    writeLockAtomic(path, lease)
+    return { ok: true, lease, status: 'acquired' }
+  })
+
+  return gated.ok ? gated.value : { ok: false, code: 'LEASE_HELD' }
 }
 
 export function assertLeaseValid(

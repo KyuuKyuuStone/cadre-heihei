@@ -5,6 +5,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   EvidenceError,
+  acquireLease,
   computeIntegrity,
   deleteEvidenceCard,
   fingerprintFile,
@@ -45,7 +46,14 @@ test('卡片 CRUD：seal/verify/write/read/update/delete', () => {
       items: [exactItem({ source: sourceFor(project.root, 'src/api.ts', 1) })],
     })
     assert.equal(verifyCardIntegrity(card), true)
-    writeEvidenceCard(project.root, card)
+    const acquired = acquireLease(project.root, TASK_ID, {
+      ownerInstanceId: 'crud-writer',
+      sessionId: 'session-crud',
+      ttlMs: 300_000,
+    })
+    if (!acquired.ok) assert.fail('租约获取失败')
+    const lease = { ownerInstanceId: 'crud-writer', fencingToken: acquired.lease.fencingToken }
+    writeEvidenceCard(project.root, card, { lease })
     const read = readEvidenceCard(project.root, TASK_ID)
     assert.equal(read.revision, 0)
     assert.equal(read.items.length, 1)
@@ -54,7 +62,7 @@ test('卡片 CRUD：seal/verify/write/read/update/delete', () => {
     const updated = nextRevision(read, {
       items: [...read.items, { id: 'note', kind: 'semantic', item: '约束', value: '不改协议字段', status: 'unverified', neededEvidence: '协议评审记录' }],
     })
-    writeEvidenceCard(project.root, updated)
+    writeEvidenceCard(project.root, updated, { lease })
     assert.equal(readEvidenceCard(project.root, TASK_ID).revision, 1)
 
     assert.equal(deleteEvidenceCard(project.root, TASK_ID), true)

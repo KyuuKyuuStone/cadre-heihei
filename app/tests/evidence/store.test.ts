@@ -21,16 +21,31 @@ function isCode(code: string) {
   return (error: unknown) => error instanceof EvidenceError && error.code === code
 }
 
+function leaseFor(
+  projectRoot: string,
+  ownerInstanceId = 'writer-test',
+): { ownerInstanceId: string; fencingToken: number } {
+  const outcome = acquireLease(projectRoot, TASK_ID, {
+    ownerInstanceId,
+    sessionId: SESSION,
+    ttlMs: 300_000,
+  })
+  if (!outcome.ok) throw new Error('测试租约获取失败')
+  return { ownerInstanceId, fencingToken: outcome.lease.fencingToken }
+}
+
 test('原子写：临时文件 + rename；rename 失败不留半成品且旧卡不变', () => {
   const project = makeProject()
   try {
     const first = makeCard()
-    writeEvidenceCard(project.root, first)
+    const lease = leaseFor(project.root)
+    writeEvidenceCard(project.root, first, { lease })
     const second = nextRevision(first)
 
     assert.throws(
       () =>
         writeEvidenceCard(project.root, second, {
+          lease,
           renameFile: () => {
             throw new Error('simulated rename failure')
           },
@@ -49,9 +64,11 @@ test('原子写：临时文件 + rename；rename 失败不留半成品且旧卡�
 test('原子写：首次写入失败时不产生 card.json', () => {
   const project = makeProject()
   try {
+    const lease = leaseFor(project.root)
     assert.throws(
       () =>
         writeEvidenceCard(project.root, makeCard(), {
+          lease,
           renameFile: () => {
             throw new Error('simulated rename failure')
           },
@@ -67,11 +84,12 @@ test('原子写：首次写入失败时不产生 card.json', () => {
 test('revision 必须严格递增', () => {
   const project = makeProject()
   try {
+    const lease = leaseFor(project.root)
     const first = makeCard()
-    writeEvidenceCard(project.root, first)
-    assert.throws(() => writeEvidenceCard(project.root, first), isCode('REVISION_CONFLICT'))
+    writeEvidenceCard(project.root, first, { lease })
+    assert.throws(() => writeEvidenceCard(project.root, first, { lease }), isCode('REVISION_CONFLICT'))
     const next = nextRevision(first)
-    writeEvidenceCard(project.root, next)
+    writeEvidenceCard(project.root, next, { lease })
     assert.equal(readEvidenceCard(project.root, TASK_ID).revision, 1)
   } finally {
     project.cleanup()
@@ -163,6 +181,83 @@ test('租约：过期可抢占，fencing token +1；旧写者写入被拒', () =
     assert.equal(releaseLease(project.root, TASK_ID, 'writer-a', a.lease.fencingToken), false)
     assert.equal(releaseLease(project.root, TASK_ID, 'writer-b', b.lease.fencingToken), true)
     assert.equal(readLease(project.root, TASK_ID), undefined)
+  } finally {
+    project.cleanup()
+  }
+})
+
+test('写卡默认强制租约：无租约 LEASE_REQUIRED；显式 allowUnsafeNoLease 才可写', () => {
+  const project = makeProject()
+  try {
+    assert.throws(() => writeEvidenceCard(project.root, makeCard()), isCode('LEASE_REQUIRED'))
+    // 风险口：仅限单写者/初次建卡；并发下绕过 fencing 可能丢更新。
+    writeEvidenceCard(project.root, makeCard(), { allowUnsafeNoLease: true })
+    assert.equal(readEvidenceCard(project.root, TASK_ID).revision, 0)
+  } finally {
+    project.cleanup()
+  }
+})
+
+test('并发接管：12 个接管者恰好 1 个成功，token+1；旧 token 写入被拒', async () => {
+  const project = makeProject()
+  try {
+    let now = 10_000
+    const old = acquireLease(project.root, TASK_ID, {
+      ownerInstanceId: 'writer-a',
+      sessionId: SESSION,
+      ttlMs: 1_000,
+      nowMs: () => now,
+    })
+    assert.equal(old.ok, true)
+    if (!old.ok) return
+    const oldToken = old.lease.fencingToken
+
+    now = 20_000
+    const results = await Promise.all(
+      Array.from({ length: 12 }, async (_, index) => {
+        await new Promise((resolve) => setImmediate(resolve))
+        return acquireLease(project.root, TASK_ID, {
+          ownerInstanceId: `taker-${index}`,
+          sessionId: SESSION,
+          ttlMs: 30_000,
+          nowMs: () => now,
+        })
+      }),
+    )
+
+    const winners = results.filter((result) => result.ok)
+    assert.equal(winners.length, 1, '恰好一个接管者成功')
+    const winner = winners[0]
+    if (winner === undefined || !winner.ok) return
+    assert.equal(winner.lease.fencingToken, oldToken + 1, 'fencing token 必须递增')
+
+    const successes = results.filter((result) => result.ok)
+    const tokens = successes.map((result) => (result.ok ? result.lease.fencingToken : -1))
+    assert.equal(new Set(tokens).size, tokens.length, '成功的 fencingToken 必须唯一')
+
+    const losers = results.filter((result) => !result.ok)
+    assert.equal(losers.length, 11)
+    for (const loser of losers) {
+      assert.equal(loser.ok, false)
+      if (!loser.ok) assert.equal(loser.code, 'LEASE_HELD')
+    }
+
+    assert.throws(
+      () =>
+        writeEvidenceCard(project.root, makeCard(), {
+          lease: { ownerInstanceId: 'writer-a', fencingToken: oldToken },
+          nowMs: () => now,
+        }),
+      isCode('FENCING_REJECTED'),
+    )
+    writeEvidenceCard(project.root, makeCard(), {
+      lease: {
+        ownerInstanceId: winner.lease.ownerInstanceId,
+        fencingToken: winner.lease.fencingToken,
+      },
+      nowMs: () => now,
+    })
+    assert.equal(readEvidenceCard(project.root, TASK_ID).revision, 0)
   } finally {
     project.cleanup()
   }
