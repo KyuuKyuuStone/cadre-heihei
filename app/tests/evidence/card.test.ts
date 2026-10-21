@@ -95,6 +95,15 @@ test('校验器：合法卡片全绿；语义项带 source / unverified 带所�
           status: 'ok',
         },
         {
+          id: 'command',
+          kind: 'exact',
+          item: '测试命令',
+          value: 'npm test',
+          exactText: 'npm test',
+          source: { command: 'npm test', exitCode: 0 },
+          status: 'ok',
+        },
+        {
           id: 'pending',
           kind: 'semantic',
           item: '真机验证',
@@ -108,8 +117,25 @@ test('校验器：合法卡片全绿；语义项带 source / unverified 带所�
     const report = validateEvidenceCard(card, { projectRoot: project.root })
     assert.equal(report.ok, true)
     assert.equal(report.integrityOk, true)
-    assert.equal(report.checkedItems, 3)
+    assert.equal(report.checkedItems, 4)
     assert.deepEqual(report.issues, [])
+
+    const badCommand = makeCard({
+      items: [
+        {
+          id: 'command',
+          kind: 'exact',
+          item: '测试命令',
+          value: 'npm test',
+          exactText: 'npm run test',
+          source: { command: 'npm test', exitCode: 0 },
+          status: 'ok',
+        },
+      ],
+    })
+    const badReport = validateEvidenceCard(badCommand, { projectRoot: project.root })
+    assert.equal(badReport.ok, false)
+    assert.ok(badReport.issues.some((issue) => issue.code === 'EXACT_TEXT_MISMATCH'))
   } finally {
     project.cleanup()
   }

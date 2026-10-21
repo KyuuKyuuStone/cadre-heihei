@@ -114,9 +114,29 @@ function validateExactItem(
     issues.push(issue('STALE', `条目 ${item.id} 已标记 stale，续作前必须刷新`, { itemId: item.id }))
     return
   }
-  if (item.source?.file === undefined || item.source.line === undefined) {
+  if (item.source?.file === undefined) {
+    // 命令类精确项：command 必须与记录的精确串逐字一致。
+    if (item.source?.command !== undefined && item.source.command !== '') {
+      const expected = item.exactText ?? item.value
+      if (expected !== item.source.command) {
+        issues.push(
+          issue('EXACT_TEXT_MISMATCH', `命令精确项 ${item.id} 与 command 不一致`, {
+            itemId: item.id,
+          }),
+        )
+      }
+      return
+    }
     issues.push(
-      issue('EXACT_SOURCE_MISSING', `精确项 ${item.id} 缺少 source.file/line`, { itemId: item.id }),
+      issue('EXACT_SOURCE_MISSING', `精确项 ${item.id} 缺少 source.file/line 或 command`, {
+        itemId: item.id,
+      }),
+    )
+    return
+  }
+  if (item.source.line === undefined) {
+    issues.push(
+      issue('EXACT_SOURCE_MISSING', `精确项 ${item.id} 缺少 source.line`, { itemId: item.id }),
     )
     return
   }
