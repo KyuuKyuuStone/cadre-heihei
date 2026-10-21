@@ -96,7 +96,10 @@ function makePort(initial: EngineSession) {
   return port satisfies SessionPort
 }
 
-function setup(initial: EngineSession = new FakeSession()) {
+function setup(
+  initial: EngineSession = new FakeSession(),
+  options: { readonly sendReplayLimit?: number } = {},
+) {
   const service = new InMemoryDispatchService({
     members: MCP_MEMBERS,
     serverVersion: 'ipc-session-test',
@@ -117,6 +120,9 @@ function setup(initial: EngineSession = new FakeSession()) {
     sessions: port,
     now: () => AT,
     newId: () => `msg-${Math.random().toString(36).slice(2)}` as never,
+    ...(options.sendReplayLimit === undefined
+      ? {}
+      : { sendReplayLimit: options.sendReplayLimit }),
   })
   const call = async (channel: string, input?: unknown): Promise<IpcResult> =>
     handlers.handle(WIN, channel, input)
@@ -170,9 +176,10 @@ test('订阅去重 + send 回执 + 事件泵投影', async () => {
     )
     const merged = ctx.captured[0]!.event
     assert.equal(merged.kind === 'message.delta' ? merged.text : '', 'hello')
-    assert.equal(merged.seq, 1)
+    // 两条 delta（seq1/2）合并为一条，使用最后一条 seq=2；complete=3。
+    assert.equal(merged.seq, 2)
     assert.equal(merged.epoch, 1)
-    assert.equal(ctx.captured[1]!.event.seq, 2)
+    assert.equal(ctx.captured[1]!.event.seq, 3)
   } finally {
     ctx.cleanup()
   }
@@ -192,6 +199,13 @@ test('空正文 EMPTY_BODY；目标会话越权 FORBIDDEN；覆盖字段 INVALID
     })) as any
     assert.equal(wrongTarget.error.code, 'FORBIDDEN_ACTOR')
     assert.equal(wrongTarget.error.reasonCategory, 'not-owner')
+
+    const badLastSeq = (await ctx.call('session:subscribe', {
+      sessionId: EMP,
+      lastSeq: -1,
+    })) as any
+    assert.equal(badLastSeq.error.code, 'INVALID_ARGUMENT')
+    assert.equal(badLastSeq.error.field, 'lastSeq')
 
     const wrongSend = (await ctx.call('session:send', {
       sessionId: SUP,
@@ -243,10 +257,22 @@ test('取消订阅 / 窗口销毁后不再投递', async () => {
     })) as any
     assert.equal(again.ok, true)
 
-    await ctx.call('session:subscribe', { sessionId: EMP })
+    // 给了 lastSeq=2：不重放已有 seq1/2。
+    await ctx.call('session:subscribe', { sessionId: EMP, lastSeq: 2 })
+    assert.equal(ctx.captured.length, 1)
     ctx.pump.dropWindow(WIN)
     ctx.pump.push(complete('three'))
     assert.equal(ctx.captured.length, 1)
+
+    // 重新订阅 lastSeq=1：按序补发 seq2/3 的终态事件。
+    await ctx.call('session:subscribe', { sessionId: EMP, lastSeq: 1 })
+    assert.deepEqual(
+      ctx.captured.slice(1).map((entry) => [entry.event.kind, entry.event.seq]),
+      [
+        ['message.complete', 2],
+        ['message.complete', 3],
+      ],
+    )
   } finally {
     ctx.cleanup()
   }
@@ -340,6 +366,51 @@ test('send 幂等：同键同 body 不重复 send/不重复推事件；异 body 
     await settle()
     ctx.pump.flush()
     assert.ok(ctx.captured.length > eventsAfterFirst)
+  } finally {
+    ctx.cleanup()
+  }
+})
+
+test('send 幂等缓存有上限：超限淘汰最旧', async () => {
+  const session = new FakeSession()
+  const ctx = setup(session, { sendReplayLimit: 2 })
+  try {
+    const first = (await ctx.call('session:send', {
+      sessionId: EMP,
+      body: 'a',
+      idempotencyKey: 'lru-1',
+    })) as any
+    const second = (await ctx.call('session:send', {
+      sessionId: EMP,
+      body: 'b',
+      idempotencyKey: 'lru-2',
+    })) as any
+    const third = (await ctx.call('session:send', {
+      sessionId: EMP,
+      body: 'c',
+      idempotencyKey: 'lru-3',
+    })) as any
+    assert.equal(session.prompts.length, 3)
+
+    // lru-1 已被淘汰：重放会再次触发 send 并生成新回执。
+    const evicted = (await ctx.call('session:send', {
+      sessionId: EMP,
+      body: 'a',
+      idempotencyKey: 'lru-1',
+    })) as any
+    assert.equal(evicted.ok, true)
+    assert.equal(session.prompts.length, 4)
+    assert.notDeepEqual(evicted, first)
+
+    // lru-3 仍在窗口内：命中缓存，不再 send。
+    const hit = (await ctx.call('session:send', {
+      sessionId: EMP,
+      body: 'c',
+      idempotencyKey: 'lru-3',
+    })) as any
+    assert.deepEqual(hit, third)
+    assert.equal(session.prompts.length, 4)
+    assert.notDeepEqual(second, third)
   } finally {
     ctx.cleanup()
   }

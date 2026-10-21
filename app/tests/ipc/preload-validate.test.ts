@@ -129,3 +129,38 @@ test('请求体上限 1MB', () => {
   })
   expectInvalid(over, 'payload')
 })
+
+test('深度上限 20 与节点上限 10000', () => {
+  let deep: Record<string, unknown> = { leaf: 1 }
+  for (let index = 0; index < 21; index += 1) deep = { nested: deep }
+  const tooDeep = validateIpcInput('collab:listTasks', deep)
+  expectInvalid(tooDeep)
+  if (!tooDeep.ok) assert.match(String(tooDeep.error.reason), /嵌套/)
+
+  const tooMany = validateIpcInput('collab:listTasks', {
+    items: Array.from({ length: 10_001 }, () => 0),
+  })
+  expectInvalid(tooMany)
+  if (!tooMany.ok) assert.match(String(tooMany.error.reason), /节点数/)
+})
+
+test('校验即快照：getter 只求值一次，后续取值不触发 getter', () => {
+  let reads = 0
+  const input: Record<string, unknown> = {}
+  Object.defineProperty(input, 'status', {
+    enumerable: true,
+    get() {
+      reads += 1
+      return reads === 1 ? ['review'] : 'not-a-status'
+    },
+  })
+  const result = validateIpcInput('collab:listTasks', input)
+  assert.equal(result.ok, true)
+  assert.equal(reads, 1)
+  if (result.ok) {
+    const snapshot = result.value as Record<string, unknown>
+    assert.deepEqual(snapshot.status, ['review'])
+    assert.deepEqual(snapshot.status, ['review'])
+    assert.equal(reads, 1, '快照读取不得再触发 getter')
+  }
+})

@@ -478,6 +478,11 @@ function toolReview(ctx: ToolContext, args: Args): ToolCallResult {
    * 幂等重放必须在「按当前状态计算 from」之前命中：
    * transitionFingerprint 含 from，若先调 transition，状态已变会导致指纹不同而报冲突。
    * 台账事件持久化 idempotencyKey，跨重启仍可按 key 找到首次结果。
+   *
+   * 作用域说明：本段事件扫描是「同 task 重放」的恢复路径；键的项目级唯一性由
+   * ledger.transition 的 (project_id, idempotency_key) 幂等表兜底。同键用于另一 task
+   * 时事件扫描不会命中，随后 transition 因指纹不同返回 IDEMPOTENCY_CONFLICT——
+   * 符合契约「同键不同请求即冲突」，因此不在此处扩大为项目级扫描。
    */
   const events = ctx.backend.ledger.listEvents(ctx.identity.projectId, taskId.value as never)
   if (!events.ok) return result(mapLedgerError(events.error))

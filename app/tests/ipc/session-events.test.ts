@@ -18,11 +18,12 @@ interface Captured {
   readonly event: SessionEvent
 }
 
-function makePump(throttle = 16) {
+function makePump(throttle = 16, bufferLimit?: number) {
   const captured: Captured[] = []
   const pump = new SessionEventPump({
     sink: (windowId, channel, event) => captured.push({ windowId, channel, event }),
     deltaThrottleMs: throttle,
+    ...(bufferLimit === undefined ? {} : { bufferLimit }),
   })
   return { pump, captured }
 }
@@ -61,7 +62,8 @@ test('delta 16ms 合并；complete 立即 flush 且顺序正确', () => {
     const merged = captured[0]!.event
     assert.equal(merged.kind, 'message.delta')
     assert.equal(merged.kind === 'message.delta' ? merged.text : '', 'ab')
-    assert.equal(merged.seq, 1)
+    // 合并事件使用批内最后一条 delta 的 seq（a=1, b=2）。
+    assert.equal(merged.seq, 2)
     assert.equal(merged.epoch, 1)
 
     pump.push(delta('c'))
@@ -71,9 +73,10 @@ test('delta 16ms 合并；complete 立即 flush 且顺序正确', () => {
       captured.slice(1).map((entry) => entry.event.kind),
       ['message.delta', 'message.complete'],
     )
+    // c=3（合并事件），complete=4；跳号 2→3→4 表示 delta 合并。
     assert.deepEqual(
       captured.map((entry) => entry.event.seq),
-      [1, 2, 3],
+      [2, 3, 4],
     )
     assert.equal(captured[1]!.event.kind === 'message.delta' ? captured[1]!.event.text : '', 'c')
     assert.equal(captured[2]!.event.kind === 'message.complete' ? captured[2]!.event.text : '', 'abc')
@@ -150,12 +153,139 @@ test('取消订阅/窗口销毁后停止投递', () => {
     assert.equal(captured.length, 3)
     assert.equal(captured.at(-1)!.windowId, 'win-2')
 
-    pump.subscribe('win-3', EMP)
+    // lastSeq=2：抑制缓冲重放，仅验证“新订阅不会收到旧事件”。
+    pump.subscribe('win-3', EMP, 2)
     pump.dropWindow('win-2')
     pump.dropWindow('win-3')
     pump.push(complete('three'))
-    assert.equal(captured.length, 3, '无订阅者时不应投递')
+    assert.equal(captured.length, 3, '无订阅者时不应实时投递')
     assert.equal(pump.unsubscribe('win-1', win2.subscriptionId), false, '不能取消别人的订阅')
+  } finally {
+    pump.dispose()
+  }
+})
+
+function errorEvent(): EngineEvent {
+  return {
+    kind: 'session.error',
+    sessionId: EMP,
+    at: AT,
+    error: { code: 'ENGINE_TIMEOUT', message: 'timeout', retryable: true },
+  }
+}
+
+function closedEvent(): EngineEvent {
+  return { kind: 'session.closed', sessionId: EMP, at: AT, reason: 'crashed' }
+}
+
+function toolResult(index: number): EngineEvent {
+  return {
+    kind: 'tool.result',
+    sessionId: EMP,
+    at: AT,
+    toolName: 'tool',
+    callId: `call-${index}`,
+    ok: true,
+    summary: `ok-${index}`,
+  }
+}
+
+test('无订阅期终态事件不丢：lastSeq 补发全部缓冲且 seq 单调', () => {
+  const { pump, captured } = makePump()
+  try {
+    pump.push(delta('a'))
+    pump.flush()
+    pump.push(complete('ab'))
+    pump.push(errorEvent())
+    pump.push(closedEvent())
+    assert.equal(captured.length, 0, '无订阅者时不得实时投递')
+
+    pump.subscribe('win-1', EMP, 0)
+    assert.deepEqual(
+      captured.map((entry) => entry.event.kind),
+      ['message.delta', 'message.complete', 'session.error', 'session.closed'],
+    )
+    assert.deepEqual(
+      captured.map((entry) => entry.event.seq),
+      [1, 2, 3, 4],
+    )
+    assert.ok(captured.every((entry) => entry.channel === SESSION_EVENT_CHANNEL))
+  } finally {
+    pump.dispose()
+  }
+})
+
+test('未给 lastSeq：只补发终态事件（保证 reload 后 UI 收敛）', () => {
+  const { pump, captured } = makePump()
+  try {
+    pump.push(delta('a'))
+    pump.flush()
+    pump.push(complete('ab'))
+    pump.push(errorEvent())
+    pump.push(closedEvent())
+
+    pump.subscribe('win-1', EMP)
+    assert.deepEqual(
+      captured.map((entry) => entry.event.kind),
+      ['message.complete', 'session.error', 'session.closed'],
+    )
+  } finally {
+    pump.dispose()
+  }
+})
+
+test('lastSeq 补发只发 seq 之后的事件', () => {
+  const { pump, captured } = makePump()
+  try {
+    pump.push(complete('one'))
+    pump.push(complete('two'))
+    pump.push(complete('three'))
+    pump.subscribe('win-1', EMP, 1)
+    assert.deepEqual(
+      captured.map((entry) => [entry.event.kind, entry.event.seq]),
+      [
+        ['message.complete', 2],
+        ['message.complete', 3],
+      ],
+    )
+  } finally {
+    pump.dispose()
+  }
+})
+
+test('缓冲上限 256：淘汰最旧非终态，终态不被淘汰', () => {
+  const { pump, captured } = makePump(16, 256)
+  try {
+    for (let index = 0; index < 300; index += 1) pump.push(toolResult(index))
+    pump.push(complete('end'))
+    pump.subscribe('win-1', EMP, 0)
+    assert.equal(captured.length, 256)
+    assert.equal(captured[0]!.event.seq, 46, '前 45 条非终态被淘汰')
+    assert.equal(captured.at(-1)!.event.kind, 'message.complete')
+    assert.equal(captured.at(-1)!.event.seq, 301)
+    for (let index = 1; index < captured.length; index += 1) {
+      assert.ok(captured[index]!.event.seq > captured[index - 1]!.event.seq)
+    }
+  } finally {
+    pump.dispose()
+  }
+})
+
+test('重建 epoch：清空旧缓冲，seq 从 1 重新计数', () => {
+  const { pump, captured } = makePump()
+  try {
+    pump.push(complete('old'))
+    assert.equal(pump.bumpEpoch(EMP), 2)
+    pump.push(complete('new'))
+    pump.subscribe('win-1', EMP, 0)
+    assert.equal(captured.length, 1)
+    assert.equal(captured[0]!.event.kind, 'message.complete')
+    assert.equal(captured[0]!.event.seq, 1)
+    assert.equal(captured[0]!.event.epoch, 2)
+    assert.equal(
+      captured[0]!.event.kind === 'message.complete' ? captured[0]!.event.text : '',
+      'new',
+    )
   } finally {
     pump.dispose()
   }

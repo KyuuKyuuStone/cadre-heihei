@@ -317,6 +317,65 @@ export function runIpcContract(name: string, makeBackend: MakeIpcBackend): void 
     }
   })
 
+  test(`[${name}] 主进程二次校验：getter 快照、深度与节点上限`, () => {
+    const ctx = setup()
+    try {
+      // 绕过 preload 直调 handler：getter 只应求值一次，后续拿到的是快照。
+      let reads = 0
+      const getterInput: Record<string, unknown> = {}
+      Object.defineProperty(getterInput, 'status', {
+        enumerable: true,
+        get() {
+          reads += 1
+          return reads === 1 ? ['review'] : 'not-a-status'
+        },
+      })
+      const ok = ctx.handlers.handle(ctx.windowId, 'collab:listTasks', getterInput) as any
+      assert.equal(ok.ok, true)
+      assert.equal(reads, 1, 'getter 只能求值一次（快照）')
+
+      let deep: Record<string, unknown> = { leaf: 1 }
+      for (let index = 0; index < 25; index += 1) deep = { nested: deep }
+      const tooDeep = ctx.handlers.handle(ctx.windowId, 'collab:listTasks', deep) as any
+      assert.equal(tooDeep.error.code, 'INVALID_ARGUMENT')
+      assert.match(String(tooDeep.error.reason), /嵌套/)
+
+      const tooManyNodes = ctx.handlers.handle(ctx.windowId, 'collab:listTasks', {
+        items: Array.from({ length: 10_001 }, () => 0),
+      }) as any
+      assert.equal(tooManyNodes.error.code, 'INVALID_ARGUMENT')
+      assert.match(String(tooManyNodes.error.reason), /节点数/)
+
+      const nestedFunction = ctx.handlers.handle(ctx.windowId, 'collab:listTasks', {
+        nested: { fn: () => 1 },
+      }) as any
+      assert.equal(nestedFunction.error.code, 'INVALID_ARGUMENT')
+      assert.equal(nestedFunction.error.field, 'input.nested.fn')
+    } finally {
+      ctx.backend.close()
+    }
+  })
+
+  test(`[${name}] review 幂等键为项目级：同键跨 task 冲突`, () => {
+    const ctx = setup({ sessionId: SUP, role: 'supervisor' })
+    try {
+      const first = ctx.handlers.handle(ctx.windowId, 'collab:reviewTask', {
+        taskId: TASK.review,
+        action: 'verify',
+        idempotencyKey: 'review-scope-key',
+      }) as any
+      assert.equal(first.ok, true)
+      const otherTask = ctx.handlers.handle(ctx.windowId, 'collab:reviewTask', {
+        taskId: TASK.reviewB,
+        action: 'verify',
+        idempotencyKey: 'review-scope-key',
+      }) as any
+      assert.equal(otherTask.error.code, 'IDEMPOTENCY_CONFLICT', '同键不同 task 视为不同请求')
+    } finally {
+      ctx.backend.close()
+    }
+  })
+
   test(`[${name}] 写通道跨项目/角色/空态/幂等`, () => {
     const supervisor = setup({ sessionId: SUP, role: 'supervisor' })
     try {

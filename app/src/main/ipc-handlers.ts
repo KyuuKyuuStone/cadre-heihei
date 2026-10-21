@@ -23,6 +23,7 @@ import { buildBodyReceipt } from '../collab/dispatch/index.ts'
 import { handleToolCall } from '../collab/tools/handlers.ts'
 import type { ToolBackend } from '../collab/tools/types.ts'
 import type { EngineEvent, EngineSession } from '../ports/engine.ts'
+import { validateIpcInput } from '../preload/validate.ts'
 import {
   IPC_CHANNELS,
   IPC_CHANNEL_VALUES,
@@ -58,6 +59,8 @@ export interface IpcHandlerOptions {
   readonly sessions?: SessionPort
   readonly now?: () => string
   readonly newId?: () => string
+  /** session:send 进程内幂等缓存上限（默认 1000，FIFO 淘汰最旧）。 */
+  readonly sendReplayLimit?: number
 }
 
 export interface IpcHandlerRegistry {
@@ -244,6 +247,19 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
     string,
     { readonly body: string; readonly receipt: SendMessageReceipt }
   >()
+  const sendReplayLimit = options.sendReplayLimit ?? 1000
+  const rememberSendReplay = (
+    key: string,
+    value: { readonly body: string; readonly receipt: SendMessageReceipt },
+  ): void => {
+    if (sendReplayLimit <= 0) return
+    while (sendReplays.size >= sendReplayLimit) {
+      const oldest = sendReplays.keys().next().value
+      if (oldest === undefined) break
+      sendReplays.delete(oldest)
+    }
+    sendReplays.set(key, value)
+  }
   const now = options.now ?? (() => new Date().toISOString())
   const newId = options.newId ?? (() => randomUUID())
 
@@ -268,7 +284,12 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
         if (!(IPC_CHANNEL_VALUES as readonly string[]).includes(channel)) {
           return invalid('channel', `未知通道：${channel}`)
         }
-        const override = overrideField(channel, input)
+        // 主进程二次校验（M4 前置）：不信任 preload；克隆/直接调用都重新生成纯数据快照。
+        const validated = validateIpcInput(channel, input)
+        if (!validated.ok) return validated
+        const safeInput = validated.value
+
+        const override = overrideField(channel, safeInput)
         if (override !== undefined) {
           return invalid(override, 'renderer 不得覆盖身份，身份只取窗口绑定')
         }
@@ -299,7 +320,7 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
           case IPC_CHANNELS.dispatchTask:
           case IPC_CHANNELS.reportTask:
           case IPC_CHANNELS.reviewTask: {
-            const parsed = inputObject(input)
+            const parsed = inputObject(safeInput)
             if (!parsed.ok) return parsed.failure
             const toolName = {
               [IPC_CHANNELS.listTasks]: 'list_tasks',
@@ -338,17 +359,29 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
           }
 
           case IPC_CHANNELS.subscribeSession: {
-            const parsed = inputObject(input)
+            const parsed = inputObject(safeInput)
             if (!parsed.ok) return parsed.failure
             const target = sessionTarget(identity, parsed.value)
             if (!target.ok) return target.failure
             if (options.pump === undefined) return unavailable('PUMP_UNAVAILABLE')
-            const { subscriptionId } = options.pump.subscribe(windowId, target.sessionId)
+            let lastSeq: number | undefined
+            if (parsed.value.lastSeq !== undefined) {
+              const raw = parsed.value.lastSeq
+              if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) {
+                return invalid('lastSeq', '必须是非负安全整数')
+              }
+              lastSeq = raw
+            }
+            const { subscriptionId } = options.pump.subscribe(
+              windowId,
+              target.sessionId,
+              lastSeq,
+            )
             return { ok: true, apiVersion: API_VERSION, subscriptionId }
           }
 
           case IPC_CHANNELS.unsubscribeSession: {
-            const parsed = inputObject(input)
+            const parsed = inputObject(safeInput)
             if (!parsed.ok) return parsed.failure
             const subscriptionId = stringField(parsed.value, 'subscriptionId', { require: true })
             if (!subscriptionId.ok) return subscriptionId.failure
@@ -358,7 +391,7 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
           }
 
           case IPC_CHANNELS.sendMessage: {
-            const parsed = inputObject(input)
+            const parsed = inputObject(safeInput)
             if (!parsed.ok) return parsed.failure
             const target = sessionTarget(identity, parsed.value)
             if (!target.ok) return target.failure
@@ -414,13 +447,13 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
               acceptedAt: now() as never,
             }
             if (replayKey !== undefined) {
-              sendReplays.set(replayKey, { body: body.value as string, receipt })
+              rememberSendReplay(replayKey, { body: body.value as string, receipt })
             }
             return { ok: true, apiVersion: API_VERSION, ...receipt }
           }
 
           case IPC_CHANNELS.interruptSession: {
-            const parsed = inputObject(input)
+            const parsed = inputObject(safeInput)
             if (!parsed.ok) return parsed.failure
             const target = sessionTarget(identity, parsed.value)
             if (!target.ok) return target.failure
@@ -434,7 +467,7 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
           }
 
           case IPC_CHANNELS.reconnectSession: {
-            const parsed = inputObject(input)
+            const parsed = inputObject(safeInput)
             if (!parsed.ok) return parsed.failure
             const target = sessionTarget(identity, parsed.value)
             if (!target.ok) return target.failure
@@ -468,7 +501,7 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
             }
 
           case IPC_CHANNELS.prefsSet: {
-            const parsed = inputObject(input)
+            const parsed = inputObject(safeInput)
             if (!parsed.ok) return parsed.failure
             const args = parsed.value
             const allowed = new Set(['locale', 'theme'])
