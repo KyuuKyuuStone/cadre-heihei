@@ -129,7 +129,10 @@ function run(): Promise<{ code: number | null; signal: string | null; timedOut: 
     CADRE_E2E_OTHER_PROJECT: 'e2e-other-project',
     CADRE_PROVIDER: process.env.CADRE_PROVIDER ?? 'deepseek',
     CADRE_MODEL: 'deepseek-flash',
-    CADRE_MAX_TOKENS: '64',
+    CADRE_MAX_TOKENS: process.env.CADRE_E2E_MAX_TOKENS ?? '64',
+    ...(process.env.CADRE_SEED_MEMBERS_JSON === undefined
+      ? {}
+      : { CADRE_SEED_MEMBERS_JSON: process.env.CADRE_SEED_MEMBERS_JSON }),
     ...(process.env.CADRE_PROVIDER_BASE_URL === undefined
       ? {}
       : { CADRE_PROVIDER_BASE_URL: process.env.CADRE_PROVIDER_BASE_URL }),
@@ -180,7 +183,15 @@ async function main(): Promise<number> {
   mkdirSync(WORK, { recursive: true })
   writeFileSync(
     join(USER_DATA, 'identity.json'),
-    `${JSON.stringify({ projectId: 'e2e-project', sessionId: 'e2e-session', role: 'worker' }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        projectId: 'e2e-project',
+        sessionId: 'e2e-session',
+        role: process.env.CADRE_E2E_ROLE ?? 'worker',
+      },
+      null,
+      2,
+    )}\n`,
     'utf8',
   )
 

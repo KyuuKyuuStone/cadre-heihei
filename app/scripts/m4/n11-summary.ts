@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 const SECRET_FILE = 'D:\\xxw_p\\cadre-spike-env\\.secrets\\deepseek.env'
 const TARGET_HEADERS = ['x-deepseek-harness-user-id', 'x-deepseek-harness-session-id']
@@ -27,6 +28,23 @@ function readKey(): string {
 
 function sha256(file: string): string {
   return createHash('sha256').update(readFileSync(file)).digest('hex')
+}
+
+function projectTasks(runDir: string): Array<Record<string, unknown>> {
+  const path = join(runDir, 'userdata', 'cadre.sqlite')
+  if (!existsSync(path)) return []
+  const db = new DatabaseSync(path)
+  try {
+    return db
+      .prepare(
+        `SELECT task_id, project_id, title, status, dispatcher_session_id,
+                assignee_session_id, created_at
+         FROM tasks WHERE project_id = 'e2e-project' ORDER BY rowid ASC`,
+      )
+      .all() as Array<Record<string, unknown>>
+  } finally {
+    db.close()
+  }
 }
 
 function walk(dir: string): string[] {
@@ -72,6 +90,46 @@ const e2eSummaryPath = join(runDir, 'summary.json')
 const e2e = existsSync(e2eSummaryPath)
   ? (JSON.parse(readFileSync(e2eSummaryPath, 'utf8')) as Record<string, unknown>)
   : null
+
+const probe = e2e?.probe as Record<string, unknown> | undefined
+const events = Array.isArray(probe?.events)
+  ? (probe!.events as Array<Record<string, unknown>>)
+  : []
+const toolCalls = events.filter((event) => event.kind === 'tool.call')
+const toolResults = events.filter((event) => event.kind === 'tool.result')
+const toolNames = [...new Set([...toolCalls, ...toolResults].map((event) => String(event.toolName ?? '')))]
+const toolOk = toolResults.length > 0 && toolResults.every((event) => event.ok === true)
+const tasks = projectTasks(runDir)
+const dispatched = tasks.filter((task) => task.dispatcher_session_id === 'e2e-session')
+const bodyShapes = requests
+  .map((request) => request.bodyShape as Record<string, unknown> | null)
+  .filter((shape): shape is Record<string, unknown> => shape !== null)
+const tool = {
+  eventToolCalls: toolCalls,
+  eventToolResults: toolResults,
+  toolNames,
+  toolOk,
+  dispatchTaskCalled: toolNames.some((name) => name.includes('dispatch_task')),
+  dbTasksInProject: tasks,
+  dispatchedByE2e: dispatched,
+  dispatchSideEffectOk:
+    dispatched.length >= 1 &&
+    dispatched.some((task) => task.assignee_session_id === 'e2e-worker'),
+  requestBodyShape: bodyShapes,
+  reasoningParamsSeen: [
+    ...new Set(
+      bodyShapes.map((shape) =>
+        JSON.stringify({
+          reasoning_effort: shape.reasoningEffort,
+          thinking: shape.thinking,
+          reasoning: shape.reasoning,
+        }),
+      ),
+    ),
+  ],
+  compaction: 'untested',
+}
+
 const summary = {
   scheme: 'A',
   schemeDetail:
@@ -97,6 +155,7 @@ const summary = {
         elapsedMs: e2e.elapsedMs,
         residualHarness: e2e.residualHarness,
       },
+  tool,
   scan,
   scanClean: scan.every((entry) => entry.exact === 0 && entry.pattern === 0),
 }
@@ -115,6 +174,11 @@ const ok =
   requests.length >= 1 &&
   summary.scanClean &&
   e2e !== null &&
-  e2e.probeOk === true
+  e2e.probeOk === true &&
+  tool.eventToolCalls.length >= 1 &&
+  tool.eventToolResults.length >= 1 &&
+  tool.toolOk &&
+  tool.dispatchTaskCalled &&
+  tool.dispatchSideEffectOk
 console.log(JSON.stringify({ ok, runDir: resolve(runDir), ...summary, hashes }, null, 2))
 process.exit(ok ? 0 : 1)

@@ -18,7 +18,15 @@ export interface E2eProbeResult {
   readonly elapsedMs?: number
   readonly receipt?: unknown
   readonly subscription?: unknown
-  readonly events?: readonly { readonly kind: string; readonly seq: number; readonly epoch: number }[]
+  readonly events?: readonly {
+    readonly kind: string
+    readonly seq: number
+    readonly epoch: number
+    readonly toolName?: string
+    readonly callId?: string
+    readonly ok?: boolean
+    readonly summary?: string
+  }[]
   readonly finalText?: string
   readonly isolation?: unknown
   readonly error?: string
@@ -42,6 +50,10 @@ export async function runE2eProbe(
         seq: event.seq,
         epoch: event.epoch,
         ...(typeof event.text === 'string' ? { text: event.text.slice(0, 200) } : {}),
+        ...(typeof event.toolName === 'string' ? { toolName: event.toolName } : {}),
+        ...(typeof event.callId === 'string' ? { callId: event.callId } : {}),
+        ...(typeof event.ok === 'boolean' ? { ok: event.ok } : {}),
+        ...(typeof event.summary === 'string' ? { summary: event.summary.slice(0, 200) } : {}),
       })
       if (event.kind === 'message.complete' && typeof event.text === 'string') finalText = event.text
       if (event.kind === 'message.complete' || event.kind === 'session.error' || event.kind === 'session.closed') {
