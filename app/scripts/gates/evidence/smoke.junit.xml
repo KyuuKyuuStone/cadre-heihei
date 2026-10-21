@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testcase name="parseJunit: pass/fail/skip 统计与失败归属" time="0.001479" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\acceptance-lib.test.ts"/>
+	<testcase name="parseJunit: 空输出与坏输入不抛错" time="0.000270" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\acceptance-lib.test.ts"/>
+	<testcase name="parseJunit: vitest 风格无 file 时回退 classname" time="0.000277" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\acceptance-lib.test.ts"/>
+	<testcase name="parseJunit: cases 保留 classname 二元组" time="0.000180" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\acceptance-lib.test.ts"/>
+	<testcase name="matchKnownFlaky: 子串命中返回 reason，未命中返回 undefined" time="0.000167" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\acceptance-lib.test.ts"/>
+	<testcase name="isRerunGreen: 0 用例/目标缺失/目标失败均判红，目标通过才绿" time="0.000232" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\acceptance-lib.test.ts"/>
+	<testcase name="classifyRerunDistribution: 3 次复跑 ≥2 红判真回归，1 红判环境噪声" time="0.001431" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\acceptance-lib.test.ts"/>
+	<testcase name="classifyFailures/verdict: 复跑绿=环境噪声，复跑红=真回归" time="0.000805" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\acceptance-lib.test.ts"/>
+	<testcase name="installHook: 复制 hook 到目标路径" time="0.006766" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\git-hooks-install.test.ts"/>
+	<testcase name="installHook: 默认拒绝覆盖不同内容，--force 才覆盖" time="0.004531" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\git-hooks-install.test.ts"/>
+	<testcase name="smoke: app 骨架目录齐全" time="0.001249" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\skeleton.test.ts"/>
+	<testcase name="smoke: 四门禁脚本与 fixture 存在" time="0.000391" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\skeleton.test.ts"/>
+	<testcase name="smoke: 入口占位与 workspace 文件可读" time="0.000555" classname="test" file="D:\xxw_p\cadre-heihei\app\tests\skeleton.test.ts"/>
+	<!-- tests 13 -->
+	<!-- suites 0 -->
+	<!-- pass 13 -->
+	<!-- fail 0 -->
+	<!-- cancelled 0 -->
+	<!-- skipped 0 -->
+	<!-- todo 0 -->
+	<!-- duration_ms 137.0602 -->
+</testsuites>

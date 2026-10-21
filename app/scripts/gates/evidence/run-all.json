@@ -1,0 +1,30 @@
+{
+  "capturedAt": "2026-10-21T08:08:19.372Z",
+  "gateCount": 4,
+  "passed": 4,
+  "failed": 0,
+  "totalMs": 1254,
+  "results": [
+    {
+      "name": "file-size",
+      "exitCode": 0,
+      "elapsedMs": 106
+    },
+    {
+      "name": "import-semantics",
+      "exitCode": 0,
+      "elapsedMs": 77
+    },
+    {
+      "name": "tsc-baseline",
+      "exitCode": 0,
+      "elapsedMs": 794
+    },
+    {
+      "name": "smoke",
+      "exitCode": 0,
+      "elapsedMs": 275
+    }
+  ],
+  "verdict": "PASS"
+}

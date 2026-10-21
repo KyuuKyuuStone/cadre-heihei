@@ -1,0 +1,9 @@
+gate=smoke phase=green
+command=node scripts/gates/smoke.ts
+exitCode=0
+elapsedMs=253
+--- stdout ---
+[smoke] collected tests=13 pass=13 fail=0 skipped=0
+[smoke] PASS: 13/13 通过，0 skipped，JUnit=D:\xxw_p\cadre-heihei\app\scripts\gates\evidence\smoke.junit.xml
+--- stderr ---
+

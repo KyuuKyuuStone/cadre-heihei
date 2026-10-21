@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 快速门禁：文件行数 + import 语义。tsc/smoke 由手动 run-all 或 preflight 执行。
+cd "$(git rev-parse --show-toplevel)"
+node app/scripts/gates/check-file-size.ts
+node app/scripts/gates/check-import-semantics.ts

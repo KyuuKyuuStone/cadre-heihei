@@ -1,0 +1,9 @@
+gate=import-semantics phase=green
+command=node scripts/gates/check-import-semantics.ts
+exitCode=0
+elapsedMs=78
+--- stdout ---
+=== import 语义检查（L2/L3 app/src 1 文件）===
+PASS  无形态不符、无说明符漂移
+--- stderr ---
+

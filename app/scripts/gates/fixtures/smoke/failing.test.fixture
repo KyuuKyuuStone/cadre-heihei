@@ -1,0 +1,7 @@
+// 坏样本：故意失败的 smoke 用例，用于验证 smoke 门禁“注入必红”。
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+
+test('gate fixture must fail', () => {
+  assert.equal(1, 2)
+})
