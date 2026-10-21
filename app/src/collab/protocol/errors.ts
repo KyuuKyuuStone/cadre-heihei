@@ -14,6 +14,7 @@ export const ERROR_CODES = [
   'TASK_NOT_FOUND',
   'CROSS_PROJECT_DENIED',
   'INVALID_TRANSITION',
+  'MISSING_REASON',
   'FORBIDDEN_ACTOR',
   'EMPTY_BODY',
   'CLIENT_COMMAND_REJECTED',
@@ -32,6 +33,7 @@ export const ERROR_RETRYABLE: Readonly<Record<ErrorCode, boolean>> = {
   TASK_NOT_FOUND: false,
   CROSS_PROJECT_DENIED: false,
   INVALID_TRANSITION: false,
+  MISSING_REASON: false,
   FORBIDDEN_ACTOR: false,
   EMPTY_BODY: false,
   CLIENT_COMMAND_REJECTED: false,
@@ -121,6 +123,24 @@ export interface InvalidTransitionFailure extends ApiFailure<'INVALID_TRANSITION
   readonly error: InvalidTransitionDetail
 }
 
+/** 目标态要求 reason 的状态（backend/01 §1.2：rework/failed/cancelled 必填）。 */
+export type ReasonRequiredStatus = Extract<TaskStatus, 'rework' | 'failed' | 'cancelled'>
+
+/**
+ * 需要 reason 的迁移未提供 reason。
+ * 适用：目标态为 `rework` / `failed` / `cancelled` 的迁移（`task_events.reason` 必填）。
+ */
+export interface MissingReasonDetail extends ErrorDetail<'MISSING_REASON'> {
+  readonly projectId: ProjectId
+  readonly taskId: TaskId
+  readonly to: ReasonRequiredStatus
+  readonly requiredFor: readonly ReasonRequiredStatus[]
+}
+
+export interface MissingReasonFailure extends ApiFailure<'MISSING_REASON'> {
+  readonly error: MissingReasonDetail
+}
+
 export type ForbiddenActorReason =
   | 'not-assignee'
   | 'not-supervisor'
@@ -182,6 +202,7 @@ export type ApiError =
   | TaskNotFoundFailure
   | CrossProjectDeniedFailure
   | InvalidTransitionFailure
+  | MissingReasonFailure
   | ForbiddenActorFailure
   | EmptyBodyFailure
   | ClientCommandRejectedFailure

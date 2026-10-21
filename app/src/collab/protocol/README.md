@@ -45,6 +45,8 @@
 | review → verified / rework / failed | supervisor | 验收三分支 |
 | rework → in_progress | assignee | 同一 taskId，attempt +1 |
 
+**reason 必填规则（backend/01 §1.2）**：目标态为 `rework` / `failed` / `cancelled` 的迁移必须提供 `reason`；缺失时返回 `MISSING_REASON`（不落库、不推进状态）。其余迁移的 `reason` 可选。
+
 不变量（`TASK_LEDGER_RULES`）：终态不可迁移；delivered 不得跳过 review；每次迁移写审计事件；取代时旧任务置 cancelled（reason=`superseded`），禁止静默并存。
 
 ### 2.2 派活/汇报
@@ -64,6 +66,7 @@
 | `TASK_NOT_FOUND` | 同项目内不存在 | false |
 | `CROSS_PROJECT_DENIED` | 跨项目（不泄露存在性） | false |
 | `INVALID_TRANSITION` | 状态机不允许 | false |
+| `MISSING_REASON` | 目标态为 rework/failed/cancelled 的迁移未提供 reason | false |
 | `FORBIDDEN_ACTOR` | 角色/归属无权 | false |
 | `EMPTY_BODY` | 派活空正文 | false |
 | `CLIENT_COMMAND_REJECTED` | 派活含客户端命令 | false |
