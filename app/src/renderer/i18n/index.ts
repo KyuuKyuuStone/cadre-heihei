@@ -1,0 +1,64 @@
+// 从 cc-heihei v1.7.9 搬迁（desktop/src/i18n/index.ts）。
+// 适配：移除 React hook（useTranslation）与 zustand store（settingsStore）依赖——
+// 首版 renderer 尚未引入 UI 框架；`translate` 为纯函数，locale 由调用方显式传入。
+// 边表机制保持不变：主表不增行，专项词条独立成文件后在此合并。
+import { en, type TranslationKey } from './locales/en.ts'
+import { zh } from './locales/zh.ts'
+import { zh as zhTW } from './locales/zh-TW.ts'
+import { jp } from './locales/jp.ts'
+import { kr } from './locales/kr.ts'
+// 朗读（TTS）文案单开一个模块：五个 locale 主表已到 2495–2497 行，再加键会越过
+// file-size 门禁（LIMIT=2500）且基线表不许新增条目。此处合并进各语言的翻译表。
+import { speechEn, speechJp, speechKr, speechZh, speechZhTW, type SpeechKey } from './locales/speech.ts'
+// 上下文用量「数据基准」文案（实测/估算徽标、基准说明、Output 不计入上下文）同理单开模块。
+import {
+  contextSourceEn,
+  contextSourceJp,
+  contextSourceKr,
+  contextSourceZh,
+  contextSourceZhTW,
+  type ContextSourceKey,
+} from './locales/contextSource.ts'
+import type { Locale } from './locale.ts'
+
+const translations: Record<Locale, Record<string, string>> = {
+  en: { ...en, ...speechEn, ...contextSourceEn },
+  zh: { ...zh, ...speechZh, ...contextSourceZh },
+  'zh-TW': { ...zhTW, ...speechZhTW, ...contextSourceZhTW },
+  jp: { ...jp, ...speechJp, ...contextSourceJp },
+  kr: { ...kr, ...speechKr, ...contextSourceKr },
+}
+
+/**
+ * 翻译键 = locale 主表键 ∪ 朗读文案模块键 ∪ 上下文基准文案模块键。
+ *
+ * 这些边表键**不并进** `TranslationKey`（那是 `keyof typeof en`，五个 locale 文件都以
+ * `Record<TranslationKey, string>` 声明自身，一旦扩键它们全体报缺失），改在这里做
+ * 调用面并集：`translate()` 的参数类型放宽，调用点仍写平铺字面量。
+ */
+export type TextKey = TranslationKey | SpeechKey | ContextSourceKey
+
+/**
+ * Translate a key with optional interpolation params.
+ * Falls back to the key itself if no translation is found.
+ *
+ * @example
+ * translate('en', 'settings.providers.connected', { latency: '42' })
+ * // => "Connected (42ms)"
+ */
+export function translate(
+  locale: Locale,
+  key: TextKey,
+  params?: Record<string, string | number>,
+): string {
+  let text = translations[locale]?.[key] ?? translations.en[key] ?? key
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      text = text.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v))
+    }
+  }
+  return text
+}
+
+export type { TranslationKey }
+export type { Locale } from './locale.ts'
