@@ -66,11 +66,67 @@ export class SqliteCollabStore implements DispatchStorePort {
       .prepare(
         `INSERT INTO members (
            project_id, session_id, role, display_name, description, state, created_at, updated_at
-         ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
          ON CONFLICT(project_id, session_id) DO UPDATE SET
-           role = excluded.role, state = excluded.state, updated_at = excluded.updated_at`,
+           role = excluded.role, state = excluded.state,
+           display_name = excluded.display_name, updated_at = excluded.updated_at`,
       )
-      .run(membership.projectId, membership.sessionId, membership.role, membership.state, at, at)
+      .run(
+        membership.projectId,
+        membership.sessionId,
+        membership.role,
+        membership.displayName ?? null,
+        membership.state,
+        at,
+        at,
+      )
+  }
+
+  listMembers(projectId: ProjectId): readonly ProjectMembership[] {
+    const rows = this.ledger.core.db
+      .prepare(
+        `SELECT project_id, session_id, role, state, display_name
+         FROM members WHERE project_id = ? ORDER BY rowid ASC`,
+      )
+      .all(projectId) as Row[]
+    return rows.map((row) => ({
+      projectId: text(row.project_id) as ProjectId,
+      sessionId: text(row.session_id) as SessionId,
+      role: text(row.role) as ProjectMembership['role'],
+      state: text(row.state) as ProjectMembership['state'],
+      ...(row.display_name == null ? {} : { displayName: text(row.display_name) }),
+    }))
+  }
+
+  listMessageRecords(projectId: ProjectId): readonly MessageRecord[] {
+    const rows = this.ledger.core.db
+      .prepare(
+        `SELECT message_id, project_id, task_id, direction, channel,
+                from_session_id, to_session_id, body, body_bytes, body_sha256,
+                preview, deliverables_json, idempotency_key, delivered_at
+         FROM messages WHERE project_id = ? ORDER BY rowid ASC`,
+      )
+      .all(projectId) as Row[]
+    return rows.map((row) => ({
+      messageId: text(row.message_id) as MessageRecord['messageId'],
+      projectId: text(row.project_id) as ProjectId,
+      taskId: text(row.task_id) as MessageRecord['taskId'],
+      direction: text(row.direction) as MessageRecord['direction'],
+      channel: text(row.channel) as MessageRecord['channel'],
+      fromSessionId: text(row.from_session_id) as SessionId,
+      ...(row.to_session_id == null
+        ? {}
+        : { toSessionId: text(row.to_session_id) as SessionId }),
+      body: text(row.body),
+      bodyBytes: numberValue(row.body_bytes),
+      bodySha256: text(row.body_sha256),
+      preview: text(row.preview),
+      ...(row.deliverables_json == null
+        ? {}
+        : { deliverables: JSON.parse(text(row.deliverables_json)) as readonly string[] }),
+      idempotencyKey: text(row.idempotency_key) as MessageRecord['idempotencyKey'],
+      deliveredAt: text(row.delivered_at) as IsoTimestamp,
+    }))
   }
 
   listMessages(projectId: ProjectId): readonly DeliveredMessage[] {
@@ -126,7 +182,8 @@ export class SqliteCollabStore implements DispatchStorePort {
       findMember: (projectId: ProjectId, sessionId: SessionId) => {
         const row = db
           .prepare(
-            'SELECT project_id, session_id, role, state FROM members WHERE project_id = ? AND session_id = ?',
+            `SELECT project_id, session_id, role, state, display_name
+             FROM members WHERE project_id = ? AND session_id = ?`,
           )
           .get(projectId, sessionId) as Row | undefined
         if (!row) return undefined
@@ -135,6 +192,7 @@ export class SqliteCollabStore implements DispatchStorePort {
           sessionId: text(row.session_id) as SessionId,
           role: text(row.role) as ProjectMembership['role'],
           state: text(row.state) as ProjectMembership['state'],
+          ...(row.display_name == null ? {} : { displayName: text(row.display_name) }),
         }
       },
       appendMessage: (message: MessageRecord) => {
@@ -142,8 +200,8 @@ export class SqliteCollabStore implements DispatchStorePort {
           `INSERT INTO messages (
              message_id, project_id, task_id, direction, channel,
              from_session_id, to_session_id, body, body_bytes, body_sha256, preview,
-             idempotency_key, delivery_state, received_at, delivered_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'delivered', ?, ?)`,
+             deliverables_json, idempotency_key, delivery_state, received_at, delivered_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'delivered', ?, ?)`,
         ).run(
           message.messageId,
           message.projectId,
@@ -156,6 +214,7 @@ export class SqliteCollabStore implements DispatchStorePort {
           message.bodyBytes,
           message.bodySha256,
           message.preview,
+          message.deliverables === undefined ? null : JSON.stringify(message.deliverables),
           message.idempotencyKey,
           message.deliveredAt,
           message.deliveredAt,

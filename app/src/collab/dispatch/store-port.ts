@@ -18,6 +18,7 @@ export interface ProjectMembership {
   readonly sessionId: SessionId
   readonly role: MemberRole
   readonly state: MemberState
+  readonly displayName?: string
 }
 
 export interface DeliveredMessage {
@@ -38,6 +39,8 @@ export interface DeliveredMessage {
 export interface MessageRecord extends DeliveredMessage {
   readonly body: string
   readonly idempotencyKey: IdempotencyKey
+  /** 汇报交付物清单；派活消息缺省。 */
+  readonly deliverables?: readonly string[]
 }
 
 export interface NonEmptyList<T> {
@@ -67,5 +70,8 @@ export interface DispatchStorePort {
   readonly ledger: TaskLedgerPort
   transaction<T>(fn: (tx: DispatchTransaction) => T): T
   listMessages(projectId: ProjectId): readonly DeliveredMessage[]
+  /** 工具层详情用：含正文与交付物。 */
+  listMessageRecords(projectId: ProjectId): readonly MessageRecord[]
+  listMembers(projectId: ProjectId): readonly ProjectMembership[]
   addMember(membership: ProjectMembership): void
 }

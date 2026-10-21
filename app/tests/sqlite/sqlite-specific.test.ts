@@ -75,7 +75,7 @@ it('schema：六张业务表 + schema_meta 齐全，WAL/busy_timeout/integrity �
     }
     assert.equal(ledger.journalMode(), 'wal')
     assert.equal(ledger.integrityCheck(), 'ok')
-    assert.equal(ledger.schemaVersion(), 1)
+    assert.equal(ledger.schemaVersion(), 2)
     const timeout = ledger.core.db.prepare('PRAGMA busy_timeout').get() as Record<string, unknown>
     assert.equal(Number(timeout.timeout), 15000)
   } finally {

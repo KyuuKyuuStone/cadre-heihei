@@ -6,7 +6,7 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS messages (
   body_bytes       INTEGER NOT NULL,
   body_sha256      TEXT NOT NULL,
   preview          TEXT NOT NULL,
+  deliverables_json TEXT,
   idempotency_key  TEXT NOT NULL,
   delivery_state   TEXT NOT NULL DEFAULT 'delivered',
   error_code       TEXT,
@@ -128,8 +129,17 @@ CREATE TABLE IF NOT EXISTS idempotency (
 
 export function initSchema(db: DatabaseSync): void {
   db.exec(DDL)
+  migrate(db)
   db.prepare(
     `INSERT INTO schema_meta(key, value) VALUES ('schema_version', ?)
-     ON CONFLICT(key) DO NOTHING`,
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run(String(SCHEMA_VERSION))
+}
+
+/** v1 → v2：messages 增加 deliverables_json（既有库原地补列）。 */
+function migrate(db: DatabaseSync): void {
+  const columns = db.prepare(`PRAGMA table_info(messages)`).all() as Array<{ name?: unknown }>
+  if (!columns.some((column) => String(column.name) === 'deliverables_json')) {
+    db.exec(`ALTER TABLE messages ADD COLUMN deliverables_json TEXT`)
+  }
 }

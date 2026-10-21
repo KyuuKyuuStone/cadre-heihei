@@ -60,6 +60,14 @@ export class InMemoryCollabStore implements DispatchStorePort {
     this.members.set(membership.projectId, byProject)
   }
 
+  listMembers(projectId: ProjectId): readonly ProjectMembership[] {
+    return [...(this.members.get(projectId)?.values() ?? [])]
+  }
+
+  listMessageRecords(projectId: ProjectId): readonly MessageRecord[] {
+    return this.messages.filter((message) => message.projectId === projectId)
+  }
+
   listMessages(projectId: ProjectId): readonly DeliveredMessage[] {
     return this.messages
       .filter((message) => message.projectId === projectId)

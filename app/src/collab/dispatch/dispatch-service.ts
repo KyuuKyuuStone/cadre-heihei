@@ -44,6 +44,7 @@ import type {
   MessageRecord,
   ProjectMembership,
 } from './store-port.ts'
+export type { MessageRecord, ProjectMembership }
 
 export type DispatchOutcome = DispatchReceipt | ApiError
 export type ReportOutcome = ReportReceipt | ApiError
@@ -385,6 +386,7 @@ export class DispatchService {
         bodyBytes: bodyReceipt.bodyBytes,
         bodySha256: bodyReceipt.bodySha256,
         preview: bodyReceipt.preview,
+        deliverables: request.deliverables,
         deliveredAt,
         idempotencyKey: request.idempotencyKey,
       })
@@ -395,6 +397,16 @@ export class DispatchService {
       })
       return receipt
     })
+  }
+
+  /** 工具层读取：项目成员（ADR-0019 权限判定来源）。 */
+  listMembers(projectId: ProjectId): readonly ProjectMembership[] {
+    return this.store.listMembers(projectId)
+  }
+
+  /** 工具层详情读取：含正文与交付物的消息记录。 */
+  listMessageRecords(projectId: ProjectId): readonly MessageRecord[] {
+    return this.store.listMessageRecords(projectId)
   }
 
   listMessages(projectId: ProjectId): ListResult<DeliveredMessage> {
