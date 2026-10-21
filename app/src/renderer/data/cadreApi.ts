@@ -41,7 +41,10 @@ export interface CadreApi {
     readonly body: string
     readonly idempotencyKey?: string
   }): Promise<SendMessageResponse>
-  subscribeSession?(input: { readonly sessionId: SessionId }): Promise<SubscribeSessionResponse>
+  subscribeSession?(input: {
+    readonly sessionId: SessionId
+    readonly lastSeq?: number
+  }): Promise<SubscribeSessionResponse>
   unsubscribeSession?(input: { readonly subscriptionId: string }): Promise<{ readonly ok: true } | ApiFailure>
   onSessionEvent?(callback: (event: SessionEvent) => void): () => void
   dispatchTask?(input: DispatchTaskInput): Promise<DispatchResponse>

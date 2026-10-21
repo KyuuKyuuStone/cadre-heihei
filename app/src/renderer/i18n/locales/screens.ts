@@ -111,6 +111,7 @@ export const screensEn = {
   'receipt.ledgerError': 'Ledger error',
   'common.cancel': 'Cancel',
   'common.pending': 'Submitting…',
+  'conversation.reconnect': 'Reconnect',
 } as const
 
 export type ScreensKey = keyof typeof screensEn
@@ -225,6 +226,7 @@ export const screensZh: Record<ScreensKey, string> = {
   'receipt.ledgerError': '台账错误',
   'common.cancel': '取消',
   'common.pending': '提交中…',
+  'conversation.reconnect': '重新连接',
 }
 
 export const screensZhTW: Record<ScreensKey, string> = {
@@ -337,6 +339,7 @@ export const screensZhTW: Record<ScreensKey, string> = {
   'receipt.ledgerError': '台賬錯誤',
   'common.cancel': '取消',
   'common.pending': '提交中…',
+  'conversation.reconnect': '重新連線',
 }
 
 export const screensJp: Record<ScreensKey, string> = {
@@ -449,6 +452,7 @@ export const screensJp: Record<ScreensKey, string> = {
   'receipt.ledgerError': '台帳エラー',
   'common.cancel': 'キャンセル',
   'common.pending': '送信中…',
+  'conversation.reconnect': '再接続',
 }
 
 export const screensKr: Record<ScreensKey, string> = {
@@ -561,4 +565,5 @@ export const screensKr: Record<ScreensKey, string> = {
   'receipt.ledgerError': '원장 오류',
   'common.cancel': '취소',
   'common.pending': '제출 중…',
+  'conversation.reconnect': '다시 연결',
 }
