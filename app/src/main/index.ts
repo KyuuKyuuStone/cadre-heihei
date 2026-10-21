@@ -200,8 +200,9 @@ async function bootstrap(): Promise<void> {
           ...process.env,
           ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: '1' }),
         },
-        // N11：默认走 llm-pi-ai 的 deepseek 路由；llm-deepseek 在 patch 中禁用。
-        provider: process.env.CADRE_PROVIDER ?? 'deepseek',
+        // N11：固定走 llm-pi-ai 的 deepseek 路由；llm-deepseek 在 patch 中禁用。
+        // 不提供 env 覆盖，避免重新启用到注入身份头的 deepseek-official。
+        provider: 'deepseek',
         model: process.env.CADRE_MODEL ?? 'deepseek-flash',
         reasoningEffort: 'off',
         maxTokens: Number(process.env.CADRE_MAX_TOKENS ?? 64) || 64,
