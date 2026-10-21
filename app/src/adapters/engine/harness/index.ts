@@ -374,16 +374,22 @@ export class HarnessAdapter implements EnginePort {
 
   /**
    * 注册表专用显式重建：同一 dshHome + 指定（通常是归档后的）patch 调用 SDK resumeSession。
+   * 默认强制重建：MCP 子进程崩溃时 record.state 可能仍是 ready，不能据此跳过；
+   * force=false 时才允许 ready 早退。重建前由 rebuildRecord 关闭旧 runtime。
    * 不自动重启；仅当上层显式调用时执行。
    */
   async rebuildSession(
     sessionId: SessionId,
-    options?: { readonly workingDirectory?: string; readonly patchPaths?: readonly string[] },
+    options?: {
+      readonly workingDirectory?: string
+      readonly patchPaths?: readonly string[]
+      readonly force?: boolean
+    },
   ): Promise<EngineSession> {
     this.ensureRunning()
     const record = this.requireSession(sessionId, 'SESSION_NOT_IN_LEDGER')
-    if (record.state === 'ready') {
-      if (options?.workingDirectory !== undefined) await this.setWorkingDirectory(record, options.workingDirectory)
+    if (options?.force === false && record.state === 'ready') {
+      if (options.workingDirectory !== undefined) await this.setWorkingDirectory(record, options.workingDirectory)
       return new HarnessEngineSession(this, record)
     }
     return this.rebuildRecord(

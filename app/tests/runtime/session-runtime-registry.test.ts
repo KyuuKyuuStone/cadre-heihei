@@ -15,6 +15,7 @@ import {
 interface RebuildOptions {
   readonly workingDirectory?: string
   readonly patchPaths: readonly string[]
+  readonly force?: boolean
 }
 
 class FakeSession implements EngineSession {
@@ -58,6 +59,7 @@ class FakeAdapter implements RuntimeAdapter {
   stopped = 0
   failCreate = false
   failRebuild = false
+  toolAvailable = true
 
   async start(): Promise<void> {
     this.status = 'running'
@@ -72,6 +74,7 @@ class FakeAdapter implements RuntimeAdapter {
   async createSessionWithRuntime(input: HarnessRuntimeCreateInput): Promise<EngineSession> {
     this.created.push(input)
     if (this.failCreate) throw new Error('fake create failure')
+    this.toolAvailable = true
     this.states.set(input.sessionId, 'ready')
     return new FakeSession(input.sessionId, input.runtimeId, input.workingDirectory, () => {
       this.states.set(input.sessionId, 'closed')
@@ -84,6 +87,7 @@ class FakeAdapter implements RuntimeAdapter {
       throw new Error('fake rebuild failure')
     }
     this.rebuilt.push({ sessionId, options })
+    this.toolAvailable = true
     this.states.set(sessionId, 'ready')
     return new FakeSession(sessionId, 'runtime-rebuilt', options.workingDirectory ?? '', () => {
       this.states.set(sessionId, 'closed')
@@ -260,6 +264,36 @@ test('reclaim closes/archives idempotently; rebuild uses archived patch and same
       () => registry.rebuildSession(created.session.sessionId),
       (error: unknown) => error instanceof RuntimeRegistryError && error.rawCode === 'REGISTRY_NOT_RUNNING',
     )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('rebuildSession forces when state is ready but tool is unavailable; IfNeeded reuses', async () => {
+  const { root, adapter, registry } = setup()
+  try {
+    const work = join(root, 'work')
+    mkdirSync(work, { recursive: true })
+    await registry.start()
+    const created = await registry.createSession(spec('project-a', 'session-a', 'worker', work))
+    adapter.toolAvailable = false
+    assert.equal(adapter.states.get(created.session.sessionId), 'ready')
+
+    const forced = await registry.rebuildSession(created.session.sessionId)
+    assert.notEqual(forced, created.session)
+    assert.equal(adapter.rebuilt.length, 1)
+    assert.equal(adapter.rebuilt[0]?.options.force, true)
+    assert.equal(adapter.toolAvailable, true)
+    assert.equal(registry.getRuntime(created.session.sessionId)?.state, 'ready')
+
+    const reused = await registry.rebuildSessionIfNeeded(created.session.sessionId)
+    assert.equal(reused, forced)
+    assert.equal(adapter.rebuilt.length, 1)
+
+    const forcedAgain = await registry.rebuildSession(created.session.sessionId)
+    assert.notEqual(forcedAgain, forced)
+    assert.equal(adapter.rebuilt.length, 2)
+    assert.equal(adapter.rebuilt[1]?.options.force, true)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

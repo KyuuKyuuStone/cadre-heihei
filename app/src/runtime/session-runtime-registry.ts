@@ -38,7 +38,11 @@ export interface RuntimeAdapter {
   createSessionWithRuntime(input: HarnessRuntimeCreateInput): Promise<EngineSession>
   rebuildSession(
     sessionId: SessionId,
-    options: { readonly workingDirectory?: string; readonly patchPaths: readonly string[] },
+    options: {
+      readonly workingDirectory?: string
+      readonly patchPaths: readonly string[]
+      readonly force?: boolean
+    },
   ): Promise<EngineSession>
   sessionState?(sessionId: SessionId): EngineSessionSummary['state'] | undefined
 }
@@ -271,13 +275,24 @@ export class SessionRuntimeRegistry {
     return { session, record: snapshot(entry) }
   }
 
-  /** 显式重建：同一 dshHome + 归档/现存 patch；不自动重启。 */
-  async rebuildSession(sessionId: SessionId): Promise<EngineSession> {
+  /**
+   * 显式重建：默认强制重建（即使 registry/adapter 状态都是 ready）。
+   * 原因：MCP 子进程崩溃后 harness 会话仍可能是 ready，状态位无法表达“工具已死”；
+   * 调用方显式 rebuild 即要求重建，不能幂等早退。需要幂等语义请用
+   * `rebuildSessionIfNeeded`。
+   */
+  async rebuildSession(
+    sessionId: SessionId,
+    options?: { readonly force?: boolean },
+  ): Promise<EngineSession> {
     this.ensureRunning()
     const entry = this.requireEntry(sessionId)
-    const adapterState = this.adapter.sessionState?.(sessionId)
-    if (entry.state === 'ready' && (adapterState === undefined || adapterState === 'ready')) {
-      return entry.session
+    const force = options?.force !== false
+    if (!force) {
+      const adapterState = this.adapter.sessionState?.(sessionId)
+      if (entry.state === 'ready' && (adapterState === undefined || adapterState === 'ready')) {
+        return entry.session
+      }
     }
 
     let patchPaths = entry.archivedPatchPaths.length > 0 ? entry.archivedPatchPaths : entry.patchPaths
@@ -304,6 +319,7 @@ export class SessionRuntimeRegistry {
       session = await this.adapter.rebuildSession(sessionId, {
         workingDirectory: entry.workingDirectory,
         patchPaths,
+        force,
       })
     } catch (error) {
       entry.state = 'failed'
@@ -320,6 +336,11 @@ export class SessionRuntimeRegistry {
       // rebuild 已成功；workingDirectory 查询失败不改变 ready 结论。
     }
     return session
+  }
+
+  /** 显式幂等语义：仅当 registry/adapter 都 ready 时复用；怀疑工具已死请用 rebuildSession。 */
+  async rebuildSessionIfNeeded(sessionId: SessionId): Promise<EngineSession> {
+    return this.rebuildSession(sessionId, { force: false })
   }
 
   /** 关闭 runtime 并归档 patch；重复调用幂等。 */
