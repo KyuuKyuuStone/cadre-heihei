@@ -169,6 +169,12 @@ body {
   color: var(--color-text-secondary);
 }
 
+.state-truncated .button {
+  margin-top: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
 .state-truncated code,
 .state__code {
   padding: 2px 4px;

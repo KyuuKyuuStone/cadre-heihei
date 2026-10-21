@@ -8,11 +8,11 @@
  *
  * 适用范围（与 frontend/01 §2 状态矩阵对齐，矩阵全表见 docs/product/testing/03-M3验收矩阵.md）：
  * - idle 屏级 N/A（需求无 idle 场景；组件级 idle 由 state-boundary.test 覆盖）；
- * - truncated 屏级未接线（StateBoundary/viewState 支持已单测，屏级无驱动路径）——矩阵记未通过格；
+ * - truncated 屏级已接线：会话超长消息/工具输出（展开全文）与台账达 limit（加载更多）；
  * - ledger/roster 的 streaming、roster 的 truncated 为需求外 N/A。
- * 本文件只包含可断言格子；未通过/N-A 格子由矩阵文档与 evidence JSON 记录。
+ * 本文件只包含可断言格子；N/A 格子由矩阵文档与 evidence JSON 记录。
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionEvent } from '../../../src/shared/ipc.ts'
 import { CadreApiProvider } from '../../../src/renderer/data/CadreApiProvider.tsx'
@@ -187,6 +187,55 @@ describe('M3 矩阵 · 会话流', () => {
     expect(dataState(container, 'ready')).not.toBeNull()
     expect(screen.queryByTestId('conversation-streaming')).toBeNull()
   })
+
+  it('loading：订阅建立前 data-state=loading，不落 empty/error', async () => {
+    const api = createFakeCadreApi({
+      subscribeSession: () => pending(),
+      onSessionEvent: vi.fn(() => () => {}),
+    })
+    const { container } = withProviders(api, <ConversationScreen />)
+    await waitFor(() => expect(dataState(container, 'loading')).not.toBeNull())
+    const loading = dataState(container, 'loading')
+    expect(loading?.getAttribute('role')).toBe('status')
+    expect(dataState(container, 'empty')).toBeNull()
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+  })
+
+  it('truncated：工具输出超长 → 已截断 N 行 + 展开全文', async () => {
+    let listener: ((event: SessionEvent) => void) | undefined
+    const api = createFakeCadreApi({
+      subscribeSession: vi.fn(async () => ({ ok: true as const, subscriptionId: 'sub-1' })),
+      onSessionEvent: vi.fn((cb: (event: SessionEvent) => void) => {
+        listener = cb
+        return () => {}
+      }),
+    })
+    const { container } = withProviders(api, <ConversationScreen />)
+    await waitFor(() => expect(listener).toBeDefined())
+
+    const summary = Array.from({ length: 15 }, (_, index) => `line-${index + 1}`).join('\n')
+    act(() => listener?.({
+      kind: 'tool.result',
+      sessionId: fakeIds.sessionId,
+      toolName: 'read',
+      callId: 'call-1',
+      ok: true,
+      summary,
+      seq: 1,
+      epoch: 1,
+    }))
+
+    await waitFor(() => expect(dataState(container, 'truncated')).not.toBeNull())
+    const truncated = dataState(container, 'truncated') as HTMLElement
+    expect(truncated.textContent).toContain('15')
+    expect(truncated.querySelector('[role="status"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('line-15')
+
+    fireEvent.click(within(truncated).getByRole('button', { name: '展开全文' }))
+
+    await waitFor(() => expect(dataState(container, 'truncated')).toBeNull())
+    expect(container.textContent).toContain('line-15')
+  })
 })
 
 // ── 任务台账（LedgerScreen）──
@@ -246,6 +295,33 @@ describe('M3 矩阵 · 任务台账', () => {
     expect(denied).not.toBeNull()
     expect(denied?.className).toContain('state--denied')
     expect(denied?.className).not.toContain('state--error')
+  })
+
+  it('truncated：返回数达到 limit → 已截断 N 条 + 加载更多', async () => {
+    const listTasks = vi.fn(async (query: { limit?: number }) => {
+      const count = query.limit === 20 ? 20 : 25
+      return {
+        ok: true as const,
+        apiVersion: 'cadre-heihei/1' as const,
+        items: Array.from({ length: count }, (_, index) => fakeTask({
+          taskId: `task-${index + 1}` as never,
+          seq: index + 1,
+          title: `任务 ${index + 1}`,
+        })),
+      }
+    })
+    const { container } = withProviders(createFakeCadreApi({ listTasks }), <LedgerScreen />)
+
+    await screen.findByText('任务 1')
+    await waitFor(() => expect(dataState(container, 'truncated')).not.toBeNull())
+    const truncated = dataState(container, 'truncated') as HTMLElement
+    expect(truncated.textContent).toContain('20')
+
+    fireEvent.click(within(truncated).getByRole('button', { name: '加载更多' }))
+
+    await waitFor(() => expect(listTasks.mock.calls.some(([query]) => query?.limit === 40)).toBe(true))
+    await waitFor(() => expect(dataState(container, 'ready')).not.toBeNull())
+    expect(dataState(container, 'truncated')).toBeNull()
   })
 })
 

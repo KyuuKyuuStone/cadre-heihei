@@ -21,6 +21,12 @@ export type ViewState<T> =
   | {
     status: 'truncated'
     data: T
-    truncated: { totalLines: number; shownLines: number; outputFile?: string }
+    truncated: {
+      totalLines: number
+      shownLines: number
+      outputFile?: string
+      /** lines = 文本行截断；items = 列表条数截断（台账）。 */
+      unit?: 'lines' | 'items'
+    }
   }
   | { status: 'streaming'; data: T; messageId?: string }

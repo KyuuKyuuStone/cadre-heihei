@@ -8,6 +8,9 @@ type Props<T> = {
   /** 空态标题；缺省用通用「暂无内容」。 */
   emptyTitle?: string
   onRetry?: () => void
+  /** truncated 态的动作：展开全文（A-F2）或加载更多（台账）。 */
+  onExpand?: () => void
+  expandLabel?: string
 }
 
 /**
@@ -16,7 +19,14 @@ type Props<T> = {
  *   就绪（ready/truncated）—— 内容 + 截断标记；
  *   受阻（empty/error/denied）—— empty 用中性空态，绝不使用错误色。
  */
-export function StateBoundary<T>({ state, renderReady, emptyTitle, onRetry }: Props<T>) {
+export function StateBoundary<T>({
+  state,
+  renderReady,
+  emptyTitle,
+  onRetry,
+  onExpand,
+  expandLabel,
+}: Props<T>) {
   const t = useTranslation()
 
   switch (state.status) {
@@ -41,16 +51,24 @@ export function StateBoundary<T>({ state, renderReady, emptyTitle, onRetry }: Pr
     case 'ready':
       return <div className="state--ready" data-state="ready">{renderReady(state.data)}</div>
 
-    case 'truncated':
+    case 'truncated': {
+      const isItems = state.truncated.unit === 'items'
+      const n = isItems ? state.truncated.shownLines : state.truncated.totalLines
       return (
         <div className="state--ready" data-state="truncated">
           {renderReady(state.data)}
           <div className="state-truncated" role="status">
-            <span>{t('state.truncated', { n: state.truncated.totalLines })}</span>
+            <span>{t(isItems ? 'state.truncatedItems' : 'state.truncated', { n })}</span>
             {state.truncated.outputFile ? <code>{state.truncated.outputFile}</code> : null}
+            {onExpand ? (
+              <button type="button" className="button button--ghost" onClick={onExpand}>
+                {expandLabel ?? t('state.expandFull')}
+              </button>
+            ) : null}
           </div>
         </div>
       )
+    }
 
     case 'empty':
       return (

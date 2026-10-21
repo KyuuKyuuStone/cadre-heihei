@@ -18,6 +18,8 @@ import { TaskActions } from './TaskActions.tsx'
 
 type Filter = (typeof TASK_FILTERS)[number]
 
+const LEDGER_PAGE_SIZE = 20
+
 export function LedgerScreen() {
   const api = useCadreApi()
   const { t, locale } = useLocale()
@@ -28,6 +30,7 @@ export function LedgerScreen() {
   const [detail, setDetail] = useState<ViewState<TaskDetail> | null>(null)
   const [since, setSince] = useState<TaskSummary['updatedAt'] | undefined>(undefined)
   const [refreshing, setRefreshing] = useState(false)
+  const [limit, setLimit] = useState(LEDGER_PAGE_SIZE)
   const [dispatchOpen, setDispatchOpen] = useState(false)
   const [dispatchSupersedes, setDispatchSupersedes] = useState<TaskId | undefined>(undefined)
 
@@ -35,6 +38,7 @@ export function LedgerScreen() {
     const res = await api.listTasks({
       ...(filter === 'all' ? {} : { status: filter }),
       ...(options.since ? { since: options.since } : {}),
+      limit,
     })
 
     if (!res.ok) {
@@ -61,6 +65,8 @@ export function LedgerScreen() {
 
     const items = res.items
     if (items.length === 0) {
+      // since 增量没有新数据时保留已有列表，不把「无增量」误判成空态。
+      if (options.merge) return
       setListState({
         status: 'empty',
         reason: t('empty.reason.no_tasks_for_filter'),
@@ -69,13 +75,26 @@ export function LedgerScreen() {
       return
     }
 
+    // 后端按 limit 截断且无总数：返回数达到 limit 即视为还有更多。
+    const hasMore = items.length >= limit
     setListState((prev) => {
-      if (options.merge && prev.status === 'ready') {
+      let data: readonly TaskSummary[] = items
+      if (options.merge && (prev.status === 'ready' || prev.status === 'truncated')) {
         const merged = new Map(prev.data.map((item) => [item.taskId, item]))
         for (const item of items) merged.set(item.taskId, item)
-        return { status: 'ready', data: [...merged.values()] }
+        data = [...merged.values()]
       }
-      return { status: 'ready', data: items }
+      return hasMore
+        ? {
+          status: 'truncated',
+          data,
+          truncated: {
+            totalLines: items.length,
+            shownLines: items.length,
+            unit: 'items',
+          },
+        }
+        : { status: 'ready', data }
     })
 
     const newest = items.reduce(
@@ -83,7 +102,7 @@ export function LedgerScreen() {
       items[0]!.updatedAt,
     )
     setSince(newest)
-  }, [api, filter, t])
+  }, [api, filter, t, limit])
 
   useEffect(() => {
     setListState({ status: 'loading' })
@@ -94,6 +113,10 @@ export function LedgerScreen() {
     setRefreshing(true)
     void load({ since, merge: true }).finally(() => setRefreshing(false))
   }, [load, since])
+
+  const loadMore = useCallback(() => {
+    setLimit((value) => value + LEDGER_PAGE_SIZE)
+  }, [])
 
   const openDetail = useCallback(async (taskId: TaskSummary['taskId']) => {
     setDetail({ status: 'loading' })
@@ -174,6 +197,8 @@ export function LedgerScreen() {
       <StateBoundary
         state={listState}
         emptyTitle={t('ledger.empty.title')}
+        onExpand={loadMore}
+        expandLabel={t('state.loadMore')}
         renderReady={(items) => (
           <ul className="task-list" aria-label={t('nav.ledger')}>
             {items.map((item) => (

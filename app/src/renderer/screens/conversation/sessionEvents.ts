@@ -10,10 +10,12 @@ import type { SessionEvent } from '../../data/ipcContract.ts'
 
 export type LocalMessage = {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool'
   text: string
   at: string
   status: 'sent'
+  /** 工具输出落盘文件（A-F2 的「打开文件」入口使用）。 */
+  outputFile?: string
 }
 
 export type ConversationError = {
@@ -70,6 +72,23 @@ export function applySessionEvent(state: ConversationState, event: SessionEvent)
     }
     case 'message.complete':
       return { ...upsertStream(base, event.text, false), error: undefined }
+    case 'tool.result': {
+      const message: LocalMessage = {
+        id: `tool-${event.callId}`,
+        role: 'tool',
+        text: event.summary,
+        at: new Date().toISOString(),
+        status: 'sent',
+        ...(event.outputFile ? { outputFile: event.outputFile } : {}),
+      }
+      const exists = base.messages.some((item) => item.id === message.id)
+      return {
+        ...base,
+        messages: exists
+          ? base.messages.map((item) => (item.id === message.id ? message : item))
+          : [...base.messages, message],
+      }
+    }
     case 'session.error':
       return { ...base, streaming: false, error: event.error }
     case 'session.closed':
