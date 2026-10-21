@@ -43,7 +43,10 @@ test('identity patch: insert semantics, args/env/db/server fields', () => {
     assert.ok(content.includes('project-a'))
     assert.ok(content.includes(JSON.stringify(databasePath)))
     assert.ok(content.includes(JSON.stringify(serverPath)))
-    assert.equal(content.includes('\n- id: '), false)
+    // N11：仅允许两条 provider 路由覆盖行，且必须在 insert 之前。
+    const topLevelIds = content.match(/^- id: .+$/gm) ?? []
+    assert.deepEqual(topLevelIds, ['- id: llm-deepseek', '- id: llm-pi-ai'])
+    assert.ok(content.indexOf('- id: llm-deepseek') < content.indexOf('- insert:'))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

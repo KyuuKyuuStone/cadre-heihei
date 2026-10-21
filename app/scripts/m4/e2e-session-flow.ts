@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const SECRET_FILE = 'D:\\xxw_p\\cadre-spike-env\\.secrets\\deepseek.env'
-const OUT_ROOT = 'D:\\xxw_p\\cadre-spike-env\\s15-session-flow'
+const OUT_ROOT = process.env.CADRE_E2E_OUT_ROOT ?? 'D:\\xxw_p\\cadre-spike-env\\s15-session-flow'
 const RUN_ID = new Date().toISOString().replace(/[:.]/g, '-')
 const OUT_DIR = join(OUT_ROOT, RUN_ID)
 const USER_DATA = join(OUT_DIR, 'userdata')
@@ -127,9 +127,12 @@ function run(): Promise<{ code: number | null; signal: string | null; timedOut: 
     CADRE_TEST_SEED_MEMBERS: '1',
     CADRE_E2E_PROMPT: process.env.CADRE_E2E_PROMPT ?? 'Reply with exactly: pong',
     CADRE_E2E_OTHER_PROJECT: 'e2e-other-project',
-    CADRE_PROVIDER: 'deepseek-official',
+    CADRE_PROVIDER: process.env.CADRE_PROVIDER ?? 'deepseek',
     CADRE_MODEL: 'deepseek-flash',
     CADRE_MAX_TOKENS: '64',
+    ...(process.env.CADRE_PROVIDER_BASE_URL === undefined
+      ? {}
+      : { CADRE_PROVIDER_BASE_URL: process.env.CADRE_PROVIDER_BASE_URL }),
     DEEPSEEK_API_KEY: key,
     DSH_TELEMETRY_MODE: 'DISABLED',
     DSH_TELEMETRY_DISABLED: '1',

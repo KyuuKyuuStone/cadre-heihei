@@ -39,6 +39,8 @@ export interface IdentityPatchInput {
   readonly serverName?: string
   readonly nodeCommand?: string
   readonly toolCallTimeoutMs?: number
+  /** 仅测试/取证：pi-ai deepseek 路由的 baseURL（指向本地代理）。 */
+  readonly providerBaseUrl?: string
 }
 
 export interface SupervisorPatchInput {
@@ -98,10 +100,32 @@ export function buildIdentityPatch(input: IdentityPatchInput): string {
   if (!Number.isInteger(toolCallTimeoutMs) || toolCallTimeoutMs < 1) {
     throw new RuntimeRegistryError('ENGINE_PROTOCOL', 'toolCallTimeoutMs must be a positive integer', false, 'PATCH_INVALID_TIMEOUT')
   }
+  const providerBaseUrl = input.providerBaseUrl
+  if (providerBaseUrl !== undefined) {
+    let parsed: URL
+    try {
+      parsed = new URL(providerBaseUrl)
+    } catch {
+      throw new RuntimeRegistryError('ENGINE_PROTOCOL', 'invalid providerBaseUrl', false, 'PATCH_INVALID_BASE_URL')
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username !== '' || parsed.search !== '') {
+      throw new RuntimeRegistryError('ENGINE_PROTOCOL', 'providerBaseUrl must be an HTTP(S) root', false, 'PATCH_INVALID_BASE_URL')
+    }
+  }
   const id = `mcp-${safePatchId(sessionId)}`
   const content = [
     `# sessionId: ${sessionId}`,
     `# projectId: ${projectId}`,
+    // N11：llm-deepseek 固定注入 x-deepseek-harness-user-id / -session-id，且无开关；
+    // 改用 base profile 自带的 llm-pi-ai `deepseek` 路由（OpenAI 兼容，不加这两个头）。
+    '- id: llm-deepseek',
+    '  disabled: true',
+    '- id: llm-pi-ai',
+    '  config:',
+    '    providers:',
+    '      deepseek:',
+    '        apiKeyEnv: DEEPSEEK_API_KEY',
+    ...(providerBaseUrl === undefined ? [] : [`        baseURL: ${quote(providerBaseUrl)}`]),
     '- insert:',
     `    - id: ${id}`,
     "      name: '@deepseek-ai/dsh-mcp-client'",

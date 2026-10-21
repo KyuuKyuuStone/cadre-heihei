@@ -59,6 +59,8 @@ export interface SessionRuntimeRegistryOptions {
   readonly patchDirBase: string
   readonly patchArchiveBase?: string
   readonly mcpServerPath?: string
+  /** 仅测试/取证：pi-ai deepseek 路由 baseURL（本地代理）。 */
+  readonly providerBaseUrl?: string
   readonly databasePathFor?: (projectId: ProjectId, sessionId: SessionId) => string
   readonly databaseBase?: string
   readonly nodeCommand?: string
@@ -150,6 +152,7 @@ export class SessionRuntimeRegistry {
   private readonly patchDirBase: string
   private readonly patchArchiveBase: string
   private readonly mcpServerPath: string
+  private readonly providerBaseUrl: string | undefined
   private readonly nodeCommand: string
   private readonly serverName: string
   private readonly toolCallTimeoutMs: number
@@ -164,6 +167,7 @@ export class SessionRuntimeRegistry {
     this.patchDirBase = requireText(options.patchDirBase, 'patchDirBase', 'INVALID_REGISTRY_OPTIONS')
     this.patchArchiveBase = options.patchArchiveBase ?? join(this.patchDirBase, 'archive')
     this.mcpServerPath = options.mcpServerPath ?? DEFAULT_MCP_SERVER_PATH
+    this.providerBaseUrl = options.providerBaseUrl
     this.nodeCommand = options.nodeCommand ?? DEFAULT_NODE_COMMAND
     this.serverName = options.serverName ?? DEFAULT_SERVER_NAME
     this.toolCallTimeoutMs = options.toolCallTimeoutMs ?? DEFAULT_TOOL_CALL_TIMEOUT_MS
@@ -228,6 +232,7 @@ export class SessionRuntimeRegistry {
       serverName: this.serverName,
       nodeCommand: this.nodeCommand,
       toolCallTimeoutMs: this.toolCallTimeoutMs,
+      ...(this.providerBaseUrl === undefined ? {} : { providerBaseUrl: this.providerBaseUrl }),
     })
 
     let session: EngineSession
@@ -315,6 +320,7 @@ export class SessionRuntimeRegistry {
         serverName: this.serverName,
         nodeCommand: this.nodeCommand,
         toolCallTimeoutMs: this.toolCallTimeoutMs,
+        ...(this.providerBaseUrl === undefined ? {} : { providerBaseUrl: this.providerBaseUrl }),
       })
       patchPaths = regenerated.patchPaths
       entry.patchPaths = regenerated.patchPaths
