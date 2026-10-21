@@ -26,12 +26,32 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const REPO_ROOT = resolve(APP_ROOT, '..')
 const GIT_PREFIX = 'app/'
-const BASELINE_REL = 'scripts/gates/tsc-baseline.json'
-const BASELINE_PATH = join(APP_ROOT, BASELINE_REL)
 const TSC = join(APP_ROOT, 'node_modules', 'typescript', 'lib', 'tsc.js')
-const TSCONFIG = join(APP_ROOT, 'tsconfig.json')
 const TSC_HEAP_MB = '12288'
 const SANITY_RATIO = 0.5
+
+/** 双 project：Node 侧与 renderer 侧各自独立基线（ADR-0020 §测试与门禁 5）。 */
+export interface TscProject {
+  name: string
+  tsconfigRel: string
+  baselineRel: string
+  comment: string
+}
+
+export const PROJECTS: readonly TscProject[] = [
+  {
+    name: 'node',
+    tsconfigRel: 'tsconfig.json',
+    baselineRel: 'scripts/gates/tsc-baseline.json',
+    comment: 'app root tsc 棘轮基线（Node 侧）。只紧不松：签名计数只许降。',
+  },
+  {
+    name: 'renderer',
+    tsconfigRel: 'tsconfig.renderer.json',
+    baselineRel: 'scripts/gates/tsc-renderer-baseline.json',
+    comment: 'app renderer tsc 棘轮基线（DOM + react-jsx + bundler）。只紧不松：签名计数只许降。',
+  },
+]
 
 export interface TscDiag {
   file: string
@@ -145,7 +165,7 @@ export interface BaselineFile {
   signatures: Record<string, number>
 }
 
-export function readBaseline(path: string = BASELINE_PATH): BaselineFile | null {
+export function readBaseline(path: string): BaselineFile | null {
   if (!existsSync(path)) return null
   return JSON.parse(readFileSync(path, 'utf8')) as BaselineFile
 }
@@ -156,7 +176,7 @@ function mapToRecord(m: Map<string, number>): Record<string, number> {
   return rec
 }
 
-export function runTsc(tsconfigPath: string = TSCONFIG, tscPath: string = TSC): { exitCode: number; stdout: string; stderr: string } {
+export function runTsc(tsconfigPath: string, tscPath: string = TSC): { exitCode: number; stdout: string; stderr: string } {
   const r = spawnSync(process.execPath, [tscPath, '-p', tsconfigPath, '--noEmit', '--pretty', 'false'], {
     cwd: APP_ROOT,
     encoding: 'utf8',
@@ -178,8 +198,8 @@ export function parsePositionlessErrors(text: string): string[] {
   return out
 }
 
-function gitShowBaseline(ref: string): BaselineFile | null {
-  const r = spawnSync('git', ['-C', REPO_ROOT, 'show', `${ref}:${GIT_PREFIX}${BASELINE_REL}`], {
+function gitShowBaseline(ref: string, baselineRel: string): BaselineFile | null {
+  const r = spawnSync('git', ['-C', REPO_ROOT, 'show', `${ref}:${GIT_PREFIX}${baselineRel}`], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   })
@@ -211,30 +231,44 @@ function main(): void {
   const refIdx = args.indexOf('--baseline-ref')
   const baselineRef = refIdx >= 0 ? args[refIdx + 1] ?? null : null
 
-  if (baselineRef) {
-    const work = readBaseline()
-    const ref = gitShowBaseline(baselineRef)
-    if (!work) fail(`工作区无 ${BASELINE_PATH}，防倒转无法执行`)
+  for (const project of PROJECTS) {
+    runProject(project, { update, baselineRef })
+  }
+}
+
+function runProject(project: TscProject, opts: { update: boolean; baselineRef: string | null }): void {
+  const tag = `[tsc-baseline:${project.name}]`
+  const tsconfigPath = join(APP_ROOT, project.tsconfigRel)
+  const baselinePath = join(APP_ROOT, project.baselineRel)
+
+  if (!existsSync(tsconfigPath)) {
+    fail(`${tag} tsconfig 不存在：${tsconfigPath}`)
+  }
+
+  if (opts.baselineRef) {
+    const work = readBaseline(baselinePath)
+    const ref = gitShowBaseline(opts.baselineRef, project.baselineRel)
+    if (!work) fail(`${tag} 工作区无 ${baselinePath}，防倒转无法执行`)
     if (ref) {
       if (work.total > ref.total) {
-        fail(`基线 total 上调（${ref.total} → ${work.total}）⇒ 棘轮倒转，禁止（相对 ${baselineRef}）`, [
+        fail(`${tag} 基线 total 上调（${ref.total} → ${work.total}）⇒ 棘轮倒转，禁止（相对 ${opts.baselineRef}）`, [
           '新增签名 key 若伴随旧签名消失（合法移位）应体现为 total 不升；如确需上调请联系架构师重裁。',
         ])
       }
-      console.log(`[tsc-baseline] 防倒转 PASS：基线 total ${ref.total} → ${work.total}（相对 ${baselineRef} 未上调）`)
+      console.log(`${tag} 防倒转 PASS：基线 total ${ref.total} → ${work.total}（相对 ${opts.baselineRef} 未上调）`)
     } else {
-      console.log(`[tsc-baseline] 防倒转跳过：${baselineRef} 无基线文件（首次接入期）`)
+      console.log(`${tag} 防倒转跳过：${opts.baselineRef} 无基线文件（首次接入期）`)
     }
   }
 
   const t0 = Date.now()
-  const { exitCode, stdout, stderr } = runTsc()
+  const { exitCode, stdout, stderr } = runTsc(tsconfigPath)
   const rawOutput = stdout + stderr
   const diags = parseTscOutput(rawOutput)
   const current = buildSignatures(diags)
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
 
-  const baseline = readBaseline()
+  const baseline = readBaseline(baselinePath)
   const sanity = sanityCheck(diags.length, exitCode, baseline ? baseline.total : null)
   if (!sanity.ok) {
     const dump: string[] = []
@@ -248,27 +282,27 @@ function main(): void {
     for (const l of stdout.split(/\r?\n/).filter((x) => x.trim()).slice(0, 40)) dump.push(`  | ${l}`)
     dump.push('—— tsc stderr 尾 20 行：')
     for (const l of stderr.split(/\r?\n/).filter((x) => x.trim()).slice(-20)) dump.push(`  | ${l}`)
-    fail(sanity.reason, dump)
+    fail(`${tag} ${sanity.reason}`, dump)
   }
 
-  if (update) {
+  if (opts.update) {
     if (baseline && diags.length < baseline.total * SANITY_RATIO) {
-      fail(`拒绝写入：新 total ${diags.length} < 旧基线 ${baseline.total} 的 50%（疑似真空/误删；确为大修请人工确认后重试）`)
+      fail(`${tag} 拒绝写入：新 total ${diags.length} < 旧基线 ${baseline.total} 的 50%（疑似真空/误删；确为大修请人工确认后重试）`)
     }
     const file: BaselineFile = {
-      comment: 'app root tsc 棘轮基线（从零重算，未沿用 cc-heihei 旧 baseline）。只紧不松：签名计数只许降。',
+      comment: project.comment,
       version: 1,
       tsVersion: tsVersion(),
       total: diags.length,
       signatures: mapToRecord(current),
     }
-    writeFileSync(BASELINE_PATH, JSON.stringify(file, null, 2) + '\n')
-    console.log(`[tsc-baseline] 基线已写入：total=${diags.length}，签名数=${current.size}（tsc ${elapsed}s，exit=${exitCode}）`)
-    if (baseline) console.log(`[tsc-baseline] 旧基线 total=${baseline.total}（同提交下调，规则 c）`)
+    writeFileSync(baselinePath, JSON.stringify(file, null, 2) + '\n')
+    console.log(`${tag} 基线已写入：total=${diags.length}，签名数=${current.size}（tsc ${elapsed}s，exit=${exitCode}）`)
+    if (baseline) console.log(`${tag} 旧基线 total=${baseline.total}（同提交下调，规则 c）`)
     return
   }
 
-  if (!baseline) fail(`基线文件不存在：${BASELINE_PATH}（首跑请 node app/scripts/gates/check-tsc-baseline.ts --update 生成）`)
+  if (!baseline) fail(`${tag} 基线文件不存在：${baselinePath}（首跑请 node app/scripts/gates/check-tsc-baseline.ts --update 生成）`)
 
   const cmp = compareSignatures(current, new Map(Object.entries(baseline.signatures)))
   const detail: string[] = []
@@ -278,7 +312,7 @@ function main(): void {
   if (cmp.exceeded.length > 20) detail.push(`…另有 ${cmp.exceeded.length - 20} 条计数超未列出`)
 
   if (!cmp.pass) {
-    fail(`类型签名棘轮被触发（tsc ${elapsed}s，exit=${exitCode}）`, [
+    fail(`${tag} 类型签名棘轮被触发（tsc ${elapsed}s，exit=${exitCode}）`, [
       `当前 total=${cmp.currentTotal} vs 基线 total=${cmp.baselineTotal}`,
       `新增签名 ${cmp.added.length} 条 / 计数超 ${cmp.exceeded.length} 条`,
       ...detail,
@@ -286,7 +320,7 @@ function main(): void {
     ])
   }
 
-  console.log(`[tsc-baseline] PASS：total=${cmp.currentTotal}（基线 ${cmp.baselineTotal}），签名数=${current.size}，新增 0 / 计数超 0（tsc ${elapsed}s，exit=${exitCode}）`)
+  console.log(`${tag} PASS：total=${cmp.currentTotal}（基线 ${cmp.baselineTotal}），签名数=${current.size}，新增 0 / 计数超 0（tsc ${elapsed}s，exit=${exitCode}）`)
 }
 
 const invoked = process.argv[1]
