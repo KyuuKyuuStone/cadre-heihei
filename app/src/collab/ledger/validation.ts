@@ -3,14 +3,23 @@
  *
  * 内存实现与 SQLite 实现都必须调用这里，避免两份业务规则漂移；
  * 迁移合法性（from → to 与允许执行者）只查 `rules.ts` / `TASK_TRANSITION_RULES`。
+ *
+ * supervisor 判定（ADR-0019）：只信 `SupervisorResolver` 的解析结果，
+ * **禁止**用 `dispatcherSessionId` 推断；跨项目在解析前先拒绝。
  */
-import { ERROR_RETRYABLE, type IsoTimestamp, type TaskStatus } from '../protocol/index.ts'
+import {
+  ERROR_RETRYABLE,
+  type IsoTimestamp,
+  type TaskStatus,
+  type TransitionActorKind,
+} from '../protocol/index.ts'
 import {
   REASON_REQUIRED_STATUSES,
   findTransitionRule,
   isTerminalStatus,
   requiresReason,
 } from './rules.ts'
+import type { SupervisorResolver } from './supervisor-resolver.ts'
 import type {
   CreateTaskCommand,
   LedgerActor,
@@ -52,18 +61,81 @@ export function transitionFingerprint(command: TransitionCommand): string {
   ].join('\u0000')
 }
 
-export function resolveActorKind(task: TaskRecord, actor: LedgerActor): 'assignee' | 'supervisor' | 'system' | null {
+/**
+ * 解析执行者类型。supervisor 分支只调用 resolver（ADR-0019），
+ * 不读取 task.dispatcherSessionId；resolver 故障返回 INTERNAL_ERROR（fail-closed）。
+ */
+export function resolveActorKind(
+  task: TaskRecord,
+  command: TransitionCommand,
+  resolver: SupervisorResolver,
+): TransitionActorKind | LedgerError {
+  const actor = command.actor
+  const actorSessionId = actor.kind === 'system' ? actor.onBehalfOf : actor.sessionId
+
   if (actor.kind === 'system') {
-    return actor.onBehalfOf === task.assigneeSessionId ? 'system' : null
+    if (actor.onBehalfOf === task.assigneeSessionId) return 'system'
+    return makeError({
+      code: 'FORBIDDEN_ACTOR',
+      message: '系统推进必须代表该任务的 assignee',
+      projectId: command.projectId,
+      taskId: task.taskId,
+      actorSessionId,
+      reasonCategory: 'not-assignee',
+      requiredActor: 'assignee',
+    })
   }
+
   if (actor.role === 'assignee') {
-    return actor.sessionId === task.assigneeSessionId ? 'assignee' : null
+    if (actor.sessionId === task.assigneeSessionId) return 'assignee'
+    return makeError({
+      code: 'FORBIDDEN_ACTOR',
+      message: '执行者不是该任务的 assignee',
+      projectId: command.projectId,
+      taskId: task.taskId,
+      actorSessionId,
+      reasonCategory: 'not-assignee',
+      requiredActor: 'assignee',
+    })
   }
-  return actor.sessionId === task.dispatcherSessionId ? 'supervisor' : null
+
+  let resolved: boolean | 'unavailable'
+  try {
+    resolved = resolver.isSupervisor(command.projectId, actor.sessionId)
+  } catch {
+    resolved = 'unavailable'
+  }
+  if (resolved === 'unavailable') {
+    return makeError({
+      code: 'INTERNAL_ERROR',
+      message: 'supervisor 花名册解析不可用',
+      projectId: command.projectId,
+      taskId: task.taskId,
+      actorSessionId,
+      rawCode: 'SUPERVISOR_RESOLVER_UNAVAILABLE',
+    })
+  }
+  if (!resolved) {
+    return makeError({
+      code: 'FORBIDDEN_ACTOR',
+      message: '执行者不是本项目在册 supervisor',
+      projectId: command.projectId,
+      taskId: task.taskId,
+      actorSessionId,
+      reasonCategory: 'not-supervisor',
+      requiredActor: 'supervisor',
+    })
+  }
+  return 'supervisor'
 }
 
 /** 迁移校验（任务已按 taskId 取出）；返回 null 表示允许。 */
-export function validateTransition(task: TaskRecord, command: TransitionCommand): LedgerError | null {
+export function validateTransition(
+  task: TaskRecord,
+  command: TransitionCommand,
+  resolver: SupervisorResolver,
+): LedgerError | null {
+  // 跨项目优先：不查花名册、不泄露存在性。
   if (task.projectId !== command.projectId) {
     return makeError({
       code: 'CROSS_PROJECT_DENIED',
@@ -104,9 +176,11 @@ export function validateTransition(task: TaskRecord, command: TransitionCommand)
       requiredFor: REASON_REQUIRED_STATUSES,
     })
   }
-  const actorKind = resolveActorKind(task, command.actor)
-  if (actorKind === null || !rule.actors.includes(actorKind)) {
-    return makeError(forbiddenActor(command, task, rule.actors, actorKind))
+
+  const actorKind = resolveActorKind(task, command, resolver)
+  if (typeof actorKind !== 'string') return actorKind
+  if (!rule.actors.includes(actorKind)) {
+    return makeError(forbiddenActor(command, task, rule.actors))
   }
   return null
 }
@@ -181,26 +255,20 @@ export function validateSupersedeTarget(
 function forbiddenActor(
   command: TransitionCommand,
   task: TaskRecord,
-  allowed: readonly ('assignee' | 'supervisor' | 'system')[],
-  actorKind: 'assignee' | 'supervisor' | 'system' | null,
+  allowed: readonly TransitionActorKind[],
 ): Omit<LedgerError, 'retryable'> {
-  const reasonCategory =
-    actorKind !== null
-      ? 'role-mismatch'
-      : command.actor.kind === 'system'
-        ? 'not-assignee'
-        : command.actor.role === 'assignee'
-          ? 'not-assignee'
-          : 'not-supervisor'
+  const actorSessionId =
+    command.actor.kind === 'system' ? command.actor.onBehalfOf : command.actor.sessionId
   const required = allowed.find((kind): kind is 'assignee' | 'supervisor' => kind !== 'system')
   return {
     code: 'FORBIDDEN_ACTOR',
     message: '执行者与迁移权限不符',
     projectId: command.projectId,
     taskId: task.taskId,
+    actorSessionId,
     from: command.from,
     to: command.to,
-    reasonCategory,
+    reasonCategory: 'role-mismatch',
     ...(required ? { requiredActor: required } : {}),
   }
 }

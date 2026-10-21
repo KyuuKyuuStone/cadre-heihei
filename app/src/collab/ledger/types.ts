@@ -89,11 +89,14 @@ export interface LedgerError {
   readonly retryable: boolean
   readonly projectId: ProjectId
   readonly taskId?: TaskId
+  readonly actorSessionId?: SessionId
   readonly from?: TaskStatus
   readonly to?: TaskStatus
   readonly reasonCategory?: ForbiddenActorReason
   readonly requiredActor?: 'assignee' | 'supervisor'
   readonly requiredFor?: readonly ReasonRequiredStatus[]
+  /** 未映射的内部错误原始码（如 SUPERVISOR_RESOLVER_UNAVAILABLE）。 */
+  readonly rawCode?: string
 }
 
 export type LedgerResult<T> =
@@ -117,4 +120,6 @@ export type TransitionOutcome = TransitionOutcomeBase & { readonly replayed: boo
 export interface LedgerDeps {
   readonly now?: () => IsoTimestamp
   readonly newId?: () => string
+  /** supervisor 解析器（ADR-0019）；缺省 fail-closed。 */
+  readonly supervisorResolver?: import('./supervisor-resolver.ts').SupervisorResolver
 }

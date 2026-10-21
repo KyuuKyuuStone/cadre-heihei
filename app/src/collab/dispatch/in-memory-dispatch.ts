@@ -8,6 +8,7 @@ import type { IdempotencyKey, ProjectId, SessionId } from '../protocol/index.ts'
 import {
   InMemoryTaskLedger,
   type LedgerTransaction,
+  type SupervisorResolver,
 } from '../ledger/index.ts'
 import {
   DEFAULT_NEW_ID,
@@ -37,11 +38,18 @@ export class InMemoryCollabStore implements DispatchStorePort {
   private readonly idempotency = new Map<string, StoredIdempotent>()
 
   constructor(options: InMemoryCollabStoreOptions = {}) {
+    // 内存原型专用：直接读本 store 的成员表；非产品默认。
+    // SQLite 实现使用 SqliteSupervisorResolver 查询 members 表。
+    const supervisorResolver: SupervisorResolver = {
+      isSupervisor: (projectId, sessionId) =>
+        this.members.get(projectId)?.get(sessionId)?.role === 'supervisor',
+    }
     this.ledger =
       options.ledger ??
       new InMemoryTaskLedger({
         now: options.now,
         newId: options.newId,
+        supervisorResolver,
       })
   }
 

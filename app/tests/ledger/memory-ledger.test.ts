@@ -18,6 +18,7 @@ import {
 } from '../../src/collab/protocol/index.ts'
 import {
   InMemoryTaskLedger,
+  PrototypeOnlySupervisorResolver,
   listIllegalTransitionPairs,
   requiresReason,
   type LedgerActor,
@@ -55,6 +56,11 @@ function makeLedger(): InMemoryTaskLedger {
   return new InMemoryTaskLedger({
     now: () => new Date(Date.UTC(2026, 9, 21, 0, 0, 0, tick++)).toISOString() as IsoTimestamp,
     newId: () => `event-${++eventSeq}`,
+    // prototypeOnly（ADR-0019）：单主管内存测试桩，非产品默认。
+    supervisorResolver: new PrototypeOnlySupervisorResolver([
+      { projectId: P1, sessionId: SUP },
+      { projectId: P2, sessionId: SUP },
+    ]),
   })
 }
 

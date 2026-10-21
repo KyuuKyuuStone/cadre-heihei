@@ -17,6 +17,10 @@ import {
   type TaskStatus,
 } from '../protocol/index.ts'
 import type { LedgerTransaction, TaskLedgerPort } from './port.ts'
+import {
+  UnavailableSupervisorResolver,
+  type SupervisorResolver,
+} from './supervisor-resolver.ts'
 import type {
   CreateTaskCommand,
   CreateTaskOutcome,
@@ -69,11 +73,13 @@ export class InMemoryTaskLedger implements TaskLedgerPort {
   private readonly idempotency = new Map<string, StoredIdempotent>()
   private readonly now: () => IsoTimestamp
   private readonly newId: () => string
+  private readonly supervisorResolver: SupervisorResolver
   private readonly tx: LedgerTransaction
 
   constructor(deps: LedgerDeps = {}) {
     this.now = deps.now ?? DEFAULT_NOW
     this.newId = deps.newId ?? DEFAULT_NEW_ID
+    this.supervisorResolver = deps.supervisorResolver ?? new UnavailableSupervisorResolver()
     this.tx = {
       createTask: (command) => this.createTaskTx(command),
       transition: (command) => this.transitionTx(command),
@@ -240,7 +246,7 @@ export class InMemoryTaskLedger implements TaskLedgerPort {
       })
     }
 
-    const invalid = validateTransition(copyTask(task), command)
+    const invalid = validateTransition(copyTask(task), command, this.supervisorResolver)
     if (invalid) return { ok: false, error: invalid }
 
     const at = this.now()

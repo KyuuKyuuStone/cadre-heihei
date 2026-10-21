@@ -179,7 +179,7 @@ function ledgerFailureToApiError(error: LedgerError, request: DispatchRequest): 
         error.taskId ?? request.supersedesTaskId ?? ('' as TaskId),
       )
     default:
-      return internalError(error.message, error.code)
+      return internalError(error.message, error.rawCode ?? error.code)
   }
 }
 

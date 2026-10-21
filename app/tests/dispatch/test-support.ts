@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import {
   InMemoryTaskLedger,
+  PrototypeOnlySupervisorResolver,
   type LedgerActor,
   type TaskRecord,
 } from '../../src/collab/ledger/index.ts'
@@ -36,6 +37,11 @@ export const P2 = 'project-2' as ProjectId
 export const GHOST = 'project-ghost' as ProjectId
 
 export const SUP = 'session-supervisor' as SessionId
+export const SUP_B = 'session-supervisor-b' as SessionId
+/** 换届前的主管：现在仍是项目成员，但 role 已降为 worker。 */
+export const SUP_OLD = 'session-supervisor-old' as SessionId
+/** 换届后的新主管。 */
+export const SUP_NEW = 'session-supervisor-new' as SessionId
 export const EMP = 'session-employee' as SessionId
 export const EMP2 = 'session-employee-2' as SessionId
 export const OFFLINE = 'session-offline' as SessionId
@@ -54,6 +60,9 @@ export const SYSTEM_ACTOR: LedgerActor = { kind: 'system', onBehalfOf: EMP }
 
 export const TEST_MEMBERS: readonly ProjectMembership[] = [
   { projectId: P1, sessionId: SUP, role: 'supervisor', state: 'available' },
+  { projectId: P1, sessionId: SUP_B, role: 'supervisor', state: 'available' },
+  { projectId: P1, sessionId: SUP_OLD, role: 'worker', state: 'available' },
+  { projectId: P1, sessionId: SUP_NEW, role: 'supervisor', state: 'available' },
   { projectId: P1, sessionId: EMP, role: 'worker', state: 'available' },
   { projectId: P1, sessionId: EMP2, role: 'worker', state: 'available' },
   { projectId: P1, sessionId: OFFLINE, role: 'worker', state: 'offline' },
@@ -72,7 +81,14 @@ export function makeService(): TestService {
   const now = (): IsoTimestamp =>
     new Date(Date.UTC(2026, 9, 21, 0, 0, 0, tick++)).toISOString() as IsoTimestamp
   const newId = (): string => `id-${++id}`
-  const ledger = new InMemoryTaskLedger({ now, newId })
+  // prototypeOnly（ADR-0019）：显式从测试花名册登记 supervisor。
+  const supervisorResolver = new PrototypeOnlySupervisorResolver(
+    TEST_MEMBERS.filter((member) => member.role === 'supervisor').map((member) => ({
+      projectId: member.projectId,
+      sessionId: member.sessionId,
+    })),
+  )
+  const ledger = new InMemoryTaskLedger({ now, newId, supervisorResolver })
   const service = new InMemoryDispatchService({
     ledger,
     now,

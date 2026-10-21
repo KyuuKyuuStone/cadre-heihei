@@ -22,6 +22,7 @@ import {
 } from '../protocol/index.ts'
 import type { LedgerTransaction, TaskLedgerPort } from './port.ts'
 import { initSchema } from './sqlite-schema.ts'
+import type { SupervisorResolver } from './supervisor-resolver.ts'
 import type {
   CreateTaskCommand,
   CreateTaskOutcome,
@@ -117,10 +118,37 @@ function eventFromRow(row: Row): TaskEvent {
   }
 }
 
+/**
+ * 产品用 supervisor 解析器（ADR-0019）：只查本项目花名册。
+ * 查询异常一律返回 'unavailable'，由台账映射为 INTERNAL_ERROR（fail-closed）。
+ */
+export class SqliteSupervisorResolver implements SupervisorResolver {
+  private readonly db: DatabaseSync
+
+  constructor(db: DatabaseSync) {
+    this.db = db
+  }
+
+  isSupervisor(projectId: ProjectId, sessionId: SessionId): boolean | 'unavailable' {
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT 1 AS ok FROM members
+           WHERE project_id = ? AND session_id = ? AND role = 'supervisor'`,
+        )
+        .get(projectId, sessionId)
+      return row !== undefined
+    } catch {
+      return 'unavailable'
+    }
+  }
+}
+
 export class SqliteLedgerCore {
   readonly db: DatabaseSync
   readonly now: () => IsoTimestamp
   readonly newId: () => string
+  readonly supervisorResolver: SupervisorResolver
   private txDepth = 0
   readonly tx: LedgerTransaction
 
@@ -136,6 +164,7 @@ export class SqliteLedgerCore {
     initSchema(this.db)
     this.now = options.now ?? DEFAULT_NOW
     this.newId = options.newId ?? DEFAULT_NEW_ID
+    this.supervisorResolver = options.supervisorResolver ?? new SqliteSupervisorResolver(this.db)
     this.tx = {
       createTask: (command) => this.createTaskTx(command),
       transition: (command) => this.transitionTx(command),
@@ -334,7 +363,7 @@ export class SqliteLedgerCore {
       })
     }
     const task = taskFromRow(row)
-    const invalid = validateTransition(task, command)
+    const invalid = validateTransition(task, command, this.supervisorResolver)
     if (invalid) return { ok: false, error: invalid }
 
     const at = this.now()
