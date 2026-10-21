@@ -12,10 +12,18 @@ export type Channel = (typeof CHANNELS)[number]
 export const DELIVERY_STATES = ['received', 'delivered', 'failed'] as const
 export type DeliveryState = (typeof DELIVERY_STATES)[number]
 
-/** `preview` 的最大字符数（backend/01 §2.2）。计数单位见协议 README U-07。 */
-export const PREVIEW_MAX_CHARS = 50 as const
+/**
+ * `preview` 的最大长度：前 50 个 **Unicode code point**（U-07 已裁决）。
+ * 注意与 `bodyBytes` 口径分开：
+ * - `preview` 按 code point 截断（避免把代理对/emoji 从中间截断）；
+ * - `bodyBytes` 按 UTF-8 字节数计，二者不可互相换算。
+ */
+export const PREVIEW_MAX_CODE_POINTS = 50 as const
 
-/** `bodyBytes` 的编码口径：UTF-8 实收字节数，非发送端本地长度。 */
+/**
+ * `bodyBytes` 的编码口径：UTF-8 **实收原样**字节数，非发送端本地长度。
+ * 不做 BOM 去除、不做换行规范化（U-13 已裁决）；`bodySha256` 同样对实收原样计算。
+ */
 export const BODY_BYTES_ENCODING = 'utf-8' as const
 
 /**

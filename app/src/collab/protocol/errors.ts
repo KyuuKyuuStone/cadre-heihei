@@ -24,7 +24,8 @@ export const ERROR_CODES = [
 export type ErrorCode = (typeof ERROR_CODES)[number]
 
 /**
- * 可重试性建议（前端错误条分层用）。U-08：`INTERNAL_ERROR` 暂定可重试，待评审。
+ * 可重试性（前端错误条分层用）。U-08 已裁决：
+ * `INTERNAL_ERROR` 为未知错误，**不自动重试**（retryable=false），是否重试由上层决定。
  */
 export const ERROR_RETRYABLE: Readonly<Record<ErrorCode, boolean>> = {
   MISSING_TASK_ID: false,
@@ -36,7 +37,7 @@ export const ERROR_RETRYABLE: Readonly<Record<ErrorCode, boolean>> = {
   CLIENT_COMMAND_REJECTED: false,
   IDEMPOTENCY_CONFLICT: false,
   DELIVERY_FAILED: true,
-  INTERNAL_ERROR: true,
+  INTERNAL_ERROR: false,
 }
 
 export interface ErrorDetail<C extends ErrorCode = ErrorCode> {

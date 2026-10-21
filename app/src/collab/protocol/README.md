@@ -27,7 +27,7 @@
 
 ### 1.3 不在范围
 
-实现代码、运行时校验、SQLite schema/仓储端口（等 B5）、UI 字段最终契约、MCP 工具 schema、证据卡结构与注入（等 A1/ADR-0015）。
+实现代码、运行时校验、UI 字段最终契约、MCP 工具 schema、证据卡结构与注入（等 A1/ADR-0015）。仓储端口类型可在 B5 原型通过后另行定义（见 U-04），不在本任务交付。
 
 ## 2. 契约摘要
 
@@ -52,7 +52,9 @@
 - 派活：`projectId`、`toSessionId`、`title`、`body`、`idempotencyKey`、可选 `supersedesTaskId`；前置拒绝空正文与客户端命令，目标须为本项目成员且非 offline。
 - 汇报：必须显式 `taskId`；入口类型 `ReportRequestInput` 允许 `taskId` 缺失，以便返回 `MISSING_TASK_ID` + 候选，**不得自动挂靠**。
 - 两个回执均含服务端实收的 `bodyBytes` / `preview` / `bodySha256`；`ledgerUpdated: false` 必须附 `ledgerError`，不得伪报成功。
+- **口径（U-07/U-13 已裁决）**：`preview` 取前 **50 个 Unicode code point**；`bodyBytes` 为 **UTF-8 实收原样字节数**（不做 BOM/换行规范化，`bodySha256` 同样对实收原样计算）。两个口径分开，不可互相换算。
 - 幂等：同一 `(project_id, idempotency_key)` 重复提交返回首次回执；同键不同正文 → `IDEMPOTENCY_CONFLICT`。
+- 取代（U-12 已裁决）：请求带 `supersedesTaskId` 时，回执必须回传 `supersededTask`（旧 taskId + `cancelled` + `reason=superseded`），供调用方确认旧任务已取消。
 
 ### 2.3 错误码
 
@@ -67,7 +69,7 @@
 | `CLIENT_COMMAND_REJECTED` | 派活含客户端命令 | false |
 | `IDEMPOTENCY_CONFLICT` | 同键不同正文 | false |
 | `DELIVERY_FAILED` | 通道投递失败（显式报错、不静默改道） | true |
-| `INTERNAL_ERROR` | 未映射引擎/内部错误（附原始码） | true（待确认） |
+| `INTERNAL_ERROR` | 未映射引擎/内部错误（附原始码） | **false**（不自动重试，由上层决定） |
 
 ### 2.4 跨项目与空态
 
@@ -92,33 +94,35 @@
 
 - **通过为 W1-05/W1-06/W1-08 的输入**：状态机、回执、错误码、跨项目、空态、端口形状已覆盖 `backend/01` 的对应章节；
 - **不通过为最终契约**：§4 未决项未闭合前，实现不得自行定论；类型草案不等于运行时校验器，实现必须独立校验（尤其权限、幂等、跨项目、候选范围）；
-- 未发现与 ADR-0003/0006/0014/0015/0017 的直接冲突；ADR-0017 前提 6 的编号争议见 U-14。
+- 未发现与 ADR-0003/0006/0014/0015/0017 的直接冲突；原 U-14 编号争议已随 ADR-0017 返工关闭。
 
 ## 4. 未决项
 
-| ID | 未决项 | 影响 | 裁决/验证 |
+| ID | 未决项 | 影响 | 状态/裁决 |
 |---|---|---|---|
-| U-01 | A1：compaction 事件字段形态、稳定事件 ID、窗口外可观测性 | 证据卡注入与幂等键 `(taskId, eventId, revision)` | `testing/02`；A1 通过前保持 `unverified` |
-| U-02 | N9：token 计量不可得 | 能力位 false；本版不定义 usage 字段，禁止估算 | 适配层自计量或延后 |
-| U-03 | N8：手动压缩不可用 | 无按需压缩入口；替代触发未定 | 产品层设计 |
-| U-04 | B5：SQLite WAL 并发/恢复、台账幂等未实测 | 本版不定义仓储端口与持久化约束 | 原型验证 |
-| U-05 | N7：SDK 无会话枚举 | `listSessions` 依赖产品自建台账，数据来源待 M2 设计 | M2 |
-| U-06 | N6：进程级 kill 不自动恢复 | 端口只承诺显式错误；重启/回收策略未设计 | M2 设计输入 |
-| U-07 | `preview` 的 50 字符按 Unicode code point 还是 UTF-16 code unit 计数 | 回执自证口径；多字节/emoji 可能出现长度争议 | 评审裁定 |
-| U-08 | `INTERNAL_ERROR` 是否可重试 | 前端错误条与重试策略 | 评审裁定（暂 true） |
-| U-09 | 空态 `reason` 集合是否覆盖 UI 全部场景 | 前端状态矩阵逐格验收 | 前端确认 |
-| U-10 | `delivered → review` 是否允许自动化触发 | 当前仅主管点名（`review/01` §4）；若自动化需改契约 | 主管/审查裁定 |
-| U-11 | 信箱降级通道的触发条件与“唤醒会话”方式 | 派活/汇报在 HTTP 不可达时的行为 | M2 验证（S5b 未覆盖） |
-| U-12 | supersedes 场景回执是否需回传旧任务状态 | 调用方如何确认旧任务已取消 | 评审裁定 |
-| U-13 | `bodyBytes` 是否对 BOM/换行做规范化 | 端到端哈希比对 | 评审裁定（当前按“实收原样”） |
-| U-14 | ADR-0017 前提 6 把 B5 写成“MCP 崩溃恢复已通过”，与 `pending-verification` 的 B5=SQLite 待实测冲突 | M1 是否可启动 SQLite 落库 | 主管裁决；本版不对 B5 作任何通过声明 |
+| U-01 | A1：compaction 事件字段形态、稳定事件 ID、窗口外可观测性 | 证据卡注入与幂等键 `(taskId, eventId, revision)` | **未决**（A1 执行中）；`compactionEvents` 保持 `unverified` |
+| U-02 | N9：token 计量不可得 | 能力位 false；本版不定义 usage 字段，禁止估算 | 保持现状：适配层自计量或延后 |
+| U-03 | N8：手动压缩不可用 | 无按需压缩入口；替代触发未定 | 保持现状：产品层设计 |
+| U-04 | B5：SQLite WAL 并发/恢复、台账幂等 | 仓储端口与持久化约束 | **已通过（原型范围）**，证据 `D:\xxw_p\cadre-spike-b1b5`；**可定义仓储端口**。限制：未测掉电/OS 崩溃、网络盘、打包 ABI |
+| U-05 | N7：SDK 无会话枚举 | `listSessions` 依赖产品自建台账，数据来源待 M2 设计 | 保持待办（M2） |
+| U-06 | N6：进程级 kill 不自动恢复 | 端口只承诺显式错误；重启/回收策略未设计 | 保持待办（M2 设计输入） |
+| U-07 | `preview` 的 50 字符计数单位 | 回执自证口径；多字节/emoji 截断 | **已裁决**：前 50 个 Unicode code point；与 `bodyBytes`（UTF-8 字节）分开 |
+| U-08 | `INTERNAL_ERROR` 是否可重试 | 前端错误条与重试策略 | **已裁决**：`retryable=false`，不自动重试，由上层决定 |
+| U-09 | 空态 `reason` 集合是否覆盖 UI 全部场景 | 前端状态矩阵逐格验收 | 保持待办（前端确认） |
+| U-10 | `delivered → review` 是否允许自动化触发 | 状态机与审查入口 | **已裁决**：不允许自动进入 review，必须主管点名 |
+| U-11 | 信箱降级通道的触发条件与“唤醒会话”方式 | 派活/汇报在 HTTP 不可达时的行为 | 保持待办（M2 验证，S5b 未覆盖） |
+| U-12 | supersedes 场景回执是否需回传旧任务状态 | 调用方如何确认旧任务已取消 | **已裁决**：回执回传 `supersededTask`（旧 taskId + cancelled + reason=superseded） |
+| U-13 | `bodyBytes` 是否对 BOM/换行做规范化 | 端到端哈希比对 | **已裁决**：按实收原样，不做 BOM/换行规范化；`bodySha256` 同口径 |
+| U-14 | ADR-0017 前提 6 与 B5 编号冲突 | M1 是否可启动 SQLite 落库 | **已关闭**：ADR-0017 已返工（前提 5=MCP 崩溃恢复、前提 6=SQLite WAL） |
 
 ## 5. 给实现方的硬约束
 
 1. 类型草案不是校验器：权限、幂等、跨项目、候选范围必须在运行时独立校验；
-2. 终态不可迁移；`delivered` 不得直达 `verified/rework/failed`；
+2. 终态不可迁移；`delivered` 不得直达 `verified/rework/failed`；`delivered → review` 只允许主管点名，禁止自动触发；
 3. 空集合必须给 `reason` + `hint`，不得渲染为错误；
 4. 跨项目错误不得携带候选或任务存在性字段；
 5. 能力位不得“补全”：`compactionEvents` 在 A1 通过前只能是 `unverified`；
-6. 任何未映射错误 → `INTERNAL_ERROR` + `rawCode`，不得吞掉或改写为成功；
-7. 端口层零 harness 类型；harness 专有 API 只允许出现在 `src/adapters/engine/harness/`。
+6. 任何未映射错误 → `INTERNAL_ERROR` + `rawCode`，不得吞掉或改写为成功；该错误不自动重试；
+7. `preview` 按前 50 个 Unicode code point 截断；`bodyBytes` 与 `bodySha256` 按 UTF-8 实收原样计算，不做 BOM/换行规范化；
+8. supersedes 回执必须回传旧任务（taskId + cancelled + reason=superseded）；
+9. 端口层零 harness 类型；harness 专有 API 只允许出现在 `src/adapters/engine/harness/`。

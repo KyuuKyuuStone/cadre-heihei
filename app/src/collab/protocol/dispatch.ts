@@ -35,7 +35,16 @@ export const DISPATCH_SUPERSEDE_RULE = {
   oldTaskStatus: 'cancelled',
   reason: 'superseded',
   silentCoexistence: false,
+  /** 回执必须回传旧任务状态，供调用方确认取消已生效（U-12 已裁决）。 */
+  receiptCarriesOldTask: true,
 } as const
+
+/** supersedes 场景的旧任务摘要；仅当请求带 `supersedesTaskId` 时出现。 */
+export interface SupersededTaskSummary {
+  readonly taskId: TaskId
+  readonly status: 'cancelled'
+  readonly reason: 'superseded'
+}
 
 export interface DispatchReceiptBase extends BodyReceipt, ServerMeta {
   readonly ok: true
@@ -47,6 +56,11 @@ export interface DispatchReceiptBase extends BodyReceipt, ServerMeta {
   readonly taskStatus: 'dispatched'
   /** 已投递到目标会话的时间（服务端生成）。 */
   readonly deliveredAt: IsoTimestamp
+  /**
+   * 被取代的旧任务（U-12）：请求带 `supersedesTaskId` 时必填；
+   * 未带时为 undefined。用于确认旧任务已 cancelled，避免静默并存。
+   */
+  readonly supersededTask?: SupersededTaskSummary
 }
 
 /**

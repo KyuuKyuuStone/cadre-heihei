@@ -69,7 +69,7 @@ export const TASK_TRANSITION_RULES: readonly TaskTransitionRule[] = [
     from: 'delivered',
     to: 'review',
     actors: ['supervisor'],
-    note: 'review 为必经态；由主管点名进入（review/01 §4）',
+    note: 'review 为必经态；仅主管点名进入，不允许自动触发（U-10 已裁决，review/01 §4）',
   },
   { from: 'delivered', to: 'cancelled', actors: ['supervisor'], note: '非终态可取消' },
   { from: 'review', to: 'verified', actors: ['supervisor'], note: '验收通过' },
@@ -86,6 +86,8 @@ export const TASK_TRANSITION_RULES: readonly TaskTransitionRule[] = [
 export const TASK_LEDGER_RULES = {
   terminalStatesImmutable: true,
   reviewIsMandatory: true,
+  reviewRequiresSupervisorNomination: true,
+  reviewAutoTriggerAllowed: false,
   deliveredCannotSkipReview: true,
   reworkKeepsTaskId: true,
   reworkAttemptIncrement: 1,
