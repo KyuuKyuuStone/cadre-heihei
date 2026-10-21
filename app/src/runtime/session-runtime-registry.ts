@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { moduleDirectory } from './module-dir.ts'
 import {
   HarnessAdapter,
   type HarnessAdapterOptions,
@@ -28,7 +28,14 @@ import {
   type RuntimeRole,
 } from './patches.ts'
 
-const DEFAULT_MCP_SERVER_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../mcp/server.ts')
+function defaultMcpServerPath(): string {
+  const candidates = [
+    resolve(moduleDirectory(), '../mcp/server.ts'),
+    resolve(process.cwd(), 'src/mcp/server.ts'),
+  ]
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!
+}
+const DEFAULT_MCP_SERVER_PATH = defaultMcpServerPath()
 
 export type RuntimeState = EngineSessionSummary['state']
 

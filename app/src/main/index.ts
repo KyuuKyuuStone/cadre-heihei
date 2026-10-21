@@ -1,17 +1,17 @@
 /**
- * Electron 主进程入口（M4 步骤 2-7；不打包）。
+ * Electron 主进程入口（M4 §2 步骤 2-7 + §8 会话流）。
  *
- * - 单实例锁 + 1280×800 BrowserWindow（contextIsolation/nodeIntegration/sandbox）；
- * - 导航/新窗口/webview 策略；
- * - ipcMain 注册：windowId 取自 fromWebContents、入口二次校验（electron-ipc.ts）；
- * - CSP：onHeadersReceived 生效；生产 dist/index.html 由构建脚本注入 meta 双保险；
- * - dev loadURL(1420) / prod loadFile(dist/renderer/index.html)。
+ * 启动顺序：身份加载/台账校验 → SQLite 后端 → registry.start → ensure →
+ * handlers 注入；身份失败只进 denied，不启动引擎。
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, session } from 'electron'
-import { InMemoryDispatchService } from '../collab/dispatch/index.ts'
+import { SqliteDispatchService } from '../collab/dispatch/index.ts'
+import type { ProjectMembership } from '../collab/dispatch/store-port.ts'
+import { SessionRuntimeRegistry } from '../runtime/session-runtime-registry.ts'
 import type { IpcIdentity } from '../shared/ipc.ts'
+import { runE2eProbe } from './e2e-probe.ts'
 import { createWindowEventSink, registerElectronIpc } from './electron-ipc.ts'
 import {
   DEV_SERVER_URL,
@@ -21,25 +21,51 @@ import {
   resolveAppMode,
 } from './electron-policy.ts'
 import { InMemoryIdentityBinding } from './identity.ts'
+import { loadIdentity, validateIdentityAgainstMembers, type LoadedIdentity } from './identity-config.ts'
 import { createIpcHandlers } from './ipc-handlers.ts'
 import { FilePreferencesStore } from './preferences.ts'
+import { countHarnessProcesses } from './residual.ts'
 import { SessionEventPump } from './session-events.ts'
+import { RegistrySessionPort } from './session-port.ts'
 
 export const APP_NAME = 'cadre-heihei'
 
+if (process.env.CADRE_USER_DATA !== undefined) app.setPath('userData', process.env.CADRE_USER_DATA)
+const userData = app.getPath('userData')
+const databasePath = join(userData, 'cadre.sqlite')
+const identityPath = join(userData, 'identity.json')
+const workingDirectory = process.env.CADRE_WORKDIR ?? join(userData, 'workspace')
+
 const windows = new Map<number, BrowserWindow>()
 const smoke = process.env.CADRE_SMOKE === '1'
+const e2e = process.env.CADRE_E2E === '1'
 const mode = resolveAppMode({ isPackaged: app.isPackaged, env: process.env })
 const devServerUrl = process.env.CADRE_DEV_SERVER_URL ?? DEV_SERVER_URL
-// asar 安全：dist/main/index.cjs → dist/renderer；不依赖 app.getAppPath()
-// （未打包直接跑 dist/main/index.cjs 时 appPath 会指向 dist/main）。
 const rendererRoot = join(__dirname, '..', 'renderer')
 const csp = buildContentSecurityPolicy(mode)
 
-const identity: IpcIdentity = {
-  projectId: (process.env.CADRE_PROJECT_ID ?? 'local-project') as never,
-  sessionId: (process.env.CADRE_SESSION_ID ?? 'local-session') as never,
-  role: process.env.CADRE_ROLE === 'worker' ? 'worker' : 'supervisor',
+const binding = new InMemoryIdentityBinding()
+const pump = new SessionEventPump({
+  sink: createWindowEventSink((windowId) => windows.get(windowId)),
+})
+
+let backend: SqliteDispatchService | undefined
+let registry: SessionRuntimeRegistry | undefined
+let port: RegistrySessionPort | undefined
+let identity: LoadedIdentity | undefined
+let otherTaskId: string | undefined
+let shuttingDown = false
+
+function log(message: string): void {
+  console.log(`[m4] ${message}`)
+}
+
+function resolveMcpServerPath(): string {
+  const candidates = [
+    join(__dirname, '..', '..', 'src', 'mcp', 'server.ts'),
+    join(app.getAppPath(), 'src', 'mcp', 'server.ts'),
+  ]
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!
 }
 
 function installCsp(): void {
@@ -51,34 +77,145 @@ function installCsp(): void {
       },
     })
   })
-  console.log(`[m4] csp mode=${mode} via=onHeadersReceived`)
+  log(`csp mode=${mode} via=onHeadersReceived`)
 }
 
-function startRuntime() {
-  const backend = new InMemoryDispatchService({
-    serverVersion: app.getVersion(),
-    members: [
-      {
-        projectId: identity.projectId,
-        sessionId: identity.sessionId,
-        role: identity.role,
-        state: 'available',
-        displayName: identity.sessionId,
-      },
-    ],
+function seedTestMembers(service: SqliteDispatchService): void {
+  if (process.env.CADRE_TEST_SEED_MEMBERS !== '1') return
+  const extra = process.env.CADRE_SEED_MEMBERS_JSON
+  if (extra !== undefined) {
+    try {
+      const parsed = JSON.parse(extra) as ProjectMembership[]
+      for (const member of parsed) service.addMember(member)
+    } catch {
+      log('seed-members: CADRE_SEED_MEMBERS_JSON 非法，已忽略')
+    }
+  }
+  if (identity !== undefined) {
+    service.addMember({
+      projectId: identity.projectId as never,
+      sessionId: identity.sessionId as never,
+      role: identity.role,
+      state: 'available',
+      displayName: identity.sessionId,
+    })
+    log('seed-members: identity 以测试模式写入（非生产路径）')
+  }
+}
+
+function seedIsolationTask(service: SqliteDispatchService): void {
+  if (!e2e) return
+  const projectId = process.env.CADRE_E2E_OTHER_PROJECT ?? 'e2e-other-project'
+  const supervisor = 'e2e-other-supervisor'
+  const worker = 'e2e-other-worker'
+  service.addMember({
+    projectId: projectId as never,
+    sessionId: supervisor as never,
+    role: 'supervisor',
+    state: 'available',
+    displayName: supervisor,
   })
-  const binding = new InMemoryIdentityBinding()
-  const preferences = new FilePreferencesStore(
-    join(app.getPath('userData'), 'preferences.json'),
+  service.addMember({
+    projectId: projectId as never,
+    sessionId: worker as never,
+    role: 'worker',
+    state: 'available',
+    displayName: worker,
+  })
+  const receipt = service.dispatch(
+    { projectId: projectId as never, sessionId: supervisor as never },
+    {
+      projectId: projectId as never,
+      toSessionId: worker as never,
+      title: 'E2E 他项目任务',
+      body: 'isolation',
+      idempotencyKey: `e2e-other-${Date.now()}` as never,
+    },
   )
-  const pump = new SessionEventPump({
-    sink: createWindowEventSink((windowId) => windows.get(windowId)),
+  if (receipt.ok) {
+    otherTaskId = receipt.taskId
+    log(`e2e: other-project task=${otherTaskId} project=${projectId}`)
+  }
+}
+
+async function bootstrap(): Promise<void> {
+  installCsp()
+  mkdirSync(workingDirectory, { recursive: true })
+
+  backend = new SqliteDispatchService({
+    databasePath,
+    busyTimeoutMs: 10_000,
+    serverVersion: app.getVersion(),
   })
+  const integrity = backend.integrityCheck()
+  const dbHealthy = integrity === 'ok'
+  log(`db path=${databasePath} journal=${backend.journalMode()} integrity=${integrity}`)
+  if (!dbHealthy) log('db integrity check failed（不启动引擎）')
+
+  const loaded = loadIdentity(process.env, identityPath)
+  if (loaded.ok) identity = loaded.identity
+  seedTestMembers(backend)
+  seedIsolationTask(backend)
+
+  let identityReady = false
+  if (!loaded.ok) {
+    log(`identity denied reason=${loaded.reason} ${loaded.detail}（不启动引擎）`)
+  } else if (!dbHealthy) {
+    log('identity denied reason=db-integrity（不启动引擎）')
+  } else {
+    const members = backend.listMembers(loaded.identity.projectId as never)
+    const validation = validateIdentityAgainstMembers(loaded.identity, members)
+    if (validation.ok) {
+      identityReady = true
+      log(
+        `identity project=${loaded.identity.projectId} session=${loaded.identity.sessionId} ` +
+          `role=${loaded.identity.role} source=${loaded.identity.source}`,
+      )
+    } else {
+      log(`identity denied reason=${validation.reason}（不启动引擎）`)
+    }
+  }
+
+  if (identityReady && identity !== undefined) {
+    registry = new SessionRuntimeRegistry({
+      dshHomeBase: join(userData, 'runtimes'),
+      patchDirBase: join(userData, 'patches'),
+      databasePathFor: () => databasePath,
+      mcpServerPath: resolveMcpServerPath(),
+      adapterOptions: {
+        // harness SDK 用 process.execPath 拉起 dsh；Electron 下需以 Node 模式运行子进程。
+        env: {
+          ...process.env,
+          ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: '1' }),
+        },
+        provider: process.env.CADRE_PROVIDER ?? 'deepseek-official',
+        model: process.env.CADRE_MODEL ?? 'deepseek-flash',
+        reasoningEffort: 'off',
+        maxTokens: Number(process.env.CADRE_MAX_TOKENS ?? 64) || 64,
+        initializeTimeoutMs: 60_000,
+        requestTimeoutMs: 180_000,
+      },
+    })
+    try {
+      await registry.start()
+      port = new RegistrySessionPort({ registry, workingDirectory, databasePath })
+      await port.ensure(identity)
+      log(`session ensured session=${identity.sessionId}`)
+    } catch (error) {
+      const code =
+        (error as { code?: unknown; rawCode?: unknown }).rawCode ??
+        (error as { code?: unknown }).code ??
+        'UNKNOWN'
+      log(`session ensure failed code=${String(code)}（不自动重建）`)
+    }
+  }
+
   const handlers = createIpcHandlers({
     binding,
     backend,
-    preferences,
+    preferences: new FilePreferencesStore(join(userData, 'preferences.json')),
     pump,
+    ...(port === undefined ? {} : { sessions: port }),
     projectNameFor: (projectId) => process.env.CADRE_PROJECT_NAME ?? projectId,
   })
   registerElectronIpc({
@@ -86,7 +223,7 @@ function startRuntime() {
     fromWebContents: (sender) => BrowserWindow.fromWebContents(sender as never) ?? undefined,
     handlers,
   })
-  return { pump, binding }
+  createWindow()
 }
 
 async function loadRenderer(win: BrowserWindow): Promise<void> {
@@ -96,18 +233,19 @@ async function loadRenderer(win: BrowserWindow): Promise<void> {
   }
   const indexPath = join(rendererRoot, 'index.html')
   const meta = hasCspMeta(readFileSync(indexPath, 'utf8')) ? 'present' : 'absent'
-  console.log(`[m4] csp mode=prod meta=${meta} path=${indexPath}`)
+  log(`csp mode=prod meta=${meta} path=${indexPath}`)
   await win.loadFile(indexPath)
 }
 
-function createWindow(runtime: {
-  pump: SessionEventPump
-  binding: InMemoryIdentityBinding
-}): BrowserWindow {
+function bindIdentity(windowId: number): void {
+  if (identity !== undefined) binding.bind(String(windowId), identity)
+}
+
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
-    show: !smoke,
+    show: !smoke && !e2e,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -118,56 +256,65 @@ function createWindow(runtime: {
   })
 
   windows.set(win.id, win)
-  runtime.binding.bind(String(win.id), identity)
+  bindIdentity(win.id)
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (event, url) => {
     if (!isAllowedNavigation(url, { mode, devServerUrl, rendererRoot })) {
       event.preventDefault()
-      console.log(`[m4] navigation denied url=${url}`)
+      log(`navigation denied url=${url}`)
     }
   })
   win.webContents.on('will-attach-webview', (event) => {
     event.preventDefault()
-    console.log('[m4] webview attach denied')
-  })
-  win.webContents.on('render-process-gone', (_event, details) => {
-    console.log(`[m4] render-process-gone reason=${details.reason} exitCode=${details.exitCode}`)
+    log('webview attach denied')
   })
   win.on('closed', () => {
     windows.delete(win.id)
-    runtime.pump.dropWindow(String(win.id))
-    runtime.binding.unbind(String(win.id))
+    pump.dropWindow(String(win.id))
+    binding.unbind(String(win.id))
+    if (!shuttingDown && identity !== undefined && port !== undefined) {
+      void port.reclaim(identity.sessionId as never).catch((error: unknown) => {
+        log(`reclaim failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }
   })
 
   if (smoke) {
     win.webContents.once('did-finish-load', () => {
-      console.log(`[m4] window-ready id=${win.id} mode=${mode} visible=false`)
+      log(`window-ready id=${win.id} mode=${mode} visible=false`)
       void win.webContents
         .executeJavaScript(
           `({ cadre: typeof window.cadre, require: typeof require, process: typeof process,
               methods: Object.keys(window.cadre ?? {}).sort() })`,
         )
-        .then((info: unknown) => console.log(`[m4] smoke-probe ${JSON.stringify(info)}`))
-        .catch((error: unknown) =>
-          console.log(`[m4] smoke-probe failed: ${error instanceof Error ? error.message : String(error)}`),
-        )
-        .finally(() => {
-          setTimeout(() => {
-            win.destroy()
-            app.quit()
-          }, 100)
-        })
+        .then((info: unknown) => log(`smoke-probe ${JSON.stringify(info)}`))
+        .catch((error: unknown) => log(`smoke-probe failed: ${String(error)}`))
+        .finally(() => setTimeout(() => app.quit(), 100))
+    })
+  }
+
+  if (e2e) {
+    win.webContents.once('did-finish-load', () => {
+      void runE2eProbe(win.webContents, {
+        sessionId: identity?.sessionId ?? '',
+        body: process.env.CADRE_E2E_PROMPT ?? 'Reply with exactly: pong',
+        ...(otherTaskId === undefined ? {} : { otherTaskId }),
+        timeoutMs: Number(process.env.CADRE_E2E_TIMEOUT_MS ?? 120_000),
+      }).then((result) => {
+        log(`e2e result=${JSON.stringify(result)}`)
+        app.quit()
+      })
     })
     setTimeout(() => {
-      console.log('[m4] smoke timeout')
-      app.exit(2)
-    }, 15_000).unref()
+      log('e2e hard timeout')
+      app.exit(4)
+    }, Number(process.env.CADRE_E2E_HARD_TIMEOUT_MS ?? 180_000)).unref()
   }
 
   void loadRenderer(win).catch((error: unknown) => {
-    console.log(`[m4] load failed: ${error instanceof Error ? error.message : String(error)}`)
-    if (smoke) app.exit(3)
+    log(`load failed: ${error instanceof Error ? error.message : String(error)}`)
+    if (smoke || e2e) app.exit(3)
   })
   return win
 }
@@ -179,21 +326,39 @@ function focusMainWindow(): void {
   first.focus()
 }
 
+async function shutdown(): Promise<void> {
+  try {
+    await registry?.stop()
+  } catch (error) {
+    log(`registry stop failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const residual = await countHarnessProcesses()
+  log(`residual-harness count=${residual}`)
+  try {
+    backend?.close()
+  } catch (error) {
+    log(`db close failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  app.exit(0)
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => focusMainWindow())
-
-  void app.whenReady().then(() => {
-    installCsp()
-    const runtime = startRuntime()
-    createWindow(runtime)
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow(runtime)
-    })
+  app.on('before-quit', (event) => {
+    if (shuttingDown) return
+    event.preventDefault()
+    shuttingDown = true
+    void shutdown()
   })
-
+  void app.whenReady().then(bootstrap)
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin' || smoke) app.quit()
+    if (process.platform !== 'darwin' || smoke || e2e) app.quit()
   })
 }
+
+export type { IpcIdentity }

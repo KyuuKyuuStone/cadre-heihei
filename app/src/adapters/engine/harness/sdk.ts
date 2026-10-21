@@ -6,12 +6,29 @@
  */
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
+import { moduleDirectory } from '../../../runtime/module-dir.ts'
 import { HarnessEngineError } from './mapping.ts'
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..')
+/** 从 src 或 dist bundle 出发向上找 `vendor/deepseek-harness`，避免依赖 import.meta。 */
+function findRepoRoot(): string {
+  const roots = [moduleDirectory(), process.cwd()]
+  for (const start of roots) {
+    let current = resolve(start)
+    for (let depth = 0; depth < 6; depth += 1) {
+      if (existsSync(join(current, 'vendor', 'deepseek-harness', 'packages', 'sdk'))) {
+        return current
+      }
+      const parent = dirname(current)
+      if (parent === current) break
+      current = parent
+    }
+  }
+  return resolve(moduleDirectory(), '../../../../..')
+}
+
 const DEFAULT_SDK_ENTRY = join(
-  REPO_ROOT,
+  findRepoRoot(),
   'vendor',
   'deepseek-harness',
   'packages',

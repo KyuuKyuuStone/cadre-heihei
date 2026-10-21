@@ -19,6 +19,7 @@
     "build:main": "node scripts/m4/build-main.ts main",
     "build:preload": "node scripts/m4/build-main.ts preload",
     "build:all": "npm run build && npm run build:main && npm run build:preload",
+    "e2e:session": "node scripts/m4/e2e-session-flow.ts",
     "preview": "vite preview",
     "test": "node --test \"tests/**/*.test.ts\"",
     "test:ui": "vitest run",

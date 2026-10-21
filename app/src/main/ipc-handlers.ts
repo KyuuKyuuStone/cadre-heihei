@@ -46,6 +46,8 @@ export type IpcResult = IpcOk | IpcWhoamiResult | ApiFailure
 
 /** 会话访问端口：M2 registry 的结构型适配（避免 main 反向 import runtime）。 */
 export interface SessionPort {
+  /** 启动期确保 ready 会话（有则复用，无则创建；失败不自动重建）。 */
+  ensure?(identity: IpcIdentity): Promise<EngineSession>
   get(sessionId: SessionId): EngineSession | undefined
   rebuild(sessionId: SessionId): Promise<EngineSession>
 }
