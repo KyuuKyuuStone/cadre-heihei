@@ -13,6 +13,7 @@ import {
   InMemoryDispatchService,
   type CallerBinding,
   type DispatchOutcome,
+  type DispatchService,
   type ProjectMembership,
   type ReportOutcome,
 } from '../../src/collab/dispatch/index.ts'
@@ -51,7 +52,7 @@ export const ASSIGNEE_ACTOR: LedgerActor = { kind: 'session', sessionId: EMP, ro
 export const SUPERVISOR_ACTOR: LedgerActor = { kind: 'session', sessionId: SUP, role: 'supervisor' }
 export const SYSTEM_ACTOR: LedgerActor = { kind: 'system', onBehalfOf: EMP }
 
-const MEMBERS: readonly ProjectMembership[] = [
+export const TEST_MEMBERS: readonly ProjectMembership[] = [
   { projectId: P1, sessionId: SUP, role: 'supervisor', state: 'available' },
   { projectId: P1, sessionId: EMP, role: 'worker', state: 'available' },
   { projectId: P1, sessionId: EMP2, role: 'worker', state: 'available' },
@@ -77,7 +78,7 @@ export function makeService(): TestService {
     now,
     newId,
     serverVersion: 'test-server',
-    members: MEMBERS,
+    members: TEST_MEMBERS,
   })
   return { service, ledger }
 }
@@ -129,7 +130,7 @@ export function expectReportError(result: ReportOutcome): ApiError {
 }
 
 export function dispatchOk(
-  service: InMemoryDispatchService,
+  service: DispatchService,
   binding: CallerBinding = BINDING_SUP,
   overrides: Partial<DispatchRequest> = {},
 ): DispatchReceipt {
@@ -137,7 +138,7 @@ export function dispatchOk(
 }
 
 export function transitionTo(
-  service: InMemoryDispatchService,
+  service: DispatchService,
   projectId: ProjectId,
   taskId: TaskId,
   to: TaskStatus,
@@ -160,7 +161,7 @@ export function transitionTo(
 }
 
 export function driveToInProgress(
-  service: InMemoryDispatchService,
+  service: DispatchService,
   projectId: ProjectId,
   taskId: TaskId,
 ): TaskRecord {
