@@ -11,7 +11,7 @@
  * - 本目录是唯一允许触碰 harness 的目录（R1）。
  */
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   type CreateSessionInput,
@@ -24,7 +24,7 @@ import {
   type ResumeSessionInput,
   type SendOptions,
 } from '../../../ports/engine.ts'
-import type { IsoTimestamp, SessionId } from '../../../collab/protocol/ids.ts'
+import type { IsoTimestamp, ProjectId, SessionId } from '../../../collab/protocol/ids.ts'
 import {
   HarnessEngineError,
   mapHarnessError,
@@ -59,6 +59,20 @@ export interface HarnessAdapterOptions {
   readonly logger?: (diagnostic: HarnessMappingDiagnostic) => void
 }
 
+/**
+ * 产品运行时注册表创建会话时的扩展输入。
+ * `patchPaths` 必须由注册表按会话生成并存在；adapter 自身不生成 MCP/supervisor patch。
+ */
+export interface HarnessRuntimeCreateInput extends CreateSessionInput {
+  readonly sessionId: SessionId
+  readonly projectId?: ProjectId
+  readonly role?: 'supervisor' | 'worker'
+  readonly runtimeId: string
+  readonly dshHome: string
+  readonly patchPaths: readonly string[]
+  readonly databasePath?: string
+}
+
 type SessionState = EngineSessionSummary['state']
 
 interface SessionRecord {
@@ -68,6 +82,8 @@ interface SessionRecord {
   readonly dshHome: string
   harness: HarnessRuntimeLike
   harnessSession: HarnessSessionLike
+  /** 本次 runtime 启动使用的 per-session patch；空数组表示端口直连（无 MCP）。 */
+  patchPaths: readonly string[]
   state: SessionState
   readonly createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
@@ -207,7 +223,7 @@ export class HarnessAdapter implements EnginePort {
     try {
       mkdirSync(this.options.dshHomeBase, { recursive: true })
       mkdirSync(dshHome, { recursive: true })
-      harness = new sdk.DeepSeekHarness(this.launchOptions(input.workingDirectory, dshHome))
+      harness = new sdk.DeepSeekHarness(this.launchOptions(input.workingDirectory, dshHome, []))
       await harness.start()
       const harnessSession = harness.session()
       const actualWorkingDirectory = await harnessSession.setWorkingDirectory(input.workingDirectory)
@@ -219,6 +235,7 @@ export class HarnessAdapter implements EnginePort {
         dshHome,
         harness,
         harnessSession,
+        patchPaths: [],
         state: 'ready',
         createdAt: at,
         updatedAt: at,
@@ -239,35 +256,189 @@ export class HarnessAdapter implements EnginePort {
   }
 
   /**
+   * 注册表专用：用显式 sessionId/dshHome/patch 启动独立 runtime。
+   * patch 缺失或 sessionId 不被 SDK 原样采用时 fail-closed，绝不无身份启动。
+   */
+  async createSessionWithRuntime(input: HarnessRuntimeCreateInput): Promise<EngineSession> {
+    this.ensureRunning()
+    if (typeof input?.sessionId !== 'string' || input.sessionId.trim() === '') {
+      throw new HarnessEngineError('ENGINE_PROTOCOL', 'createSessionWithRuntime requires a non-empty sessionId', false, 'INVALID_SESSION_ID')
+    }
+    if (typeof input.workingDirectory !== 'string' || input.workingDirectory.trim() === '') {
+      throw new HarnessEngineError('ENGINE_PROTOCOL', 'createSessionWithRuntime requires a non-empty workingDirectory', false, 'INVALID_WORKDIR')
+    }
+    if (!isDirectory(input.workingDirectory)) {
+      throw new HarnessEngineError(
+        'ENGINE_PROTOCOL',
+        `workingDirectory does not exist or is not a directory: ${input.workingDirectory}`,
+        false,
+        'WORKDIR_NOT_DIRECTORY',
+      )
+    }
+    if (typeof input.runtimeId !== 'string' || input.runtimeId.trim() === '' ||
+      typeof input.dshHome !== 'string' || input.dshHome.trim() === '') {
+      throw new HarnessEngineError('ENGINE_PROTOCOL', 'runtimeId and dshHome are required', false, 'INVALID_RUNTIME')
+    }
+    if (!Array.isArray(input.patchPaths) || input.patchPaths.length === 0) {
+      throw new HarnessEngineError(
+        'ENGINE_UNAVAILABLE',
+        'refusing to start a runtime without a per-session patch (identity fail-closed)',
+        false,
+        'PATCH_MISSING',
+      )
+    }
+    for (const patchPath of input.patchPaths) {
+      if (typeof patchPath !== 'string' || !existsSync(patchPath)) {
+        throw new HarnessEngineError(
+          'ENGINE_UNAVAILABLE',
+          `per-session patch is missing: ${String(patchPath)}`,
+          false,
+          'PATCH_MISSING',
+        )
+      }
+    }
+    if (this.sessions.has(input.sessionId)) {
+      throw new HarnessEngineError(
+        'ENGINE_PROTOCOL',
+        `session ${String(input.sessionId)} already exists in this adapter`,
+        false,
+        'SESSION_EXISTS',
+      )
+    }
+
+    const sdk = this.requireSdk()
+    let harness: HarnessRuntimeLike | undefined
+    try {
+      mkdirSync(input.dshHome, { recursive: true })
+      harness = new sdk.DeepSeekHarness(
+        this.launchOptions(input.workingDirectory, input.dshHome, input.patchPaths),
+      )
+      await harness.start()
+      const harnessSession = harness.session(String(input.sessionId))
+      if (harnessSession.id !== String(input.sessionId)) {
+        throw new HarnessEngineError(
+          'ENGINE_PROTOCOL',
+          `harness session id mismatch: requested ${String(input.sessionId)}, got ${harnessSession.id}`,
+          false,
+          'SESSION_ID_MISMATCH',
+        )
+      }
+      const actualWorkingDirectory = await harnessSession.setWorkingDirectory(input.workingDirectory)
+      const at = now()
+      const record: SessionRecord = {
+        sessionId: harnessSession.id as SessionId,
+        runtimeId: input.runtimeId,
+        workingDirectory: actualWorkingDirectory,
+        dshHome: input.dshHome,
+        harness,
+        harnessSession,
+        patchPaths: [...input.patchPaths],
+        state: 'ready',
+        createdAt: at,
+        updatedAt: at,
+        ...(input.title === undefined ? {} : { title: input.title }),
+      }
+      this.sessions.set(record.sessionId, record)
+      return new HarnessEngineSession(this, record)
+    } catch (error) {
+      if (harness !== undefined) {
+        try {
+          await harness.close()
+        } catch {
+          // 保留原始创建错误。
+        }
+      }
+      throw mapHarnessError(error, 'harness createSessionWithRuntime failed')
+    }
+  }
+
+  /**
    * 只恢复产品自建台账中的会话（N7）。
    * 不存在 → ENGINE_UNAVAILABLE；存在但 runtime 已关闭 → 显式重建同一 dshHome
    * 并调用 SDK resumeSession（持久化历史），不是自动恢复。
    */
   async resumeSession(sessionId: SessionId, input?: ResumeSessionInput): Promise<EngineSession> {
     this.ensureRunning()
+    const record = this.requireSession(sessionId, 'SESSION_NOT_IN_LEDGER')
+    if (record.state === 'ready') {
+      if (input?.workingDirectory !== undefined) await this.setWorkingDirectory(record, input.workingDirectory)
+      return new HarnessEngineSession(this, record)
+    }
+    return this.rebuildRecord(
+      record,
+      input?.workingDirectory,
+      record.patchPaths,
+      'harness resumeSession failed',
+    )
+  }
+
+  /**
+   * 注册表专用显式重建：同一 dshHome + 指定（通常是归档后的）patch 调用 SDK resumeSession。
+   * 不自动重启；仅当上层显式调用时执行。
+   */
+  async rebuildSession(
+    sessionId: SessionId,
+    options?: { readonly workingDirectory?: string; readonly patchPaths?: readonly string[] },
+  ): Promise<EngineSession> {
+    this.ensureRunning()
+    const record = this.requireSession(sessionId, 'SESSION_NOT_IN_LEDGER')
+    if (record.state === 'ready') {
+      if (options?.workingDirectory !== undefined) await this.setWorkingDirectory(record, options.workingDirectory)
+      return new HarnessEngineSession(this, record)
+    }
+    return this.rebuildRecord(
+      record,
+      options?.workingDirectory,
+      options?.patchPaths ?? record.patchPaths,
+      'harness rebuildSession failed',
+    )
+  }
+
+  /** 注册表状态查询；未知会话返回 undefined，不伪造。 */
+  sessionState(sessionId: SessionId): EngineSessionSummary['state'] | undefined {
+    return this.sessions.get(sessionId)?.state
+  }
+
+  private requireSession(sessionId: SessionId, rawCode: string): SessionRecord {
     const record = this.sessions.get(sessionId)
     if (record === undefined) {
       throw new HarnessEngineError(
         'ENGINE_UNAVAILABLE',
         `session ${String(sessionId)} not found in product ledger; refusing to fabricate it`,
         false,
-        'SESSION_NOT_IN_LEDGER',
+        rawCode,
       )
     }
+    return record
+  }
 
-    if (record.state === 'ready') {
-      if (input?.workingDirectory !== undefined) await this.setWorkingDirectory(record, input.workingDirectory)
-      return new HarnessEngineSession(this, record)
-    }
-
-    if (input?.workingDirectory !== undefined && !isDirectory(input.workingDirectory)) {
+  private async rebuildRecord(
+    record: SessionRecord,
+    workingDirectoryInput: string | undefined,
+    patchPaths: readonly string[],
+    context: string,
+  ): Promise<EngineSession> {
+    if (workingDirectoryInput !== undefined && !isDirectory(workingDirectoryInput)) {
       throw new HarnessEngineError(
         'ENGINE_PROTOCOL',
-        `resume workingDirectory does not exist or is not a directory: ${input.workingDirectory}`,
+        `resume workingDirectory does not exist or is not a directory: ${workingDirectoryInput}`,
         false,
         'WORKDIR_NOT_DIRECTORY',
       )
     }
+    for (const patchPath of patchPaths) {
+      if (!existsSync(patchPath)) {
+        record.state = 'failed'
+        record.updatedAt = now()
+        throw new HarnessEngineError(
+          'ENGINE_UNAVAILABLE',
+          `per-session patch is missing: ${patchPath}`,
+          false,
+          'PATCH_MISSING',
+        )
+      }
+    }
+
     const sdk = this.requireSdk()
     try {
       await record.harness.close()
@@ -275,16 +446,25 @@ export class HarnessAdapter implements EnginePort {
       // 旧 runtime 可能已崩溃；继续显式重建，错误由新 resume 暴露。
     }
 
-    const workingDirectory = input?.workingDirectory ?? record.workingDirectory
+    const workingDirectory = workingDirectoryInput ?? record.workingDirectory
     let harness: HarnessRuntimeLike | undefined
     try {
-      harness = new sdk.DeepSeekHarness(this.launchOptions(workingDirectory, record.dshHome))
-      const harnessSession = await harness.resumeSession(String(sessionId))
-      const actualWorkingDirectory = input?.workingDirectory === undefined
+      harness = new sdk.DeepSeekHarness(this.launchOptions(workingDirectory, record.dshHome, patchPaths))
+      const harnessSession = await harness.resumeSession(String(record.sessionId))
+      if (harnessSession.id !== String(record.sessionId)) {
+        throw new HarnessEngineError(
+          'ENGINE_PROTOCOL',
+          `resumed harness session id mismatch: requested ${String(record.sessionId)}, got ${harnessSession.id}`,
+          false,
+          'SESSION_ID_MISMATCH',
+        )
+      }
+      const actualWorkingDirectory = workingDirectoryInput === undefined
         ? await harnessSession.getWorkingDirectory()
-        : await harnessSession.setWorkingDirectory(input.workingDirectory)
+        : await harnessSession.setWorkingDirectory(workingDirectory)
       record.harness = harness
       record.harnessSession = harnessSession
+      record.patchPaths = [...patchPaths]
       record.workingDirectory = actualWorkingDirectory
       record.state = 'ready'
       record.updatedAt = now()
@@ -299,7 +479,7 @@ export class HarnessAdapter implements EnginePort {
       }
       record.state = 'failed'
       record.updatedAt = now()
-      throw mapHarnessError(error, 'harness resumeSession failed')
+      throw mapHarnessError(error, context)
     }
   }
 
@@ -406,10 +586,15 @@ export class HarnessAdapter implements EnginePort {
     return this.sdk
   }
 
-  private launchOptions(workingDirectory: string, dshHome: string): HarnessLaunchOptions {
+  private launchOptions(
+    workingDirectory: string,
+    dshHome: string,
+    patchPaths: readonly string[],
+  ): HarnessLaunchOptions {
     return {
       cwd: workingDirectory,
       dshHome,
+      ...(patchPaths.length === 0 ? {} : { patches: [...patchPaths] }),
       ...(this.options.env === undefined ? {} : { env: this.options.env }),
       provider: this.options.provider ?? 'deepseek-official',
       model: this.options.model ?? 'deepseek-flash',
