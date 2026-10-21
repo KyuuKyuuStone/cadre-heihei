@@ -12,7 +12,7 @@
  * 凭据只从 .secrets/deepseek.env 读入 env；不打印、不进 argv、不落日志。
  */
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
@@ -22,6 +22,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
 import { SqliteCollabStore } from '../../src/collab/dispatch/index.ts'
@@ -35,10 +36,18 @@ import {
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const APP_ROOT = resolve(SCRIPT_DIR, '../..')
 const SECRET_FILE = 'D:\\xxw_p\\cadre-spike-env\\.secrets\\deepseek.env'
-const OUT_ROOT = 'D:\\xxw_p\\cadre-spike-env\\s9-runtime-registry'
+const argValue = (name: string): string | undefined => {
+  const index = process.argv.indexOf(`--${name}`)
+  return index >= 0 ? process.argv[index + 1] : undefined
+}
+const OUT_ROOT = argValue('out-root') ?? process.env.OUT_ROOT ?? 'D:\\xxw_p\\cadre-spike-env\\s10-m2-soak'
 const MCP_SERVER_PATH = join(APP_ROOT, 'src', 'mcp', 'server.ts')
-const SOAK_MS = Number(process.env.SOAK_MS ?? 300_000)
-const ROUND_INTERVAL_MS = Math.max(5_000, Math.min(30_000, Math.floor(SOAK_MS / 10)))
+const SOAK_MS = Number(argValue('soak-ms') ?? process.env.SOAK_MS ?? 300_000)
+const ROUNDS_ARG = Number(argValue('rounds') ?? 0)
+const ROUND_INTERVAL_MS = Number(argValue('round-interval-ms') ?? Math.max(5_000, Math.min(30_000, Math.floor(SOAK_MS / 10))))
+const MODEL_ROSTER_EVERY = Number(argValue('model-roster-every') ?? 20)
+const DIRECT_ROSTER_EVERY = Number(argValue('direct-roster-every') ?? 2)
+const RSS_EVERY = Number(argValue('rss-every') ?? 10)
 const RUN_ID = new Date().toISOString().replace(/[:.]/g, '-')
 const STARTED_AT = new Date().toISOString()
 const RUN_DIR = join(OUT_ROOT, RUN_ID)
@@ -54,6 +63,9 @@ const runs: Array<Record<string, unknown>> = []
 const runLog: string[] = []
 const processChecks: Array<Record<string, unknown>> = []
 const workdirRounds: Array<Record<string, unknown>> = []
+const directRosterResults: Array<Record<string, unknown>> = []
+const modelRosterResults: Array<Record<string, unknown>> = []
+const rssSamples: Array<Record<string, unknown>> = []
 let key = ''
 let registry: SessionRuntimeRegistry | undefined
 let registryStopped = false
@@ -64,6 +76,7 @@ interface SessionSpec {
   readonly role: 'supervisor' | 'worker'
   readonly workingDirectory: string
   readonly forbiddenProjectId: string
+  readonly databasePath: string
 }
 
 function readKey(file: string): string {
@@ -234,8 +247,198 @@ async function checkWorkdir(handle: RuntimeSessionHandle, round: number): Promis
   return ok
 }
 
+function directRosterCheck(spec: SessionSpec, round: number): Promise<Record<string, unknown>> {
+  const started = Date.now()
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    CADRE_PROJECT_ID: spec.projectId,
+    CADRE_SESSION_ID: spec.sessionId,
+    CADRE_DB_PATH: spec.databasePath,
+  }
+  delete env.DEEPSEEK_API_KEY
+  for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete env[name]
+  const child = spawn(
+    process.execPath,
+    [
+      MCP_SERVER_PATH,
+      '--project-id', spec.projectId,
+      '--session-id', spec.sessionId,
+      '--database-path', spec.databasePath,
+    ],
+    { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+  )
+  let buffer = ''
+  let stderr = ''
+  const responses = new Map<number, Record<string, unknown>>()
+  child.stdout.setEncoding('utf8')
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk: string) => { stderr += chunk })
+  const done = new Promise<void>((resolveDone, rejectDone) => {
+    const timer = setTimeout(() => rejectDone(new Error('direct MCP roster timeout')), 10_000)
+    child.stdout.on('data', (chunk: string) => {
+      buffer += chunk
+      let newline
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline).trim()
+        buffer = buffer.slice(newline + 1)
+        if (line === '') continue
+        try {
+          const message = JSON.parse(line) as Record<string, unknown>
+          if (typeof message.id === 'number') responses.set(message.id, message)
+          if (message.id === 3) {
+            clearTimeout(timer)
+            resolveDone()
+          }
+        } catch {
+          // direct server 可能输出非 JSON 诊断；仅保留 stderr。
+        }
+      }
+    })
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      rejectDone(error)
+    })
+    child.on('exit', () => {
+      if (!responses.has(3)) {
+        clearTimeout(timer)
+        rejectDone(new Error('direct MCP exited before roster response'))
+      }
+    })
+  })
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 's10-direct-roster', version: '0.0.1' } } })}\n`)
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`)
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`)
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_roster', arguments: { scope: 'project' } } })}\n`)
+
+  return done
+    .then(() => {
+      const response = responses.get(3)
+      const content = (response?.result as { content?: Array<{ text?: string }> } | undefined)?.content
+      const text = content?.[0]?.text ?? ''
+      let parsed: Record<string, unknown> | undefined
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>
+      } catch {
+        parsed = undefined
+      }
+      const projects = Array.isArray(parsed?.projects) ? parsed.projects as Array<Record<string, unknown>> : []
+      const members = Array.isArray(parsed?.members) ? parsed.members as Array<Record<string, unknown>> : []
+      const projectOk = parsed?.ok === true &&
+        projects.length > 0 &&
+        projects.every((project) => project.projectId === spec.projectId) &&
+        members.every((member) => member.projectId === spec.projectId)
+      const result = {
+        round,
+        sessionId: spec.sessionId,
+        expectedProjectId: spec.projectId,
+        ok: projectOk,
+        ms: Date.now() - started,
+        pid: child.pid,
+        projectIds: projects.map((project) => project.projectId),
+        memberSessionIds: members.map((member) => member.sessionId),
+        summary: redact(text).slice(0, 1000),
+        stderr: redact(stderr).slice(0, 500),
+        error: null as string | null,
+      }
+      directRosterResults.push(result)
+      if (!projectOk) log(`[direct-roster] MISMATCH ${spec.sessionId} round=${round} project=${String(projects[0]?.projectId)}`)
+      return result
+    })
+    .catch((error: unknown) => {
+      const result = {
+        round,
+        sessionId: spec.sessionId,
+        expectedProjectId: spec.projectId,
+        ok: false,
+        ms: Date.now() - started,
+        pid: child.pid,
+        projectIds: [],
+        memberSessionIds: [],
+        summary: '',
+        stderr: redact(stderr).slice(0, 500),
+        error: redact(error instanceof Error ? error.message : String(error)).slice(0, 500),
+      }
+      directRosterResults.push(result)
+      log(`[direct-roster] FAILED ${spec.sessionId} round=${round}: ${String(result.error)}`)
+      return result
+    })
+    .finally(() => {
+      try { child.stdin.end() } catch { /* already closed */ }
+      setTimeout(() => { try { child.kill() } catch { /* already exited */ } }, 200)
+    })
+}
+
+function dbSnapshot(path: string): Record<string, unknown> {
+  const db = new DatabaseSync(path)
+  try {
+    db.exec('PRAGMA busy_timeout=5000')
+    const tables = ['projects', 'members', 'tasks', 'messages', 'task_events', 'idempotency']
+    const counts: Record<string, unknown> = {}
+    const projectIds: Record<string, unknown> = {}
+    for (const table of tables) {
+      try {
+        const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n?: unknown }
+        counts[table] = Number(row.n ?? 0)
+        const rows = db.prepare(`SELECT DISTINCT project_id FROM ${table}`).all() as Array<{ project_id?: unknown }>
+        projectIds[table] = rows.map((item) => String(item.project_id)).sort()
+      } catch {
+        counts[table] = 'missing'
+        projectIds[table] = []
+      }
+    }
+    return { path, at: now(), counts, projectIds }
+  } finally {
+    db.close()
+  }
+}
+
+function assertDbSnapshot(snapshot: Record<string, unknown>, label: string): void {
+  const counts = snapshot.counts as Record<string, unknown>
+  const projectIds = snapshot.projectIds as Record<string, unknown>
+  for (const table of ['tasks', 'messages', 'task_events', 'idempotency']) {
+    assert.equal(counts[table], 0, `${label}: unexpected ${table} rows in ${String(snapshot.path)}`)
+  }
+  const expectedProject = String(snapshot.path).includes('proj-p1') ? 'proj-p1' : 'proj-p2'
+  assert.deepEqual(projectIds.members, [expectedProject], `${label}: cross-project members in ${String(snapshot.path)}`)
+}
+
+function patchSnapshot(label: string): Record<string, unknown> {
+  const describe = (root: string): Array<Record<string, unknown>> => {
+    if (!existsSync(root)) return []
+    return walk(root).map((full) => ({
+      path: relative(root, full).split('\\').join('/'),
+      sha256: sha256(full),
+      bytes: readFileSync(full).byteLength,
+    }))
+  }
+  return {
+    label,
+    at: now(),
+    active: describe(PATCH_DIR),
+    archived: describe(ARCHIVE_DIR),
+  }
+}
+
+function summarizeRss(label: string, round: number, processes: readonly Record<string, unknown>[]): Record<string, unknown> {
+  const described = processes.map(describeProcess)
+  const sum = (items: readonly Record<string, unknown>[]): number =>
+    items.reduce((total, item) => total + Number(item.rssBytes ?? 0), 0)
+  const mcp = described.filter((item) => String(item.commandTail ?? '').includes('mcp') && String(item.commandTail ?? '').includes('server.ts'))
+  const runtime = described.filter((item) => !mcp.includes(item))
+  return {
+    label,
+    round,
+    at: now(),
+    count: described.length,
+    totalRssBytes: sum(described),
+    runtimeRssBytes: sum(runtime),
+    mcpRssBytes: sum(mcp),
+    processes: described,
+  }
+}
+
 function snapshotProcesses(): Array<Record<string, unknown>> {
-  const script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress"
+  const script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,WorkingSetSize | ConvertTo-Json -Compress"
   const output = execFileSync('powershell', ['-NoProfile', '-Command', script], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
@@ -287,6 +490,7 @@ function describeProcess(processInfo: Record<string, unknown>): Record<string, u
     pid: Number(processInfo.ProcessId),
     ppid: Number(processInfo.ParentProcessId),
     name: processInfo.Name,
+    rssBytes: Number(processInfo.WorkingSetSize ?? 0),
     commandTail: redact(String(processInfo.CommandLine ?? '')).slice(-320),
   }
 }
@@ -458,6 +662,7 @@ async function main(): Promise<number> {
       role: 'supervisor',
       workingDirectory: join(WORK_DIR, 'session-sup-1'),
       forbiddenProjectId: 'proj-p2',
+      databasePath: join(DB_DIR, 'proj-p1', 'cadre.sqlite'),
     },
     {
       projectId: 'proj-p1',
@@ -465,6 +670,7 @@ async function main(): Promise<number> {
       role: 'worker',
       workingDirectory: join(WORK_DIR, 'session-worker-1'),
       forbiddenProjectId: 'proj-p2',
+      databasePath: join(DB_DIR, 'proj-p1', 'cadre.sqlite'),
     },
     {
       projectId: 'proj-p2',
@@ -472,6 +678,7 @@ async function main(): Promise<number> {
       role: 'worker',
       workingDirectory: join(WORK_DIR, 'session-worker-2'),
       forbiddenProjectId: 'proj-p1',
+      databasePath: join(DB_DIR, 'proj-p2', 'cadre.sqlite'),
     },
   ]
   for (const spec of specs) mkdirSync(spec.workingDirectory, { recursive: true })
@@ -519,40 +726,81 @@ async function main(): Promise<number> {
     for (const [index, handle] of handles.entries()) {
       const spec = specs[index] as SessionSpec
       const result = await rosterCheck(handle, spec.projectId, spec.forbiddenProjectId, `roster-initial-${spec.sessionId}`)
-      initialRoster.push({ sessionId: spec.sessionId, projectId: spec.projectId, ok: result.ok, result: result.result })
+      const record = { round: 0, sessionId: spec.sessionId, projectId: spec.projectId, ok: result.ok, result: result.result }
+      initialRoster.push(record)
+      modelRosterResults.push(record)
       assert.equal(result.ok, true, `initial roster identity mismatch for ${spec.sessionId}`)
     }
 
     const initialProcesses = captureProcesses('after-initial-roster')
     const identityCheck = validateProcessIdentities(initialProcesses, specs)
     assert.equal(identityCheck.ok, true, `initial process identity mismatch: ${JSON.stringify(identityCheck)}`)
+    rssSamples.push(summarizeRss('initial', 0, initialProcesses))
+    const patchStart = patchSnapshot('after-create')
+    const dbPaths = [...new Set(specs.map((spec) => spec.databasePath))]
+    const dbStart = dbPaths.map((path) => dbSnapshot(path))
+    for (const snapshot of dbStart) assertDbSnapshot(snapshot, 'start')
 
+    const totalRounds = Number.isFinite(ROUNDS_ARG) && ROUNDS_ARG > 0
+      ? Math.floor(ROUNDS_ARG)
+      : Math.max(1, Math.ceil(SOAK_MS / ROUND_INTERVAL_MS))
+    const midRound = Math.ceil(totalRounds / 2)
+    log(`soak start rounds=${totalRounds} interval=${ROUND_INTERVAL_MS}ms directEvery=${DIRECT_ROSTER_EVERY} modelEvery=${MODEL_ROSTER_EVERY} rssEvery=${RSS_EVERY}`)
     const soakStarted = Date.now()
-    let round = 0
     let midProcesses: Array<Record<string, unknown>> = []
     let midIdentity: Record<string, unknown> = {}
-    while (Date.now() - soakStarted < SOAK_MS) {
-      round += 1
+    for (let round = 1; round <= totalRounds; round += 1) {
       for (const handle of handles) {
         assert.equal(await checkWorkdir(handle, round), true, `workdir mismatch round ${round}`)
       }
-      if (midProcesses.length === 0 && Date.now() - soakStarted >= Math.floor(SOAK_MS / 2)) {
-        midProcesses = captureProcesses('mid-soak')
-        midIdentity = validateProcessIdentities(midProcesses, specs) as unknown as Record<string, unknown>
-        assert.equal(midIdentity.ok, true, `mid-soak process identity mismatch: ${JSON.stringify(midIdentity)}`)
+
+      if (round % DIRECT_ROSTER_EVERY === 0) {
+        for (const spec of specs) {
+          const result = await directRosterCheck(spec, round)
+          assert.equal(result.ok, true, `direct roster identity mismatch round ${round} for ${spec.sessionId}`)
+        }
       }
-      await sleep(Math.min(ROUND_INTERVAL_MS, Math.max(0, SOAK_MS - (Date.now() - soakStarted))))
+
+      if (round % MODEL_ROSTER_EVERY === 0 && round !== totalRounds) {
+        for (const [index, handle] of handles.entries()) {
+          const spec = specs[index] as SessionSpec
+          const result = await rosterCheck(handle, spec.projectId, spec.forbiddenProjectId, `roster-mid-${spec.sessionId}-r${round}`)
+          const record = { round, sessionId: spec.sessionId, projectId: spec.projectId, ok: result.ok, result: result.result }
+          modelRosterResults.push(record)
+          assert.equal(result.ok, true, `model roster identity mismatch round ${round} for ${spec.sessionId}`)
+        }
+      }
+
+      const shouldMid = round === midRound
+      if (shouldMid || round % RSS_EVERY === 0) {
+        const processes = captureProcesses(shouldMid ? 'mid-soak' : `rss-round-${round}`)
+        rssSamples.push(summarizeRss(shouldMid ? 'mid' : `round-${round}`, round, processes))
+        const processIdentity = validateProcessIdentities(processes, specs)
+        assert.equal(processIdentity.ok, true, `process identity mismatch round ${round}: ${JSON.stringify(processIdentity)}`)
+        if (shouldMid) {
+          midProcesses = processes
+          midIdentity = processIdentity as unknown as Record<string, unknown>
+        }
+      }
+
+      await sleep(ROUND_INTERVAL_MS)
     }
     const soakEnded = Date.now()
-    log(`soak ended after ${soakEnded - soakStarted}ms, rounds=${round}`)
+    log(`soak ended after ${soakEnded - soakStarted}ms, rounds=${totalRounds}`)
 
     const finalRoster: Array<Record<string, unknown>> = []
     for (const [index, handle] of handles.entries()) {
       const spec = specs[index] as SessionSpec
       const result = await rosterCheck(handle, spec.projectId, spec.forbiddenProjectId, `roster-final-${spec.sessionId}`)
-      finalRoster.push({ sessionId: spec.sessionId, projectId: spec.projectId, ok: result.ok, result: result.result })
+      const record = { round: totalRounds, sessionId: spec.sessionId, projectId: spec.projectId, ok: result.ok, result: result.result }
+      finalRoster.push(record)
+      modelRosterResults.push(record)
       assert.equal(result.ok, true, `final roster identity mismatch for ${spec.sessionId}`)
     }
+
+    const patchAfterSoak = patchSnapshot('after-soak')
+    const dbEnd = dbPaths.map((path) => dbSnapshot(path))
+    for (const snapshot of dbEnd) assertDbSnapshot(snapshot, 'after-soak')
 
     const rebuiltSessionId = 'session-worker-2' as SessionId
     const beforeRebuild = registry.getRuntime(rebuiltSessionId)
@@ -595,6 +843,10 @@ async function main(): Promise<number> {
       }
     }
 
+    const patchAfterStop = patchSnapshot('after-stop')
+    const dbAfterStop = dbPaths.map((path) => dbSnapshot(path))
+    for (const snapshot of dbAfterStop) assertDbSnapshot(snapshot, 'after-stop')
+
     let residual = await waitForNoRelevant(15_000)
     const killedResidualPids: number[] = []
     if (residual.length > 0) {
@@ -612,19 +864,36 @@ async function main(): Promise<number> {
     captureProcesses('final')
     assert.equal(residual.length, 0, `residual processes: ${JSON.stringify(residual.map(describeProcess))}`)
 
+    const rssNonZero = rssSamples.filter((item) => Number(item.count ?? 0) > 0)
     const summary = {
       runId: RUN_ID,
       startedAt: STARTED_AT,
       finishedAt: now(),
       node: process.version,
       model: 'deepseek-flash',
+      requestedRounds: totalRounds,
+      roundIntervalMs: ROUND_INTERVAL_MS,
+      directRosterEvery: DIRECT_ROSTER_EVERY,
+      modelRosterEvery: MODEL_ROSTER_EVERY,
+      rssEvery: RSS_EVERY,
       soakMs: soakEnded - soakStarted,
-      soakRounds: round,
+      soakRounds: totalRounds,
       specs,
       initialProcessIdentity: identityCheck,
       midProcessIdentity: midIdentity,
+      midProcessCount: midProcesses.length,
       initialRoster,
       finalRoster,
+      modelRoster: {
+        count: modelRosterResults.length,
+        okCount: modelRosterResults.filter((item) => item.ok === true).length,
+        results: modelRosterResults,
+      },
+      directRoster: {
+        count: directRosterResults.length,
+        okCount: directRosterResults.filter((item) => item.ok === true).length,
+        failures: directRosterResults.filter((item) => item.ok !== true),
+      },
       rebuild: {
         sessionId: 'session-worker-2',
         before: beforeRebuild,
@@ -637,6 +906,20 @@ async function main(): Promise<number> {
       beforeStop,
       afterStop,
       processChecks,
+      processTimeline: 'process-timeline.json',
+      db: {
+        start: dbStart,
+        afterSoak: dbEnd,
+        afterStop: dbAfterStop,
+        note: 'direct/tool startup may write schema_meta; project tables tasks/messages/task_events/idempotency must stay 0 and members must stay project-local',
+      },
+      patchSnapshots: { start: patchStart, afterSoak: patchAfterSoak, afterStop: patchAfterStop },
+      rss: {
+        samples: rssSamples,
+        initialTotalRssBytes: rssNonZero[0]?.totalRssBytes ?? 0,
+        lastRunningTotalRssBytes: rssNonZero[rssNonZero.length - 1]?.totalRssBytes ?? 0,
+        peakTotalRssBytes: rssNonZero.reduce((peak, item) => Math.max(peak, Number(item.totalRssBytes ?? 0)), 0),
+      },
       runs: { count: runs.length, totalMs: runs.reduce((sum, item) => sum + Number(item.ms ?? 0), 0), details: runs },
       workdir: { rounds: workdirRounds, allOk: workdirRounds.every((item) => item.ok === true) },
       residual: { count: residual.length, killedResidualPids },
@@ -646,16 +929,32 @@ async function main(): Promise<number> {
         patchArchive: 'patch-archive/',
         dbs: 'dbs/',
         homes: 'homes/',
+        directRoster: 'direct-roster.json',
+        modelRoster: 'model-roster.json',
+        processTimeline: 'process-timeline.json',
+        dbChecks: 'db-checks.json',
+        patchSnapshots: 'patch-snapshots.json',
+        rss: 'rss.json',
         securityScan: 'security-scan.json',
         hashes: 'hashes.json',
       },
       unverified: [
-        '30min soak 未执行（本单 5min）；patch 并发回收压测未执行。',
-        'MCP server 真崩溃重连未测（reconnect.enabled=false）；本单只测显式 reclaim/rebuild。',
-        '模型调用只在 roster 检查点发生；soak 期间以 workdir set/get 保持实例活跃。',
+        'patch 高频并发回收压测未做（本单仅 3 实例并发 stop）。',
+        'MCP 真崩溃/自动重连由 P2 单独脚本验证；本 soak 未做。',
+        'supervisor patch 的写/执行拦截沿用 S8 行为证据，本 soak 未重复尝试 write/shell。',
         '只测 Windows + sdk profile。',
       ],
     }
+    writeJson(join(RUN_DIR, 'direct-roster.json'), { results: directRosterResults })
+    writeJson(join(RUN_DIR, 'model-roster.json'), { results: modelRosterResults })
+    writeJson(join(RUN_DIR, 'process-timeline.json'), { checks: processChecks })
+    writeJson(join(RUN_DIR, 'db-checks.json'), { start: dbStart, afterSoak: dbEnd, afterStop: dbAfterStop })
+    writeJson(join(RUN_DIR, 'patch-snapshots.json'), { start: patchStart, afterSoak: patchAfterSoak, afterStop: patchAfterStop })
+    writeJson(join(RUN_DIR, 'rss.json'), { samples: rssSamples })
+    writeJson(join(RUN_DIR, 'direct-roster.json'), { results: directRosterResults })
+    writeJson(join(RUN_DIR, 'model-roster.json'), { results: modelRosterResults })
+    writeJson(join(RUN_DIR, 'process-timeline.json'), { checks: processChecks })
+    writeJson(join(RUN_DIR, 'rss.json'), { samples: rssSamples })
     writeFileSync(join(RUN_DIR, 'run.log'), `${redact(runLog.join('\n'))}\n`, 'utf8')
     writeJson(join(RUN_DIR, 'summary.json'), summary)
     const security = securityScanAndHashes() as {
@@ -668,6 +967,20 @@ async function main(): Promise<number> {
       soakMs: summary.soakMs,
       soakRounds: summary.soakRounds,
       runs: summary.runs.count,
+      directRoster: { count: summary.directRoster.count, okCount: summary.directRoster.okCount, failures: summary.directRoster.failures.length },
+      modelRoster: { count: summary.modelRoster.count, okCount: summary.modelRoster.okCount },
+      workdirAllOk: summary.workdir.allOk,
+      db: {
+        startZero: summary.db.start.every((item) => {
+          const counts = item.counts as Record<string, unknown>
+          return ['tasks', 'messages', 'task_events', 'idempotency'].every((table) => counts[table] === 0)
+        }),
+        afterStopZero: summary.db.afterStop.every((item) => {
+          const counts = item.counts as Record<string, unknown>
+          return ['tasks', 'messages', 'task_events', 'idempotency'].every((table) => counts[table] === 0)
+        }),
+      },
+      rss: { initial: summary.rss.initialTotalRssBytes, last: summary.rss.lastRunningTotalRssBytes, peak: summary.rss.peakTotalRssBytes },
       identities: {
         initial: identityCheck.mcpIdentities,
         mid: midIdentity.mcpIdentities,
