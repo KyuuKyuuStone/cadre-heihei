@@ -1,12 +1,20 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import './theme/themes.css'
+import './styles/app.css'
+import { App } from './app/App.tsx'
+import { LocaleProvider } from './i18n/LocaleProvider.tsx'
+import { ThemeProvider } from './theme/ThemeProvider.tsx'
 
-// Vite 骨架空壳：Provider / 三屏接线在 M3 步骤 4 完成。
 const root = document.getElementById('root')
 if (!root) throw new Error('#root 不存在')
 
 createRoot(root).render(
   <StrictMode>
-    <div>cadre-heihei renderer booting</div>
+    <ThemeProvider>
+      <LocaleProvider>
+        <App />
+      </LocaleProvider>
+    </ThemeProvider>
   </StrictMode>,
 )

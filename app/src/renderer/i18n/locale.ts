@@ -4,7 +4,7 @@ export type Locale = 'en' | 'zh' | 'zh-TW' | 'jp' | 'kr'
 export const LOCALE_STORAGE_KEY = 'cadre-heihei-locale'
 export const LEGACY_LOCALE_STORAGE_KEY = 'cc-heihei-locale'
 
-const VALID_LOCALES: readonly Locale[] = ['en', 'zh', 'zh-TW', 'jp', 'kr']
+export const VALID_LOCALES: readonly Locale[] = ['en', 'zh', 'zh-TW', 'jp', 'kr']
 const DOCUMENT_LANG: Record<Locale, string> = {
   en: 'en',
   zh: 'zh-CN',

@@ -2,12 +2,10 @@
 /**
  * smoke.ts —— smoke/acceptance 门禁（四门禁之一）
  *
- * 用 Node 内置 test runner 跑 app/tests，输出 JUnit，再交给
- * acceptance-lib.parseJunit 判定：
- *   - 收集 0 例 → 直接报错（不允许空跑假绿）
- *   - skipped > 0 → 报错（不允许跳过）
- *   - fail > 0 → 报错并列失败用例
- *   - total == pass 且 skipped == 0 → 通过
+ * 双 runner（ADR-0020 §测试与门禁 6）：
+ *   - node:test：纯函数 / 协议 / 门禁自测，JUnit 落 smoke.junit.xml
+ *   - vitest：组件/DOM（jsdom），JUnit 落 vitest.junit.xml
+ * 每个 runner 都必须收集到 >0 例，且 skipped=0、fail=0。
  *
  * 用法：node app/scripts/gates/smoke.ts
  */
@@ -15,55 +13,110 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseJunit } from './acceptance-lib.ts'
+import { parseJunit, type ParsedRun } from './acceptance-lib.ts'
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const EVIDENCE_DIR = join(APP_ROOT, 'scripts/gates/evidence')
-const JUNIT_PATH = join(EVIDENCE_DIR, 'smoke.junit.xml')
+const NODE_JUNIT = join(EVIDENCE_DIR, 'smoke.junit.xml')
+const VITEST_JUNIT = join(EVIDENCE_DIR, 'vitest.junit.xml')
+const VITEST_BIN = join(APP_ROOT, 'node_modules', 'vitest', 'vitest.mjs')
 
 mkdirSync(EVIDENCE_DIR, { recursive: true })
 
-const r = spawnSync(process.execPath, [
-  '--test',
-  '--test-reporter=junit',
-  `--test-reporter-destination=${JUNIT_PATH}`,
-  'tests/**/*.test.ts',
-], {
-  cwd: APP_ROOT,
-  encoding: 'utf8',
-  maxBuffer: 64 * 1024 * 1024,
-})
-
-if (!existsSync(JUNIT_PATH)) {
-  console.error('[smoke] FAIL: JUnit 输出不存在，测试未收集到任何用例')
-  if (r.stdout) console.error(r.stdout.slice(-4000))
-  if (r.stderr) console.error(r.stderr.slice(-4000))
-  process.exit(1)
+type Runner = {
+  name: string
+  command: string[]
+  junitPath: string
 }
 
-const parsed = parseJunit(readFileSync(JUNIT_PATH, 'utf8'))
-console.log(`[smoke] collected tests=${parsed.total} pass=${parsed.pass} fail=${parsed.fail} skipped=${parsed.skipped}`)
+const RUNNERS: Runner[] = [
+  {
+    name: 'node',
+    command: [
+      process.execPath,
+      '--test',
+      '--test-reporter=junit',
+      `--test-reporter-destination=${NODE_JUNIT}`,
+      'tests/**/*.test.ts',
+    ],
+    junitPath: NODE_JUNIT,
+  },
+  {
+    name: 'vitest',
+    command: [
+      process.execPath,
+      VITEST_BIN,
+      'run',
+      '--reporter=junit',
+      `--outputFile=${VITEST_JUNIT}`,
+    ],
+    junitPath: VITEST_JUNIT,
+  },
+]
 
-if (parsed.total === 0 || parsed.cases.length === 0) {
-  console.error('[smoke] FAIL: 收集 0 例（空跑不算通过）')
-  if (r.stdout) console.error(r.stdout.slice(-4000))
-  if (r.stderr) console.error(r.stderr.slice(-4000))
-  process.exit(1)
+type RunnerResult = {
+  name: string
+  exitCode: number
+  parsed: ParsedRun | null
 }
 
-if (parsed.skipped > 0) {
-  console.error(`[smoke] FAIL: 存在 ${parsed.skipped} 个 skipped 用例（smoke 不允许跳过）`)
-  process.exit(1)
-}
+const results: RunnerResult[] = []
+let failed = false
 
-if (parsed.fail > 0 || r.status !== 0) {
-  console.error(`[smoke] FAIL: ${parsed.fail} 个用例失败（test runner exit=${r.status ?? -1}）`)
-  for (const f of parsed.failures.slice(0, 20)) {
-    console.error(`  - ${f.file || '<unknown>'} :: ${f.name}${f.message ? ` — ${f.message}` : ''}`)
+for (const runner of RUNNERS) {
+  const [bin, ...args] = runner.command
+  const r = spawnSync(bin!, args, {
+    cwd: APP_ROOT,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  const exitCode = r.status ?? -1
+
+  if (!existsSync(runner.junitPath)) {
+    console.error(`[smoke:${runner.name}] FAIL: JUnit 输出不存在，测试未收集到任何用例`)
+    if (r.stdout) console.error(r.stdout.slice(-4000))
+    if (r.stderr) console.error(r.stderr.slice(-4000))
+    results.push({ name: runner.name, exitCode, parsed: null })
+    failed = true
+    continue
   }
-  if (r.stdout) console.error(r.stdout.slice(-4000))
-  if (r.stderr) console.error(r.stderr.slice(-4000))
+
+  const parsed = parseJunit(readFileSync(runner.junitPath, 'utf8'))
+  results.push({ name: runner.name, exitCode, parsed })
+  console.log(
+    `[smoke:${runner.name}] collected tests=${parsed.total} pass=${parsed.pass} fail=${parsed.fail} skipped=${parsed.skipped}`,
+  )
+
+  if (parsed.total === 0 || parsed.cases.length === 0) {
+    console.error(`[smoke:${runner.name}] FAIL: 收集 0 例（空跑不算通过）`)
+    if (r.stdout) console.error(r.stdout.slice(-4000))
+    if (r.stderr) console.error(r.stderr.slice(-4000))
+    failed = true
+    continue
+  }
+
+  if (parsed.skipped > 0) {
+    console.error(`[smoke:${runner.name}] FAIL: 存在 ${parsed.skipped} 个 skipped 用例（smoke 不允许跳过）`)
+    failed = true
+  }
+
+  if (parsed.fail > 0 || exitCode !== 0) {
+    console.error(`[smoke:${runner.name}] FAIL: ${parsed.fail} 个用例失败（runner exit=${exitCode}）`)
+    for (const f of parsed.failures.slice(0, 20)) {
+      console.error(`  - ${f.file || '<unknown>'} :: ${f.name}${f.message ? ` — ${f.message}` : ''}`)
+    }
+    if (r.stdout) console.error(r.stdout.slice(-4000))
+    if (r.stderr) console.error(r.stderr.slice(-4000))
+    failed = true
+  }
+}
+
+const total = results.reduce((sum, r) => sum + (r.parsed?.total ?? 0), 0)
+const passed = results.reduce((sum, r) => sum + (r.parsed?.pass ?? 0), 0)
+
+if (failed) {
+  console.error(`[smoke] FAIL: ${passed}/${total} 通过（node:test + vitest）`)
   process.exit(1)
 }
 
-console.log(`[smoke] PASS: ${parsed.pass}/${parsed.total} 通过，0 skipped，JUnit=${JUNIT_PATH}`)
+console.log(`[smoke] PASS: ${passed}/${total} 通过，0 skipped（node:test + vitest）`)

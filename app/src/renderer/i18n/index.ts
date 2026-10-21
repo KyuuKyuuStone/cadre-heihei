@@ -19,24 +19,33 @@ import {
   contextSourceZhTW,
   type ContextSourceKey,
 } from './locales/contextSource.ts'
+// 首版三屏文案边表（ADR-0020）：新增词条不并入主表。
+import {
+  screensEn,
+  screensJp,
+  screensKr,
+  screensZh,
+  screensZhTW,
+  type ScreensKey,
+} from './locales/screens.ts'
 import type { Locale } from './locale.ts'
 
 const translations: Record<Locale, Record<string, string>> = {
-  en: { ...en, ...speechEn, ...contextSourceEn },
-  zh: { ...zh, ...speechZh, ...contextSourceZh },
-  'zh-TW': { ...zhTW, ...speechZhTW, ...contextSourceZhTW },
-  jp: { ...jp, ...speechJp, ...contextSourceJp },
-  kr: { ...kr, ...speechKr, ...contextSourceKr },
+  en: { ...en, ...speechEn, ...contextSourceEn, ...screensEn },
+  zh: { ...zh, ...speechZh, ...contextSourceZh, ...screensZh },
+  'zh-TW': { ...zhTW, ...speechZhTW, ...contextSourceZhTW, ...screensZhTW },
+  jp: { ...jp, ...speechJp, ...contextSourceJp, ...screensJp },
+  kr: { ...kr, ...speechKr, ...contextSourceKr, ...screensKr },
 }
 
 /**
- * 翻译键 = locale 主表键 ∪ 朗读文案模块键 ∪ 上下文基准文案模块键。
+ * 翻译键 = locale 主表键 ∪ 朗读边表 ∪ 上下文基准边表 ∪ 三屏边表。
  *
  * 这些边表键**不并进** `TranslationKey`（那是 `keyof typeof en`，五个 locale 文件都以
  * `Record<TranslationKey, string>` 声明自身，一旦扩键它们全体报缺失），改在这里做
  * 调用面并集：`translate()` 的参数类型放宽，调用点仍写平铺字面量。
  */
-export type TextKey = TranslationKey | SpeechKey | ContextSourceKey
+export type TextKey = TranslationKey | SpeechKey | ContextSourceKey | ScreensKey
 
 /**
  * Translate a key with optional interpolation params.

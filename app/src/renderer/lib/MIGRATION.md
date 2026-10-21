@@ -59,8 +59,8 @@
 
 | 件 | 原因 |
 |---|---|
-| `i18n/index.ts` 的 `useTranslation` / `t()` | 依赖 React 与 zustand `settingsStore`；renderer 尚未引入 UI 框架与状态库 |
-| `i18n/index.test.tsx` 的 hook 用例 | 依赖 `@testing-library/react` + zustand；随 hook 一起暂缓 |
+| `i18n/index.ts` 的 `useTranslation` / `t()` | **M3 已补齐**：`LocaleProvider` + `useTranslation` 等价重写（React Context）；依赖 zustand 的全局 `t()` 不搬，调用方用 `useLocale()` |
+| `i18n/index.test.tsx` 的 hook 用例 | **M3 以 vitest 组件测试覆盖**（`tests/renderer/components`、`tests/renderer/app`）；原用例未逐条搬 |
 | `lib/speech/**` | 语音二期（任务明确不搬） |
 | `lib/backgroundTasks.ts` | 依赖前身 `types/chat` 的 `BackgroundAgentTask` 业务类型 |
 | `lib/recentProjectsCache.ts` | 依赖前身 `api/sessions` 的 `RecentProject` 类型 |
