@@ -8,7 +8,15 @@ export type ViewState<T> =
   | { status: 'loading' }
   | { status: 'ready'; data: T }
   | { status: 'empty'; reason: string; hint: string }
-  | { status: 'error'; message: string; code?: string; retryable?: boolean }
+  | {
+    status: 'error'
+    message: string
+    code?: string
+    retryable?: boolean
+    /** validation = 表单/参数错误（就地提示）；缺省 system = 系统错误条。 */
+    kind?: 'system' | 'validation'
+    field?: string
+  }
   | { status: 'denied'; message: string; code?: string }
   | {
     status: 'truncated'

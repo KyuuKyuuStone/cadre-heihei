@@ -33,8 +33,8 @@ const LOCALE_LABEL_KEYS: Record<Locale, TextKey> = {
 
 export function App() {
   const [state, dispatch] = useReducer(appReducer, { screen: 'conversation' })
-  const { t, locale, setLocale } = useLocale()
-  const { theme, setTheme } = useTheme()
+  const { t, locale, setLocale, preferenceError: localePrefError } = useLocale()
+  const { theme, setTheme, preferenceError: themePrefError } = useTheme()
 
   return (
     <div className="app">
@@ -88,6 +88,12 @@ export function App() {
             </select>
           </label>
         </header>
+
+        {localePrefError || themePrefError ? (
+          <div className="app__notice" role="status" data-testid="prefs-error">
+            {t('prefs.error')}
+          </div>
+        ) : null}
 
         <main className="app__content">
           {state.screen === 'conversation' ? <ConversationScreen /> : null}

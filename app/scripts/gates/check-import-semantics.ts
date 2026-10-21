@@ -79,7 +79,8 @@ type ImportEntry = { spec: string; symbols: string[]; namespaces: string[]; type
 
 function parseImports(src: string): ImportEntry[] {
   const out: ImportEntry[] = []
-  const re = /import\s+(type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g
+  // 行首/语句边界起算，避免把注释里的「import」当成语句起点（会吞掉下一行的 type 标记）。
+  const re = /(?:^|[;\n])\s*import\s+(type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/gm
   for (const m of src.matchAll(re)) {
     const clause = m[2]!.trim()
     const spec = m[3]!
