@@ -1,0 +1,4 @@
+// ADAPTER-DIR 坏样本：ports 反向 import adapters。
+import { FakeEngine } from '../adapters/engine/fake/index.ts'
+
+export const gateFixtureEngine = FakeEngine

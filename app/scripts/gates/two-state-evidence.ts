@@ -21,6 +21,8 @@ type GateCase = {
   fixture: string
   target: string
   description: string
+  /** 红态输出必须指名的注入文件 */
+  expectRedIncludes?: string
 }
 
 const CASES: GateCase[] = [
@@ -51,6 +53,38 @@ const CASES: GateCase[] = [
     fixture: 'scripts/gates/fixtures/smoke/failing.test.fixture',
     target: 'tests/__gate_fixture_failing.test.ts',
     description: '注入 1 个失败用例',
+  },
+  {
+    name: 'import-boundaries-ports',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/ports-harness.fixture',
+    target: 'src/ports/__gate_fixture_ports_harness.ts',
+    description: 'R2 ports 层 harness import + 类型 re-export',
+    expectRedIncludes: '__gate_fixture_ports_harness.ts',
+  },
+  {
+    name: 'import-boundaries-collab',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/collab-harness.fixture',
+    target: 'src/collab/__gate_fixture_collab_harness.ts',
+    description: 'R3 collab 层 harness 源码路径 import',
+    expectRedIncludes: '__gate_fixture_collab_harness.ts',
+  },
+  {
+    name: 'import-boundaries-renderer',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/renderer-harness.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_harness.ts',
+    description: 'R3 renderer 层 harness 包 import',
+    expectRedIncludes: '__gate_fixture_renderer_harness.ts',
+  },
+  {
+    name: 'import-boundaries-reverse',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/ports-to-adapters.fixture',
+    target: 'src/ports/__gate_fixture_ports_adapters.ts',
+    description: 'ports 反向 import adapters',
+    expectRedIncludes: '__gate_fixture_ports_adapters.ts',
   },
 ]
 
@@ -90,6 +124,7 @@ const summary: Array<{
   greenExit: number
   redExpected: boolean
   greenExpected: boolean
+  redNamedFile: boolean
   redElapsedMs: number
   greenElapsedMs: number
   redEvidence: string
@@ -122,7 +157,9 @@ for (const c of CASES) {
     rmSync(targetPath, { force: true })
   }
 
-  const redExpected = red.exitCode !== 0
+  const redOutput = `${red.stdout}\n${red.stderr}`
+  const redNamedFile = c.expectRedIncludes === undefined || redOutput.includes(c.expectRedIncludes)
+  const redExpected = red.exitCode !== 0 && redNamedFile
   const greenExpected = green.exitCode === 0
   if (!redExpected) failed++
   if (!greenExpected) failed++
@@ -140,6 +177,7 @@ for (const c of CASES) {
     greenExit: green.exitCode,
     redExpected,
     greenExpected,
+    redNamedFile,
     redElapsedMs: red.elapsedMs,
     greenElapsedMs: green.elapsedMs,
     redEvidence: redPath,

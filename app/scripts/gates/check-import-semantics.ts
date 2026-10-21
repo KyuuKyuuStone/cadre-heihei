@@ -1,18 +1,26 @@
 #!/usr/bin/env node
 /**
- * check-import-semantics.ts —— import 语义检查（从 cc-heihei v1.7.9 迁移）
+ * check-import-semantics.ts —— import 语义检查 + adapter 边界（§1.6）
  *
  * 迁移改动：
  *   - 扫描根收敛为 app/src（新项目骨架）
  *   - L1 的 git 路径加 app/ 前缀；默认 L2/L3 不变
  *   - 帮助文本改为 node 调用
  *
+ * W1-07 边界规则（与 implementation/01 §1.6 一致）：
+ *   R1 只有 src/adapters/engine/harness/** 可 import @deepseek-ai/dsh-* 或
+ *      vendor/deepseek-harness 源码路径；
+ *   R2 src/ports/** 零 harness import、零 harness 类型 re-export；
+ *   R3 src/collab|main|preload|renderer/** 不得 import harness；
+ *   ADAPTER-DIR ports/collab 不得反向 import adapters（adapter 可 import 二者）。
+ * 同时覆盖静态 import、`export ... from` re-export、动态 import()。
+ *
  * L2/L3：`import * as fs from 'node:fs'` 混用 promise 方法、或具名导入与
  * promises/回调套件不匹配时失败。L1 说明符对账仍需显式传
  * --baseline/--baseline-files/--dirs，本项目暂无旧基线。
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -21,6 +29,19 @@ const GIT_PREFIX = 'app/'
 const ROOTS = ['src']
 const TEST_RE = /(\.test\.|\.spec\.|\.bench\.|__tests__)/
 const SRC_RE = /\.(ts|tsx)$/
+
+// §1.6 边界常量（rel 路径均相对 app/，使用 / 分隔）
+const HARNESS_PACKAGE_RE = /^@deepseek-ai\/dsh(?:-|$)/
+const HARNESS_VENDOR = 'vendor/deepseek-harness'
+const HARNESS_ADAPTER_PREFIX = 'src/adapters/engine/harness/'
+const ADAPTERS_PREFIX = 'src/adapters/'
+const HARNESS_FREE_RULES: Array<{ prefix: string; rule: 'R2' | 'R3' }> = [
+  { prefix: 'src/ports/', rule: 'R2' },
+  { prefix: 'src/collab/', rule: 'R3' },
+  { prefix: 'src/main/', rule: 'R3' },
+  { prefix: 'src/preload/', rule: 'R3' },
+  { prefix: 'src/renderer/', rule: 'R3' },
+]
 
 const argv = process.argv.slice(2)
 if (argv.includes('--help') || argv.includes('-h')) {
@@ -67,6 +88,63 @@ function parseImports(src: string): ImportEntry[] {
     out.push({ spec, symbols, namespaces })
   }
   return out
+}
+
+/** `export * from` / `export * as ns from` / `export type { X } from` 的说明符 */
+function parseReexports(src: string): string[] {
+  const out: string[] = []
+  const re = /export\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[\s\S]*?\})\s+from\s+['"]([^'"]+)['"]/g
+  for (const m of src.matchAll(re)) out.push(m[1]!)
+  return out
+}
+
+/** 动态 import('...') 的说明符 */
+function parseDynamicImports(src: string): string[] {
+  const out: string[] = []
+  const re = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+  for (const m of src.matchAll(re)) out.push(m[1]!)
+  return out
+}
+
+function resolveRelativeSpecifier(relFile: string, spec: string): string | null {
+  if (!spec.startsWith('.')) return null
+  return resolve(dirname(join(APP_ROOT, relFile)), spec)
+}
+
+function isWithin(root: string, target: string): boolean {
+  const rel = relative(root, target)
+  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))
+}
+
+/** 是否为 harness 包或 harness 源码路径（含相对路径解析到 vendor/deepseek-harness） */
+function isHarnessSpecifier(relFile: string, spec: string): boolean {
+  if (HARNESS_PACKAGE_RE.test(spec)) return true
+  if (spec === HARNESS_VENDOR || spec.startsWith(`${HARNESS_VENDOR}/`) || spec.includes(HARNESS_VENDOR)) return true
+  const resolved = resolveRelativeSpecifier(relFile, spec)
+  return resolved !== null && isWithin(join(REPO_ROOT, 'vendor', 'deepseek-harness'), resolved)
+}
+
+/** 是否为 adapters 路径（含相对路径解析到 app/src/adapters） */
+function isAdapterSpecifier(relFile: string, spec: string): boolean {
+  if (spec === 'adapters' || spec.startsWith('adapters/') || spec.startsWith('@/adapters/') || spec.includes('/adapters/')) {
+    return true
+  }
+  const resolved = resolveRelativeSpecifier(relFile, spec)
+  return resolved !== null && isWithin(join(APP_ROOT, 'src', 'adapters'), resolved)
+}
+
+function harnessRuleFor(relFile: string): 'R1' | 'R2' | 'R3' | null {
+  if (relFile.startsWith(HARNESS_ADAPTER_PREFIX)) return null
+  for (const { prefix, rule } of HARNESS_FREE_RULES) {
+    if (relFile.startsWith(prefix)) return rule
+  }
+  return 'R1'
+}
+
+function boundaryRuleText(rule: 'R1' | 'R2' | 'R3'): string {
+  if (rule === 'R2') return 'R2 ports 零 harness import/re-export'
+  if (rule === 'R3') return 'R3 collab/main/preload/renderer 不得 import harness'
+  return 'R1 仅 src/adapters/engine/harness/** 可 import harness'
 }
 
 function isBoundary(src: string, pos: number): boolean {
@@ -230,11 +308,44 @@ for (const rel of all) {
   }
 }
 
-console.log(`=== import 语义检查（L2/L3 app/src ${all.length} 文件${BASELINE_REV ? `；L1 基线 ${BASELINE_REV} 对账 ${l1Rows} 处` : ''}）===`)
+// ── §1.6 边界：R1/R2/R3 + ports/collab 反向 import adapters
+let boundaryCount = 0
+for (const rel of all) {
+  const src = readFileSync(join(APP_ROOT, rel), 'utf8')
+  const entries: Array<{ spec: string; kind: 'import' | 're-export' | 'dynamic import' }> = [
+    ...parseImports(src).map((e) => ({ spec: e.spec, kind: 'import' as const })),
+    ...parseReexports(src).map((spec) => ({ spec, kind: 're-export' as const })),
+    ...parseDynamicImports(src).map((spec) => ({ spec, kind: 'dynamic import' as const })),
+  ]
+  const seen = new Set<string>()
+  for (const { spec, kind } of entries) {
+    const key = `${kind}\u0000${spec}`
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    if (isHarnessSpecifier(rel, spec)) {
+      const rule = harnessRuleFor(rel)
+      if (rule !== null) {
+        boundaryCount++
+        const kindText = kind === 're-export'
+          ? 'harness re-export'
+          : kind === 'dynamic import' ? 'harness 动态 import' : 'harness import'
+        findings.push(`[${rule}] ${rel}: ${kindText} 越界 (${spec}) — ${boundaryRuleText(rule)}`)
+      }
+    }
+
+    if ((rel.startsWith('src/ports/') || rel.startsWith('src/collab/')) && isAdapterSpecifier(rel, spec)) {
+      boundaryCount++
+      findings.push(`[ADAPTER-DIR] ${rel}: 反向 import adapters (${spec}) — ports/collab 不得 import ${ADAPTERS_PREFIX}**`)
+    }
+  }
+}
+
+console.log(`=== import 语义检查（L2/L3 app/src ${all.length} 文件；R1-R3/反向边界${BASELINE_REV ? `；L1 基线 ${BASELINE_REV} 对账 ${l1Rows} 处` : ''}）===`)
 if (findings.length === 0) {
-  console.log('PASS  无形态不符、无说明符漂移')
+  console.log(`PASS  无形态不符、无说明符漂移、无边界违规（边界检查 ${all.length} 文件）`)
   process.exit(0)
 }
 for (const f of findings) console.log(`FAIL  ${f}`)
-console.log(`\n共 ${findings.length} 处问题`)
+console.log(`\n共 ${findings.length} 处问题（其中边界 ${boundaryCount} 处）`)
 process.exit(1)

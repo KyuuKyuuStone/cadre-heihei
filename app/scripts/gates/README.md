@@ -6,11 +6,34 @@
 | 门禁 | 命令 | 判定 |
 |---|---|---|
 | file-size | `node scripts/gates/check-file-size.ts` | 新文件 >2500 行红；基线只许降；allowlist 过期红 |
-| import-semantics | `node scripts/gates/check-import-semantics.ts` | L2/L3 形态不符红；L1 需显式基线 |
+| import-semantics | `node scripts/gates/check-import-semantics.ts` | L2/L3 形态不符红；§1.6 边界违规红；L1 需显式基线 |
 | tsc-baseline | `node scripts/gates/check-tsc-baseline.ts` | 新增签名/计数超红；真空检查红 |
 | smoke | `node scripts/gates/smoke.ts` | Node test runner + JUnit；**0 例红、skipped>0 红、fail>0 红** |
 
 `acceptance-lib.ts` 是 smoke 门禁的 JUnit 解析/判定库，其单测在 `app/tests/acceptance-lib.test.ts`。
+
+## §1.6 adapter 边界（W1-07）
+
+`check-import-semantics.ts` 同时执行 R1-R3 与 adapter 方向检查，覆盖静态 import、
+`export ... from`（含 `export type`）和动态 `import()`：
+
+| 规则 | 判定 |
+|---|---|
+| R1 | 仅 `src/adapters/engine/harness/**` 可 import `@deepseek-ai/dsh-*` 或 `vendor/deepseek-harness` 源码路径 |
+| R2 | `src/ports/**` 零 harness import、零 harness 类型 re-export |
+| R3 | `src/collab|main|preload|renderer/**` 不得 import harness |
+| ADAPTER-DIR | `src/ports/**`、`src/collab/**` 不得 import `src/adapters/**`（adapter 可 import 二者） |
+
+相对路径会先解析再判断是否落入 `vendor/deepseek-harness` 或 `src/adapters`，因此
+`../../../vendor/deepseek-harness/...` 与 `../adapters/...` 均可识别。
+
+坏样本：`fixtures/import-boundaries/{ports-harness,collab-harness,renderer-harness,ports-to-adapters}.fixture`；
+允许样本：`allowed-harness.fixture`（注入 `src/adapters/engine/harness/` 应保持绿）。
+
+证据（按 `.gitignore` 为本地运行产物，不入库；报告引用路径）：
+- `evidence/import-boundaries-{ports,collab,renderer,reverse}-red.txt`（exit=1，指名文件）
+- 对应 `-green.txt`（exit=0）
+- `evidence/import-boundaries-allowed.txt`（R1 允许路径，exit=0）
 
 ## 空仓基线
 

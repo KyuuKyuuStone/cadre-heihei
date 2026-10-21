@@ -1,0 +1,4 @@
+// R1 允许样本：仅 adapters/engine/harness/** 可 import harness。
+import type { AgentId } from '@deepseek-ai/dsh-agent'
+
+export type { AgentId } from '@deepseek-ai/dsh-agent'
