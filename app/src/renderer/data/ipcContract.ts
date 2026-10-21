@@ -1,10 +1,10 @@
 /**
- * renderer 侧 IPC 契约补充（只读通道 + 写通道声明）。
+ * renderer 侧的 IPC 调用面与响应包装。
  *
- * 来源：`docs/product/frontend/02-IPC与主进程契约.md` §1/§2/§5。
- * `app/src/shared/ipc.ts`（df84f8b）目前只落了 whoami/listTasks/listRoster/prefs，
- * 这里补齐 getTask、session:* 与 `window.cadre` 调用面；shared 落地后合并回共享层。
- * 本文件只含类型与常量，不 import Electron/Node/主进程实现。
+ * 单一事实源：通道常量与 SessionEvent 来自 `app/src/shared/ipc.ts`（35a2527），
+ * renderer 不再本地重复定义，避免两套契约漂移（W1 返工）。
+ * 本文件只保留「成功即 ok:true」的响应包装（文档 §0）与 `window.cadre` 调用面；
+ * 不 import Electron/Node/主进程实现。
  */
 import type { ApiVersion, IsoTimestamp, SessionId, TaskId } from '../../collab/protocol/ids.ts'
 import type { ApiFailure } from '../../collab/protocol/errors.ts'
@@ -12,14 +12,51 @@ import type { EmptyList } from '../../collab/protocol/common.ts'
 import type { TaskStatus } from '../../collab/protocol/task-status.ts'
 import type { TaskDetail, TaskSummary, SendMessageReceipt } from '../../collab/protocol/tool-outputs.ts'
 import type { RosterResponse } from '../../collab/protocol/roster.ts'
-import type { IpcWhoamiResult, Preferences, PreferencesPatch } from '../../shared/ipc.ts'
+import {
+  IPC_CHANNELS,
+  type IpcWhoamiResult,
+  type Preferences,
+  type PreferencesPatch,
+  type SessionEvent,
+} from '../../shared/ipc.ts'
 
-/** shared/ipc.ts 尚未包含的通道（文档 §1 第 5/10/13 条）。 */
-export const RENDERER_IPC_CHANNELS = {
-  getTask: 'collab:getTask',
-  sessionSend: 'session:send',
-  sessionEvent: 'session:event',
+export type { SessionEvent }
+
+/**
+ * renderer 实际引用的通道（从 shared 常量取值，不写字面量）。
+ * 一致性测试逐项核对 IPC_CHANNELS 与文档，防止任一侧漂移。
+ */
+export const RENDERER_CHANNEL_USAGE = {
+  whoami: IPC_CHANNELS.whoami,
+  listTasks: IPC_CHANNELS.listTasks,
+  getTask: IPC_CHANNELS.getTask,
+  listRoster: IPC_CHANNELS.listRoster,
+  sendMessage: IPC_CHANNELS.sendMessage,
+  subscribeSession: IPC_CHANNELS.subscribeSession,
+  unsubscribeSession: IPC_CHANNELS.unsubscribeSession,
+  sessionEvent: IPC_CHANNELS.sessionEvent,
+  prefsGet: IPC_CHANNELS.prefsGet,
+  prefsSet: IPC_CHANNELS.prefsSet,
 } as const
+
+/**
+ * SessionEvent 的全部 kind（编译期与 shared 穷尽对齐）：
+ * shared 若新增/删除 kind，这里的 `SESSION_EVENT_KINDS_COMPLETE` 会类型报错。
+ */
+export const SESSION_EVENT_KINDS = [
+  'message.delta',
+  'message.complete',
+  'tool.call',
+  'tool.result',
+  'compaction.start',
+  'compaction.summary',
+  'compaction.end',
+  'session.error',
+  'session.closed',
+] as const satisfies readonly SessionEvent['kind'][]
+
+type UncoveredSessionEventKind = Exclude<SessionEvent['kind'], (typeof SESSION_EVENT_KINDS)[number]>
+export const SESSION_EVENT_KINDS_COMPLETE: UncoveredSessionEventKind extends never ? true : false = true
 
 export interface ListTasksQuery {
   readonly status?: TaskStatus
@@ -46,21 +83,6 @@ export type PreferencesResponse = ({ readonly ok: true } & Preferences) | ApiFai
 export type SetPreferencesResponse = { readonly ok: true } | ApiFailure
 export type SendMessageResponse = ({ readonly ok: true } & SendMessageReceipt) | ApiFailure
 export type SubscribeSessionResponse = { readonly ok: true; readonly subscriptionId: string } | ApiFailure
-
-/** 主进程 → renderer 的会话事件白名单投影（文档 §5；不传 raw/harness payload）。 */
-export type SessionEvent =
-  | { readonly kind: 'message.delta'; readonly sessionId: SessionId; readonly text: string; readonly seq: number; readonly epoch?: number }
-  | { readonly kind: 'message.complete'; readonly sessionId: SessionId; readonly text: string; readonly seq: number; readonly epoch?: number }
-  | { readonly kind: 'tool.call'; readonly sessionId: SessionId; readonly toolName: string; readonly callId: string; readonly summary: string; readonly seq: number }
-  | { readonly kind: 'tool.result'; readonly sessionId: SessionId; readonly toolName: string; readonly callId: string; readonly ok: boolean; readonly summary: string; readonly outputFile?: string; readonly seq: number }
-  | { readonly kind: 'compaction.start' | 'compaction.summary' | 'compaction.end'; readonly sessionId: SessionId; readonly seq: number }
-  | {
-    readonly kind: 'session.error'
-    readonly sessionId: SessionId
-    readonly error: { readonly code: string; readonly message: string; readonly rawCode?: string; readonly retryable: boolean }
-    readonly seq: number
-  }
-  | { readonly kind: 'session.closed'; readonly sessionId: SessionId; readonly reason: string; readonly seq: number }
 
 /** preload 白名单调用面（文档 §2）；写通道在 preload 落地前为可选。 */
 export interface CadreBridge {

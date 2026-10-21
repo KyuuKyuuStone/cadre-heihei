@@ -26,8 +26,8 @@ export const emptyConversationState: ConversationState = { messages: [], lastSeq
 const STREAM_ID = 'assistant-stream'
 
 export function applySessionEvent(state: ConversationState, event: SessionEvent): ConversationState {
-  const nextEpoch = 'epoch' in event ? event.epoch : undefined
-  if (nextEpoch !== undefined && state.epoch !== undefined && nextEpoch !== state.epoch) {
+  const nextEpoch = event.epoch
+  if (state.epoch !== undefined && nextEpoch !== state.epoch) {
     state = { messages: [], lastSeq: 0, epoch: nextEpoch }
   }
   if (event.seq <= state.lastSeq) return state
@@ -35,7 +35,7 @@ export function applySessionEvent(state: ConversationState, event: SessionEvent)
   const base: ConversationState = {
     ...state,
     lastSeq: event.seq,
-    ...(nextEpoch !== undefined ? { epoch: nextEpoch } : {}),
+    epoch: nextEpoch,
   }
 
   if (event.kind === 'message.delta' || event.kind === 'message.complete') {
