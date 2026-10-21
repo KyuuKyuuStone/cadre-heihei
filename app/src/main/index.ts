@@ -61,6 +61,13 @@ function log(message: string): void {
 }
 
 function resolveMcpServerPath(): string {
+  // 打包态：MCP server 以 TS 源码随 extraResources 落真实磁盘（app.src），
+  // 由系统 node（Node ≥22.19 原生 TS 运行）拉起；asar 内路径子进程不可读。
+  // 终端用户无系统 node 时的 nodeCommand 方案未定（见 s16 未验证项）。
+  if (app.isPackaged) {
+    const packaged = join(process.resourcesPath, 'app.src', 'mcp', 'server.ts')
+    if (existsSync(packaged)) return packaged
+  }
   const candidates = [
     join(__dirname, '..', '..', 'src', 'mcp', 'server.ts'),
     join(app.getAppPath(), 'src', 'mcp', 'server.ts'),

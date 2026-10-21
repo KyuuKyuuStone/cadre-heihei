@@ -1,0 +1,34 @@
+# electron-builder 配置（M4 §3 / U-M4-04）。
+#
+# 结构决策：
+# - asar: true；files 只进 dist（renderer 产物 + main/preload 单文件 CJS）与 package.json；
+# - harness 运行树由 scripts/m4/stage-harness.mjs 物化到 resources/harness-stage
+#   （dsh 及其生产依赖经 pnpm deploy 物化，无 junction、无开发机绝对路径），
+#   再由 extraResources 复制到安装目录 <resources>/vendor/deepseek-harness，
+#   使 src/adapters/engine/harness/sdk.ts 现有 findRepoRoot 上溯解析在打包态继续成立（不改 sdk.ts）；
+# - 不使用 asarUnpack（M4 §3 禁止扩大 unpacked 面）；
+# - MCP server 分发为已知缺口：main 的 resolveMcpServerPath() 打包态解析到 asar 内路径，
+#   子进程 node 不可读，属 main 业务逻辑，另行裁决（见 s16 证据 summary）。
+appId: dev.cadreheihei.app
+productName: cadre-heihei
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+asar: true
+npmRebuild: false
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+extraResources:
+  # stage 布局为 vendor/deepseek-harness/**；from 指到 vendor 层，
+  # 使安装目录为 <resources>/vendor/deepseek-harness（与 sdk.ts findRepoRoot 期望一致）。
+  - from: resources/harness-stage/vendor
+    to: vendor
+  # MCP server 以 TS 源码落真实磁盘（asar 内路径子进程 node 不可读）；
+  # 打包态 resolveMcpServerPath 优先解析 process.resourcesPath/app.src/mcp/server.ts。
+  - from: src
+    to: app.src
