@@ -19,6 +19,7 @@ import {
 import {
   InMemoryTaskLedger,
   listIllegalTransitionPairs,
+  requiresReason,
   type LedgerActor,
   type LedgerResult,
   type TaskRecord,
@@ -117,6 +118,19 @@ function mustMove(
   return result.value.task
 }
 
+function mustMoveWithReason(
+  ledger: InMemoryTaskLedger,
+  taskId: TaskId,
+  from: TaskStatus,
+  to: TaskStatus,
+  actor: LedgerActor,
+  reason: string,
+): TaskRecord {
+  const result = move(ledger, taskId, from, to, actor, { reason })
+  if (!result.ok) assert.fail(`迁移 ${from} → ${to} 失败：${result.error.code} ${result.error.message}`)
+  return result.value.task
+}
+
 /** 把新任务驱动到目标状态；每个测试用独立 ledger，避免相互污染。 */
 function prepare(status: TaskStatus): { ledger: InMemoryTaskLedger; taskId: TaskId } {
   const ledger = makeLedger()
@@ -177,7 +191,10 @@ function prepare(status: TaskStatus): { ledger: InMemoryTaskLedger; taskId: Task
       )
       break
   }
-  for (const [from, to, actor] of steps) mustMove(ledger, taskId, from, to, actor)
+  for (const [from, to, actor] of steps) {
+    const result = move(ledger, taskId, from, to, actor, requiresReason(to) ? { reason: '测试准备' } : {})
+    if (!result.ok) assert.fail(`准备 ${from} → ${to} 失败：${result.error.code} ${result.error.message}`)
+  }
   return { ledger, taskId }
 }
 
@@ -205,7 +222,9 @@ for (const rule of TASK_TRANSITION_RULES) {
     for (const kind of ACTOR_KINDS) {
       const { ledger, taskId } = prepare(rule.from)
       const eventsBefore = eventsOf(ledger, taskId).length
-      const result = move(ledger, taskId, rule.from, rule.to, actorFor(kind))
+      const result = move(ledger, taskId, rule.from, rule.to, actorFor(kind), {
+        ...(requiresReason(rule.to) ? { reason: '测试原因' } : {}),
+      })
 
       if (rule.actors.includes(kind)) {
         assert.equal(result.ok, true, `${kind} 应被允许执行 ${rule.from} → ${rule.to}`)
@@ -266,7 +285,7 @@ for (const terminal of ['verified', 'failed', 'cancelled'] as const) {
 it('rework 循环：保留 taskId，每次 rework attempt +1', () => {
   const { ledger, taskId } = prepare('review')
 
-  let task = mustMove(ledger, taskId, 'review', 'rework', SUPERVISOR)
+  let task = mustMoveWithReason(ledger, taskId, 'review', 'rework', SUPERVISOR, '返工')
   assert.equal(task.taskId, taskId)
   assert.equal(task.status, 'rework')
   assert.equal(task.attempt, 1)
@@ -276,13 +295,55 @@ it('rework 循环：保留 taskId，每次 rework attempt +1', () => {
 
   mustMove(ledger, taskId, 'in_progress', 'delivered', ASSIGNEE)
   mustMove(ledger, taskId, 'delivered', 'review', SUPERVISOR)
-  task = mustMove(ledger, taskId, 'review', 'rework', SUPERVISOR)
+  task = mustMoveWithReason(ledger, taskId, 'review', 'rework', SUPERVISOR, '再次返工')
   assert.equal(task.taskId, taskId)
   assert.equal(task.attempt, 2)
 
   assert.equal(ledger.listTasks(P1).length, 1, 'rework 不产生新任务')
   assert.equal(eventsOf(ledger, taskId).at(-1)?.toStatus, 'rework')
 })
+
+// —— reason 必填（目标态 rework / failed / cancelled） ——
+const REASON_CASES = [
+  { from: 'review', to: 'rework', actor: SUPERVISOR },
+  { from: 'review', to: 'failed', actor: SUPERVISOR },
+  { from: 'dispatched', to: 'cancelled', actor: SUPERVISOR },
+] as const satisfies ReadonlyArray<{ from: TaskStatus; to: TaskStatus; actor: LedgerActor }>
+
+for (const reasonCase of REASON_CASES) {
+  it(`reason 必填：${reasonCase.from} → ${reasonCase.to} 缺失/空白必拒且不推进`, () => {
+    for (const reason of [undefined, '', '   ', '\t\n'] as const) {
+      const { ledger, taskId } = prepare(reasonCase.from)
+      const before = taskOf(ledger, taskId)
+      const eventsBefore = eventsOf(ledger, taskId).length
+      const result = move(ledger, taskId, reasonCase.from, reasonCase.to, reasonCase.actor, {
+        ...(reason === undefined ? {} : { reason }),
+      })
+      assert.equal(result.ok, false, `reason=${JSON.stringify(reason)} 应被拒绝`)
+      if (result.ok) continue
+      assert.equal(result.error.code, 'MISSING_REASON')
+      assert.equal(result.error.retryable, false)
+      assert.equal(result.error.projectId, P1)
+      assert.equal(result.error.taskId, taskId)
+      assert.equal(result.error.to, reasonCase.to)
+      assert.deepEqual(result.error.requiredFor, ['rework', 'failed', 'cancelled'])
+      assert.deepEqual(taskOf(ledger, taskId), before, '状态与 version 均不得变化')
+      assert.equal(eventsOf(ledger, taskId).length, eventsBefore, '不得写审计事件')
+    }
+  })
+
+  it(`reason 必填：${reasonCase.from} → ${reasonCase.to} 提供非空 reason 正常迁移`, () => {
+    const { ledger, taskId } = prepare(reasonCase.from)
+    const result = move(ledger, taskId, reasonCase.from, reasonCase.to, reasonCase.actor, {
+      reason: '验收不通过',
+    })
+    assert.equal(result.ok, true)
+    if (!result.ok) return
+    assert.equal(result.value.task.status, reasonCase.to)
+    assert.equal(result.value.event.reason, '验收不通过')
+    assert.equal(eventsOf(ledger, taskId).at(-1)?.reason, '验收不通过')
+  })
+}
 
 // —— 取代语义 ——
 it('取代：旧任务 cancelled + reason=superseded + supersededBy 指向新任务', () => {
@@ -477,8 +538,8 @@ it('审计事件：创建写一条 from 为空的事件', () => {
   assert.equal(events[0]?.actorSessionId, SUP)
 })
 
-it('meta: 用例收集数 > 0（0 例即失败）', () => {
-  const expected = TASK_TRANSITION_RULES.length + listIllegalTransitionPairs().length + 16
+it('meta: 用例收集数非零（0 例即失败）', () => {
+  const expected = TASK_TRANSITION_RULES.length + listIllegalTransitionPairs().length + 22
   assert.equal(registered, expected, `注册用例数 ${registered} ≠ 预期 ${expected}`)
   assert.ok(registered > 0)
 })

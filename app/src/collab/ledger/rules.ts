@@ -8,10 +8,18 @@ import {
   TASK_STATUSES,
   TASK_TRANSITION_RULES,
   TERMINAL_TASK_STATUSES,
+  type ReasonRequiredStatus,
   type TaskStatus,
   type TaskTransitionRule,
   type TransitionActorKind,
 } from '../protocol/index.ts'
+
+/** 目标态要求 reason 的状态（backend/01 §1.2，契约 errors.ts 的 ReasonRequiredStatus）。 */
+export const REASON_REQUIRED_STATUSES: readonly ReasonRequiredStatus[] = ['rework', 'failed', 'cancelled']
+
+export function requiresReason(to: TaskStatus): to is ReasonRequiredStatus {
+  return (REASON_REQUIRED_STATUSES as readonly TaskStatus[]).includes(to)
+}
 
 export interface LegalTransition {
   readonly from: TaskStatus

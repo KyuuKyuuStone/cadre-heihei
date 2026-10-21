@@ -9,18 +9,20 @@
  */
 import { randomUUID } from 'node:crypto'
 import {
+  ERROR_RETRYABLE,
   type ErrorCode,
   type EventId,
   type ForbiddenActorReason,
   type IdempotencyKey,
   type IsoTimestamp,
   type ProjectId,
+  type ReasonRequiredStatus,
   type SessionId,
   type TaskId,
   type TaskStatus,
   type TransitionActorKind,
 } from '../protocol/index.ts'
-import { findTransitionRule, isTerminalStatus } from './rules.ts'
+import { REASON_REQUIRED_STATUSES, findTransitionRule, isTerminalStatus, requiresReason } from './rules.ts'
 
 export type LedgerActor =
   | {
@@ -92,12 +94,14 @@ export interface TaskEvent {
 export interface LedgerError {
   readonly code: ErrorCode
   readonly message: string
+  readonly retryable: boolean
   readonly projectId: ProjectId
   readonly taskId?: TaskId
   readonly from?: TaskStatus
   readonly to?: TaskStatus
   readonly reasonCategory?: ForbiddenActorReason
   readonly requiredActor?: 'assignee' | 'supervisor'
+  readonly requiredFor?: readonly ReasonRequiredStatus[]
 }
 
 export type LedgerResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: LedgerError }
@@ -146,8 +150,8 @@ function copyTask(task: MutableTask): TaskRecord {
   return { ...task }
 }
 
-function fail(error: LedgerError): LedgerResult<never> {
-  return { ok: false, error }
+function fail(error: Omit<LedgerError, 'retryable'>): LedgerResult<never> {
+  return { ok: false, error: { ...error, retryable: ERROR_RETRYABLE[error.code] } }
 }
 
 export class InMemoryTaskLedger {
@@ -354,6 +358,17 @@ export class InMemoryTaskLedger {
       })
     }
 
+    if (requiresReason(command.to) && (command.reason === undefined || command.reason.trim() === '')) {
+      return fail({
+        code: 'MISSING_REASON',
+        message: `目标态 ${command.to} 的迁移必须提供非空 reason`,
+        projectId: command.projectId,
+        taskId: command.taskId,
+        to: command.to,
+        requiredFor: REASON_REQUIRED_STATUSES,
+      })
+    }
+
     const actorKind = this.resolveActorKind(task, command.actor)
     if (actorKind === null || !rule.actors.includes(actorKind)) {
       return fail(this.forbiddenActor(command, task, rule.actors, actorKind))
@@ -446,7 +461,7 @@ export class InMemoryTaskLedger {
     task: MutableTask,
     allowed: readonly TransitionActorKind[],
     actorKind: TransitionActorKind | null,
-  ): LedgerError {
+  ): Omit<LedgerError, 'retryable'> {
     const reasonCategory: ForbiddenActorReason =
       actorKind !== null
         ? 'role-mismatch'
@@ -495,7 +510,7 @@ export class InMemoryTaskLedger {
     return event
   }
 
-  private idempotencyConflict(projectId: ProjectId, key: IdempotencyKey): LedgerError {
+  private idempotencyConflict(projectId: ProjectId, key: IdempotencyKey): Omit<LedgerError, 'retryable'> {
     return {
       code: 'IDEMPOTENCY_CONFLICT',
       message: `幂等键已被不同请求占用：${key}`,

@@ -76,7 +76,7 @@ it('矩阵完整性：合法 + 非法 = 状态全组合', () => {
   }
 })
 
-it('meta: 用例收集数 > 0（0 例即失败）', () => {
+it('meta: 用例收集数非零（0 例即失败）', () => {
   const expected = TASK_TRANSITION_RULES.length + illegalPairs.length + 3 + TERMINAL_TASK_STATUSES.length
   assert.equal(registered, expected, `注册用例数 ${registered} ≠ 预期 ${expected}`)
   assert.ok(registered > 0)
