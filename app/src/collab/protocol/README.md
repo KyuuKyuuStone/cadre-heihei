@@ -70,11 +70,14 @@
 | `INVALID_TRANSITION` | 状态机不允许 | false |
 | `MISSING_REASON` | 目标态为 rework/failed/cancelled 的迁移未提供 reason | false |
 | `FORBIDDEN_ACTOR` | 角色/归属无权 | false |
+| `INVALID_ARGUMENT` | 工具/请求参数缺失或非法（缺 idempotencyKey、非法 action 等）；不得用 INTERNAL_ERROR 代替 | false |
 | `EMPTY_BODY` | 派活空正文 | false |
 | `CLIENT_COMMAND_REJECTED` | 派活含客户端命令 | false |
 | `IDEMPOTENCY_CONFLICT` | 同键不同正文 | false |
 | `DELIVERY_FAILED` | 通道投递失败（显式报错、不静默改道） | true |
 | `INTERNAL_ERROR` | 未映射引擎/内部错误（附原始码） | **false**（不自动重试，由上层决定） |
+
+> **ForbiddenActorReason 裁决（U-MCP-05）**：暂不新增 `supervisor-write-denied`；主管越界写拦截使用现有 `role-mismatch`，并在 `message` 中说明具体限制。
 
 ### 2.4 跨项目与空态
 
@@ -130,4 +133,5 @@
 6. 任何未映射错误 → `INTERNAL_ERROR` + `rawCode`，不得吞掉或改写为成功；该错误不自动重试；
 7. `preview` 按前 50 个 Unicode code point 截断；`bodyBytes` 与 `bodySha256` 按 UTF-8 实收原样计算，不做 BOM/换行规范化；
 8. supersedes 回执必须回传旧任务（taskId + cancelled + reason=superseded）；
-9. 端口层零 harness 类型；harness 专有 API 只允许出现在 `src/adapters/engine/harness/`。
+9. 参数缺失/非法一律 `INVALID_ARGUMENT`（可带 `field`/`reason`），不得用 `INTERNAL_ERROR` 代替；
+10. 端口层零 harness 类型；harness 专有 API 只允许出现在 `src/adapters/engine/harness/`。

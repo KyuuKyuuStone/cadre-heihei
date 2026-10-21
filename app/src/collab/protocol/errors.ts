@@ -16,6 +16,7 @@ export const ERROR_CODES = [
   'INVALID_TRANSITION',
   'MISSING_REASON',
   'FORBIDDEN_ACTOR',
+  'INVALID_ARGUMENT',
   'EMPTY_BODY',
   'CLIENT_COMMAND_REJECTED',
   'IDEMPOTENCY_CONFLICT',
@@ -35,6 +36,7 @@ export const ERROR_RETRYABLE: Readonly<Record<ErrorCode, boolean>> = {
   INVALID_TRANSITION: false,
   MISSING_REASON: false,
   FORBIDDEN_ACTOR: false,
+  INVALID_ARGUMENT: false,
   EMPTY_BODY: false,
   CLIENT_COMMAND_REJECTED: false,
   IDEMPOTENCY_CONFLICT: false,
@@ -161,6 +163,20 @@ export interface ForbiddenActorFailure extends ApiFailure<'FORBIDDEN_ACTOR'> {
   readonly error: ForbiddenActorDetail
 }
 
+/**
+ * 工具/请求参数缺失或非法（U-MCP-15 裁决）：缺 `idempotencyKey`、非法 `action`、
+ * 未知字段组合等。**不得**用 `INTERNAL_ERROR` 代替。
+ * `field` / `reason` 为可选诊断信息，不得用于泄露内部实现细节。
+ */
+export interface InvalidArgumentDetail extends ErrorDetail<'INVALID_ARGUMENT'> {
+  readonly field?: string
+  readonly reason?: string
+}
+
+export interface InvalidArgumentFailure extends ApiFailure<'INVALID_ARGUMENT'> {
+  readonly error: InvalidArgumentDetail
+}
+
 export interface EmptyBodyDetail extends ErrorDetail<'EMPTY_BODY'> {
   readonly field: 'body'
 }
@@ -204,6 +220,7 @@ export type ApiError =
   | InvalidTransitionFailure
   | MissingReasonFailure
   | ForbiddenActorFailure
+  | InvalidArgumentFailure
   | EmptyBodyFailure
   | ClientCommandRejectedFailure
   | IdempotencyConflictFailure
