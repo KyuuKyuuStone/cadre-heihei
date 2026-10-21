@@ -14,8 +14,18 @@
 
 ## §1.6 adapter 边界（W1-07）
 
-`check-import-semantics.ts` 同时执行 R1-R3 与 adapter 方向检查，覆盖静态 import、
-`export ... from`（含 `export type`）和动态 `import()`：
+`check-import-semantics.ts` 同时执行 R1-R3 与 adapter 方向检查，覆盖：
+静态 `import ... from`（含 `import type`）、无 `from` 的副作用 import
+（`import '@deepseek-ai/dsh-x'` / `import '../../../vendor/...'`）、
+`export ... from`（含 `export type` / `export *`）、动态 `import()`、
+`require('...')` 与 TS `import x = require('...')`。
+
+扫描范围是 `app/src/**/*.{ts,tsx}` **全部文件**（含 `*.test.ts` 与 `.d.ts`），
+**没有测试豁免**；测试本应放 `app/tests/`。symlink 先 `realpath`：文件链接按真实
+路径读取、相对 import 按真实目录解析；目录链接防环递归；指向 vendor/harness 或
+adapters 的链接直接按真实路径判红；无法解析/悬空链接显式计数并打印
+`NOTE … 跳过 N 个 symlink`，不静默跳过（Windows junction 实测：跟随 1 → 红；
+悬空 1 → 跳过 1）。
 
 | 规则 | 判定 |
 |---|---|
@@ -27,26 +37,26 @@
 相对路径会先解析再判断是否落入 `vendor/deepseek-harness` 或 `src/adapters`，因此
 `../../../vendor/deepseek-harness/...` 与 `../adapters/...` 均可识别。
 
-坏样本：`fixtures/import-boundaries/{ports-harness,collab-harness,renderer-harness,ports-to-adapters}.fixture`；
+坏样本：`fixtures/import-boundaries/{ports-harness,collab-harness,renderer-harness,ports-to-adapters,side-effect-package,side-effect-vendor,require,import-equals,src-test}.fixture`；
 允许样本：`allowed-harness.fixture`（注入 `src/adapters/engine/harness/` 应保持绿）。
 
 证据（按 `.gitignore` 为本地运行产物，不入库；报告引用路径）：
-- `evidence/import-boundaries-{ports,collab,renderer,reverse}-red.txt`（exit=1，指名文件）
-- 对应 `-green.txt`（exit=0）
+- `evidence/import-boundaries-<项>-{red,green}.txt`（项：ports/collab/renderer/reverse/
+  side-effect-package/side-effect-vendor/require/import-equals/src-test；red exit=1 指名文件，green exit=0）
 - `evidence/import-boundaries-allowed.txt`（R1 允许路径，exit=0）
+- `evidence/import-boundaries-symlink-{red,green}.txt`、`...symlink-skipped.txt`
 
-### §1.6.1 已知漏报面（待修，2026-10-21 审查 00979930）
+### §1.6.1 审查 00979930 修复（2026-10-21）
 
-当前 parser 只覆盖「静态 `import ... from` / `export ... from` / 动态 `import()`」，以下边界**尚未覆盖**；本单只登记，不改脚本：
+| 原漏报面 | 修复 | 两态证据 |
+|---|---|---|
+| 无 `from` 副作用 import | 新增 `parseSideEffectImports`；包与 vendor 源码两种形态 | `side-effect-package`、`side-effect-vendor` |
+| `require()` / `import x = require()` | 新增 `parseRequires`（import-equals 去重） | `require`、`import-equals` |
+| `src/**/*.test.ts` 豁免 | 删除 `TEST_RE` 与 `.d.ts` 豁免，扫描 src 全部源码 | `src-test`（`src/ports/*.test.ts` 判红） |
+| symlink 目标跳过 | `realpath` 跟随；敏感目标按真实路径判红；悬空链接计数并打印 | `symlink-red/green/skipped` |
 
-| 边界 | 当前行为 | 风险 | 待修方向 |
-|---|---|---|---|
-| 无 `from` 的副作用 import（`import './x.ts'`） | parser 只匹配带 `from` 的形式 | 该文件不被解析，边界/R1-R3 可能漏判 | parser 增加 side-effect import 分支 |
-| `require()` / `import x = require()` | 不解析 | CJS/import-equals 可绕过边界 | 增加 CJS 与 import-equals 解析 |
-| `src/**/*.test.ts` 豁免 | `collect()` 按 `TEST_RE` 排除测试文件 | 测试文件可绕过边界，且豁免范围未显式声明 | 显式声明豁免规则，或对测试纳入边界扫描 |
-| symlink | 目录 symlink 不递归；文件 symlink 按链接路径读取，真实路径不校验 | 目标目录/文件可能漏扫或归属误判 | 用 `realpath` 解析并显式处理链接目标 |
-
-> 在修复前，涉及上述写法的改动必须人工核对；验证时用 `git ls-files` 与扫描计数对账，不把「0 命中」直接当作无违规。
+> 结论：无测试豁免；`src/**/*.test.ts` 与 `.d.ts` 同样受 R1-R3 约束。悬空/不可解析
+> symlink 不会静默通过：输出 `NOTE … 跳过 N 个 symlink`，人工复核该路径。
 
 ## 空仓基线
 
@@ -84,6 +94,9 @@ smoke 的 JUnit：`evidence/smoke.junit.xml`。
 | 日期 | commit | 命令 | 结果 | 产物 / 生成时间 | sha256 |
 |---|---|---|---|---|---|
 | 2026-10-21 16:21 (+08:00) | `dfff143` | `npm run gates:evidence` | **8/8 符合预期**：file-size、import-semantics、tsc-baseline、smoke、import-boundaries-{ports,collab,renderer,reverse}；全部 red exit=1 / green exit=0 | `app/scripts/gates/evidence/two-state-summary.json`；capturedAt `2026-10-21T08:21:10.389Z` | `91647da1394a8b2bae3fa9b3e8453b0cc909e203868f2775fb0ba519f8dc7f41` |
+| 2026-10-21 16:33 (+08:00) | 本单（审查 00979930 修复；hash 见协作汇报） | `npm run gates:evidence` | **13/13 符合预期**：原 8 + side-effect-package/vendor、require、import-equals、src-test；另 symlink 红/绿/跳过证据 | `app/scripts/gates/evidence/two-state-summary.json`；capturedAt `2026-10-21T08:32:27.332Z` | `00ccfe85a507a56f1166d2cb99a5358f3defb28e3ca91682367c52acc8414f61` |
+
+> 同轮 `npm run gates` 4/4 PASS（3.67s）；全量 `node --test "tests/**/*.test.ts"` 503 pass / 0 fail / 0 skipped。
 
 > 同日同 commit 的 `run-all` 四门禁顺序执行 exit=0（`evidence/run-all.txt`，生成 16:26），
 > 扫描 37 文件、边界检查 37 文件；该文件同样不入库。

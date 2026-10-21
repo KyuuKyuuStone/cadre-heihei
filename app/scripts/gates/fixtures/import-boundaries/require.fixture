@@ -1,0 +1,4 @@
+// R3 坏样本：require() 绕过静态 import。
+const mod = require('@deepseek-ai/dsh-agent')
+
+export const gateFixtureRequire = mod

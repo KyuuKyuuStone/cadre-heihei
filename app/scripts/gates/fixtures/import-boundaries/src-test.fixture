@@ -1,0 +1,4 @@
+// R2 坏样本：src 下的 .test.ts 也必须受边界约束（不豁免）。
+import { AgentId } from '@deepseek-ai/dsh-agent'
+
+export type GateFixtureAgent = AgentId

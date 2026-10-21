@@ -86,6 +86,46 @@ const CASES: GateCase[] = [
     description: 'ports 反向 import adapters',
     expectRedIncludes: '__gate_fixture_ports_adapters.ts',
   },
+  {
+    name: 'import-boundaries-side-effect-package',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/side-effect-package.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_side_effect_package.ts',
+    description: 'R3 无 from 副作用 import（harness 包）',
+    expectRedIncludes: '__gate_fixture_renderer_side_effect_package.ts',
+  },
+  {
+    name: 'import-boundaries-side-effect-vendor',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/side-effect-vendor.fixture',
+    target: 'src/collab/__gate_fixture_collab_side_effect_vendor.ts',
+    description: 'R3 无 from 副作用 import（vendor 源码）',
+    expectRedIncludes: '__gate_fixture_collab_side_effect_vendor.ts',
+  },
+  {
+    name: 'import-boundaries-require',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/require.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_require.ts',
+    description: 'R3 require() 绕过静态 import',
+    expectRedIncludes: '__gate_fixture_renderer_require.ts',
+  },
+  {
+    name: 'import-boundaries-import-equals',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/import-equals.fixture',
+    target: 'src/ports/__gate_fixture_ports_import_equals.ts',
+    description: 'R2 TS import x = require()',
+    expectRedIncludes: '__gate_fixture_ports_import_equals.ts',
+  },
+  {
+    name: 'import-boundaries-src-test',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/src-test.fixture',
+    target: 'src/ports/__gate_fixture_ports_test.test.ts',
+    description: 'R2 src 下 .test.ts 不豁免',
+    expectRedIncludes: '__gate_fixture_ports_test.test.ts',
+  },
 ]
 
 function run(gate: string) {
