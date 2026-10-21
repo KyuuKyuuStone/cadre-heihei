@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { SessionId } from '../../src/collab/protocol/ids.ts'
 import { FakeEngine, type FakeScriptEvent } from '../../src/adapters/engine/fake/index.ts'
-import type { EngineError, EngineEvent } from '../../src/ports/engine.ts'
+import type { EngineEvent } from '../../src/ports/engine.ts'
+import { runPortContractSuite } from './contract-shared.ts'
 
 async function collect(iterable: AsyncIterable<EngineEvent>): Promise<EngineEvent[]> {
   const events: EngineEvent[] = []
@@ -20,84 +21,17 @@ function isCode(code: string) {
   return (error: unknown): boolean => codeOf(error) === code
 }
 
-function texts(events: EngineEvent[]): string[] {
-  return events.map((event) =>
-    event.kind === 'message.delta' || event.kind === 'message.complete' ? event.text : event.kind)
-}
+// ── M2 §2.3：fake 侧跑双实现共有契约 shared suite（harness 侧同一套断言见 scripts/m2-port-contract/run.ts）──
+runPortContractSuite({
+  name: 'fake',
+  makeEngine: () => new FakeEngine(),
+  makeWorkDir: (tag) => `/work/${tag}`,
+  setSessionScript: (engine, sessionId, events) =>
+    (engine as FakeEngine).setSessionScript(sessionId, events as FakeScriptEvent[]),
+}, test)
 
-test('lifecycle: start → create → send → stop', async () => {
-  const engine = new FakeEngine()
-  assert.equal(engine.engineId, 'fake')
-  assert.equal((await engine.health()).state, 'unknown')
-  assert.deepEqual(await engine.listSessions(), [])
-
-  await engine.start()
-  assert.equal((await engine.health()).state, 'ready')
-
-  const session = await engine.createSession({ workingDirectory: '/work/a', title: 'a' })
-  assert.ok(session.sessionId.length > 0)
-  assert.ok(session.runtimeId.length > 0)
-
-  const events = await collect(session.send('hello'))
-  assert.deepEqual(events.map((event) => event.kind), ['message.delta', 'message.complete'])
-  assert.deepEqual(texts(events), ['fake:hello', 'fake:hello'])
-  assert.ok(events.every((event) => event.sessionId === session.sessionId))
-  assert.ok(events.every((event) => typeof event.at === 'string' && event.at.length > 0))
-
-  const listed = await engine.listSessions()
-  assert.equal(listed.length, 1)
-  assert.equal(listed[0]!.state, 'ready')
-  assert.equal(listed[0]!.workingDirectory, '/work/a')
-
-  await session.close()
-  assert.equal((await engine.listSessions())[0]!.state, 'closed')
-
-  await engine.stop()
-  assert.equal((await engine.health()).state, 'stopped')
-  assert.equal((await engine.listSessions())[0]!.state, 'closed')
-  await assert.rejects(engine.start(), isCode('ENGINE_UNAVAILABLE'))
-})
-
-test('two sessions: distinct runtimes and no event sessionId crosstalk', async () => {
-  const engine = new FakeEngine()
-  await engine.start()
-  const a = await engine.createSession({ workingDirectory: '/work/a' })
-  const b = await engine.createSession({ workingDirectory: '/work/b' })
-
-  assert.notEqual(a.sessionId, b.sessionId)
-  assert.notEqual(a.runtimeId, b.runtimeId)
-
-  engine.setSessionScript(a.sessionId, [
-    { kind: 'message.delta', text: 'A1' },
-    { kind: 'message.complete', text: 'A2' },
-  ] as FakeScriptEvent[])
-  engine.setSessionScript(b.sessionId, [
-    { kind: 'message.delta', text: 'B1' },
-    { kind: 'message.complete', text: 'B2' },
-  ] as FakeScriptEvent[])
-
-  const [eventsA, eventsB] = await Promise.all([collect(a.send('x')), collect(b.send('y'))])
-  assert.ok(eventsA.every((event) => event.sessionId === a.sessionId))
-  assert.ok(eventsB.every((event) => event.sessionId === b.sessionId))
-  assert.deepEqual(texts(eventsA), ['A1', 'A2'])
-  assert.deepEqual(texts(eventsB), ['B1', 'B2'])
-})
-
-test('workingDirectory roundtrip and resume override', async () => {
-  const engine = new FakeEngine()
-  await engine.start()
-  const session = await engine.createSession({ workingDirectory: '/work/one' })
-  assert.equal(await session.getWorkingDirectory(), '/work/one')
-
-  await session.setWorkingDirectory('/work/two')
-  assert.equal(await session.getWorkingDirectory(), '/work/two')
-
-  const resumed = await engine.resumeSession(session.sessionId, { workingDirectory: '/work/three' })
-  assert.equal(resumed.sessionId, session.sessionId)
-  assert.equal(resumed.runtimeId, session.runtimeId)
-  assert.equal(await resumed.getWorkingDirectory(), '/work/three')
-  assert.equal((await engine.listSessions())[0]!.workingDirectory, '/work/three')
-})
+// ── 以下为 fake 专有行为（脚本事件注入/abort/错误流终结/未映射错误）；
+//    harness 侧不适用（真实 harness 无脚本注入面），在 M2 契约报告的 not-applicable 清单中列明。──
 
 test('abort stops production and does not hang', async () => {
   const engine = new FakeEngine({ eventDelayMs: 5 })
@@ -121,50 +55,6 @@ test('abort stops production and does not hang', async () => {
   const alreadyAborted = new AbortController()
   alreadyAborted.abort()
   assert.deepEqual(await collect(session.send('x', { signal: alreadyAborted.signal })), [])
-})
-
-test('not-started and stopped operations return TRANSPORT_CLOSED', async () => {
-  const engine = new FakeEngine()
-  await assert.rejects(engine.createSession({ workingDirectory: '/work' }), isCode('TRANSPORT_CLOSED'))
-  await assert.rejects(engine.resumeSession('missing' as SessionId), isCode('TRANSPORT_CLOSED'))
-
-  await engine.start()
-  const session = await engine.createSession({ workingDirectory: '/work' })
-  await engine.stop()
-
-  assert.throws(() => session.send('x'), isCode('TRANSPORT_CLOSED'))
-  await assert.rejects(session.setWorkingDirectory('/other'), isCode('TRANSPORT_CLOSED'))
-  await assert.rejects(engine.createSession({ workingDirectory: '/work' }), isCode('TRANSPORT_CLOSED'))
-  await assert.rejects(engine.resumeSession(session.sessionId), isCode('TRANSPORT_CLOSED'))
-})
-
-test('capabilities match harness evidence exactly', () => {
-  const engine = new FakeEngine()
-  assert.deepEqual(engine.capabilities(), {
-    manualCompact: false,
-    tokenUsage: false,
-    mcpTools: true,
-    compactionEvents: 'available',
-    sessionEnumeration: false,
-    crashRecovery: 'structured-error-only',
-  })
-  // A1 v2 判据层通过：能力位与实测一致，且不得扩张为 system 注入可用。
-  assert.equal(engine.capabilities().compactionEvents, 'available')
-})
-
-test('resume only restores ledger sessions; missing -> ENGINE_UNAVAILABLE', async () => {
-  const engine = new FakeEngine()
-  await engine.start()
-  await assert.rejects(
-    engine.resumeSession('does-not-exist' as SessionId),
-    (error: unknown) => isCode('ENGINE_UNAVAILABLE')(error) && (error as EngineError).retryable === false,
-  )
-
-  const session = await engine.createSession({ workingDirectory: '/work' })
-  await session.close()
-  const resumed = await engine.resumeSession(session.sessionId)
-  assert.equal(resumed.sessionId, session.sessionId)
-  assert.equal((await engine.listSessions())[0]!.state, 'ready')
 })
 
 test('scripted event kinds are yielded with per-session ids', async () => {
@@ -192,6 +82,26 @@ test('scripted event kinds are yielded with per-session ids', async () => {
     'message.complete',
   ])
   assert.ok(events.every((event) => event.sessionId === session.sessionId))
+})
+
+test('close → resume returns the closed session to ready (fake ledger semantics; harness 用 rebuildSession 显式重建)', async () => {
+  const engine = new FakeEngine()
+  await engine.start()
+  const session = await engine.createSession({ workingDirectory: '/work' })
+  await session.close()
+  const resumed = await engine.resumeSession(session.sessionId)
+  assert.equal(resumed.sessionId, session.sessionId)
+  assert.equal((await engine.listSessions())[0]!.state, 'ready')
+})
+
+test('resume override replaces the working directory (fake ledger semantics)', async () => {
+  const engine = new FakeEngine()
+  await engine.start()
+  const session = await engine.createSession({ workingDirectory: '/work/one' })
+  const resumed = await engine.resumeSession(session.sessionId, { workingDirectory: '/work/three' })
+  assert.equal(resumed.sessionId, session.sessionId)
+  assert.equal(await resumed.getWorkingDirectory(), '/work/three')
+  assert.equal((await engine.listSessions())[0]!.workingDirectory, '/work/three')
 })
 
 test('session.error ends the stream, marks failed, and requires explicit resume', async () => {
