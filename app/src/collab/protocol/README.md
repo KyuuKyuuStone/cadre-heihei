@@ -45,6 +45,8 @@
 | review → verified / rework / failed | supervisor | 验收三分支 |
 | rework → in_progress | assignee | 同一 taskId，attempt +1 |
 
+**supervisor 身份（ADR-0019）**：以项目 `members` 的 `role='supervisor'` 为权威口径，允许同一项目多名 supervisor；`dispatcherSessionId` 只用于审计，**不参与权限判定**。花名册不可用时 fail-closed（`INTERNAL_ERROR`），不得回退到 dispatcher 推断。
+
 **reason 必填规则（backend/01 §1.2）**：目标态为 `rework` / `failed` / `cancelled` 的迁移必须提供 `reason`；缺失时返回 `MISSING_REASON`（不落库、不推进状态）。其余迁移的 `reason` 可选。
 
 不变量（`TASK_LEDGER_RULES`）：终态不可迁移；delivered 不得跳过 review；每次迁移写审计事件；取代时旧任务置 cancelled（reason=`superseded`），禁止静默并存。

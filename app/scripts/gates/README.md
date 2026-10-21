@@ -35,6 +35,19 @@
 - 对应 `-green.txt`（exit=0）
 - `evidence/import-boundaries-allowed.txt`（R1 允许路径，exit=0）
 
+### §1.6.1 已知漏报面（待修，2026-10-21 审查 00979930）
+
+当前 parser 只覆盖「静态 `import ... from` / `export ... from` / 动态 `import()`」，以下边界**尚未覆盖**；本单只登记，不改脚本：
+
+| 边界 | 当前行为 | 风险 | 待修方向 |
+|---|---|---|---|
+| 无 `from` 的副作用 import（`import './x.ts'`） | parser 只匹配带 `from` 的形式 | 该文件不被解析，边界/R1-R3 可能漏判 | parser 增加 side-effect import 分支 |
+| `require()` / `import x = require()` | 不解析 | CJS/import-equals 可绕过边界 | 增加 CJS 与 import-equals 解析 |
+| `src/**/*.test.ts` 豁免 | `collect()` 按 `TEST_RE` 排除测试文件 | 测试文件可绕过边界，且豁免范围未显式声明 | 显式声明豁免规则，或对测试纳入边界扫描 |
+| symlink | 目录 symlink 不递归；文件 symlink 按链接路径读取，真实路径不校验 | 目标目录/文件可能漏扫或归属误判 | 用 `realpath` 解析并显式处理链接目标 |
+
+> 在修复前，涉及上述写法的改动必须人工核对；验证时用 `git ls-files` 与扫描计数对账，不把「0 命中」直接当作无违规。
+
 ## 空仓基线
 
 | 文件 | 初始状态 |
@@ -56,6 +69,24 @@
 
 汇总：`evidence/two-state-summary.json`；四门禁顺序全量：`evidence/run-all.{json,txt}`；
 smoke 的 JUnit：`evidence/smoke.junit.xml`。
+
+### 留存口径（2026-10-21 裁决）
+
+1. **产物不入库**：`app/scripts/gates/evidence/` 由 `.gitignore` 排除，保持本地运行产物；
+2. 纯 clone 下 `evidence/` 不存在是**预期状态**。验证必须运行 `npm run gates:evidence` 重建，
+   **不得只对该目录 grep**，再以「无命中」判定通过/失败（静默漏搜风险）；
+3. 每次门禁/证据机制变更或发布前，在本节**追加一条归档记录**（入库文本）：
+   日期、commit、命令、结果、产物路径、生成时间、`two-state-summary.json` 的 sha256；
+4. 红/绿原文留在本地；需要复核时按命令重建，用 sha256 与归档记录比对。
+
+**归档记录**
+
+| 日期 | commit | 命令 | 结果 | 产物 / 生成时间 | sha256 |
+|---|---|---|---|---|---|
+| 2026-10-21 16:21 (+08:00) | `dfff143` | `npm run gates:evidence` | **8/8 符合预期**：file-size、import-semantics、tsc-baseline、smoke、import-boundaries-{ports,collab,renderer,reverse}；全部 red exit=1 / green exit=0 | `app/scripts/gates/evidence/two-state-summary.json`；capturedAt `2026-10-21T08:21:10.389Z` | `91647da1394a8b2bae3fa9b3e8453b0cc909e203868f2775fb0ba519f8dc7f41` |
+
+> 同日同 commit 的 `run-all` 四门禁顺序执行 exit=0（`evidence/run-all.txt`，生成 16:26），
+> 扫描 37 文件、边界检查 37 文件；该文件同样不入库。
 
 ## 迁移改动与未适配
 

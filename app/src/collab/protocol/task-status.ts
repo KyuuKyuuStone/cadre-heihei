@@ -132,6 +132,10 @@ export type TaskTransitionActor =
   | {
       readonly kind: 'session'
       readonly sessionId: SessionId
+      /**
+       * supervisor 身份由项目 `members.role` 解析（ADR-0019），允许同项目多主管；
+       * 不得用 `dispatcherSessionId` 推断。
+       */
       readonly role: 'assignee' | 'supervisor'
     }
   | {
