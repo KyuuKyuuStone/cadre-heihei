@@ -14,7 +14,11 @@
     "gates:tsc": "node scripts/gates/check-tsc-baseline.ts",
     "gates:smoke": "node scripts/gates/smoke.ts",
     "gates:evidence": "node scripts/gates/two-state-evidence.ts",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "test": "node --test \"tests/**/*.test.ts\"",
+    "test:ui": "vitest run",
     "harness:smoke": "node scripts/s7-harness-adapter/run.ts",
     "harness:scan": "node scripts/s7-harness-adapter/security-scan.ts",
     "runtime:soak": "node scripts/m2-runtime-registry/soak.ts",
@@ -23,7 +27,19 @@
     "preflight": "node scripts/preflight-release.mjs --stage all"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^24.0.0",
-    "typescript": "^6.0.3"
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.1.2",
+    "jsdom": "^25.0.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "^4.1.12"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   }
 }
