@@ -324,15 +324,20 @@ function toolGetTask(ctx: ToolContext, args: Args): ToolCallResult {
   const report = [...ctx.backend.listMessageRecords(ctx.identity.projectId)]
     .filter((message) => message.taskId === task.value.taskId && message.direction === 'report')
     .at(-1)
+  const assignee = ctx.backend
+    .listMembers(ctx.identity.projectId)
+    .find((member) => member.sessionId === task.value.assigneeSessionId)
 
   return result({
     ok: true,
     apiVersion: API_VERSION,
     taskId: task.value.taskId,
+    projectId: task.value.projectId,
+    seq: task.value.seq,
     title: task.value.title,
     body: task.value.body,
     status: task.value.status,
-    projectId: task.value.projectId,
+    ...(assignee?.displayName === undefined ? {} : { assigneeName: assignee.displayName }),
     assigneeSessionId: task.value.assigneeSessionId,
     dispatcherSessionId: task.value.dispatcherSessionId,
     attempt: task.value.attempt,

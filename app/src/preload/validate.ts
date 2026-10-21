@@ -15,8 +15,9 @@ import {
 import {
   IPC_CHANNELS,
   IPC_CHANNEL_VALUES,
-  IPC_IDENTITY_FIELDS,
+  IPC_FORBIDDEN_INPUT_FIELDS,
   IPC_MAX_PAYLOAD_BYTES,
+  IPC_SESSION_TARGET_CHANNELS,
   type IpcChannel,
 } from '../shared/ipc.ts'
 
@@ -146,12 +147,21 @@ export function validateIpcInput(
     return invalid('input', `必须传 plain object（收到 ${typeName(input)}）`)
   }
 
-  // 身份覆盖优先判定：即便值为 undefined，也报具体字段而不是 input.xxx。
+  // 身份/通道覆盖优先判定：即便值为 undefined，也报具体字段而不是 input.xxx。
   if (isPlainObject(input)) {
-    const override = IPC_IDENTITY_FIELDS.find((field) =>
+    const forbidden = IPC_FORBIDDEN_INPUT_FIELDS.find((field) =>
       Object.prototype.hasOwnProperty.call(input, field),
     )
-    if (override !== undefined) return invalid(override, 'renderer 不得覆盖身份')
+    if (forbidden !== undefined) {
+      return invalid(
+        forbidden,
+        forbidden === 'channel' ? 'renderer 不得指定事件通道' : 'renderer 不得覆盖身份',
+      )
+    }
+    const sessionTargetAllowed = (IPC_SESSION_TARGET_CHANNELS as readonly string[]).includes(channel)
+    if (!sessionTargetAllowed && Object.prototype.hasOwnProperty.call(input, 'sessionId')) {
+      return invalid('sessionId', 'renderer 不得覆盖身份')
+    }
   }
 
   const seen = new WeakSet<object>()

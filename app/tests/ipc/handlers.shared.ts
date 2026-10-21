@@ -245,6 +245,202 @@ export function runIpcContract(name: string, makeBackend: MakeIpcBackend): void 
     }
   })
 
+  test(`[${name}] 写通道成功 + getTask TaskDetail`, () => {
+    const ctx = setup({ sessionId: SUP, role: 'supervisor' })
+    try {
+      const dispatched = ctx.handlers.handle(ctx.windowId, 'collab:dispatchTask', {
+        toSessionId: EMP,
+        title: 'IPC 派活',
+        body: '正文',
+        idempotencyKey: 'ipc-dispatch-1',
+      }) as any
+      assert.equal(dispatched.ok, true)
+      assert.equal(dispatched.taskStatus, 'dispatched')
+
+      const detail = ctx.handlers.handle(ctx.windowId, 'collab:getTask', {
+        taskId: dispatched.taskId,
+      }) as any
+      assert.equal(detail.ok, true)
+      assert.equal(detail.taskId, dispatched.taskId)
+      assert.equal(detail.status, 'dispatched')
+      assert.equal(typeof detail.seq, 'number')
+      assert.equal(detail.body, '正文')
+      assert.equal(detail.sourceSessionId, SUP)
+      assert.equal(typeof detail.version, 'number')
+      assert.equal(detail.report, null)
+      assert.equal(detail.transitions.length, 1)
+
+      const reviewed = ctx.handlers.handle(ctx.windowId, 'collab:reviewTask', {
+        taskId: TASK.delivered,
+        action: 'enter_review',
+        idempotencyKey: 'ipc-enter-review',
+      }) as any
+      assert.equal(reviewed.ok, true)
+      assert.equal(reviewed.from, 'delivered')
+      assert.equal(reviewed.to, 'review')
+
+      const verified = ctx.handlers.handle(ctx.windowId, 'collab:reviewTask', {
+        taskId: TASK.delivered,
+        action: 'verify',
+        idempotencyKey: 'ipc-verify',
+      }) as any
+      assert.equal(verified.to, 'verified')
+    } finally {
+      ctx.backend.close()
+    }
+
+    const worker = setup({ sessionId: EMP, role: 'worker' })
+    try {
+      const reported = worker.handlers.handle(worker.windowId, 'collab:reportTask', {
+        taskId: TASK.inProgress,
+        body: '完成',
+        deliverables: ['src/a.ts'],
+        idempotencyKey: 'ipc-report-1',
+      }) as any
+      assert.equal(reported.ok, true)
+      assert.equal(reported.ledgerUpdated, true)
+      assert.equal(reported.taskStatusAfter, 'delivered')
+
+      const own = worker.handlers.handle(worker.windowId, 'collab:getTask', {
+        taskId: TASK.inProgress,
+      }) as any
+      assert.equal(own.ok, true)
+      assert.equal(own.report.summary, '完成')
+      assert.deepEqual(own.report.deliverables, ['src/a.ts'])
+
+      const other = worker.handlers.handle(worker.windowId, 'collab:getTask', {
+        taskId: TASK.reviewB,
+      }) as any
+      assert.equal(other.ok, true, '同是本人任务应可读')
+    } finally {
+      worker.backend.close()
+    }
+  })
+
+  test(`[${name}] 写通道跨项目/角色/空态/幂等`, () => {
+    const supervisor = setup({ sessionId: SUP, role: 'supervisor' })
+    try {
+      const cross = supervisor.handlers.handle(supervisor.windowId, 'collab:getTask', {
+        taskId: TASK.p2,
+      }) as any
+      assert.equal(cross.error.code, 'CROSS_PROJECT_DENIED')
+      assert.equal('taskId' in cross.error, false)
+
+      const crossSupersede = supervisor.handlers.handle(
+        supervisor.windowId,
+        'collab:dispatchTask',
+        {
+          toSessionId: EMP,
+          title: '跨项目取代',
+          body: '正文',
+          idempotencyKey: 'ipc-cross-supersede',
+          supersedesTaskId: TASK.p2,
+        },
+      ) as any
+      assert.equal(crossSupersede.error.code, 'CROSS_PROJECT_DENIED')
+
+      const emptyBody = supervisor.handlers.handle(supervisor.windowId, 'collab:dispatchTask', {
+        toSessionId: EMP,
+        title: '空正文',
+        body: '   ',
+        idempotencyKey: 'ipc-empty-body',
+      }) as any
+      assert.equal(emptyBody.error.code, 'EMPTY_BODY')
+
+      const first = supervisor.handlers.handle(supervisor.windowId, 'collab:dispatchTask', {
+        toSessionId: EMP,
+        title: '幂等任务',
+        body: '正文',
+        idempotencyKey: 'ipc-idem',
+      }) as any
+      const replay = supervisor.handlers.handle(supervisor.windowId, 'collab:dispatchTask', {
+        toSessionId: EMP,
+        title: '幂等任务',
+        body: '正文',
+        idempotencyKey: 'ipc-idem',
+      }) as any
+      assert.deepEqual(replay, first)
+      const conflict = supervisor.handlers.handle(supervisor.windowId, 'collab:dispatchTask', {
+        toSessionId: EMP,
+        title: '幂等任务',
+        body: '另一份正文',
+        idempotencyKey: 'ipc-idem',
+      }) as any
+      assert.equal(conflict.error.code, 'IDEMPOTENCY_CONFLICT')
+
+      const missingKey = supervisor.handlers.handle(supervisor.windowId, 'collab:dispatchTask', {
+        toSessionId: EMP,
+        title: '缺键',
+        body: '正文',
+      }) as any
+      assert.equal(missingKey.error.code, 'INVALID_ARGUMENT')
+      assert.equal(missingKey.error.field, 'idempotencyKey')
+    } finally {
+      supervisor.backend.close()
+    }
+
+    const worker = setup({ sessionId: EMP, role: 'worker' })
+    try {
+      const workerDispatch = worker.handlers.handle(worker.windowId, 'collab:dispatchTask', {
+        toSessionId: EMP,
+        title: '员工派活',
+        body: '正文',
+        idempotencyKey: 'ipc-worker-dispatch',
+      }) as any
+      assert.equal(workerDispatch.error.code, 'FORBIDDEN_ACTOR')
+      assert.equal(workerDispatch.error.reasonCategory, 'not-supervisor')
+
+      const workerReview = worker.handlers.handle(worker.windowId, 'collab:reviewTask', {
+        taskId: TASK.review,
+        action: 'verify',
+        idempotencyKey: 'ipc-worker-review',
+      }) as any
+      assert.equal(workerReview.error.code, 'FORBIDDEN_ACTOR')
+
+      const missingTask = worker.handlers.handle(worker.windowId, 'collab:reportTask', {
+        body: '完成',
+        deliverables: [],
+        idempotencyKey: 'ipc-missing-task',
+      }) as any
+      assert.equal(missingTask.error.code, 'MISSING_TASK_ID')
+      assert.ok(Array.isArray(missingTask.error.candidates))
+      assert.ok(missingTask.error.hint)
+    } finally {
+      worker.backend.close()
+    }
+
+    const other = setup({ sessionId: EMP2, role: 'worker' })
+    try {
+      const notAssignee = other.handlers.handle(other.windowId, 'collab:reportTask', {
+        taskId: TASK.review,
+        body: '代汇报',
+        deliverables: [],
+        idempotencyKey: 'ipc-not-assignee',
+      }) as any
+      assert.equal(notAssignee.error.code, 'FORBIDDEN_ACTOR')
+      assert.equal(notAssignee.error.reasonCategory, 'not-assignee')
+    } finally {
+      other.backend.close()
+    }
+  })
+
+  test(`[${name}] review 幂等：同键重放返回首次回执`, () => {
+    const ctx = setup({ sessionId: SUP, role: 'supervisor' })
+    try {
+      const request = {
+        taskId: TASK.review,
+        action: 'verify',
+        idempotencyKey: 'ipc-review-idem',
+      }
+      const first = ctx.handlers.handle(ctx.windowId, 'collab:reviewTask', request) as any
+      const second = ctx.handlers.handle(ctx.windowId, 'collab:reviewTask', request) as any
+      assert.equal(first.ok, true)
+      assert.deepEqual(second, first)
+    } finally {
+      ctx.backend.close()
+    }
+  })
+
   test(`[${name}] 未映射异常 → INTERNAL_ERROR + rawCode，不抛出`, () => {
     const ctx = setup()
     try {

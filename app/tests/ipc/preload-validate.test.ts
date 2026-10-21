@@ -85,6 +85,29 @@ test('身份覆盖：projectId/sessionId 出现即拒绝', () => {
   expectInvalid(validateIpcInput('app:whoami', { projectId: 'p2' }), 'projectId')
   // 值即使 undefined 也不得出现。
   expectInvalid(validateIpcInput('collab:listTasks', { sessionId: undefined }), 'sessionId')
+  expectInvalid(validateIpcInput('collab:dispatchTask', { sessionId: 's' }), 'sessionId')
+  expectInvalid(validateIpcInput('session:unsubscribe', { sessionId: 's' }), 'sessionId')
+})
+
+test('会话通道允许目标 sessionId，但仍拒绝 projectId/channel', () => {
+  const send = validateIpcInput('session:send', {
+    sessionId: 'session-emp',
+    body: 'hi',
+    idempotencyKey: 'k',
+  })
+  assert.equal(send.ok, true)
+  const subscribe = validateIpcInput('session:subscribe', { sessionId: 'session-emp' })
+  assert.equal(subscribe.ok, true)
+
+  expectInvalid(
+    validateIpcInput('session:send', { projectId: 'p', sessionId: 's', body: 'hi' }),
+    'projectId',
+  )
+  expectInvalid(
+    validateIpcInput('session:send', { channel: 'session:event', sessionId: 's', body: 'hi' }),
+    'channel',
+  )
+  expectInvalid(validateIpcInput('session:send', { sessionId: 's', body: () => 1 }), 'input.body')
 })
 
 test('无参通道与未知通道', () => {
