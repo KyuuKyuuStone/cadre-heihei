@@ -173,10 +173,13 @@ export function independentReceipt(body: string): {
   bodySha256: string
   preview: string
 } {
+  // 独立复算：先 trim → 前 50 个 code point → 有剩余才追加省略号。
+  const trimmed = body.trim()
+  const codePoints = Array.from(trimmed)
   return {
     bodyBytes: Buffer.from(body, 'utf8').length,
     bodySha256: createHash('sha256').update(body, 'utf8').digest('hex'),
-    preview: Array.from(body).slice(0, 50).join(''),
+    preview: codePoints.length > 50 ? `${codePoints.slice(0, 50).join('')}…` : trimmed,
   }
 }
 

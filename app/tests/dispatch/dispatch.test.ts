@@ -149,7 +149,8 @@ it('客户端命令：代码块内的 /compact 放行（只检查首个 token）
 // —— 5. 回执自证 ——
 it('回执自证：bodyBytes/bodySha256/preview 对实收原样正文计算', () => {
   const { service } = makeService()
-  const body = `第一行\r\n${'a'.repeat(44)}😀结尾`
+  // 恰好 50 个 code point：5（第一行\r\n）+ 44 个 a + emoji，边界不触发省略号。
+  const body = `第一行\r\n${'a'.repeat(44)}😀`
   const receipt = dispatchOk(service, BINDING_SUP, { body })
   const expected = independentReceipt(body)
 
@@ -172,8 +173,9 @@ it('回执自证：BOM 原样进入 bodyBytes 与哈希', () => {
   const body = '\uFEFF你好'
   const receipt = dispatchOk(service, BINDING_SUP, { body })
   assert.equal(receipt.bodyBytes, 9)
-  assert.equal(receipt.preview.codePointAt(0), 0xfeff)
+  assert.equal(receipt.preview, '你好', 'preview 先 trim，BOM 不计入预览')
   assert.equal(receipt.bodySha256, independentReceipt(body).bodySha256)
+  assert.notEqual(receipt.bodySha256, independentReceipt('你好').bodySha256)
 })
 
 // —— 6. 幂等 ——

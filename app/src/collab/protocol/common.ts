@@ -13,10 +13,11 @@ export const DELIVERY_STATES = ['received', 'delivered', 'failed'] as const
 export type DeliveryState = (typeof DELIVERY_STATES)[number]
 
 /**
- * `preview` 的最大长度：前 50 个 **Unicode code point**（U-07 已裁决）。
- * 注意与 `bodyBytes` 口径分开：
- * - `preview` 按 code point 截断（避免把代理对/emoji 从中间截断）；
- * - `bodyBytes` 按 UTF-8 字节数计，二者不可互相换算。
+ * `preview` 的基准长度（backend/01 §2.3，U-07 已裁决）：
+ * 先去首尾空白（trim）→ 取前 50 个 **Unicode code point**；若 trim 后仍有剩余，
+ * 末尾追加一个 `…`，因此 preview 总长最多 51 code point。
+ * 注意与 `bodyBytes` 口径分开：trim 与省略号只影响 preview；
+ * `bodyBytes` / `bodySha256` 仍按 UTF-8 实收原样计，不 trim、不可互相换算。
  */
 export const PREVIEW_MAX_CODE_POINTS = 50 as const
 

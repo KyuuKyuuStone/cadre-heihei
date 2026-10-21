@@ -54,7 +54,7 @@
 - 派活：`projectId`、`toSessionId`、`title`、`body`、`idempotencyKey`、可选 `supersedesTaskId`；前置拒绝空正文与客户端命令，目标须为本项目成员且非 offline。
 - 汇报：必须显式 `taskId`；入口类型 `ReportRequestInput` 允许 `taskId` 缺失，以便返回 `MISSING_TASK_ID` + 候选，**不得自动挂靠**。
 - 两个回执均含服务端实收的 `bodyBytes` / `preview` / `bodySha256`；`ledgerUpdated: false` 必须附 `ledgerError`，不得伪报成功。
-- **口径（U-07/U-13 已裁决）**：`preview` 取前 **50 个 Unicode code point**；`bodyBytes` 为 **UTF-8 实收原样字节数**（不做 BOM/换行规范化，`bodySha256` 同样对实收原样计算）。两个口径分开，不可互相换算。
+- **口径（backend/01 §2.3，U-07/U-13 已裁决）**：`preview` 先 **trim 首尾空白**，再取前 **50 个 Unicode code point**；trim 后若仍有剩余，末尾追加一个 `…`（总长最多 51 code point）。`bodyBytes` 为 **UTF-8 实收原样字节数**（不做 BOM/换行规范化，不 trim，`bodySha256` 同样对实收原样计算）。trim 与省略号只影响 `preview`，两个口径分开，不可互相换算。
 - 幂等：同一 `(project_id, idempotency_key)` 重复提交返回首次回执；同键不同正文 → `IDEMPOTENCY_CONFLICT`。
 - 取代（U-12 已裁决）：请求带 `supersedesTaskId` 时，回执必须回传 `supersededTask`（旧 taskId + `cancelled` + `reason=superseded`），供调用方确认旧任务已取消。
 
