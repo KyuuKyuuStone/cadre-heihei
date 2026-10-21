@@ -172,12 +172,12 @@ export class FakeEngine implements EnginePort {
   }
 
   capabilities(): EngineCapabilities {
-    // 与 S1-S5b 实测一致；A1 未回报前 compactionEvents 不得改为 available。
+    // 与 S1-S5b/A1 v2 实测一致：compaction 事件与稳定 ID 可观测；注入仅 user-role。
     return {
       manualCompact: false,
       tokenUsage: false,
       mcpTools: true,
-      compactionEvents: 'unverified',
+      compactionEvents: 'available',
       sessionEnumeration: false,
       crashRecovery: 'structured-error-only',
     }

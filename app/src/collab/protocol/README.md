@@ -89,7 +89,7 @@
 | `manualCompact` | `false` | N8；S3 手动 `/compact` 0 事件 | 实测不可用 |
 | `tokenUsage` | `false` | N9；usage/shadowed 未暴露 | 实测不可得 |
 | `mcpTools` | `true` | S5b B1-B4 | 实测可用 |
-| `compactionEvents` | `'unverified'` | A1 未验证 | **不得改成 available** |
+| `compactionEvents` | `'available'` | A1 补测 v2（判据层通过） | 实测可用；注入仅 user-role |
 | `sessionEnumeration` | `false` | N7：SDK 无枚举 | 自建会话台账 |
 | `crashRecovery` | `'structured-error-only'` | N15/N16 | 崩溃需重建会话 |
 
@@ -105,7 +105,7 @@
 
 | ID | 未决项 | 影响 | 状态/裁决 |
 |---|---|---|---|
-| U-01 | A1：compaction 事件字段形态、稳定事件 ID、窗口外可观测性 | 证据卡注入与幂等键 `(taskId, eventId, revision)` | **未决**（A1 执行中）；`compactionEvents` 保持 `unverified` |
+| U-01 | A1：compaction 事件字段形态、稳定事件 ID、窗口外可观测性 | 证据卡注入与幂等键 `(taskId, compactionId, revision)` | **已裁决/关闭**（A1 补测 v2，2026-10-21）：`compactionId`/`turn`/`shadowedTokenCount`/`usage` 等字段、稳定事件 ID、窗口外可观测均已实测；注入形态为 user-role（system 不可） |
 | U-02 | N9：token 计量不可得 | 能力位 false；本版不定义 usage 字段，禁止估算 | 保持现状：适配层自计量或延后 |
 | U-03 | N8：手动压缩不可用 | 无按需压缩入口；替代触发未定 | 保持现状：产品层设计 |
 | U-04 | B5：SQLite WAL 并发/恢复、台账幂等 | 仓储端口与持久化约束 | **已通过（原型范围）**，证据 `D:\xxw_p\cadre-spike-b1b5`；**可定义仓储端口**。限制：未测掉电/OS 崩溃、网络盘、打包 ABI |
@@ -126,7 +126,7 @@
 2. 终态不可迁移；`delivered` 不得直达 `verified/rework/failed`；`delivered → review` 只允许主管点名，禁止自动触发；
 3. 空集合必须给 `reason` + `hint`，不得渲染为错误；
 4. 跨项目错误不得携带候选或任务存在性字段；
-5. 能力位不得“补全”：`compactionEvents` 在 A1 通过前只能是 `unverified`；
+5. 能力位不得臆造：`compactionEvents` 自 A1 判据层通过（2026-10-21）起为 `available`；不得据此宣称 system 注入可用；
 6. 任何未映射错误 → `INTERNAL_ERROR` + `rawCode`，不得吞掉或改写为成功；该错误不自动重试；
 7. `preview` 按前 50 个 Unicode code point 截断；`bodyBytes` 与 `bodySha256` 按 UTF-8 实收原样计算，不做 BOM/换行规范化；
 8. supersedes 回执必须回传旧任务（taskId + cancelled + reason=superseded）；

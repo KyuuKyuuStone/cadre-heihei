@@ -144,11 +144,12 @@ test('capabilities match harness evidence exactly', () => {
     manualCompact: false,
     tokenUsage: false,
     mcpTools: true,
-    compactionEvents: 'unverified',
+    compactionEvents: 'available',
     sessionEnumeration: false,
     crashRecovery: 'structured-error-only',
   })
-  assert.notEqual(engine.capabilities().compactionEvents, 'available')
+  // A1 v2 判据层通过：能力位与实测一致，且不得扩张为 system 注入可用。
+  assert.equal(engine.capabilities().compactionEvents, 'available')
 })
 
 test('resume only restores ledger sessions; missing -> ENGINE_UNAVAILABLE', async () => {

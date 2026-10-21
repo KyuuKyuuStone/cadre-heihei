@@ -24,14 +24,19 @@ export type CapabilityStatus = (typeof CAPABILITY_STATUSES)[number]
  * - `manualCompact: false` —— N8：SDK 形态 `/compact` 触发 0 事件（S3）；
  * - `tokenUsage: false` —— N9：usage/shadowedTokenCount 未暴露（S3）；
  * - `mcpTools: true` —— S5b B1-B4：工具发现/调用/错误可见；
- * - `compactionEvents: 'unverified'` —— A1 未验证；**A1 通过前不得改为 available**；
+ * - `compactionEvents: 'available'` —— A1 判据层已通过（2026-10-21）：事件与稳定 ID
+ *   （`data.compactionId`）窗口内外可观测；注入仅 user-role，system 不可（证据 a1 v2）；
  * - `sessionEnumeration: false` —— N7：SDK 无会话枚举 API；
  * - `crashRecovery: 'structured-error-only'` —— N15/N16：崩溃后结构化失败，需重建会话。
+ *
+ * `compactionEvents` 的类型仍为 `CapabilityStatus`，用于表达
+ * available / unavailable / unverified 三态，不因 A1 通过而收窄。
  */
 export interface EngineCapabilities {
   readonly manualCompact: false
   readonly tokenUsage: false
   readonly mcpTools: true
+  /** A1 v2（2026-10-21）：当前实现返回 `'available'`；注入仅 user-role，system 不可。 */
   readonly compactionEvents: CapabilityStatus
   readonly sessionEnumeration: false
   readonly crashRecovery: 'structured-error-only'
@@ -117,9 +122,10 @@ export interface EngineToolResult extends EngineEventBase {
 }
 
 /**
- * 压缩事件：S3 已证三类事件出现在 `RunResult.events`；字段形态与窗口外可观测性
- * 属 A1 未验证项（`testing/02` §1）。
- * `raw` 仅允许 adapter/诊断使用，产品逻辑不得依赖；A1 结论出来后再补结构化字段。
+ * 压缩事件：S3 已证三类事件出现在 `RunResult.events`；A1 补测 v2（2026-10-21）
+ * 证实窗口内外均可观测、稳定 ID `data.compactionId`，以及 `turn` /
+ * `shadowedTokenCount` / `usage` 等字段形态；注入仅 user-role，system 不可。
+ * `raw` 仅允许 adapter/诊断使用，产品逻辑不得依赖。
  */
 export interface EngineCompactionEvent extends EngineEventBase {
   readonly kind: 'compaction.start' | 'compaction.summary' | 'compaction.end'
