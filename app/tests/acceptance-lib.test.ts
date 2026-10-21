@@ -111,3 +111,56 @@ test('classifyFailures/verdict: 复跑绿=环境噪声，复跑红=真回归', (
   assert.deepEqual(verdict(classified), { result: 'FAIL', realRegressions: 1, envNoise: 1 })
   assert.deepEqual(verdict([classified[0]!]), { result: 'PASS', realRegressions: 0, envNoise: 1 })
 })
+
+test('parseJunit: 属性值含裸 > 不漏计（单引号/双引号）', () => {
+  const xml = `<testsuites><testsuite tests="4" failures="0">
+    <testcase name="meta: raw > 0" classname="a"/>
+    <testcase name='meta: single > quote' classname='a'/>
+    <testcase name="meta: 用例收集数 &gt; 0" classname="a"/>
+    <testcase name="normal" classname="a"/>
+  </testsuite></testsuites>`
+  const parsed = parseJunit(xml)
+  assert.equal(parsed.cases.length, 4)
+  assert.equal(parsed.pass, 4)
+  assert.equal(parsed.fail, 0)
+  assert.equal(parsed.skipped, 0)
+  assert.equal(parsed.total, 4)
+  assert.deepEqual(parsed.cases.map((c) => c.name), [
+    'meta: raw > 0',
+    'meta: single > quote',
+    'meta: 用例收集数 > 0',
+    'normal',
+  ])
+})
+
+test('parseJunit: 用例名含 /> 字样不被截断', () => {
+  const xml = `<testsuites><testsuite tests="2" failures="0">
+    <testcase name="name with /> marker" classname="a"/>
+    <testcase name='single with /> marker' classname='a'/>
+  </testsuite></testsuites>`
+  const parsed = parseJunit(xml)
+  assert.equal(parsed.cases.length, 2)
+  assert.equal(parsed.pass, 2)
+  assert.deepEqual(parsed.cases.map((c) => c.name), [
+    'name with /> marker',
+    'single with /> marker',
+  ])
+})
+
+test('parseJunit: 自闭合与带 failure/error/skipped 子元素混合，逐条计数一致', () => {
+  const xml = `<testsuites><testsuite>
+    <testcase name="pass > one" classname="a"/>
+    <testcase name="fail /> two" classname="a"><failure message="boom > x">trace</failure></testcase>
+    <testcase name="skipped > three" classname="a"><skipped/></testcase>
+    <testcase name='single fail > four' classname='a'><error message='err > y'/></testcase>
+  </testsuite></testsuites>`
+  const parsed = parseJunit(xml)
+  assert.equal(parsed.cases.length, 4)
+  assert.equal(parsed.pass, 1)
+  assert.equal(parsed.fail, 2)
+  assert.equal(parsed.skipped, 1)
+  assert.equal(parsed.total, 4)
+  assert.equal(parsed.failures.length, parsed.cases.filter((c) => c.failed).length)
+  assert.equal(parsed.cases.length, parsed.pass + parsed.fail + parsed.skipped)
+  assert.deepEqual(parsed.failures.map((f) => f.message), ['boom > x', 'err > y'])
+})

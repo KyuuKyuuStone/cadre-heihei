@@ -44,13 +44,80 @@ export type ClassifiedFailure = RerunOutcome & {
   kind: 'env-noise' | 'real-regression'
 }
 
-const TESTCASE_RE = /<testcase\b[^>]*?(?:\/>|>[\s\S]*?<\/testcase>)/g
-const ATTR_RE = /\b([a-zA-Z]+)="([^"]*)"/g
+const TESTCASE_OPEN = '<testcase'
+const TESTCASE_CLOSE = '</testcase>'
+// 属性值允许单引号/双引号；值内的 `>`、`/>` 由起始标签扫描器按引号状态忽略。
+const ATTR_RE = /\b([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
+
+type StartTag = { end: number; selfClosing: boolean }
+
+/**
+ * 找到起始标签的结束位置。属性值内的 `>` / `/>` 不结束标签；
+ * 单引号与双引号都按引号状态处理。
+ */
+function findStartTagEnd(xml: string, start: number, tagName: string): StartTag | null {
+  let quote: '"' | "'" | null = null
+  for (let i = start + tagName.length; i < xml.length; i++) {
+    const ch = xml[i]!
+    if (quote !== null) {
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      continue
+    }
+    if (ch === '>') {
+      let j = i - 1
+      while (j > start && /\s/.test(xml[j]!)) j--
+      return { end: i + 1, selfClosing: xml[j] === '/' }
+    }
+  }
+  return null
+}
+
+/** 提取所有 <testcase> 块；自闭合与带子元素（failure/skipped）两种形态都覆盖。 */
+function testcaseBlocks(xml: string): string[] {
+  const blocks: string[] = []
+  let cursor = 0
+  while (true) {
+    const start = xml.indexOf(TESTCASE_OPEN, cursor)
+    if (start < 0) break
+    const next = xml[start + TESTCASE_OPEN.length]
+    // 排除 <testcases> 之类同前缀标签
+    if (next !== undefined && !/[\s/>]/.test(next)) {
+      cursor = start + TESTCASE_OPEN.length
+      continue
+    }
+    const tag = findStartTagEnd(xml, start, TESTCASE_OPEN)
+    if (tag === null) break
+    if (tag.selfClosing) {
+      blocks.push(xml.slice(start, tag.end))
+      cursor = tag.end
+      continue
+    }
+    const close = xml.indexOf(TESTCASE_CLOSE, tag.end)
+    if (close < 0) {
+      cursor = tag.end
+      continue
+    }
+    const end = close + TESTCASE_CLOSE.length
+    blocks.push(xml.slice(start, end))
+    cursor = end
+  }
+  return blocks
+}
+
+function startTagText(block: string): string {
+  const tag = findStartTagEnd(block, 0, TESTCASE_OPEN)
+  return tag === null ? block : block.slice(0, tag.end)
+}
 
 function extractAttrs(block: string): Record<string, string> {
   const attrs: Record<string, string> = {}
   for (const match of block.matchAll(ATTR_RE)) {
-    attrs[match[1]!] = decodeXml(match[2]!)
+    const value = match[2] ?? match[3] ?? ''
+    attrs[match[1]!] = decodeXml(value)
   }
   return attrs
 }
@@ -65,10 +132,28 @@ function decodeXml(value: string): string {
 }
 
 function firstFailureMessage(block: string): string | undefined {
-  const match = /<(?:failure|error)\b[^>]*message="([^"]*)"/.exec(block)
-    ?? /<(?:failure|error)\b[^>]*>([\s\S]*?)<\/(?:failure|error)>/.exec(block)
-  if (!match) return undefined
-  const text = decodeXml(match[1]!).trim()
+  let index = -1
+  let tagName = ''
+  for (const candidate of ['<failure', '<error']) {
+    const at = block.indexOf(candidate)
+    if (at >= 0 && (index < 0 || at < index)) {
+      index = at
+      tagName = candidate
+    }
+  }
+  if (index < 0) return undefined
+
+  const tag = findStartTagEnd(block, index, tagName)
+  if (tag === null) return undefined
+  const attrs = extractAttrs(block.slice(index, tag.end))
+  if (attrs.message !== undefined) {
+    return attrs.message.trim().split(/\r?\n/)[0]
+  }
+
+  const closeTag = `</${tagName.slice(1)}>`
+  const close = block.indexOf(closeTag, tag.end)
+  if (close < 0) return undefined
+  const text = decodeXml(block.slice(tag.end, close)).trim()
   return text.split(/\r?\n/)[0]
 }
 
@@ -79,9 +164,8 @@ export function parseJunit(xml: string): ParsedRun {
   let skipped = 0
   const cases: JunitCase[] = []
 
-  for (const match of xml.matchAll(TESTCASE_RE)) {
-    const block = match[0]
-    const attrs = extractAttrs(block)
+  for (const block of testcaseBlocks(xml)) {
+    const attrs = extractAttrs(startTagText(block))
     const name = attrs.name ?? ''
     const classname = attrs.classname ?? ''
     const file = (attrs.file ?? attrs.classname ?? '').replaceAll('\\', '/')
