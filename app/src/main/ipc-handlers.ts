@@ -235,8 +235,15 @@ function callerMember(
 export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistry {
   // 每个会话当前 run 的“停止后续产出”控制器（harness 无 mid-turn cancel）。
   const activeRuns = new Map<SessionId, AbortController>()
-  // review 幂等：同键同请求返回首次回执；不同请求仍交给台账判 IDEMPOTENCY_CONFLICT。
-  const reviewReplays = new Map<string, { readonly signature: string; readonly result: IpcResult }>()
+  /**
+   * session:send 进程内幂等缓存（U-IPC-02）：同键同 body 返回首次回执，
+   * 不重复调用 EngineSession.send；同键异 body → IDEMPOTENCY_CONFLICT。
+   * 仅进程内有效，跨主进程重启不保证（M4 再接持久化）。
+   */
+  const sendReplays = new Map<
+    string,
+    { readonly body: string; readonly receipt: SendMessageReceipt }
+  >()
   const now = options.now ?? (() => new Date().toISOString())
   const newId = options.newId ?? (() => randomUUID())
 
@@ -270,7 +277,6 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
         if (identity === undefined) return crossProjectDenied('')
         const membership = callerMember(options, identity)
         if (!membership.ok) return membership.failure
-        const callerIsSupervisor = membership.member.role === 'supervisor'
 
         switch (channel as IpcChannel) {
           case IPC_CHANNELS.whoami: {
@@ -309,23 +315,6 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
               | 'dispatch_task'
               | 'report_task'
               | 'review_task'
-            const replayKey =
-              callerIsSupervisor &&
-              channel === IPC_CHANNELS.reviewTask &&
-              typeof parsed.value.idempotencyKey === 'string'
-                ? `${String(identity.projectId)}\u0000${parsed.value.idempotencyKey}`
-                : undefined
-            const signature =
-              replayKey === undefined
-                ? undefined
-                : JSON.stringify({
-                    taskId: parsed.value.taskId,
-                    action: parsed.value.action,
-                    reason: parsed.value.reason,
-                  })
-            const cached = replayKey === undefined ? undefined : reviewReplays.get(replayKey)
-            if (cached !== undefined && cached.signature === signature) return cached.result
-
             const result = handleToolCall(
               {
                 identity: {
@@ -337,9 +326,6 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
               toolName,
               parsed.value,
             )
-            if (replayKey !== undefined && signature !== undefined && !result.isError) {
-              reviewReplays.set(replayKey, { signature, result: result.payload as IpcResult })
-            }
             if (channel === IPC_CHANNELS.getTask) {
               if (result.isError) return result.payload as IpcResult
               return {
@@ -381,6 +367,19 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
             if ((body.value as string).trim() === '') return emptyBodyFailure()
             const key = stringField(parsed.value, 'idempotencyKey')
             if (!key.ok) return key.failure
+            const replayKey =
+              key.value === undefined
+                ? undefined
+                : `${String(identity.projectId)}\u0000${String(target.sessionId)}\u0000${key.value}`
+            const cached = replayKey === undefined ? undefined : sendReplays.get(replayKey)
+            if (cached !== undefined) {
+              if (cached.body !== (body.value as string)) {
+                return failure('IDEMPOTENCY_CONFLICT', '幂等键已被不同正文占用', {
+                  projectId: identity.projectId,
+                })
+              }
+              return { ok: true, apiVersion: API_VERSION, ...cached.receipt }
+            }
             if (options.sessions === undefined) return unavailable('SESSION_PORT_UNAVAILABLE')
             if (options.pump === undefined) return unavailable('PUMP_UNAVAILABLE')
             const session = options.sessions.get(target.sessionId)
@@ -413,6 +412,9 @@ export function createIpcHandlers(options: IpcHandlerOptions): IpcHandlerRegistr
               ...buildBodyReceipt(body.value as string),
               messageId: newId() as never,
               acceptedAt: now() as never,
+            }
+            if (replayKey !== undefined) {
+              sendReplays.set(replayKey, { body: body.value as string, receipt })
             }
             return { ok: true, apiVersion: API_VERSION, ...receipt }
           }

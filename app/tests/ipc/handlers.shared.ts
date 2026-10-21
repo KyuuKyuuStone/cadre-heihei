@@ -424,7 +424,7 @@ export function runIpcContract(name: string, makeBackend: MakeIpcBackend): void 
     }
   })
 
-  test(`[${name}] review 幂等：同键重放返回首次回执`, () => {
+  test(`[${name}] review 幂等：状态已变后同键重放仍返回首次回执且版本不增`, () => {
     const ctx = setup({ sessionId: SUP, role: 'supervisor' })
     try {
       const request = {
@@ -433,9 +433,25 @@ export function runIpcContract(name: string, makeBackend: MakeIpcBackend): void 
         idempotencyKey: 'ipc-review-idem',
       }
       const first = ctx.handlers.handle(ctx.windowId, 'collab:reviewTask', request) as any
-      const second = ctx.handlers.handle(ctx.windowId, 'collab:reviewTask', request) as any
       assert.equal(first.ok, true)
-      assert.deepEqual(second, first)
+      const versionAfterFirst = first.version
+
+      // 新 handler 实例（模拟主进程重启/模块级缓存丢失）：只能靠台账事件 replay。
+      const fresh = createIpcHandlers({
+        binding: ctx.binding,
+        backend: ctx.backend.service,
+        preferences: ctx.prefs,
+      })
+      const second = fresh.handle(ctx.windowId, 'collab:reviewTask', request) as any
+      assert.deepEqual(second, first, '重放必须返回首次回执')
+      assert.equal(second.version, versionAfterFirst, '重放不得再次迁移')
+
+      const task = ctx.backend.service.ledger.getTask(P1 as never, TASK.review)
+      assert.equal(task.ok, true)
+      if (task.ok) {
+        assert.equal(task.value.status, 'verified')
+        assert.equal(task.value.version, versionAfterFirst)
+      }
     } finally {
       ctx.backend.close()
     }

@@ -474,6 +474,50 @@ function toolReview(ctx: ToolContext, args: Args): ToolCallResult {
   const current = ctx.backend.ledger.getTask(ctx.identity.projectId, taskId.value as never)
   if (!current.ok) return result(mapLedgerError(current.error))
 
+  /*
+   * 幂等重放必须在「按当前状态计算 from」之前命中：
+   * transitionFingerprint 含 from，若先调 transition，状态已变会导致指纹不同而报冲突。
+   * 台账事件持久化 idempotencyKey，跨重启仍可按 key 找到首次结果。
+   */
+  const events = ctx.backend.ledger.listEvents(ctx.identity.projectId, taskId.value as never)
+  if (!events.ok) return result(mapLedgerError(events.error))
+  const replay = events.value.find((event) => event.idempotencyKey === idempotencyKey.value)
+  if (replay !== undefined) {
+    const actorSessionId =
+      replay.actorSessionId === 'system' ? ctx.identity.sessionId : replay.actorSessionId
+    const sameRequest =
+      replay.toStatus === to &&
+      actorSessionId === ctx.identity.sessionId &&
+      (replay.reason ?? '') === (reason.value ?? '')
+    if (!sameRequest) {
+      return result({
+        ok: false,
+        apiVersion: API_VERSION,
+        error: {
+          code: 'IDEMPOTENCY_CONFLICT',
+          message: `幂等键已被不同请求占用：${idempotencyKey.value}`,
+          retryable: false,
+          projectId: ctx.identity.projectId,
+        },
+      })
+    }
+    const replayReceipt: TransitionReceipt = {
+      taskId: current.value.taskId,
+      from: replay.fromStatus ?? current.value.status,
+      to: replay.toStatus,
+      attempt: current.value.attempt,
+      updatedAt: replay.at,
+      ...(replay.reason === undefined ? {} : { reason: replay.reason }),
+      eventId: replay.eventId,
+      ...(replay.actorSessionId === 'system'
+        ? {}
+        : { actorSessionId: replay.actorSessionId }),
+      version: current.value.version,
+      ledgerUpdated: true,
+    }
+    return result({ ok: true, apiVersion: API_VERSION, ...replayReceipt })
+  }
+
   const transition = ctx.backend.ledger.transition({
     projectId: ctx.identity.projectId,
     taskId: taskId.value as never,

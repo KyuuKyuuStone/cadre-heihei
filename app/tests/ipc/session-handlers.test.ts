@@ -299,6 +299,52 @@ test('reconnect：重建成功 → recreated + epoch 递增；失败 → INTERNA
   }
 })
 
+test('send 幂等：同键同 body 不重复 send/不重复推事件；异 body 冲突；不同键放行', async () => {
+  const session = new FakeSession(EMP, [
+    [delta('a'), complete('a')],
+    [complete('b')],
+  ])
+  const ctx = setup(session)
+  try {
+    await ctx.call('session:subscribe', { sessionId: EMP })
+    const request = { sessionId: EMP, body: 'a', idempotencyKey: 'send-idem-1' }
+    const first = (await ctx.call('session:send', request)) as any
+    assert.equal(first.ok, true)
+    await settle()
+    ctx.pump.flush()
+    const eventsAfterFirst = ctx.captured.length
+    assert.equal(session.prompts.length, 1)
+
+    const replay = (await ctx.call('session:send', request)) as any
+    assert.deepEqual(replay, first, '同键同 body 返回首次回执')
+    assert.equal(session.prompts.length, 1, '重放不得再次调用 send')
+    await settle()
+    ctx.pump.flush()
+    assert.equal(ctx.captured.length, eventsAfterFirst, '重放不得重复推事件')
+
+    const conflict = (await ctx.call('session:send', {
+      sessionId: EMP,
+      body: 'b',
+      idempotencyKey: 'send-idem-1',
+    })) as any
+    assert.equal(conflict.error.code, 'IDEMPOTENCY_CONFLICT')
+    assert.equal(session.prompts.length, 1)
+
+    const differentKey = (await ctx.call('session:send', {
+      sessionId: EMP,
+      body: 'b',
+      idempotencyKey: 'send-idem-2',
+    })) as any
+    assert.equal(differentKey.ok, true)
+    assert.equal(session.prompts.length, 2, '不同键应放行')
+    await settle()
+    ctx.pump.flush()
+    assert.ok(ctx.captured.length > eventsAfterFirst)
+  } finally {
+    ctx.cleanup()
+  }
+})
+
 test('send 事件流抛错 → 合成 session.error，handler 不抛出', async () => {
   const throwing: EngineSession = {
     sessionId: EMP,
