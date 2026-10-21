@@ -1,6 +1,8 @@
 export type Locale = 'en' | 'zh' | 'zh-TW' | 'jp' | 'kr'
 
-export const LOCALE_STORAGE_KEY = 'cc-heihei-locale'
+// 新产品独立键；旧键只做一次性读取迁移（读到即写新键，旧键保留给前身应用）。
+export const LOCALE_STORAGE_KEY = 'cadre-heihei-locale'
+export const LEGACY_LOCALE_STORAGE_KEY = 'cc-heihei-locale'
 
 const VALID_LOCALES: readonly Locale[] = ['en', 'zh', 'zh-TW', 'jp', 'kr']
 const DOCUMENT_LANG: Record<Locale, string> = {
@@ -25,7 +27,10 @@ export type LocaleRuntime = {
 // 这里用最小结构类型访问浏览器全局，避免为 Node 侧配置整体打开 DOM lib。
 type BrowserGlobals = {
   document?: { documentElement: { lang: string } }
-  localStorage?: { getItem(key: string): string | null }
+  localStorage?: {
+    getItem(key: string): string | null
+    setItem?(key: string, value: string): void
+  }
   navigator?: { languages?: readonly string[]; language?: string }
 }
 
@@ -78,8 +83,20 @@ export function resolveSupportedLocale(languageTags: readonly string[]): Locale 
 
 export function readStoredLocale(): Locale | null {
   try {
-    const stored = browser.localStorage?.getItem(LOCALE_STORAGE_KEY) ?? null
+    const storage = browser.localStorage
+    const stored = storage?.getItem(LOCALE_STORAGE_KEY) ?? null
     if (isLocale(stored)) return stored
+
+    // 前身键一次性迁移：读到合法旧值后写新键。旧键不删除（前身应用仍可读）；
+    // 新键一旦存在即优先，因此迁移不会覆盖用户后来在新应用里的选择。
+    const legacy = storage?.getItem(LEGACY_LOCALE_STORAGE_KEY) ?? null
+    if (!isLocale(legacy)) return null
+    try {
+      storage?.setItem?.(LOCALE_STORAGE_KEY, legacy)
+    } catch {
+      // 写入失败时仍按旧值生效，下次启动再尝试迁移。
+    }
+    return legacy
   } catch {
     // localStorage can be unavailable in locked-down browser contexts.
   }

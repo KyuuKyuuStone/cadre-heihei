@@ -1,9 +1,0 @@
-gate=smoke phase=red
-command=node scripts/gates/smoke.ts
-exitCode=1
-elapsedMs=281
---- stdout ---
-[smoke] collected tests=14 pass=13 fail=1 skipped=0
---- stderr ---
-[smoke] FAIL: 1 个用例失败（test runner exit=1）
-  - D:/xxw_p/cadre-heihei/app/tests/__gate_fixture_failing.test.ts :: gate fixture must fail — Expected values to be strictly equal:&#10;&#10;1 !== 2

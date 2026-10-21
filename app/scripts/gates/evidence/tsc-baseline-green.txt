@@ -1,8 +1,0 @@
-gate=tsc-baseline phase=green
-command=node scripts/gates/check-tsc-baseline.ts
-exitCode=0
-elapsedMs=785
---- stdout ---
-[tsc-baseline] PASS：total=0（基线 0），签名数=0，新增 0 / 计数超 0（tsc 0.7s，exit=0）
---- stderr ---
-

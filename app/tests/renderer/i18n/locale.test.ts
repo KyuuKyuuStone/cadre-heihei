@@ -6,6 +6,9 @@ import assert from 'node:assert/strict'
 
 import {
   initializeLocale,
+  LEGACY_LOCALE_STORAGE_KEY,
+  LOCALE_STORAGE_KEY,
+  readStoredLocale,
   resolveSupportedLocale,
   subscribeLocaleChanges,
   type Locale,
@@ -87,7 +90,7 @@ describe('locale detection', { concurrency: 1 }, () => {
   })
 
   it('migrates a stored main-window choice without consulting the system again', async () => {
-    storage.set('cc-heihei-locale', 'zh-TW')
+    storage.set(LEGACY_LOCALE_STORAGE_KEY, 'zh-TW')
     let preferenceCalls = 0
     let systemCalls = 0
     const setCalls: Locale[] = []
@@ -141,6 +144,29 @@ describe('locale detection', { concurrency: 1 }, () => {
 
     assert.ok(seen.includes('kr'), `listener 未收到 kr：${JSON.stringify(seen)}`)
     assert.equal(documentStub.documentElement.lang, 'ko')
+  })
+
+  it('migrates the legacy key once and writes the new key', () => {
+    storage.set(LEGACY_LOCALE_STORAGE_KEY, 'zh-TW')
+
+    assert.equal(readStoredLocale(), 'zh-TW')
+    assert.equal(storage.get(LOCALE_STORAGE_KEY), 'zh-TW')
+    // 旧键保留给前身应用，不做删除。
+    assert.equal(storage.get(LEGACY_LOCALE_STORAGE_KEY), 'zh-TW')
+  })
+
+  it('prefers the new key over the legacy key', () => {
+    storage.set(LOCALE_STORAGE_KEY, 'jp')
+    storage.set(LEGACY_LOCALE_STORAGE_KEY, 'zh')
+
+    assert.equal(readStoredLocale(), 'jp')
+  })
+
+  it('ignores an invalid legacy value and does not write the new key', () => {
+    storage.set(LEGACY_LOCALE_STORAGE_KEY, 'fr-FR')
+
+    assert.equal(readStoredLocale(), null)
+    assert.equal(storage.has(LOCALE_STORAGE_KEY), false)
   })
 
   it('uses navigator.language when navigator.languages is unavailable', async () => {

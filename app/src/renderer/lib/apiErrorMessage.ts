@@ -11,7 +11,8 @@
 import type { TranslationKey } from '../i18n/locales/en.ts'
 
 // 搬迁适配：前身从 api/client 导入该联合类型；新项目尚未提供 api 层契约，
-// 此处本地声明同一语义，待 ports/adapters 契约定稿后改为从正式来源导入。
+// 此处本地声明同一语义。
+// TODO(M1): 接入 app/src/collab/protocol 的错误码后，改为从该契约导入并删除本类型。
 export type ApiFailureKind = 'timeout' | 'network' | 'server' | 'business'
 
 const MAPPING_KEYS: Partial<Record<ApiFailureKind, TranslationKey>> = {

@@ -1,9 +1,0 @@
-gate=file-size phase=green
-command=node scripts/gates/check-file-size.ts
-exitCode=0
-elapsedMs=100
---- stdout ---
-
-[file-size] 通过：检查 1 个文件，0 失败（基线 0 项，豁免 0 项）
---- stderr ---
-
