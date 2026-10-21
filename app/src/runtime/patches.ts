@@ -121,6 +121,9 @@ export function buildIdentityPatch(input: IdentityPatchInput): string {
     `          CADRE_PROJECT_ID: ${quote(projectId)}`,
     `          CADRE_SESSION_ID: ${quote(sessionId)}`,
     `          CADRE_DB_PATH: ${quote(databasePath)}`,
+    // MCP server 可能由 electron.exe（nodeCommand=process.execPath）拉起；
+    // 该 env 对系统 node 无效但无害，对 electron 使其以 Node 模式运行。
+    `          ELECTRON_RUN_AS_NODE: ${quote('1')}`,
     '        reconnect:',
     '          enabled: false',
     '        failOnStartupError: true',

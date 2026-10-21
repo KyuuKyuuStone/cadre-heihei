@@ -27,6 +27,11 @@ const STAGE_TREE = join(STAGE, 'vendor', 'deepseek-harness')
 const SDK_ENTRY = join(STAGE_TREE, 'packages', 'sdk', 'client', 'lib', 'index.js')
 const DSH_BIN = join(STAGE_TREE, 'packages', 'sdk', 'client', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
 const DEV_PATH_MARKERS = ['D:\\xxw_p\\cadre-heihei', 'D:/xxw_p/cadre-heihei']
+// 裁剪决策（s16-R 实测）：website/ 仅 1MB 源文件 + 8958 个指向共享 store 的链接，
+// 无任何运行时引用（packages 内 grep 0 命中），排除以消灭坏链接源；
+// 顶层 node_modules 2.1G 为全 workspace dev+prod store，prod 闭包无法静态推导
+// （pnpm deploy 实测打地鼠），不做内容裁剪，分发体积以压缩实测为准。
+const EXCLUDED_TOP = ['website']
 const TEXT_EXT = new Set(['.js', '.mjs', '.cjs', '.json', '.yml', '.yaml', '.md', '.ts', '.txt'])
 const MAX_SCAN_BYTES = 8 * 1024 * 1024
 
@@ -41,7 +46,8 @@ function copyVendor(): void {
   cpSync(VENDOR, STAGE_TREE, {
     recursive: true,
     dereference: false,
-    filter: (src: string) => basename(src) !== '.git',
+    filter: (src: string) =>
+      basename(src) !== '.git' && !EXCLUDED_TOP.some((name) => src === join(VENDOR, name)),
   })
 }
 
@@ -181,6 +187,7 @@ const manifest = {
   vendorSubmoduleCleanBefore: true,
   vendorSubmoduleCleanAfter: gitPorcelain() === '',
   mode: 'full-copy',
+  excludedTop: EXCLUDED_TOP,
   dshVersion: JSON.parse(readFileSync(DSH_BIN.replace(/lib[\\/]bin\.js$/, 'package.json'), 'utf8')).version as string,
   clientVersion: JSON.parse(readFileSync(join(STAGE_TREE, 'packages', 'sdk', 'client', 'package.json'), 'utf8')).version as string,
   stage: STAGE,

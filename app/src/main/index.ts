@@ -61,11 +61,11 @@ function log(message: string): void {
 }
 
 function resolveMcpServerPath(): string {
-  // 打包态：MCP server 以 TS 源码随 extraResources 落真实磁盘（app.src），
-  // 由系统 node（Node ≥22.19 原生 TS 运行）拉起；asar 内路径子进程不可读。
-  // 终端用户无系统 node 时的 nodeCommand 方案未定（见 s16 未验证项）。
+  // 打包态：MCP server 为 esbuild 单文件 CJS，随 extraResources 落真实磁盘；
+  // 由 nodeCommand=process.execPath（electron.exe）+ ELECTRON_RUN_AS_NODE=1 拉起，
+  // 不依赖终端用户安装系统 Node。asar 内路径子进程不可读。
   if (app.isPackaged) {
-    const packaged = join(process.resourcesPath, 'app.src', 'mcp', 'server.ts')
+    const packaged = join(process.resourcesPath, 'app.mcp', 'server.cjs')
     if (existsSync(packaged)) return packaged
   }
   const candidates = [
@@ -189,6 +189,8 @@ async function bootstrap(): Promise<void> {
       patchDirBase: join(userData, 'patches'),
       databasePathFor: () => databasePath,
       mcpServerPath: resolveMcpServerPath(),
+      // MCP 子进程不依赖系统 Node：electron.exe + ELECTRON_RUN_AS_NODE=1（patch env 注入）。
+      nodeCommand: process.execPath,
       adapterOptions: {
         // harness SDK 用 process.execPath 拉起 dsh；Electron 下需以 Node 模式运行子进程。
         env: {

@@ -15,6 +15,7 @@ directories:
   output: release
 files:
   - dist/**/*
+  - '!dist/mcp/**'
   - package.json
 asar: true
 npmRebuild: false
@@ -28,7 +29,7 @@ extraResources:
   # 使安装目录为 <resources>/vendor/deepseek-harness（与 sdk.ts findRepoRoot 期望一致）。
   - from: resources/harness-stage/vendor
     to: vendor
-  # MCP server 以 TS 源码落真实磁盘（asar 内路径子进程 node 不可读）；
-  # 打包态 resolveMcpServerPath 优先解析 process.resourcesPath/app.src/mcp/server.ts。
-  - from: src
-    to: app.src
+  # MCP server 单文件 CJS 落真实磁盘（asar 内路径子进程不可读）；
+  # nodeCommand=process.execPath（electron.exe）+ patch env ELECTRON_RUN_AS_NODE=1 拉起。
+  - from: dist/mcp
+    to: app.mcp

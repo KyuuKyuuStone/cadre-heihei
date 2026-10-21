@@ -28,13 +28,36 @@ function loadEsbuild(): EsbuildLike {
 const TARGETS = {
   main: { entry: 'src/main/index.ts', outfile: 'dist/main/index.cjs' },
   preload: { entry: 'src/preload/index.ts', outfile: 'dist/preload/index.cjs' },
+  // MCP server 单文件：随 extraResources 落真实磁盘，由 ELECTRON_RUN_AS_NODE 的
+  // electron.exe（或系统 node）直接执行，不依赖终端用户安装系统 Node。
+  mcp: { entry: 'src/mcp/server.ts', outfile: 'dist/mcp/server.cjs' },
 } as const
+
+/**
+ * esbuild 对 import.meta 生成空 shim（url=undefined），mcp 的主入口判断会失效。
+ * define 只接受标识符/字面量，故 define 成 banner 注入的实体：
+ * import.meta.url → __mcp_entry_url = pathToFileURL(__filename).href（CJS 运行时等价语义）。
+ */
+const MCP_ENTRY_URL = '__mcp_entry_url'
+const DEFINES: Record<string, Record<string, string>> = {
+  main: { 'process.env.NODE_ENV': '"production"' },
+  preload: { 'process.env.NODE_ENV': '"production"' },
+  mcp: {
+    'process.env.NODE_ENV': '"production"',
+    'import.meta.url': MCP_ENTRY_URL,
+  },
+}
+const BANNERS: Record<string, Record<string, string>> = {
+  mcp: {
+    js: `var ${MCP_ENTRY_URL} = require("node:url").pathToFileURL(__filename).href;`,
+  },
+}
 
 type TargetName = keyof typeof TARGETS
 
 const requested = (process.argv[2] ?? 'all') as TargetName | 'all'
 const names: TargetName[] =
-  requested === 'all' ? ['main', 'preload'] : [requested]
+  requested === 'all' ? ['main', 'preload', 'mcp'] : [requested]
 if (requested !== 'all' && !(requested in TARGETS)) {
   console.error(`[m4] unknown target: ${requested}（main|preload|all）`)
   process.exit(2)
@@ -59,7 +82,8 @@ for (const name of names) {
     format: 'cjs',
     target: 'node24',
     external,
-    define: { 'process.env.NODE_ENV': '"production"' },
+    define: DEFINES[name]!,
+    ...(BANNERS[name] === undefined ? {} : { banner: BANNERS[name]! }),
     logLevel: 'info',
   })
   console.log(`[m4] built ${name}: ${target.outfile} (${statSync(outfile).size} bytes)`)
