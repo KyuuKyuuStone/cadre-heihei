@@ -12,7 +12,10 @@
  *      vendor/deepseek-harness 源码路径；
  *   R2 src/ports/** 零 harness import、零 harness 类型 re-export；
  *   R3 src/collab|main|preload|renderer/** 不得 import harness；
- *   ADAPTER-DIR ports/collab 不得反向 import adapters（adapter 可 import 二者）。
+ *   ADAPTER-DIR ports/collab 不得反向 import adapters（adapter 可 import 二者）；
+ *   RENDERER-NODE src/renderer/** 禁 node:* / electron / src/adapters /
+ *     collab/{ledger,dispatch,roster,evidence,tools} / vendor；
+ *     只允许 collab/protocol 的类型导入与 src/shared/**。
  * 覆盖：静态 `import ... from`、无 `from` 的副作用 import、`export ... from`
  * re-export、动态 `import()`、`require()`、TS `import x = require()`。
  * 扫描 app/src 下全部 .ts/.tsx（含 *.test.ts 与 .d.ts，无测试豁免）。
@@ -33,6 +36,11 @@ const ROOTS = ['src']
 const SRC_RE = /\.(ts|tsx)$/
 const HARNESS_ROOT = join(REPO_ROOT, 'vendor', 'deepseek-harness')
 const ADAPTERS_ROOT = join(APP_ROOT, 'src', 'adapters')
+const VENDOR_ROOT = join(REPO_ROOT, 'vendor')
+const RENDERER_PREFIX = 'src/renderer/'
+const COLLAB_PROTOCOL_ROOT = join(APP_ROOT, 'src', 'collab', 'protocol')
+const COLLAB_IMPL_ROOTS = ['ledger', 'dispatch', 'roster', 'evidence', 'tools']
+  .map((dir) => join(APP_ROOT, 'src', 'collab', dir))
 
 // §1.6 边界常量（rel 路径均相对 app/，使用 / 分隔）
 const HARNESS_PACKAGE_RE = /^@deepseek-ai\/dsh(?:-|$)/
@@ -67,38 +75,50 @@ const BASELINE_FILES = baselineFilesIdx >= 0 ? (argv[baselineFilesIdx + 1] ?? ''
 const dirsIdx = argv.indexOf('--dirs')
 const L1_DIRS = dirsIdx >= 0 ? (argv[dirsIdx + 1] ?? '').split(',').filter(Boolean) : []
 
-type ImportEntry = { spec: string; symbols: string[]; namespaces: string[] }
+type ImportEntry = { spec: string; symbols: string[]; namespaces: string[]; typeOnly: boolean }
 
 function parseImports(src: string): ImportEntry[] {
   const out: ImportEntry[] = []
-  const re = /import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g
+  const re = /import\s+(type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g
   for (const m of src.matchAll(re)) {
-    const clause = m[1]!.trim()
-    const spec = m[2]!
+    const clause = m[2]!.trim()
+    const spec = m[3]!
     const symbols: string[] = []
     const namespaces: string[] = []
     const ns = clause.match(/\*\s+as\s+([A-Za-z_$][\w$]*)/)
     if (ns) namespaces.push(ns[1]!)
     const named = clause.match(/\{([\s\S]*)\}/)
+    const namedParts = named
+      ? named[1]!.split(',').map((part) => part.trim()).filter(Boolean)
+      : []
     if (named) {
-      for (const part of named[1]!.split(',')) {
-        const t = part.trim().replace(/^type\s+/, '')
+      for (const part of namedParts) {
+        const t = part.replace(/^type\s+/, '')
         if (!t) continue
         const alias = t.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/)
         symbols.push(alias ? alias[1]! : t)
       }
     }
     if (!ns && !named && /^[A-Za-z_$][\w$]*$/.test(clause)) symbols.push(clause)
-    out.push({ spec, symbols, namespaces })
+    // `import type`，或具名导入每一项都是 `type X`，视为纯类型导入。
+    const allNamedTypeOnly = namedParts.length > 0
+      && namedParts.every((part) => /^type\s+/.test(part))
+    const typeOnly = Boolean(m[1]) || (allNamedTypeOnly && !ns)
+    out.push({ spec, symbols, namespaces, typeOnly })
   }
   return out
 }
 
 /** `export * from` / `export * as ns from` / `export type { X } from` 的说明符 */
-function parseReexports(src: string): string[] {
-  const out: string[] = []
-  const re = /export\s+(?:type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[\s\S]*?\})\s+from\s+['"]([^'"]+)['"]/g
-  for (const m of src.matchAll(re)) out.push(m[1]!)
+function parseReexports(src: string): Array<{ spec: string; typeOnly: boolean }> {
+  const out: Array<{ spec: string; typeOnly: boolean }> = []
+  const re = /export\s+(type\s+)?(?:\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|\{[\s\S]*?\})\s+from\s+['"]([^'"]+)['"]/g
+  for (const m of src.matchAll(re)) {
+    const clauseIsTypeOnly = Boolean(m[1])
+    // `export * from` 是运行时再导出，即使目标全是类型也不放宽。
+    const isStar = /^\s*\*/.test(m[0]!.slice(m[0]!.indexOf('export') + 6))
+    out.push({ spec: m[2]!, typeOnly: clauseIsTypeOnly && !isStar })
+  }
   return out
 }
 
@@ -162,6 +182,26 @@ function isAdapterSpecifier(realFile: string, spec: string): boolean {
   }
   const resolved = resolveRelativeSpecifier(realFile, spec)
   return resolved !== null && isWithin(ADAPTERS_ROOT, resolved)
+}
+
+/** RENDERER-NODE：返回违规说明；null 表示允许（shared/** 与 protocol 类型导入放行）。 */
+function rendererNodeViolation(realFile: string, spec: string, typeOnly: boolean): string | null {
+  if (spec.startsWith('node:')) return 'node:*'
+  if (spec === 'electron' || spec.startsWith('electron/')) return 'electron'
+  if (spec === 'adapters' || spec.startsWith('adapters/') || spec.startsWith('@/adapters/')) {
+    return 'src/adapters/**'
+  }
+  const resolved = resolveRelativeSpecifier(realFile, spec)
+  if (resolved === null) return null
+  if (isWithin(ADAPTERS_ROOT, resolved)) return 'src/adapters/**'
+  if (isWithin(VENDOR_ROOT, resolved)) return 'vendor/**'
+  for (const root of COLLAB_IMPL_ROOTS) {
+    if (isWithin(root, resolved)) return 'src/collab/{ledger,dispatch,roster,evidence,tools}/**'
+  }
+  if (isWithin(COLLAB_PROTOCOL_ROOT, resolved) && !typeOnly) {
+    return 'src/collab/protocol/**（只允许 import type）'
+  }
+  return null
 }
 
 function harnessRuleFor(relFile: string): 'R1' | 'R2' | 'R3' | null {
@@ -436,18 +476,27 @@ type SpecKind = 'import' | 're-export' | 'dynamic import' | 'side-effect import'
 let boundaryCount = 0
 for (const file of all) {
   const src = readFileSync(file.realPath, 'utf8')
-  const entries: Array<{ spec: string; kind: SpecKind }> = [
-    ...parseImports(src).map((e) => ({ spec: e.spec, kind: 'import' as const })),
-    ...parseReexports(src).map((spec) => ({ spec, kind: 're-export' as const })),
-    ...parseDynamicImports(src).map((spec) => ({ spec, kind: 'dynamic import' as const })),
-    ...parseSideEffectImports(src).map((spec) => ({ spec, kind: 'side-effect import' as const })),
-    ...parseRequires(src).map((e) => ({ spec: e.spec, kind: e.kind })),
+  const entries: Array<{ spec: string; kind: SpecKind; typeOnly: boolean }> = [
+    ...parseImports(src).map((e) => ({ spec: e.spec, kind: 'import' as const, typeOnly: e.typeOnly })),
+    ...parseReexports(src).map((e) => ({ spec: e.spec, kind: 're-export' as const, typeOnly: e.typeOnly })),
+    ...parseDynamicImports(src).map((spec) => ({ spec, kind: 'dynamic import' as const, typeOnly: false })),
+    ...parseSideEffectImports(src).map((spec) => ({ spec, kind: 'side-effect import' as const, typeOnly: false })),
+    ...parseRequires(src).map((e) => ({ spec: e.spec, kind: e.kind, typeOnly: false })),
   ]
   const seen = new Set<string>()
-  for (const { spec, kind } of entries) {
-    const key = `${kind}\u0000${spec}`
+  for (const { spec, kind, typeOnly } of entries) {
+    const key = `${kind}\u0000${spec}\u0000${typeOnly}`
     if (seen.has(key)) continue
     seen.add(key)
+
+    // RENDERER-NODE：renderer 与 Node/Electron/adapters/协作实现/vendor 隔离。
+    if (file.rel.startsWith(RENDERER_PREFIX)) {
+      const violation = rendererNodeViolation(file.realPath, spec, typeOnly)
+      if (violation !== null) {
+        boundaryCount++
+        findings.push(`[RENDERER-NODE] ${file.rel}: ${kind} 越界 (${spec}) — renderer 禁 ${violation}`)
+      }
+    }
 
     if (isHarnessSpecifier(file.realPath, spec)) {
       const rule = harnessRuleFor(file.rel)

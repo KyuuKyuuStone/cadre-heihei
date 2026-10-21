@@ -1,0 +1,4 @@
+// RENDERER-NODE 坏样本：renderer 不得 import adapters 实现。
+import { FakeEngine } from '../adapters/engine/fake/index.ts'
+
+export const probe = FakeEngine

@@ -23,6 +23,8 @@ type GateCase = {
   description: string
   /** 红态输出必须指名的注入文件 */
   expectRedIncludes?: string
+  /** 允许样本：注入后门禁必须保持绿（不产生红态）。 */
+  expectGreenOnly?: boolean
 }
 
 const CASES: GateCase[] = [
@@ -126,6 +128,62 @@ const CASES: GateCase[] = [
     description: 'R2 src 下 .test.ts 不豁免',
     expectRedIncludes: '__gate_fixture_ports_test.test.ts',
   },
+  {
+    name: 'renderer-node-import',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/renderer-node-import.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_node_import.ts',
+    description: 'RENDERER-NODE 禁 node:*',
+    expectRedIncludes: '__gate_fixture_renderer_node_import.ts',
+  },
+  {
+    name: 'renderer-electron',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/renderer-electron.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_electron.ts',
+    description: 'RENDERER-NODE 禁 electron',
+    expectRedIncludes: '__gate_fixture_renderer_electron.ts',
+  },
+  {
+    name: 'renderer-adapters',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/renderer-adapters.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_adapters.ts',
+    description: 'RENDERER-NODE 禁 src/adapters/**',
+    expectRedIncludes: '__gate_fixture_renderer_adapters.ts',
+  },
+  {
+    name: 'renderer-collab-impl',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/renderer-collab-impl.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_collab_impl.ts',
+    description: 'RENDERER-NODE 禁协作层实现',
+    expectRedIncludes: '__gate_fixture_renderer_collab_impl.ts',
+  },
+  {
+    name: 'renderer-protocol-value',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/renderer-protocol-value.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_protocol_value.ts',
+    description: 'RENDERER-NODE protocol 值导入越界（只许 type）',
+    expectRedIncludes: '__gate_fixture_renderer_protocol_value.ts',
+  },
+  {
+    name: 'renderer-vendor',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/renderer-vendor.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_vendor.ts',
+    description: 'RENDERER-NODE 禁 vendor/**',
+    expectRedIncludes: '__gate_fixture_renderer_vendor.ts',
+  },
+  {
+    name: 'renderer-protocol-type-allow',
+    gate: 'scripts/gates/check-import-semantics.ts',
+    fixture: 'scripts/gates/fixtures/import-boundaries/renderer-protocol-type-allow.fixture',
+    target: 'src/renderer/__gate_fixture_renderer_protocol_type_allow.ts',
+    description: 'RENDERER-NODE 允许 protocol 类型 + shared 类型导入',
+    expectGreenOnly: true,
+  },
 ]
 
 function run(gate: string) {
@@ -160,6 +218,7 @@ function format(name: string, phase: string, gate: string, result: ReturnType<ty
 const summary: Array<{
   name: string
   description: string
+  kind: 'red-green' | 'allow'
   redExit: number
   greenExit: number
   redExpected: boolean
@@ -183,6 +242,37 @@ for (const c of CASES) {
   if (existsSync(targetPath)) {
     console.error(`[evidence] FAIL ${c.name}: 注入目标已存在，拒绝覆盖 ${targetPath}`)
     failed++
+    continue
+  }
+
+  // 允许样本：只验证「注入后门禁保持绿」，不制造红态。
+  if (c.expectGreenOnly) {
+    let allow!: ReturnType<typeof run>
+    try {
+      copyFileSync(fixturePath, targetPath)
+      allow = run(c.gate)
+    } finally {
+      rmSync(targetPath, { force: true })
+    }
+    const greenExpected = allow.exitCode === 0
+    if (!greenExpected) failed++
+    const allowPath = join(EVIDENCE_DIR, `${c.name}-allow.txt`)
+    writeFileSync(allowPath, format(c.name, 'allow', c.gate, allow), 'utf8')
+    console.log(`[evidence] ${c.name}: allow exit=${allow.exitCode} ${greenExpected ? 'OK' : 'UNEXPECTED'} (${c.description})`)
+    summary.push({
+      name: c.name,
+      description: c.description,
+      kind: 'allow',
+      redExit: -1,
+      greenExit: allow.exitCode,
+      redExpected: true,
+      greenExpected,
+      redNamedFile: true,
+      redElapsedMs: 0,
+      greenElapsedMs: allow.elapsedMs,
+      redEvidence: '',
+      greenEvidence: allowPath,
+    })
     continue
   }
 
@@ -213,6 +303,7 @@ for (const c of CASES) {
   summary.push({
     name: c.name,
     description: c.description,
+    kind: 'red-green',
     redExit: red.exitCode,
     greenExit: green.exitCode,
     redExpected,
