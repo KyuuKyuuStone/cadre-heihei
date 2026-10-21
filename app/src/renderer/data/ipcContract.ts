@@ -6,11 +6,18 @@
  * 本文件只保留「成功即 ok:true」的响应包装（文档 §0）与 `window.cadre` 调用面；
  * 不 import Electron/Node/主进程实现。
  */
-import type { ApiVersion, IsoTimestamp, SessionId, TaskId } from '../../collab/protocol/ids.ts'
+import type { ApiVersion, IdempotencyKey, IsoTimestamp, SessionId, TaskId } from '../../collab/protocol/ids.ts'
 import type { ApiFailure } from '../../collab/protocol/errors.ts'
 import type { EmptyList } from '../../collab/protocol/common.ts'
 import type { TaskStatus } from '../../collab/protocol/task-status.ts'
-import type { TaskDetail, TaskSummary, SendMessageReceipt } from '../../collab/protocol/tool-outputs.ts'
+import type {
+  TaskDetail,
+  TaskSummary,
+  SendMessageReceipt,
+  TransitionReceipt,
+} from '../../collab/protocol/tool-outputs.ts'
+import type { DispatchReceipt } from '../../collab/protocol/dispatch.ts'
+import type { ReportReceipt } from '../../collab/protocol/report.ts'
 import type { RosterResponse } from '../../collab/protocol/roster.ts'
 import {
   IPC_CHANNELS,
@@ -84,6 +91,35 @@ export type SetPreferencesResponse = { readonly ok: true } | ApiFailure
 export type SendMessageResponse = ({ readonly ok: true } & SendMessageReceipt) | ApiFailure
 export type SubscribeSessionResponse = { readonly ok: true; readonly subscriptionId: string } | ApiFailure
 
+export interface DispatchTaskInput {
+  readonly toSessionId: SessionId
+  readonly title: string
+  readonly body: string
+  readonly idempotencyKey: IdempotencyKey
+  readonly supersedesTaskId?: TaskId
+}
+
+export interface ReportTaskInput {
+  readonly taskId?: TaskId
+  readonly body: string
+  readonly deliverables: readonly string[]
+  readonly idempotencyKey: IdempotencyKey
+}
+
+export const REVIEW_ACTIONS = ['enter_review', 'verify', 'rework', 'fail'] as const
+export type ReviewAction = (typeof REVIEW_ACTIONS)[number]
+
+export interface ReviewTaskInput {
+  readonly taskId: TaskId
+  readonly action: ReviewAction
+  readonly reason?: string
+  readonly idempotencyKey: IdempotencyKey
+}
+
+export type DispatchResponse = DispatchReceipt | ApiFailure
+export type ReportResponse = ReportReceipt | ApiFailure
+export type ReviewResponse = ({ readonly ok: true } & TransitionReceipt) | ApiFailure
+
 /** preload 白名单调用面（文档 §2）；写通道在 preload 落地前为可选。 */
 export interface CadreBridge {
   whoami(): Promise<WhoamiResponse>
@@ -100,6 +136,9 @@ export interface CadreBridge {
   subscribeSession?(input: { readonly sessionId: SessionId }): Promise<SubscribeSessionResponse>
   unsubscribeSession?(input: { readonly subscriptionId: string }): Promise<{ readonly ok: true } | ApiFailure>
   onSessionEvent?(callback: (event: SessionEvent) => void): () => void
+  dispatchTask?(input: DispatchTaskInput): Promise<DispatchResponse>
+  reportTask?(input: ReportTaskInput): Promise<ReportResponse>
+  reviewTask?(input: ReviewTaskInput): Promise<ReviewResponse>
 }
 
 export type { RosterResponse, TaskDetail, TaskSummary, TaskStatus, EmptyList, ApiFailure }

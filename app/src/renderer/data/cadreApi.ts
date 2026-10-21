@@ -8,11 +8,17 @@ import type { SessionId, TaskId } from '../../collab/protocol/ids.ts'
 import type { Preferences, PreferencesPatch } from '../../shared/ipc.ts'
 import type {
   CadreBridge,
+  DispatchResponse,
+  DispatchTaskInput,
   GetTaskResponse,
   ListRosterResponse,
   ListTasksQuery,
   ListTasksResponse,
   PreferencesResponse,
+  ReportResponse,
+  ReportTaskInput,
+  ReviewResponse,
+  ReviewTaskInput,
   SendMessageResponse,
   SessionEvent,
   SetPreferencesResponse,
@@ -38,6 +44,9 @@ export interface CadreApi {
   subscribeSession?(input: { readonly sessionId: SessionId }): Promise<SubscribeSessionResponse>
   unsubscribeSession?(input: { readonly subscriptionId: string }): Promise<{ readonly ok: true } | ApiFailure>
   onSessionEvent?(callback: (event: SessionEvent) => void): () => void
+  dispatchTask?(input: DispatchTaskInput): Promise<DispatchResponse>
+  reportTask?(input: ReportTaskInput): Promise<ReportResponse>
+  reviewTask?(input: ReviewTaskInput): Promise<ReviewResponse>
 }
 
 function notConnectedFailure(): ApiFailure {
@@ -70,6 +79,9 @@ export function createWindowCadreApi(bridge: CadreBridge | undefined = readWindo
     ...(bridge.subscribeSession ? { subscribeSession: (input) => bridge.subscribeSession!(input) } : {}),
     ...(bridge.unsubscribeSession ? { unsubscribeSession: (input) => bridge.unsubscribeSession!(input) } : {}),
     ...(bridge.onSessionEvent ? { onSessionEvent: (cb) => bridge.onSessionEvent!(cb) } : {}),
+    ...(bridge.dispatchTask ? { dispatchTask: (input) => bridge.dispatchTask!(input) } : {}),
+    ...(bridge.reportTask ? { reportTask: (input) => bridge.reportTask!(input) } : {}),
+    ...(bridge.reviewTask ? { reviewTask: (input) => bridge.reviewTask!(input) } : {}),
   }
 }
 

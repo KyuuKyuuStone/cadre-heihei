@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { TaskId } from '../../../collab/protocol/ids.ts'
 import { StateBoundary } from '../../components/StateBoundary.tsx'
 import type { ViewState } from '../../components/viewState.ts'
 import { useCadreApi } from '../../data/CadreApiProvider.tsx'
+import { useIdentity, type Identity } from '../../data/IdentityProvider.tsx'
 import {
   emptyListToViewState,
   failureToViewState,
@@ -9,20 +11,25 @@ import {
 } from '../../data/failureMapping.ts'
 import { TASK_FILTERS, TASK_STATUS_LABEL_KEYS } from '../../data/labels.ts'
 import type { TaskDetail, TaskSummary } from '../../data/ipcContract.ts'
-import { useLocale, useTranslation } from '../../i18n/LocaleProvider.tsx'
+import { useLocale } from '../../i18n/LocaleProvider.tsx'
 import { formatMessageTimestamp } from '../../lib/formatMessageTimestamp.ts'
+import { DispatchPanel } from './DispatchPanel.tsx'
+import { TaskActions } from './TaskActions.tsx'
 
 type Filter = (typeof TASK_FILTERS)[number]
 
 export function LedgerScreen() {
   const api = useCadreApi()
   const { t, locale } = useLocale()
+  const { identity } = useIdentity()
   const [filter, setFilter] = useState<Filter>('all')
   const [listState, setListState] = useState<ViewState<readonly TaskSummary[]>>({ status: 'loading' })
   const [filterError, setFilterError] = useState<string | null>(null)
   const [detail, setDetail] = useState<ViewState<TaskDetail> | null>(null)
   const [since, setSince] = useState<TaskSummary['updatedAt'] | undefined>(undefined)
   const [refreshing, setRefreshing] = useState(false)
+  const [dispatchOpen, setDispatchOpen] = useState(false)
+  const [dispatchSupersedes, setDispatchSupersedes] = useState<TaskId | undefined>(undefined)
 
   const load = useCallback(async (options: { since?: TaskSummary['updatedAt']; merge?: boolean } = {}) => {
     const res = await api.listTasks({
@@ -104,6 +111,17 @@ export function LedgerScreen() {
     setDetail({ status: 'ready', data: res })
   }, [api, t])
 
+  /** 静默刷新详情：不切 loading，避免写操作后的回执面板被卸载。 */
+  const refreshDetail = useCallback(async (taskId: TaskId) => {
+    const res = await api.getTask({ taskId })
+    if (res.ok) setDetail({ status: 'ready', data: res })
+  }, [api])
+
+  const afterMutation = useCallback((taskId: TaskId) => {
+    void load()
+    void refreshDetail(taskId)
+  }, [load, refreshDetail])
+
   return (
     <section className="screen" data-screen="ledger" aria-label={t('nav.ledger')}>
       <h1 className="screen__title">{t('nav.ledger')}</h1>
@@ -126,7 +144,28 @@ export function LedgerScreen() {
         <button type="button" className="button" onClick={refresh} disabled={refreshing}>
           {t('ledger.refresh')}
         </button>
+        {identity?.role === 'supervisor' ? (
+          <button
+            type="button"
+            className="button"
+            data-testid="dispatch-open"
+            onClick={() => {
+              setDispatchSupersedes(detail?.status === 'ready' ? detail.data.taskId : undefined)
+              setDispatchOpen(true)
+            }}
+          >
+            {t('dispatch.open')}
+          </button>
+        ) : null}
       </div>
+
+      {dispatchOpen ? (
+        <DispatchPanel
+          supersedesTaskId={dispatchSupersedes}
+          onClose={() => setDispatchOpen(false)}
+          onDispatched={() => { void load() }}
+        />
+      ) : null}
 
       {filterError ? (
         <p className="form-error" role="alert" data-testid="ledger-filter-error">{filterError}</p>
@@ -165,7 +204,9 @@ export function LedgerScreen() {
           <StateBoundary
             state={detail}
             emptyTitle={t('ledger.empty.title')}
-            renderReady={(task) => <TaskDetailPanel detail={task} />}
+            renderReady={(task) => (
+              <TaskDetailPanel detail={task} identity={identity} onChanged={afterMutation} />
+            )}
           />
         </aside>
       ) : null}
@@ -173,7 +214,15 @@ export function LedgerScreen() {
   )
 }
 
-function TaskDetailPanel({ detail }: { detail: TaskDetail }) {
+function TaskDetailPanel({
+  detail,
+  identity,
+  onChanged,
+}: {
+  detail: TaskDetail
+  identity: Identity | null
+  onChanged: (taskId: TaskId) => void
+}) {
   const { t, locale } = useLocale()
 
   return (
@@ -223,6 +272,12 @@ function TaskDetailPanel({ detail }: { detail: TaskDetail }) {
       <p className="task-detail__meta">
         <span>{t('ledger.detail.source')}: {detail.sourceSessionId}</span>
       </p>
+
+      <TaskActions
+        task={detail}
+        identity={identity}
+        onChanged={() => onChanged(detail.taskId)}
+      />
     </div>
   )
 }

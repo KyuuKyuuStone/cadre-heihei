@@ -453,6 +453,86 @@ body {
   color: var(--color-text-secondary);
 }
 
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  margin: 0 0 16px;
+  background: var(--color-surface-container-low);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.panel--inline {
+  margin-top: 16px;
+  margin-bottom: 0;
+}
+
+.panel__title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.field input,
+.field textarea,
+.field select {
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-surface-container);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+}
+
+.action-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.button--ghost {
+  background: transparent;
+}
+
+.receipt {
+  padding: 12px;
+  font-size: 13px;
+  background: var(--color-surface-container);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.receipt__title {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.receipt p {
+  margin: 4px 0;
+}
+
+.receipt code {
+  padding: 1px 4px;
+  background: var(--color-surface-container-high);
+  border-radius: 4px;
+}
+
+.task-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
 @media (max-width: 720px) {
   .app {
     flex-direction: column;
