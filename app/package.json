@@ -15,6 +15,7 @@
     "gates:smoke": "node scripts/gates/smoke.ts",
     "gates:evidence": "node scripts/gates/two-state-evidence.ts",
     "test": "node --test \"tests/**/*.test.ts\"",
+    "harness:smoke": "node scripts/s7-harness-adapter/run.ts",
     "hooks:install": "node scripts/git-hooks/install.ts",
     "hooks:install:pre-commit": "node scripts/git-hooks/install-pre-commit.ts",
     "preflight": "node scripts/preflight-release.mjs --stage all"
