@@ -166,12 +166,13 @@ export class HarnessAdapter implements EnginePort {
   }
 
   capabilities(): EngineCapabilities {
-    // A1 已通过，但契约变更需架构单；本单按任务保持 unverified。
+    // A1 v2 已通过（2026-10-21，user-role 可注入/system 不可）；契约 7770113 已更新，
+    // compaction 事件与稳定 ID 窗口内外可观测，故返回 'available'。
     return {
       manualCompact: false,
       tokenUsage: false,
       mcpTools: true,
-      compactionEvents: 'unverified',
+      compactionEvents: 'available',
       sessionEnumeration: false,
       crashRecovery: 'structured-error-only',
     }
