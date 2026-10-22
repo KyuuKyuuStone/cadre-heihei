@@ -123,6 +123,8 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
       ipcRenderer.invoke(DESKTOP_IPC.cadreDeleteProvider, options) as Promise<unknown>,
     testProvider: (options: { providerId: string }) =>
       ipcRenderer.invoke(DESKTOP_IPC.cadreTestProvider, options) as Promise<unknown>,
+    bindSession: (options: { sessionId: string; providerId: string; model?: string }) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreBindSession, options) as Promise<unknown>,
   })
   contextBridge.exposeInMainWorld('dshPlatform', {
     open: (page: 'usage' | 'top-up', bounds: { x: number; y: number; width: number; height: number }) => ipcRenderer.invoke(PLATFORM_IPC.open, page, bounds),

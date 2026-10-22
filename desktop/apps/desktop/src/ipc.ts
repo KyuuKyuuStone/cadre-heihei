@@ -41,6 +41,8 @@ export const DESKTOP_IPC = {
   cadreSaveProvider: 'cadre:saveProvider',
   cadreDeleteProvider: 'cadre:deleteProvider',
   cadreTestProvider: 'cadre:testProvider',
+  /** Session→provider binding used by new-session defaults and switching. */
+  cadreBindSession: 'cadre:bindSession',
 } as const
 
 /** Desktop release update state rendered by desktop-owned UI. */

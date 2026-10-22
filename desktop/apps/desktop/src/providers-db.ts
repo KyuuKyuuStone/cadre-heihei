@@ -253,9 +253,11 @@ export class ProviderStore {
     return { ok: true, deleted: true }
   }
 
-  bindSession(sessionId: string, providerId: string, model: string, now: string): ProviderResult<{ bound: true }> {
+  bindSession(sessionId: string, providerId: string, model: string, now: string): ProviderResult<{ binding: { sessionId: string; providerId: string; model: string; updatedAt: string } }> {
+    if (sessionId.trim() === '') return fail('INVALID_ARGUMENT', 'sessionId 无效', 'sessionId')
     const provider = this.get(providerId)
     if (provider === undefined) return fail('INVALID_ARGUMENT', 'provider 不存在', 'providerId')
+    if (!provider.enabled) return fail('INVALID_ARGUMENT', 'provider 已停用', 'providerId')
     if (!provider.models.some(entry => entry.id === model)) {
       return fail('MODEL_NOT_FOUND', `模型不在 provider 目录中：${model}`, 'model')
     }
@@ -265,7 +267,7 @@ export class ProviderStore {
       ON CONFLICT(session_id) DO UPDATE SET provider_id = excluded.provider_id,
         model = excluded.model, updated_at = excluded.updated_at
     `).run(sessionId, providerId, model, now)
-    return { ok: true, bound: true }
+    return { ok: true, binding: { sessionId, providerId, model, updatedAt: now } }
   }
 
   sessionBinding(sessionId: string): { providerId: string; model: string } | undefined {

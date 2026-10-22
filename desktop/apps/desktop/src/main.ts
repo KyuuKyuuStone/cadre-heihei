@@ -1097,6 +1097,38 @@ async function main(): Promise<void> {
     return { ok: true, providerId, hasKey: true, ...(metadata.maskedKey === undefined ? {} : { maskedKey: metadata.maskedKey }) }
   })
 
+  ipcMain.handle(DESKTOP_IPC.cadreBindSession, (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreProviders === undefined) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
+    }
+    if (typeof options !== 'object' || options === null) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    const { sessionId, providerId, model } = options as { sessionId?: unknown; providerId?: unknown; model?: unknown }
+    if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
+    }
+    if (typeof providerId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'providerId 无效', field: 'providerId' }
+    }
+    if (model !== undefined && typeof model !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'model 无效', field: 'model' }
+    }
+    const provider = cadreProviders.get(providerId)
+    if (provider === undefined) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 不存在', field: 'providerId' }
+    }
+    const binding = cadreProviders.bindSession(sessionId.trim(), providerId,
+      typeof model === 'string' && model !== '' ? model : provider.defaultModel, new Date().toISOString())
+    if (binding.ok !== true) {
+      console.log(`cadre:bindSession session=${sessionId} provider=${providerId} ok=false code=${binding.code}`)
+      return binding
+    }
+    console.log(`cadre:bindSession session=${sessionId} provider=${providerId} model=${binding.binding.model} ok=true`)
+    return binding
+  })
+
   ipcMain.handle(DESKTOP_IPC.boot, async (event) => {
     assertDesktopSender(event, ['app'])
     await startup
