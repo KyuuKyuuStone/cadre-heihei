@@ -19,11 +19,27 @@ files:
   - package.json
 asar: true
 npmRebuild: false
+# s17 实测：LZMA 默认档在 2.7GB/10 万文件载荷下 7za 管线 RangeError 崩溃；
+# 先以 store（不压缩）保通过，体积代价记入发布说明；后续再调档实测。
+compression: store
 win:
   target:
     - target: nsis
       arch:
         - x64
+nsis:
+  # 静默可验证：/S /D=<dir>；装完不自启（取证流程自行受控启动）；
+  # 卸载保留 userData（deleteAppDataOnUninstall=false 为 NSIS 默认，显式声明）。
+  # differentialPackage/useZip：s17 两次实测默认差分 7z 管线（execFile 回调 join）
+  # 在 2.6GB 载荷下 RangeError（builder-util exec maxBuffer 1GB + V8 string 上限）；
+  # 改 zip + 无差分 + store 绕开（代价：无差分自动更新基线、安装包近原始体积，首版可接受）。
+  oneClick: true
+  perMachine: false
+  runAfterFinish: false
+  deleteAppDataOnUninstall: false
+  allowToChangeInstallationDirectory: false
+  differentialPackage: false
+  useZip: true
 extraResources:
   # stage 布局为 vendor/deepseek-harness/**；from 指到 vendor 层，
   # 使安装目录为 <resources>/vendor/deepseek-harness（与 sdk.ts findRepoRoot 期望一致）。

@@ -32,6 +32,28 @@ const DEV_PATH_MARKERS = ['D:\\xxw_p\\cadre-heihei', 'D:/xxw_p/cadre-heihei']
 // 顶层 node_modules 2.1G 为全 workspace dev+prod store，prod 闭包无法静态推导
 // （pnpm deploy 实测打地鼠），不做内容裁剪，分发体积以压缩实测为准。
 const EXCLUDED_TOP = ['website']
+// 非运行时裁剪（s17 实测：2.7GB/10 万文件使 electron-builder NSIS 的 7za 管线
+// RangeError 崩溃；裁掉测试/文档/映射等非运行时文件，lib/bin 解析链不动）。
+const EXCLUDED_DIRS = new Set(['.git', 'docs', 'snapshots', 'examples', 'benchmark', 'test', 'tests', '__tests__', '.github'])
+// s17 裁剪（805MB 首版口径，<500MB 发布后优化）：功能无关大件/开发工具链不随包。
+// 逐包剔除后 driver probe "pong" + MCP list_roster 验证通过；详细清单见 manifest。
+const EXCLUDED_PNPM_PACKAGES = new Set([
+  '@openai+codex@0.153.4-win32-x64',
+  '@anthropic-ai+claude-agent-sdk-win32-x64@0.3.263',
+  '@deepseek-ai+libreoffice-kit-win32-x64@0.1.5',
+  'chrome-devtools-frontend@1.0.1638082',
+  'pnpm@11.28.5',
+  'typescript@6.0.3',
+  '@oxlint-tsgolint+win32-x64@7.0.2001',
+  '@rolldown+binding-win32-x64-msvc@1.1.1',
+  '@rolldown+binding-win32-x64-msvc@1.2.7',
+  'electron-winstaller@5.4.0_supports-color@9.4.0',
+  'simple-icons@16.31.0',
+  'mermaid@11.17.2',
+  'sherpa-onnx-win-x64@1.13.8',
+  'lefthook-windows-x64@2.1.12',
+  '@oxlint+binding-win32-x64-msvc@1.81.0',
+])
 const TEXT_EXT = new Set(['.js', '.mjs', '.cjs', '.json', '.yml', '.yaml', '.md', '.ts', '.txt'])
 const MAX_SCAN_BYTES = 8 * 1024 * 1024
 
@@ -46,8 +68,17 @@ function copyVendor(): void {
   cpSync(VENDOR, STAGE_TREE, {
     recursive: true,
     dereference: false,
-    filter: (src: string) =>
-      basename(src) !== '.git' && !EXCLUDED_TOP.some((name) => src === join(VENDOR, name)),
+    filter: (src: string) => {
+      if (EXCLUDED_TOP.some((name) => src === join(VENDOR, name))) return false
+      const base = basename(src)
+      if (EXCLUDED_DIRS.has(base)) return false
+      // packages|apps 的 src 为 TS 源码，运行时仅用 lib（node_modules 内 src 不受影响）。
+      if (base === 'src' && /[\\/]packages[\\/]|[\\/]apps[\\/]/.test(src)) return false
+      // s17 裁剪：.pnpm 内功能无关大件/开发工具链（EXCLUDED_PNPM_PACKAGES）。
+      if (src.includes(join('node_modules', '.pnpm')) && EXCLUDED_PNPM_PACKAGES.has(base)) return false
+      // .d.ts/.map/.md 为类型声明、sourcemap、文档：运行时零读取（lib/bin 解析链不含）。
+      return !base.endsWith('.d.ts') && !base.endsWith('.map') && !base.endsWith('.md')
+    },
   })
 }
 
@@ -188,6 +219,7 @@ const manifest = {
   vendorSubmoduleCleanAfter: gitPorcelain() === '',
   mode: 'full-copy',
   excludedTop: EXCLUDED_TOP,
+  excludedPnpmPackages: [...EXCLUDED_PNPM_PACKAGES].sort(),
   dshVersion: JSON.parse(readFileSync(DSH_BIN.replace(/lib[\\/]bin\.js$/, 'package.json'), 'utf8')).version as string,
   clientVersion: JSON.parse(readFileSync(join(STAGE_TREE, 'packages', 'sdk', 'client', 'package.json'), 'utf8')).version as string,
   stage: STAGE,
@@ -207,4 +239,47 @@ if (scan.absoluteLinks.length > 0) {
 }
 if (scan.textLeaks.length > 0) {
   console.warn(`[stage-harness] ${scan.textLeaks.length} 个 vendor 构建产物内嵌源码路径字面量（node_modules ${nodeModulesLiterals.length} / packages lib ${packageLiterals}；发布卫生待办）`)
+}
+
+// 实体化发布树：改写后的链接全部指向 stage 内部（相对），dereference 跟随复制安全；
+// 发布（7z/NSIS）必须实体化——s17 实测 7za 默认跟随 symlink（-snl 才保留），
+// 数万链接被重复展开导致打包时长与 stdout 爆炸；且安装时还原 symlink 需终端用户特权。
+const STAGE_FLAT = join(APP_ROOT, 'resources', 'harness-stage-flat')
+rmSync(STAGE_FLAT, { recursive: true, force: true })
+cpSync(STAGE, STAGE_FLAT, { recursive: true, dereference: true })
+const flatStats = scanFlat(join(STAGE_FLAT, 'vendor', 'deepseek-harness'))
+writeFileSync(
+  join(APP_ROOT, 'resources', 'harness-stage-flat-manifest.json'),
+  `${JSON.stringify({ generatedAt: new Date().toISOString(), source: STAGE, files: flatStats.files, bytes: flatStats.bytes }, null, 2)}\n`,
+  'utf8',
+)
+console.log(`[stage-harness] materialized: files=${flatStats.files} bytes=${flatStats.bytes}`)
+
+function scanFlat(root: string): { files: number; bytes: number } {
+  let files = 0
+  let bytes = 0
+  const stack: string[] = [root]
+  while (stack.length > 0) {
+    const dir = stack.pop()!
+    let entries: Dirent<string>[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const p = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        stack.push(p)
+      } else {
+        try {
+          files += 1
+          bytes += statSync(p).size
+        } catch {
+          continue
+        }
+      }
+    }
+  }
+  return { files, bytes }
 }
