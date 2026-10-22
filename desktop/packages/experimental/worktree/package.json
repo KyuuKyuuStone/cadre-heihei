@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-worktree",
   "description": "Creates a named Git worktree and changes the calling Session working directory",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publishConfig": {
     "access": "public"
   },
