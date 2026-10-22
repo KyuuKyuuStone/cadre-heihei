@@ -544,7 +544,7 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
         open={acceptFor !== null}
         onClose={() => { setAcceptFor(null) }}
         title="验收任务"
-        description={acceptFor ?? undefined}
+        {...(acceptFor !== null ? { description: acceptFor } : {})}
         closeLabel="关闭"
         footer={(
           <Button variant="outline" onClick={() => { setAcceptFor(null) }}>取消</Button>
