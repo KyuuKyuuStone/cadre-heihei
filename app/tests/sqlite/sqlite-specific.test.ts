@@ -281,6 +281,28 @@ it('失败不半写：取代终态任务被拒后不新增任务/消息/事件',
   }
 })
 
+it('派活权限（SQLite 花名册）：worker 被拒且无落库，supervisor 成功', () => {
+  const temp = makeTempDb()
+  const service = makeService(temp.path, 'perm')
+  try {
+    const denied = expectDispatchError(service.dispatch(BINDING_EMP, dispatchRequest()))
+    assert.equal(denied.error.code, 'FORBIDDEN_ACTOR')
+    assert.equal(
+      (denied.error as { reasonCategory?: string }).reasonCategory,
+      'not-supervisor',
+    )
+    assert.equal(service.ledger.listTasks(P1).length, 0)
+    assert.equal(service.listMessages(P1).empty, true)
+
+    const receipt = expectDispatchOk(service.dispatch(BINDING_SUP, dispatchRequest()))
+    assert.equal(receipt.taskStatus, 'dispatched')
+    assert.equal(service.ledger.listTasks(P1).length, 1)
+  } finally {
+    service.close()
+    temp.cleanup()
+  }
+})
+
 it('meta: 用例收集数非零（0 例即失败）', () => {
   assert.ok(registered > 0)
 })

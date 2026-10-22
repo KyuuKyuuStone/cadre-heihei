@@ -125,6 +125,28 @@ function forbiddenTarget(
   }
 }
 
+/**
+ * 派活仅限本项目在册 supervisor（产品模型：主管派活、员工汇报）。
+ *
+ * 角色以 `members.role` 为准（ADR-0019），不信任调用方自报；不在册、
+ * role=worker 或未知 role 一律拒绝，避免只靠前端禁用按钮。
+ */
+function forbiddenDispatcher(projectId: ProjectId, actorSessionId: SessionId): ForbiddenActorFailure {
+  return {
+    ok: false,
+    apiVersion: API_VERSION,
+    error: {
+      code: 'FORBIDDEN_ACTOR',
+      message: '派活仅限本项目在册 supervisor',
+      retryable: false,
+      projectId,
+      actorSessionId,
+      reasonCategory: 'not-supervisor',
+      requiredActor: 'supervisor',
+    },
+  }
+}
+
 function taskNotFound(projectId: ProjectId, taskId: TaskId): TaskNotFoundFailure {
   return {
     ok: false,
@@ -219,6 +241,13 @@ export class DispatchService {
     if (request.projectId !== binding.projectId) return crossProjectDenied(binding.projectId)
 
     return this.store.transaction((tx) => {
+      // Authorization precedes replay and writes: a worker, an unknown session
+      // or an unknown role must not learn/trigger idempotent receipts.
+      const caller = tx.findMember(binding.projectId, binding.sessionId)
+      if (caller?.role !== 'supervisor') {
+        return forbiddenDispatcher(binding.projectId, binding.sessionId)
+      }
+
       const fingerprint = JSON.stringify([
         'dispatch',
         request.toSessionId,

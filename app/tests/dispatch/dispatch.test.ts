@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { TaskId } from '../../src/collab/protocol/index.ts'
+import type { CallerBinding } from '../../src/collab/dispatch/index.ts'
 import {
   BINDING_EMP,
   BINDING_EMP2,
@@ -333,6 +334,49 @@ it('空集合：消息列表为空时 empty+reason+hint，非空时 empty=false'
   assert.equal(messages.items[0]?.taskId, receipt.taskId)
   assert.equal(messages.items[0]?.direction, 'dispatch')
   assert.equal(messages.items[0]?.toSessionId, EMP)
+})
+
+// —— 派活 supervisor-only（产品模型：主管派活、员工汇报） ——
+it('派活权限：worker 被拒为 FORBIDDEN_ACTOR/not-supervisor，且不写任务与消息', () => {
+  const { service, ledger } = makeService()
+  const error = expectDispatchError(service.dispatch(BINDING_EMP, dispatchRequest()))
+  assert.equal(error.error.code, 'FORBIDDEN_ACTOR')
+  const detail = error.error as {
+    reasonCategory?: string
+    requiredActor?: string
+    actorSessionId?: string
+  }
+  assert.equal(detail.reasonCategory, 'not-supervisor')
+  assert.equal(detail.requiredActor, 'supervisor')
+  assert.equal(detail.actorSessionId, EMP)
+  assert.equal(ledger.listTasks(P1).length, 0)
+  assert.equal(service.listMessages(P1).empty, true)
+})
+
+it('派活权限：非成员与未知 role 被拒；在册 supervisor 成功', () => {
+  const { service, ledger } = makeService()
+  service.addMember({
+    projectId: P1,
+    sessionId: 'session-observer' as never,
+    role: 'observer' as never,
+    state: 'available',
+  })
+  const bindings: readonly CallerBinding[] = [
+    { projectId: P1, sessionId: STRANGER },
+    { projectId: P1, sessionId: 'session-observer' as never },
+  ]
+  for (const binding of bindings) {
+    const error = expectDispatchError(service.dispatch(binding, dispatchRequest()))
+    assert.equal(error.error.code, 'FORBIDDEN_ACTOR')
+    assert.equal(
+      (error.error as { reasonCategory?: string }).reasonCategory,
+      'not-supervisor',
+    )
+  }
+  assert.equal(ledger.listTasks(P1).length, 0)
+  const receipt = dispatchOk(service, BINDING_SUP)
+  assert.equal(receipt.taskStatus, 'dispatched')
+  assert.equal(ledger.listTasks(P1).length, 1)
 })
 
 it('空集合：汇报候选为空时 empty+reason+hint', () => {
