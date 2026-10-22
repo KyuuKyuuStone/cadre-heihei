@@ -48,8 +48,19 @@ export interface EmployeeRecord {
   readonly projectId?: string
   readonly displayName?: string
   readonly templateId?: string
+  readonly personaNote?: string
   readonly preferredProviderId?: string
   readonly preferredModel?: string
+}
+
+/** One bridge write; `null` clears a column, `undefined` keeps it. */
+export interface EmployeeWrite {
+  readonly sessionId: string
+  readonly displayName?: string | null
+  readonly templateId?: string | null
+  readonly personaNote?: string | null
+  readonly preferredProviderId?: string | null
+  readonly preferredModel?: string | null
 }
 
 /** Shared employee roster state (plugin-level store). */
@@ -67,7 +78,7 @@ export interface EmployeeDialogRequest {
 }
 
 /** One official preset reduced to what the dialog renders. */
-interface PresetOption {
+export interface PresetOption {
   readonly id: string
   readonly name: string
   readonly description?: string
@@ -76,26 +87,33 @@ interface PresetOption {
 }
 
 /** One provider group from `session/modelCatalog`. */
-interface CatalogModel {
+export interface CatalogModel {
   readonly id: string
   readonly name: string
   readonly reasoning?: { readonly defaultEffort?: string }
 }
 
-interface CatalogGroup {
+export interface CatalogGroup {
   readonly id: string
   readonly name: string
   readonly models: readonly CatalogModel[]
 }
 
 /** Structured outcome of one submit step. */
-interface StepOutcome {
+export interface StepOutcome {
   readonly ok: boolean
   readonly code?: string
   readonly message?: string
 }
 
-type Load<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string; readonly message: string }
+export type Load<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string; readonly message: string }
+
+/** Full model catalog reduced for both employee surfaces. */
+export interface ModelCatalog {
+  readonly groups: readonly CatalogGroup[]
+  readonly defaultProvider: string
+  readonly defaultModel: string
+}
 
 /** Menu entry face. */
 export interface EmployeeMenuInjected {
@@ -116,20 +134,19 @@ export interface EmployeeDialogInjected {
   closeEmployeeDialog: () => void
   getEmployee: (sessionId: string) => Promise<{ ok: boolean; employee?: EmployeeRecord | null; code?: string; message?: string }>
   listPresets: () => Promise<Load<readonly PresetOption[]>>
-  loadModels: () => Promise<Load<{ readonly groups: readonly CatalogGroup[]; readonly defaultProvider: string; readonly defaultModel: string }>>
+  loadModels: () => Promise<Load<ModelCatalog>>
   isBlank: (sessionId: string) => boolean | undefined
   /** Preset the Session currently projects, used to roll back a partial submit. */
   currentPreset: (sessionId: string) => string | undefined
   applyPreset: (sessionId: string, presetId: string) => Promise<StepOutcome>
   applyModel: (sessionId: string, providerId: string, modelId: string, reasoningEffort?: string) => Promise<StepOutcome>
-  saveEmployee: (input: {
-    sessionId: string
-    displayName: string
-    templateId?: string
-    preferredProviderId?: string
-    preferredModel?: string
-  }) => Promise<StepOutcome & { employee?: EmployeeRecord }>
+  saveEmployee: (input: EmployeeWrite) => Promise<StepOutcome & { employee?: EmployeeRecord }>
   refreshEmployees: () => void
+}
+
+/** `code · message` for one structured failure; shared by both employee surfaces. */
+export function failureText(outcome: { readonly code?: string; readonly message?: string } | undefined): string {
+  return `${outcome?.code ?? 'UNKNOWN'} · ${outcome?.message ?? '未知错误'}`
 }
 
 /** Template glyphs keep the 16px badge legible; unknown templates fall back to 员. */

@@ -100,6 +100,30 @@
   line-height: 16px;
 }
 
+.textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  resize: vertical;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.textarea::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
 .loadingRow {
   display: flex;
   align-items: center;

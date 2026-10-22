@@ -18,8 +18,9 @@ import { CadreIcon, CadrePanel } from './CadrePanel.tsx'
 import {
   EmployeeDialog, EmployeeMenuItem, EmployeeRowBadge,
   type EmployeeDialogInjected, type EmployeeDialogRequest, type EmployeeListState, type EmployeeMenuInjected,
-  type EmployeeBadgeInjected, type EmployeeRecord,
+  type EmployeeBadgeInjected, type EmployeeRecord, type EmployeeWrite,
 } from './CadreEmployee.tsx'
+import { EmployeeSection, type EmployeeSettingsInjected } from './EmployeeSection.tsx'
 import { ProviderSection } from './ProviderSection.tsx'
 import { HeaderLeadingControls } from './HeaderLeadingControls.tsx'
 import { SidebarRoot } from './SidebarRoot.tsx'
@@ -49,13 +50,8 @@ interface WorkspaceNavigation {
 /** Optional employee slice of the desktop bridge (ADR-0022 T1). */
 interface EmployeeBridge {
   getEmployee?: (query: { sessionId: string }) => Promise<{ ok?: boolean; employee?: EmployeeRecord | null; code?: string; message?: string }>
-  upsertEmployee?: (query: {
-    sessionId: string
-    displayName?: string
-    templateId?: string
-    preferredProviderId?: string
-    preferredModel?: string
-  }) => Promise<{ ok?: boolean; employee?: EmployeeRecord; code?: string; message?: string }>
+  upsertEmployee?: (query: EmployeeWrite) => Promise<{ ok?: boolean; employee?: EmployeeRecord; code?: string; message?: string }>
+  deleteEmployee?: (query: { sessionId: string }) => Promise<{ ok?: boolean; code?: string; message?: string }>
   listEmployees?: () => Promise<{ ok?: boolean; employees?: readonly EmployeeRecord[]; code?: string; message?: string }>
 }
 
@@ -191,19 +187,24 @@ export function apply(ctx: ClientContext): void {
       return { ok: false as const, code: 'REMOTE_ERROR', message: reason(error) }
     }
   }
-  const saveEmployee = async (input: {
-    sessionId: string
-    displayName: string
-    templateId?: string
-    preferredProviderId?: string
-    preferredModel?: string
-  }) => {
+  const saveEmployee = async (input: EmployeeWrite) => {
     const bridge = employeeBridge()
     if (bridge?.upsertEmployee === undefined) return { ok: false as const, code: 'CHANNEL_MISSING', message: 'window.cadre.upsertEmployee 未注册' }
     try {
       const result = await bridge.upsertEmployee(input)
       if (result?.ok !== true) return { ok: false as const, code: result?.code ?? 'UNKNOWN', message: result?.message ?? '未知错误' }
       return { ok: true as const, ...(result.employee === undefined ? {} : { employee: result.employee }) }
+    } catch (error) {
+      return { ok: false as const, code: 'IPC_ERROR', message: reason(error) }
+    }
+  }
+  const deleteEmployee = async (sessionId: string) => {
+    const bridge = employeeBridge()
+    if (bridge?.deleteEmployee === undefined) return { ok: false as const, code: 'CHANNEL_MISSING', message: 'window.cadre.deleteEmployee 未注册' }
+    try {
+      const result = await bridge.deleteEmployee({ sessionId })
+      if (result?.ok !== true) return { ok: false as const, code: result?.code ?? 'UNKNOWN', message: result?.message ?? '未知错误' }
+      return { ok: true as const }
     } catch (error) {
       return { ok: false as const, code: 'IPC_ERROR', message: reason(error) }
     }
@@ -224,6 +225,16 @@ export function apply(ctx: ClientContext): void {
     applyPreset,
     applyModel,
     saveEmployee,
+    refreshEmployees,
+  })
+  const employeeSettingsInjected = (): EmployeeSettingsInjected => ({
+    hooks: { employees },
+    listPresets,
+    loadModels,
+    getEmployee,
+    saveEmployee,
+    deleteEmployee,
+    isBlank,
     refreshEmployees,
   })
   const panels = createSnapshotStore<readonly SidebarPanelMetadata[]>([])
@@ -298,6 +309,15 @@ export function apply(ctx: ClientContext): void {
     label: () => '模型 Providers',
     locale: NS,
   }, ProviderSection))
+  // ADR-0022 §5: employee roster, between Models (15) and Agent presets (20).
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'cadre-employees',
+    order: 18,
+    label: () => '员工',
+    locale: NS,
+    inject: employeeSettingsInjected,
+  }, EmployeeSection))
   // ADR-0022 T3: session row menu between Rename (200) and Fork (300).
   ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register({
     name: 'sidebar.workspaces.session.menu.item',
