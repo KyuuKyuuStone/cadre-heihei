@@ -32,6 +32,14 @@ import type {
   CadreDispatchInput,
   CadreTransitionInput,
 } from './cadre-collab-api.ts'
+import { ProviderStore, type SaveProviderInput } from './providers-db.ts'
+import { credentialValue, maskCredential } from './provider-credentials.ts'
+import {
+  providerKeyConfigured,
+  setProviderCredential,
+  syncProvidersToHost,
+  unsetProviderCredential,
+} from './provider-runtime.ts'
 import { DesktopProjectManager } from './project-manager.ts'
 import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError } from './host-process.ts'
 import { DesktopPlatformView, PLATFORM_IPC, platformBounds } from './platform-view.ts'
@@ -554,6 +562,15 @@ async function main(): Promise<void> {
   }
   const cadreLedger = new CadreLedger(cadreLedgerPath)
   console.log(`cadre-ledger default-project=${cadreProjectId}`)
+  // Milestone ④: provider catalogue shares the cadre SQLite file; migration is
+  // additive and stores credential references only.
+  let cadreProviders: ProviderStore | undefined
+  try {
+    cadreProviders = new ProviderStore(cadreLedgerPath)
+    console.log(`cadre-providers open path=${cadreLedgerPath} rows=${cadreProviders.list().length}`)
+  } catch (error) {
+    console.error(`cadre-providers open failed reason=${error instanceof Error ? error.message : String(error)}`)
+  }
   let hostUrl: string | undefined
   let hostCookie: string | undefined
   const browserGuests = new DesktopBrowserGuests(() => hostUrl)
@@ -607,6 +624,11 @@ async function main(): Promise<void> {
         const ready = await host.start()
         hostCookie = await authenticateWebHost(ready.url)
         hostUrl = ready.url
+        // Compose enabled providers into llm-pi-ai once the Host owns settings.
+        if (cadreProviders !== undefined) {
+          void syncProvidersToHost(ready.url, hostCookie, cadreProviders.list(), message => console.log(message))
+            .catch(error => console.warn(`cadre-providers sync failed reason=${error instanceof Error ? error.message : String(error)}`))
+        }
         if (ready.injections === undefined) throw new Error('Desktop Host did not provide boot injections')
         injections = ready.injections
         welcomeBackend = await connectDesktopWelcome(ready.url, (input, init) => net.fetch(input, init), async () => (await session.defaultSession.cookies.get({ url: ready.url })).map(cookie => `${cookie.name}=${cookie.value}`).join('; '))
@@ -939,6 +961,140 @@ async function main(): Promise<void> {
       console.log(`cadre:transitionTask failed reason=${error instanceof Error ? error.message : String(error)}`)
       return { ok: false, code: 'INTERNAL_ERROR', message: '验收执行失败' }
     }
+  })
+
+  // Milestone ④ provider catalogue. Key values cross only this boundary on
+  // their way to credentials-local; responses carry hasKey and a last-four mask.
+  const providerMetadata = async (provider: { readonly apiKeyRef: string }) => {
+    let hasKey = credentialValue(provider.apiKeyRef) !== undefined
+    if (hostUrl !== undefined && hostCookie !== undefined) {
+      hasKey = await providerKeyConfigured(hostUrl, hostCookie, provider.apiKeyRef).catch(() => hasKey)
+    }
+    const value = credentialValue(provider.apiKeyRef)
+    return { hasKey, ...(value === undefined ? {} : { maskedKey: maskCredential(value) }) }
+  }
+  const providerView = async (provider: {
+    readonly providerId: string
+    readonly name: string
+    readonly kind: string
+    readonly baseUrl?: string
+    readonly apiKeyRef: string
+    readonly defaultModel: string
+    readonly models: readonly { id: string; contextWindow?: number; maxTokens?: number }[]
+    readonly enabled: boolean
+    readonly isDefault: boolean
+    readonly createdAt: string
+    readonly updatedAt: string
+  }) => ({ ...provider, ...(await providerMetadata(provider)) })
+
+  ipcMain.handle(DESKTOP_IPC.cadreListProviders, async (event) => {
+    assertProductSender(event)
+    if (cadreProviders === undefined) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
+    }
+    const providers = await Promise.all(cadreProviders.list().map(providerView))
+    console.log(`cadre:listProviders count=${providers.length} withKey=${providers.filter(p => p.hasKey).length}`)
+    return { ok: true, providers }
+  })
+
+  ipcMain.handle(DESKTOP_IPC.cadreSaveProvider, async (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreProviders === undefined) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
+    }
+    if (typeof options !== 'object' || options === null) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    const input = options as Partial<SaveProviderInput> & { apiKey?: unknown }
+    if (typeof input.providerId !== 'string' || typeof input.name !== 'string'
+      || typeof input.kind !== 'string' || typeof input.defaultModel !== 'string'
+      || !Array.isArray(input.models)) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    if (input.apiKey !== undefined && typeof input.apiKey !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'apiKey 必须是字符串' }
+    }
+    const saved = cadreProviders.save({
+      providerId: input.providerId,
+      name: input.name,
+      kind: input.kind,
+      ...(typeof input.baseUrl === 'string' && input.baseUrl !== '' ? { baseUrl: input.baseUrl } : {}),
+      defaultModel: input.defaultModel,
+      models: input.models,
+      ...(typeof input.enabled === 'boolean' ? { enabled: input.enabled } : {}),
+      ...(typeof input.isDefault === 'boolean' ? { isDefault: input.isDefault } : {}),
+    }, new Date().toISOString())
+    if (saved.ok !== true) {
+      console.log(`cadre:saveProvider id=${input.providerId} ok=false code=${saved.code} field=${saved.field ?? '(none)'}`)
+      return saved
+    }
+    let runtimeSynced = false
+    let runtimeError: string | undefined
+    if (typeof input.apiKey === 'string' && input.apiKey.trim() !== '') {
+      if (hostUrl === undefined || hostCookie === undefined) {
+        return { ok: false, code: 'MISSING_CREDENTIAL', message: '凭据服务未就绪，请稍后重试', field: 'apiKey' }
+      }
+      try {
+        await setProviderCredential(hostUrl, hostCookie, saved.provider.apiKeyRef, input.apiKey.trim())
+      } catch {
+        console.log(`cadre:saveProvider id=${input.providerId} credential-write=failed`)
+        return { ok: false, code: 'INVALID_CREDENTIAL', message: '凭据写入失败', field: 'apiKey' }
+      }
+    }
+    if (hostUrl !== undefined && hostCookie !== undefined) {
+      try {
+        await syncProvidersToHost(hostUrl, hostCookie, cadreProviders.list(), message => console.log(message))
+        runtimeSynced = true
+      } catch (error) {
+        runtimeError = error instanceof Error ? error.message : String(error)
+        console.log(`cadre:saveProvider id=${input.providerId} runtime-sync=failed reason=${runtimeError}`)
+      }
+    }
+    const view = await providerView(saved.provider)
+    console.log(`cadre:saveProvider id=${input.providerId} ok=true hasKey=${view.hasKey} ` +
+      `default=${saved.provider.isDefault} enabled=${saved.provider.enabled} runtimeSynced=${runtimeSynced}`)
+    return { ok: true, provider: view, runtimeSynced, ...(runtimeError === undefined ? {} : { runtimeError: 'settings sync failed' }) }
+  })
+
+  ipcMain.handle(DESKTOP_IPC.cadreDeleteProvider, async (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreProviders === undefined) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
+    }
+    const providerId = typeof options === 'object' && options !== null ? (options as { providerId?: unknown }).providerId : undefined
+    if (typeof providerId !== 'string') return { ok: false, code: 'INVALID_ARGUMENT', message: 'providerId 无效' }
+    const provider = cadreProviders.get(providerId)
+    if (provider === undefined) return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 不存在' }
+    const deleted = cadreProviders.delete(providerId)
+    if (deleted.ok !== true) {
+      console.log(`cadre:deleteProvider id=${providerId} ok=false code=${deleted.code}`)
+      return deleted
+    }
+    if (hostUrl !== undefined && hostCookie !== undefined) {
+      await unsetProviderCredential(hostUrl, hostCookie, provider.apiKeyRef).catch(() => {})
+      await syncProvidersToHost(hostUrl, hostCookie, cadreProviders.list(), message => console.log(message))
+        .catch(error => console.log(`cadre:deleteProvider runtime-sync=failed reason=${error instanceof Error ? error.message : String(error)}`))
+    }
+    console.log(`cadre:deleteProvider id=${providerId} ok=true`)
+    return { ok: true, deleted: true }
+  })
+
+  ipcMain.handle(DESKTOP_IPC.cadreTestProvider, async (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreProviders === undefined) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
+    }
+    const providerId = typeof options === 'object' && options !== null ? (options as { providerId?: unknown }).providerId : undefined
+    if (typeof providerId !== 'string') return { ok: false, code: 'INVALID_ARGUMENT', message: 'providerId 无效' }
+    const provider = cadreProviders.get(providerId)
+    if (provider === undefined) return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 不存在' }
+    const metadata = await providerMetadata(provider)
+    if (!metadata.hasKey) {
+      return { ok: false, code: 'MISSING_CREDENTIAL', message: '未配置 Key', field: 'apiKey' }
+    }
+    // Probe is non-network by design (U-20): format and credential presence only.
+    console.log(`cadre:testProvider id=${providerId} ok=true hasKey=true check=credential`)
+    return { ok: true, providerId, hasKey: true, ...(metadata.maskedKey === undefined ? {} : { maskedKey: metadata.maskedKey }) }
   })
 
   ipcMain.handle(DESKTOP_IPC.boot, async (event) => {

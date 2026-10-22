@@ -107,6 +107,22 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
       reason?: string
       idempotencyKey?: string
     }) => ipcRenderer.invoke(DESKTOP_IPC.cadreTransitionTask, options) as Promise<unknown>,
+    listProviders: () => ipcRenderer.invoke(DESKTOP_IPC.cadreListProviders) as Promise<unknown>,
+    saveProvider: (options: {
+      providerId: string
+      name: string
+      kind: string
+      baseUrl?: string
+      apiKey?: string
+      defaultModel: string
+      models: readonly { id: string; contextWindow?: number; maxTokens?: number }[]
+      enabled?: boolean
+      isDefault?: boolean
+    }) => ipcRenderer.invoke(DESKTOP_IPC.cadreSaveProvider, options) as Promise<unknown>,
+    deleteProvider: (options: { providerId: string }) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreDeleteProvider, options) as Promise<unknown>,
+    testProvider: (options: { providerId: string }) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreTestProvider, options) as Promise<unknown>,
   })
   contextBridge.exposeInMainWorld('dshPlatform', {
     open: (page: 'usage' | 'top-up', bounds: { x: number; y: number; width: number; height: number }) => ipcRenderer.invoke(PLATFORM_IPC.open, page, bounds),

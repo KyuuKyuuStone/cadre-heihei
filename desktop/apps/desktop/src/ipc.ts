@@ -36,6 +36,11 @@ export const DESKTOP_IPC = {
   /** Cadre write path; delegates to app/src/collab via lib/cadre-collab.cjs. */
   cadreDispatchTask: 'cadre:dispatchTask',
   cadreTransitionTask: 'cadre:transitionTask',
+  /** Milestone ④ local provider catalogue; values are never returned. */
+  cadreListProviders: 'cadre:listProviders',
+  cadreSaveProvider: 'cadre:saveProvider',
+  cadreDeleteProvider: 'cadre:deleteProvider',
+  cadreTestProvider: 'cadre:testProvider',
 } as const
 
 /** Desktop release update state rendered by desktop-owned UI. */
