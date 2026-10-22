@@ -55,13 +55,13 @@ interface CadreBridge {
     assigneeSessionId: string
     title: string
     body: string
-  }): Promise<unknown>
+  }): Promise<{ tasks?: CadreTaskRow[] } | undefined>
   transitionTask?(query: {
     projectId: string
     taskId: string
     status: 'verified' | 'rework' | 'failed'
     reason?: string
-  }): Promise<unknown>
+  }): Promise<{ tasks?: CadreTaskRow[] } | undefined>
 }
 
 declare global {
@@ -184,6 +184,20 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
   useEffect(() => { void load() }, [load])
   useEffect(() => { void loadRoster() }, [loadRoster])
 
+  // Apply the rows a write already read back, then reconcile with a fresh read.
+  const applyWriteResult = (result: { tasks?: CadreTaskRow[] } | undefined) => {
+    if (result?.tasks === undefined) return
+    setState({
+      kind: 'ready',
+      tasks: result.tasks.map(row => ({
+        taskId: row.taskId,
+        title: row.title,
+        status: row.status,
+        assignee: row.assigneeSessionId,
+      })),
+    })
+  }
+
   const submitDispatch = async () => {
     const bridge = window.cadre
     if (bridge === undefined) {
@@ -201,17 +215,18 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
     setPending(true)
     setNotice(null)
     try {
-      await bridge.dispatchTask({
+      const result = await bridge.dispatchTask({
         projectId: PROJECT_ID,
         assigneeSessionId: employee.trim(),
         title: title.trim(),
         body,
       })
+      applyWriteResult(result)
       setDispatchOpen(false)
       setEmployee('')
       setTitle('')
       setBody('')
-      await load()
+      void load()
       setNotice({ tone: 'neutral', text: '已派发，列表已刷新' })
     } catch (error) {
       setNotice({ tone: 'danger', text: errorMessage(error) })
@@ -229,15 +244,16 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
     setPending(true)
     setNotice(null)
     try {
-      await bridge.transitionTask({
+      const result = await bridge.transitionTask({
         projectId: PROJECT_ID,
         taskId,
         status,
         ...(reasonText === undefined || reasonText.trim() === '' ? {} : { reason: reasonText.trim() }),
       })
+      applyWriteResult(result)
       setReasonFor(null)
       setReason('')
-      await load()
+      void load()
       setNotice({ tone: 'neutral', text: '状态已更新，列表已刷新' })
     } catch (error) {
       setNotice({ tone: 'danger', text: errorMessage(error) })
