@@ -5,6 +5,7 @@ import { beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  getInitialLocale,
   initializeLocale,
   LEGACY_LOCALE_STORAGE_KEY,
   LOCALE_STORAGE_KEY,
@@ -63,9 +64,23 @@ describe('locale detection', { concurrency: 1 }, () => {
     setNavigator(['en-US'])
   })
 
+  it('defaults to zh for a fresh install with no stored preference', () => {
+    setNavigator(['en-US'])
+    assert.equal(getInitialLocale(), 'zh')
+  })
+
+  it('keeps a stored user choice instead of the zh default', () => {
+    storage.set(LOCALE_STORAGE_KEY, 'en')
+    assert.equal(getInitialLocale(), 'en')
+  })
+
   it('normalizes BCP 47 tags and selects the first supported language', () => {
     assert.equal(resolveSupportedLocale(['fr-FR', 'zh_Hant_HK', 'en-US']), 'zh-TW')
     assert.equal(resolveSupportedLocale(['zh-Hans-HK']), 'zh')
+  })
+
+  it('falls back to zh for unsupported languages', () => {
+    assert.equal(resolveSupportedLocale(['fr-FR', 'de-DE']), 'zh')
   })
 
   it('uses Electron preferred system languages before the renderer fallback', async () => {

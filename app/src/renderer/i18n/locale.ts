@@ -5,6 +5,8 @@ export const LOCALE_STORAGE_KEY = 'cadre-heihei-locale'
 export const LEGACY_LOCALE_STORAGE_KEY = 'cc-heihei-locale'
 
 export const VALID_LOCALES: readonly Locale[] = ['en', 'zh', 'zh-TW', 'jp', 'kr']
+/** 与 shared/ipc.ts 的 DEFAULT_PREFERENCES.locale 保持一致：首次启动默认中文。 */
+export const DEFAULT_LOCALE: Locale = 'zh'
 const DOCUMENT_LANG: Record<Locale, string> = {
   en: 'en',
   zh: 'zh-CN',
@@ -78,7 +80,7 @@ export function resolveSupportedLocale(languageTags: readonly string[]): Locale 
     const locale = mapLanguageTag(languageTag)
     if (locale) return locale
   }
-  return 'en'
+  return DEFAULT_LOCALE
 }
 
 export function readStoredLocale(): Locale | null {
@@ -104,9 +106,11 @@ export function readStoredLocale(): Locale | null {
 }
 
 export function getInitialLocale(): Locale {
+  // 无用户偏好时默认中文（与主进程 DEFAULT_PREFERENCES 一致），
+  // 不因系统语言为英文而首次落到 en；已保存的选择优先。
   return readStoredLocale()
     ?? initializedLocale
-    ?? resolveSupportedLocale(readBrowserLanguages())
+    ?? DEFAULT_LOCALE
 }
 
 export function applyDocumentLocale(locale: Locale): void {

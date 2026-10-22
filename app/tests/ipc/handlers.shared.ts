@@ -98,7 +98,7 @@ export function runIpcContract(name: string, makeBackend: MakeIpcBackend): void 
 
       const prefs = ctx.handlers.handle(ctx.windowId, 'prefs:get') as any
       assert.equal(prefs.ok, true)
-      assert.equal(prefs.locale, 'en')
+      assert.equal(prefs.locale, 'zh')
       assert.equal(prefs.theme, 'white')
 
       const set = ctx.handlers.handle(ctx.windowId, 'prefs:set', {

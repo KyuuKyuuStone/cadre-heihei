@@ -103,7 +103,7 @@ export interface PreferencesPatch {
   readonly theme?: PreferenceTheme
 }
 
-export const DEFAULT_PREFERENCES: Preferences = { locale: 'en', theme: 'white' }
+export const DEFAULT_PREFERENCES: Preferences = { locale: 'zh', theme: 'white' }
 
 export function isPreferenceLocale(value: unknown): value is PreferenceLocale {
   return typeof value === 'string' && (PREFERENCE_LOCALES as readonly string[]).includes(value)

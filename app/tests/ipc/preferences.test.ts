@@ -11,7 +11,7 @@ import { makeTempDb } from '../support/temp-db.ts'
 
 test('内存偏好：默认值、局部更新与非法初始值回落', () => {
   const store = new InMemoryPreferencesStore()
-  assert.deepEqual(store.get(), { locale: 'en', theme: 'white' })
+  assert.deepEqual(store.get(), { locale: 'zh', theme: 'white' })
   store.set({ locale: 'zh' })
   assert.deepEqual(store.get(), { locale: 'zh', theme: 'white' })
   store.set({ theme: 'celadon' })
@@ -21,7 +21,7 @@ test('内存偏好：默认值、局部更新与非法初始值回落', () => {
     locale: 'fr' as never,
     theme: 'neon' as never,
   })
-  assert.deepEqual(sanitized.get(), { locale: 'en', theme: 'white' })
+  assert.deepEqual(sanitized.get(), { locale: 'zh', theme: 'white' })
 })
 
 test('文件偏好：写入后可被新实例读取；损坏文件回退默认值', () => {
@@ -30,7 +30,7 @@ test('文件偏好：写入后可被新实例读取；损坏文件回退默认�
   try {
     mkdirSync(temp.path, { recursive: true })
     const first = new FilePreferencesStore(filePath)
-    assert.deepEqual(first.get(), { locale: 'en', theme: 'white' })
+    assert.deepEqual(first.get(), { locale: 'zh', theme: 'white' })
     first.set({ locale: 'jp', theme: 'paper' })
     assert.deepEqual(JSON.parse(readFileSync(filePath, 'utf8')), {
       locale: 'jp',
@@ -42,7 +42,7 @@ test('文件偏好：写入后可被新实例读取；损坏文件回退默认�
 
     writeFileSync(filePath, '{broken', 'utf8')
     const third = new FilePreferencesStore(filePath)
-    assert.deepEqual(third.get(), { locale: 'en', theme: 'white' })
+    assert.deepEqual(third.get(), { locale: 'zh', theme: 'white' })
   } finally {
     temp.cleanup()
   }
