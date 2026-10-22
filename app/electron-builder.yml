@@ -41,10 +41,22 @@ nsis:
   differentialPackage: false
   useZip: true
 extraResources:
-  # stage 布局为 vendor/deepseek-harness/**；from 指到 vendor 层，
-  # 使安装目录为 <resources>/vendor/deepseek-harness（与 sdk.ts findRepoRoot 期望一致）。
-  - from: resources/harness-stage/vendor
-    to: vendor
+  # s25 起 harness 运行树改为官方 prepare-dsh 产物（自包含零链接包形态，439MB，
+  # 替代 stage-harness 全量复制 741MB；s24 桥接 probe "pong"+list_roster 验证通过）。
+  # 安装目录 <resources>/dsh 与 src/main/dsh-path.ts 打包态 resolveDshBin 约定一致：
+  #   <resources>/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js
+  # 回退方式：恢复下行 stage 复制（resources/harness-stage/vendor → vendor）并重跑
+  #   node scripts/m4/stage-harness.ts。
+  # - from: resources/harness-stage/vendor
+  #   to: vendor
+  - from: ../vendor/deepseek-harness/apps/desktop/.desktop-build/targets/win-x64/dsh
+    to: dsh
+    # s25 实测：builder 默认复制滤掉 node_modules（dsh 只剩 4MB manifest）；
+    # filter 显式列出全量内容。
+    filter:
+      - package.json
+      - desktop-runtime.json
+      - node_modules/**/*
   # MCP server 单文件 CJS 落真实磁盘（asar 内路径子进程不可读）；
   # nodeCommand=process.execPath（electron.exe）+ patch env ELECTRON_RUN_AS_NODE=1 拉起。
   - from: dist/mcp
