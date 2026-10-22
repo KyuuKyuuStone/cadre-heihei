@@ -110,6 +110,32 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
         if (!current.ok) return current
         from = current.value.status
       }
+      const actor = { kind: 'session' as const, sessionId: options.sessionId, role: options.role }
+      // One-step accept: the panel's "通过验收" on a delivered task runs the
+      // mandatory delivered→review→verified chain as two real ledger
+      // transitions (two events). Each step still passes validation.ts and the
+      // SQLite trigger; non-delivered starts keep the old single-step path.
+      if (input.to === 'verified' && from === 'delivered') {
+        const review = store.ledger.transition({
+          projectId: options.projectId,
+          taskId: input.taskId,
+          from: 'delivered',
+          to: 'review',
+          actor,
+          idempotencyKey: `${input.idempotencyKey ?? crypto.randomUUID()}:review`,
+        })
+        if (!review.ok) return review
+        console.log(`cadre-ledger one-step review project=${options.projectId} task=${input.taskId}`)
+        return store.ledger.transition({
+          projectId: options.projectId,
+          taskId: input.taskId,
+          from: 'review',
+          to: 'verified',
+          actor,
+          ...(input.reason === undefined ? {} : { reason: input.reason }),
+          idempotencyKey: `${input.idempotencyKey ?? crypto.randomUUID()}:verified`,
+        })
+      }
       // `SqliteTaskLedger.transition` applies `validation.ts`: start-status
       // match, legal rule, reason requirement, and actor permission via the
       // project roster (`SqliteSupervisorResolver`).
@@ -118,7 +144,7 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
         taskId: input.taskId,
         from,
         to: input.to,
-        actor: { kind: 'session', sessionId: options.sessionId, role: options.role },
+        actor,
         ...(input.reason === undefined ? {} : { reason: input.reason }),
         idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
       })
