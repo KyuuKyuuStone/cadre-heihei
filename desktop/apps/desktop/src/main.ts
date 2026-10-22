@@ -33,6 +33,7 @@ import type {
   CadreTransitionInput,
 } from './cadre-collab-api.ts'
 import { ProviderStore, type SaveProviderInput } from './providers-db.ts'
+import { EmployeeStore, type UpsertEmployeeInput } from './employees-db.ts'
 import { credentialValue, maskCredential } from './provider-credentials.ts'
 import {
   providerKeyConfigured,
@@ -570,6 +571,15 @@ async function main(): Promise<void> {
     console.log(`cadre-providers open path=${cadreLedgerPath} rows=${cadreProviders.list().length}`)
   } catch (error) {
     console.error(`cadre-providers open failed reason=${error instanceof Error ? error.message : String(error)}`)
+  }
+  // ADR-0022 T1: the employee roster shares the same SQLite file; the migration
+  // is additive and stores preferences only (no credentials).
+  let cadreEmployees: EmployeeStore | undefined
+  try {
+    cadreEmployees = new EmployeeStore(cadreLedgerPath)
+    console.log(`cadre-employees open path=${cadreLedgerPath} project=${cadreProjectId} rows=${cadreEmployees.list(cadreProjectId).length}`)
+  } catch (error) {
+    console.error(`cadre-employees open failed reason=${error instanceof Error ? error.message : String(error)}`)
   }
   let hostUrl: string | undefined
   let hostCookie: string | undefined
@@ -1127,6 +1137,121 @@ async function main(): Promise<void> {
     }
     console.log(`cadre:bindSession session=${sessionId} provider=${providerId} model=${binding.binding.model} ok=true`)
     return binding
+  })
+
+  // ADR-0022 T1 employee roster. Validation rules live in employees-db so the
+  // tests pin exactly what this path applies; a bad payload returns a structured
+  // error instead of throwing, and logs carry ids only (never persona text).
+  const employeeStoreMissing = { ok: false as const, code: 'INVALID_ARGUMENT' as const, message: '员工存储不可用' }
+  const employeeProject = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.trim() !== '' ? value : undefined
+  const employeeText = (value: unknown, field: string):
+    | { readonly ok: true; readonly value: string | null | undefined }
+    | { readonly ok: false; readonly code: 'INVALID_ARGUMENT'; readonly message: string; readonly field: string } => {
+    if (value === undefined || value === null) return { ok: true, value }
+    if (typeof value !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: `${field} 必须是字符串或 null`, field }
+    }
+    return { ok: true, value }
+  }
+
+  ipcMain.handle(DESKTOP_IPC.cadreGetEmployee, (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (typeof options !== 'object' || options === null) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    const { sessionId, projectId } = options as { sessionId?: unknown; projectId?: unknown }
+    if (typeof sessionId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
+    }
+    if (projectId !== undefined && typeof projectId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
+    }
+    const employee = cadreEmployees.get(sessionId, employeeProject(projectId))
+    return { ok: true, employee: employee ?? null }
+  })
+
+  ipcMain.handle(DESKTOP_IPC.cadreUpsertEmployee, (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (typeof options !== 'object' || options === null) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    const record = options as Record<string, unknown>
+    if (typeof record.sessionId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
+    }
+    if (record.projectId !== undefined && typeof record.projectId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
+    }
+    const displayName = employeeText(record.displayName, 'displayName')
+    if (displayName.ok === false) return displayName
+    const templateId = employeeText(record.templateId, 'templateId')
+    if (templateId.ok === false) return templateId
+    const personaNote = employeeText(record.personaNote, 'personaNote')
+    if (personaNote.ok === false) return personaNote
+    const preferredProviderId = employeeText(record.preferredProviderId, 'preferredProviderId')
+    if (preferredProviderId.ok === false) return preferredProviderId
+    const preferredModel = employeeText(record.preferredModel, 'preferredModel')
+    if (preferredModel.ok === false) return preferredModel
+    const input: UpsertEmployeeInput = {
+      sessionId: record.sessionId,
+      projectId: employeeProject(record.projectId) ?? cadreProjectId,
+      ...(displayName.value === undefined ? {} : { displayName: displayName.value }),
+      ...(templateId.value === undefined ? {} : { templateId: templateId.value }),
+      ...(personaNote.value === undefined ? {} : { personaNote: personaNote.value }),
+      ...(preferredProviderId.value === undefined ? {} : { preferredProviderId: preferredProviderId.value }),
+      ...(preferredModel.value === undefined ? {} : { preferredModel: preferredModel.value }),
+    }
+    const saved = cadreEmployees.upsert(input, new Date().toISOString())
+    if (saved.ok === false) {
+      console.log(`cadre:upsertEmployee session=${input.sessionId} project=${input.projectId} ` +
+        `ok=false code=${saved.code} field=${saved.field ?? '(none)'}`)
+      return saved
+    }
+    console.log(`cadre:upsertEmployee session=${input.sessionId} project=${input.projectId} ok=true ` +
+      `template=${saved.employee.templateId ?? '(none)'}`)
+    return saved
+  })
+
+  ipcMain.handle(DESKTOP_IPC.cadreDeleteEmployee, (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (typeof options !== 'object' || options === null) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    const { sessionId, projectId } = options as { sessionId?: unknown; projectId?: unknown }
+    if (typeof sessionId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
+    }
+    if (projectId !== undefined && typeof projectId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
+    }
+    const project = employeeProject(projectId) ?? cadreProjectId
+    const deleted = cadreEmployees.delete(sessionId, project)
+    if (deleted.ok === false) {
+      console.log(`cadre:deleteEmployee session=${sessionId} project=${project} ok=false code=${deleted.code}`)
+      return deleted
+    }
+    console.log(`cadre:deleteEmployee session=${sessionId} project=${project} ok=true`)
+    return deleted
+  })
+
+  ipcMain.handle(DESKTOP_IPC.cadreListEmployees, (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (options !== undefined && (typeof options !== 'object' || options === null)) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    const projectId = options === undefined ? undefined : (options as { projectId?: unknown }).projectId
+    if (projectId !== undefined && typeof projectId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
+    }
+    const project = employeeProject(projectId) ?? cadreProjectId
+    const employees = cadreEmployees.list(project)
+    console.log(`cadre:listEmployees project=${project} count=${employees.length}`)
+    return { ok: true, employees }
   })
 
   ipcMain.handle(DESKTOP_IPC.boot, async (event) => {

@@ -125,6 +125,21 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
       ipcRenderer.invoke(DESKTOP_IPC.cadreTestProvider, options) as Promise<unknown>,
     bindSession: (options: { sessionId: string; providerId: string; model?: string }) =>
       ipcRenderer.invoke(DESKTOP_IPC.cadreBindSession, options) as Promise<unknown>,
+    getEmployee: (options: { sessionId: string; projectId?: string }) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreGetEmployee, options) as Promise<unknown>,
+    upsertEmployee: (options: {
+      sessionId: string
+      projectId?: string
+      displayName?: string | null
+      templateId?: string | null
+      personaNote?: string | null
+      preferredProviderId?: string | null
+      preferredModel?: string | null
+    }) => ipcRenderer.invoke(DESKTOP_IPC.cadreUpsertEmployee, options) as Promise<unknown>,
+    deleteEmployee: (options: { sessionId: string; projectId?: string }) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreDeleteEmployee, options) as Promise<unknown>,
+    listEmployees: (options?: { projectId?: string }) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreListEmployees, options) as Promise<unknown>,
   })
   contextBridge.exposeInMainWorld('dshPlatform', {
     open: (page: 'usage' | 'top-up', bounds: { x: number; y: number; width: number; height: number }) => ipcRenderer.invoke(PLATFORM_IPC.open, page, bounds),

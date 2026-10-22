@@ -43,6 +43,11 @@ export const DESKTOP_IPC = {
   cadreTestProvider: 'cadre:testProvider',
   /** Session→provider binding used by new-session defaults and switching. */
   cadreBindSession: 'cadre:bindSession',
+  /** ADR-0022 T1 employee roster; optional columns are preferences, not runtime truth. */
+  cadreGetEmployee: 'cadre:getEmployee',
+  cadreUpsertEmployee: 'cadre:upsertEmployee',
+  cadreDeleteEmployee: 'cadre:deleteEmployee',
+  cadreListEmployees: 'cadre:listEmployees',
 } as const
 
 /** Desktop release update state rendered by desktop-owned UI. */
