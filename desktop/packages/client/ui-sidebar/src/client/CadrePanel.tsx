@@ -226,7 +226,10 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
       setEmployee('')
       setTitle('')
       setBody('')
-      void load()
+      // Reconcile after the write's rows are on screen; an immediate second read
+      // can still observe the previous WAL snapshot and overwrite the result.
+      if (result?.tasks === undefined) void load()
+      else window.setTimeout(() => { void load() }, 2000)
       setNotice({ tone: 'neutral', text: '已派发，列表已刷新' })
     } catch (error) {
       setNotice({ tone: 'danger', text: errorMessage(error) })
@@ -253,7 +256,8 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
       applyWriteResult(result)
       setReasonFor(null)
       setReason('')
-      void load()
+      if (result?.tasks === undefined) void load()
+      else window.setTimeout(() => { void load() }, 2000)
       setNotice({ tone: 'neutral', text: '状态已更新，列表已刷新' })
     } catch (error) {
       setNotice({ tone: 'danger', text: errorMessage(error) })
