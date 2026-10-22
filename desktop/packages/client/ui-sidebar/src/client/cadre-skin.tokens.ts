@@ -1,7 +1,7 @@
 /**
  * Cadre warm skin: official `--dsw-alias-*` overrides for the 「纸 · 墨 · 印」
  * palette. The first 38 entries are generated from
- * `docs/product/design/tokens.json` v1.1.0 (`officialOverrides` +
+ * `docs/product/design/tokens.json` v1.2.0 (`officialOverrides` +
  * `themes.light` / `officialDarkResolved`), resolved to literals rather than
  * `var(--ch-color-*)` indirections: `overrideTokens` writes these onto
  * `document.body` as inline variables and the sidebar bundle must not depend
@@ -36,7 +36,7 @@ export const CADRE_SKIN_TOKENS = {
   '--dsw-alias-border-l1': { light: '#DED2B8', dark: '#383226' },
   '--dsw-alias-border-l2': { light: '#DED2B8', dark: '#383226' },
   '--dsw-alias-border-l3': { light: '#C8B897', dark: '#867E6B' },
-  '--dsw-alias-border-l4': { light: '#C8B897', dark: '#867E6B' },
+  '--dsw-alias-border-l4': { light: '#887B61', dark: '#867E6B' },
   '--dsw-alias-label-primary': { light: '#251E11', dark: '#EDE6D6' },
   '--dsw-alias-label-secondary': { light: '#6E6146', dark: '#A79B83' },
   '--dsw-alias-label-tertiary': { light: '#746951', dark: '#9C9080' },
@@ -51,7 +51,7 @@ export const CADRE_SKIN_TOKENS = {
   '--dsw-specific-sidebar-nav-item-active': { light: '#F0E1D0', dark: '#3E2F21' },
   '--dsw-specific-sidebar-nav-item-active-accent': { light: '#96442B', dark: '#D8855D' },
   '--dsw-alias-interactive-bg-hover': { light: 'rgba(90, 74, 46, 0.08)', dark: 'rgba(237, 230, 214, 0.06)' },
-  '--dsw-alias-state-error-primary': { light: '#BD4133', dark: '#E17058' },
+  '--dsw-alias-state-error-primary': { light: '#B23B2E', dark: '#E17058' },
   '--dsw-alias-state-success-primary': { light: '#3A784D', dark: '#84B383' },
   '--dsw-alias-state-warn-primary': { light: '#90641B', dark: '#D3A34C' },
   '--dsw-alias-state-error-tertiary': { light: '#FAECE8', dark: '#3A241B' },
