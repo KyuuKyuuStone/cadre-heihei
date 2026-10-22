@@ -42,6 +42,26 @@ interface CadreMember {
   readonly name?: string
 }
 
+/** Write response: the ledger reports whether the write actually landed. */
+interface CadreWriteResult {
+  readonly ledgerUpdated?: boolean
+  readonly tasks?: CadreTaskRow[]
+  readonly code?: string
+  readonly message?: string
+  readonly taskStatus?: string
+}
+
+/** A write is successful only when the ledger confirms it and returns rows. */
+function writeSucceeded(result: CadreWriteResult | undefined): result is CadreWriteResult & { tasks: CadreTaskRow[] } {
+  return result?.ledgerUpdated === true && Array.isArray(result.tasks)
+}
+
+function writeFailure(result: CadreWriteResult | undefined): string {
+  const code = result?.code ?? 'ledger_not_updated'
+  const message = result?.message ?? (result?.ledgerUpdated === false ? '台账未更新' : '响应缺少 tasks')
+  return `写入失败：${code} · ${message}`
+}
+
 /** Bridge surface. Write methods are optional until the main process ships them. */
 interface CadreBridge {
   listTasks(query: { projectId: string }): Promise<{
@@ -55,13 +75,13 @@ interface CadreBridge {
     assigneeSessionId: string
     title: string
     body: string
-  }): Promise<{ tasks?: CadreTaskRow[] } | undefined>
+  }): Promise<CadreWriteResult | undefined>
   transitionTask?(query: {
     projectId: string
     taskId: string
     status: 'verified' | 'rework' | 'failed'
     reason?: string
-  }): Promise<{ tasks?: CadreTaskRow[] } | undefined>
+  }): Promise<CadreWriteResult | undefined>
 }
 
 declare global {
@@ -221,6 +241,12 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
         title: title.trim(),
         body,
       })
+      if (!writeSucceeded(result)) {
+        // Keep the form open for retry and the list untouched: the ledger did
+        // not confirm the write.
+        setNotice({ tone: 'danger', text: writeFailure(result) })
+        return
+      }
       applyWriteResult(result)
       setDispatchOpen(false)
       setEmployee('')
@@ -228,8 +254,7 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
       setBody('')
       // Reconcile after the write's rows are on screen; an immediate second read
       // can still observe the previous WAL snapshot and overwrite the result.
-      if (result?.tasks === undefined) void load()
-      else window.setTimeout(() => { void load() }, 2000)
+      window.setTimeout(() => { void load() }, 2000)
       setNotice({ tone: 'neutral', text: '已派发，列表已刷新' })
     } catch (error) {
       setNotice({ tone: 'danger', text: errorMessage(error) })
@@ -253,11 +278,14 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
         status,
         ...(reasonText === undefined || reasonText.trim() === '' ? {} : { reason: reasonText.trim() }),
       })
+      if (!writeSucceeded(result)) {
+        setNotice({ tone: 'danger', text: writeFailure(result) })
+        return
+      }
       applyWriteResult(result)
       setReasonFor(null)
       setReason('')
-      if (result?.tasks === undefined) void load()
-      else window.setTimeout(() => { void load() }, 2000)
+      window.setTimeout(() => { void load() }, 2000)
       setNotice({ tone: 'neutral', text: '状态已更新，列表已刷新' })
     } catch (error) {
       setNotice({ tone: 'danger', text: errorMessage(error) })
