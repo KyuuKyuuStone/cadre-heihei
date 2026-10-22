@@ -880,15 +880,19 @@ async function main(): Promise<void> {
         ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
       })
       const failure = asCadreFailure(result)
+      const inputLog = `to=${input.to} idempotencyKey=${input.idempotencyKey ?? '(auto)'}`
       if (failure !== undefined) {
-        console.log(`cadre:dispatchTask project=${cadreProjectId} to=${input.to} ok=false code=${failure.code}`)
+        console.log(`cadre:dispatchTask project=${cadreProjectId} ${inputLog} actor=${cadreSessionId}/${cadreActorRole} ` +
+          `path=${cadreLedgerPath} ok=false code=${failure.code}`)
         return failure
       }
       // Read back on the write connection after commit: the renderer gets the
       // new row without a second IPC round-trip or a stale read snapshot.
       const snapshot = cadreCollab.listTasks()
       const taskId = (result as { taskId?: unknown }).taskId
-      console.log(`cadre:dispatchTask project=${cadreProjectId} to=${input.to} ok=true task=${String(taskId)} ` +
+      const ledgerUpdated = (result as { ledgerUpdated?: unknown }).ledgerUpdated
+      console.log(`cadre:dispatchTask project=${cadreProjectId} ${inputLog} actor=${cadreSessionId}/${cadreActorRole} ` +
+        `path=${cadreLedgerPath} ok=true task=${String(taskId)} ledgerUpdated=${String(ledgerUpdated)} ` +
         `rows=${snapshot.rows.length} readback=write-connection`)
       return { ...(result as Record<string, unknown>), tasks: snapshot.rows }
     } catch (error) {
@@ -919,15 +923,18 @@ async function main(): Promise<void> {
         ...(input.reason === undefined ? {} : { reason: input.reason }),
         ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
       })) as { ok?: unknown; code?: unknown }
+      const fields = `task=${input.taskId} from=${input.from ?? '(current)'} to=${input.to} ` +
+        `reason=${input.reason ?? '(none)'} idempotencyKey=${input.idempotencyKey ?? '(auto)'}`
       if (view.ok !== true) {
-        console.log(`cadre:transitionTask task=${input.taskId} ${input.from ?? '(current)'}->${input.to} ` +
+        console.log(`cadre:transitionTask ${fields} actor=${cadreSessionId}/${cadreActorRole} path=${cadreLedgerPath} ` +
           `ok=false code=${String(view.code ?? 'INTERNAL_ERROR')}`)
         return view
       }
       const snapshot = cadreCollab.listTasks()
-      console.log(`cadre:transitionTask task=${input.taskId} ${input.from ?? '(current)'}->${input.to} ok=true ` +
-        `status=${String((view as { status?: unknown }).status)} rows=${snapshot.rows.length} readback=write-connection`)
-      return { ...view, tasks: snapshot.rows }
+      console.log(`cadre:transitionTask ${fields} actor=${cadreSessionId}/${cadreActorRole} path=${cadreLedgerPath} ` +
+        `ok=true status=${String((view as { status?: unknown }).status)} ledgerUpdated=true ` +
+        `rows=${snapshot.rows.length} readback=write-connection`)
+      return { ...view, ledgerUpdated: true, tasks: snapshot.rows }
     } catch (error) {
       console.log(`cadre:transitionTask failed reason=${error instanceof Error ? error.message : String(error)}`)
       return { ok: false, code: 'INTERNAL_ERROR', message: '验收执行失败' }

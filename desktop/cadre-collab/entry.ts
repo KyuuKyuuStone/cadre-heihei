@@ -54,11 +54,42 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
     databasePath: options.databasePath,
     ...(options.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: options.busyTimeoutMs }),
   })
+  // A fresh shell database has no roster; without this the configured local
+  // identity is rejected as FORBIDDEN_ACTOR and the first write never lands.
+  // Seed only when the project roster is empty, never override existing rows.
+  const existing = store.listMembers(options.projectId as never)
+  if (existing.length === 0) {
+    store.addMember({
+      projectId: options.projectId as never,
+      sessionId: options.sessionId as never,
+      role: options.role === 'assignee' ? 'worker' : 'supervisor',
+      state: 'available',
+      displayName: options.sessionId,
+    })
+    console.log(`cadre-ledger roster seeded project=${options.projectId} session=${options.sessionId} role=${options.role}`)
+  }
+  console.log(`cadre-ledger roster project=${options.projectId} size=${store.listMembers(options.projectId as never).length}`)
   const service = new DispatchService(store)
   const binding = { projectId: options.projectId, sessionId: options.sessionId }
   return {
     databasePath: options.databasePath,
     dispatch(input) {
+      // The shell has no roster-management UI and the panel's employee field is
+      // free-form. Enrol an unknown target as a worker only when the caller is
+      // an in-roster supervisor; the service still re-checks both sides.
+      const members = store.listMembers(options.projectId as never)
+      const caller = members.find(member => member.sessionId === options.sessionId)
+      const targetKnown = members.some(member => member.sessionId === input.to)
+      if (caller?.role === 'supervisor' && !targetKnown) {
+        store.addMember({
+          projectId: options.projectId as never,
+          sessionId: input.to as never,
+          role: 'worker',
+          state: 'available',
+          displayName: input.to,
+        })
+        console.log(`cadre-ledger target enrolled project=${options.projectId} session=${input.to} role=worker`)
+      }
       return service.dispatch(binding, {
         projectId: options.projectId,
         toSessionId: input.to,
