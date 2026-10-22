@@ -18,10 +18,23 @@ interface CadreTask {
   readonly assignee: string
 }
 
+/** Raw row shape of `cadre:listTasks` (assignee is a session id). */
+interface CadreTaskRow {
+  readonly taskId: string
+  readonly title: string
+  readonly status: string
+  readonly assigneeSessionId: string
+  readonly updatedAt: string
+}
+
 declare global {
   interface Window {
     cadre?: {
-      listTasks(query: { projectId: string }): Promise<{ tasks: CadreTask[] }>
+      listTasks(query: { projectId: string }): Promise<{
+        projectId: string
+        rows: CadreTaskRow[]
+        elapsedMs?: number
+      }>
     }
   }
 }
@@ -47,13 +60,22 @@ export function CadreIcon({ size }: PropsRuntime<'sidebar.panellist'>) {
   return <IconBranchOutlineRegular size={size} />
 }
 
+/** Display labels for the ledger's status codes. */
+const STATUS_LABELS: Record<string, string> = {
+  delivered: '已交付',
+  in_progress: '进行中',
+  verified: '已验收',
+  failed: '失败',
+  cancelled: '已取消',
+}
+
 function TaskRow({ task }: { readonly task: CadreTask }) {
   return (
     <li style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0' }}>
       <Tag tone="neutral">{task.taskId}</Tag>
       <span style={{ flex: 1 }}>{task.title}</span>
       <span>{task.assignee}</span>
-      <Pill>{task.status}</Pill>
+      <Pill>{STATUS_LABELS[task.status] ?? task.status}</Pill>
     </li>
   )
 }
@@ -71,7 +93,15 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
     }
     try {
       const result = await bridge.listTasks({ projectId: PROJECT_ID })
-      setState({ kind: 'ready', tasks: result.tasks })
+      setState({
+        kind: 'ready',
+        tasks: result.rows.map(row => ({
+          taskId: row.taskId,
+          title: row.title,
+          status: row.status,
+          assignee: row.assigneeSessionId,
+        })),
+      })
     } catch (error) {
       setState({ kind: 'fallback', reason: error instanceof Error ? error.message : String(error) })
     }
