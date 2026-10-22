@@ -16,7 +16,8 @@ import { fileURLToPath } from 'node:url'
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const SECRET_FILE = 'D:\\xxw_p\\cadre-spike-env\\.secrets\\deepseek.env'
 const OUT_ROOT = process.env.CADRE_E2E_OUT_ROOT ?? 'D:\\xxw_p\\cadre-spike-env\\s15-session-flow'
-const RUN_ID = new Date().toISOString().replace(/[:.]/g, '-')
+const RUN_ID =
+  new Date().toISOString().replace(/[:.]/g, '-') + (process.env.CADRE_E2E_RUN_SUFFIX ?? '')
 const OUT_DIR = join(OUT_ROOT, RUN_ID)
 const USER_DATA = join(OUT_DIR, 'userdata')
 const WORK = join(OUT_DIR, 'work')
@@ -83,12 +84,20 @@ function dbCheck(databasePath: string): Record<string, unknown> {
       const journal = db.prepare('PRAGMA journal_mode').get() as { journal_mode?: string }
       const members = db.prepare('SELECT project_id, COUNT(*) AS n FROM members GROUP BY project_id').all()
       const tasks = db.prepare('SELECT project_id, COUNT(*) AS n FROM tasks GROUP BY project_id').all()
+      const taskRows = db
+        .prepare(
+          `SELECT task_id, project_id, title, status, dispatcher_session_id,
+                  assignee_session_id, created_at
+           FROM tasks ORDER BY rowid ASC`,
+        )
+        .all()
       return {
         path: databasePath,
         integrity: integrity?.integrity_check ?? 'unknown',
         journal: journal?.journal_mode ?? 'unknown',
         members,
         tasks,
+        taskRows,
       }
     } finally {
       db.close()
@@ -136,6 +145,7 @@ function run(): Promise<{ code: number | null; signal: string | null; timedOut: 
     ...(process.env.CADRE_PROVIDER_BASE_URL === undefined
       ? {}
       : { CADRE_PROVIDER_BASE_URL: process.env.CADRE_PROVIDER_BASE_URL }),
+    ...(process.env.CADRE_DSH_BIN === undefined ? {} : { CADRE_DSH_BIN: process.env.CADRE_DSH_BIN }),
     DEEPSEEK_API_KEY: key,
     DSH_TELEMETRY_MODE: 'DISABLED',
     DSH_TELEMETRY_DISABLED: '1',
@@ -213,6 +223,14 @@ async function main(): Promise<number> {
   const patchRefs = patchDbRefs(join(USER_DATA, 'patches'))
 
   const events = Array.isArray(probe?.events) ? (probe!.events as Array<Record<string, unknown>>) : []
+  const taskRows = Array.isArray(db.taskRows) ? (db.taskRows as Array<Record<string, unknown>>) : []
+  const toolCheck = {
+    required: process.env.CADRE_E2E_REQUIRE_TOOL === '1',
+    hasCall: events.some((event) => event.kind === 'tool.call'),
+    hasResult: events.some((event) => event.kind === 'tool.result'),
+    resultOk: events.some((event) => event.kind === 'tool.result' && event.ok === true),
+    ledgerRow: taskRows.find((row) => row.dispatcher_session_id === 'e2e-session') ?? null,
+  }
   const summary = {
     runId: RUN_ID,
     startedAt,
@@ -232,6 +250,14 @@ async function main(): Promise<number> {
     finalText: probe?.finalText ?? null,
     isolation: probe?.isolation ?? null,
     residualHarness: { before, after },
+    dshBin: process.env.CADRE_DSH_BIN ?? null,
+    runtimeLogs: stdout
+      .split(/\r?\n/)
+      .filter((line) => line.includes('dsh-bin') || line.includes('harness-sdk')),
+    toolEvents: events.filter(
+      (event) => event.kind === 'tool.call' || event.kind === 'tool.result',
+    ),
+    toolCheck,
     db,
     patchDbRefs: patchRefs,
     logs: {
@@ -282,7 +308,9 @@ async function main(): Promise<number> {
     events.some((event) => event.kind === 'message.complete') &&
     after === 0 &&
     scan.every((entry) => entry.exact === 0 && entry.pattern === 0) &&
-    (isolationCode === 'CROSS_PROJECT_DENIED' || isolationCode === 'none')
+    (isolationCode === 'CROSS_PROJECT_DENIED' || isolationCode === 'none') &&
+    (!toolCheck.required ||
+      (toolCheck.hasCall && toolCheck.hasResult && toolCheck.resultOk && toolCheck.ledgerRow !== null))
 
   console.log(
     JSON.stringify(

@@ -10,13 +10,19 @@ import { pathToFileURL } from 'node:url'
 import { moduleDirectory } from '../../../runtime/module-dir.ts'
 import { HarnessEngineError } from './mapping.ts'
 
-/** 从 src 或 dist bundle 出发向上找 `vendor/deepseek-harness`，避免依赖 import.meta。 */
-function findRepoRoot(): string {
-  const roots = [moduleDirectory(), process.cwd()]
-  for (const start of roots) {
+/**
+ * 从多个起点向上找带 `vendor/deepseek-harness/packages/sdk` 的根。
+ * 纯函数便于单测；官方 dsh 包树本身没有 packages/，因此不能以它作根。
+ */
+export function findRepoRootFrom(
+  starts: readonly string[],
+  exists: (path: string) => boolean,
+): string | undefined {
+  for (const start of starts) {
+    if (start.trim() === '') continue
     let current = resolve(start)
-    for (let depth = 0; depth < 6; depth += 1) {
-      if (existsSync(join(current, 'vendor', 'deepseek-harness', 'packages', 'sdk'))) {
+    for (let depth = 0; depth < 8; depth += 1) {
+      if (exists(join(current, 'vendor', 'deepseek-harness', 'packages', 'sdk'))) {
         return current
       }
       const parent = dirname(current)
@@ -24,7 +30,23 @@ function findRepoRoot(): string {
       current = parent
     }
   }
-  return resolve(moduleDirectory(), '../../../../..')
+  return undefined
+}
+
+/** 优先 bundle/源码位置，其次安装态 resources、可执行文件目录与 cwd。 */
+function findRepoRoot(): string {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+  const starts = [
+    moduleDirectory(),
+    resourcesPath ?? '',
+    dirname(process.execPath),
+    process.cwd(),
+  ]
+  return findRepoRootFrom(starts, existsSync) ?? resolve(moduleDirectory(), '../../../../..')
+}
+
+export function resolveHarnessRepoRoot(): string {
+  return findRepoRoot()
 }
 
 const DEFAULT_SDK_ENTRY = join(
@@ -37,6 +59,10 @@ const DEFAULT_SDK_ENTRY = join(
   'lib',
   'index.js',
 )
+
+export function harnessSdkEntryPath(): string {
+  return DEFAULT_SDK_ENTRY
+}
 
 export interface HarnessLaunchOptions {
   cwd?: string
