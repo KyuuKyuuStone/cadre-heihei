@@ -166,6 +166,12 @@ export function prepareDevelopmentProject(options: DevelopmentProjectOptions): s
     linkDirectory(cadrePlugin, cadreLink)
     const projectManifestPath = join(options.projectDir, 'package.json')
     const projectManifest = JSON.parse(readFileSync(projectManifestPath, 'utf8'))
+    // Mirror `dsh plugin add`: the bundle must also be a profile dependency so
+    // the loader can resolve it from the profile's own node_modules.
+    projectManifest.dependencies = {
+      ...projectManifest.dependencies,
+      '@deepseek-ai/dsh-client-ui-cadre': `link:${realpathSync(cadrePlugin).replaceAll('\\', '/')}`,
+    }
     projectManifest.dsh.profile.bundles.push('@deepseek-ai/dsh-client-ui-cadre')
     writeFileSync(projectManifestPath, `${JSON.stringify(projectManifest, undefined, 2)}\n`)
     names.push('@deepseek-ai/dsh-client-ui-cadre')
