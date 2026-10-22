@@ -165,8 +165,10 @@ describe('employee roster validation', () => {
       expect(failure?.field).toBe('templateId')
     }
     // Surrounding whitespace is trimmed before the match, like every other text column.
+    // An absent key and an explicit null/empty value are both accepted, so the
+    // undefined case spreads no property (exactOptionalPropertyTypes).
     for (const templateId of [undefined, null, '', '  ', 'cadre-dev', 'cadre-roleplay', ' cadre-dev ']) {
-      expect(validateEmployeeInput(employee({ templateId }))).toBeUndefined()
+      expect(validateEmployeeInput(employee(templateId === undefined ? {} : { templateId }))).toBeUndefined()
     }
   })
 
