@@ -4,8 +4,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./startup": {
+      "types": "./lib/types/startup.d.ts",
+      "default": "./lib/startup.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
   "files": [
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "lib/**"
   ],
   "license": "MIT",
   "dsh": {
