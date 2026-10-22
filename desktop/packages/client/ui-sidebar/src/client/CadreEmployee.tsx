@@ -72,6 +72,7 @@ interface PresetOption {
   readonly name: string
   readonly description?: string
   readonly broken?: string
+  readonly isDefault?: boolean
 }
 
 /** One provider group from `session/modelCatalog`. */
@@ -117,6 +118,8 @@ export interface EmployeeDialogInjected {
   listPresets: () => Promise<Load<readonly PresetOption[]>>
   loadModels: () => Promise<Load<{ readonly groups: readonly CatalogGroup[]; readonly defaultProvider: string; readonly defaultModel: string }>>
   isBlank: (sessionId: string) => boolean | undefined
+  /** Preset the Session currently projects, used to roll back a partial submit. */
+  currentPreset: (sessionId: string) => string | undefined
   applyPreset: (sessionId: string, presetId: string) => Promise<StepOutcome>
   applyModel: (sessionId: string, providerId: string, modelId: string, reasoningEffort?: string) => Promise<StepOutcome>
   saveEmployee: (input: {
@@ -199,7 +202,7 @@ interface DialogError {
 }
 
 /** One request's dialog; all state dies with the key. */
-function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPresets, loadModels, isBlank, applyPreset, applyModel, saveEmployee, refreshEmployees }: {
+function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPresets, loadModels, isBlank, currentPreset, applyPreset, applyModel, saveEmployee, refreshEmployees }: {
   readonly request: EmployeeDialogRequest
 } & Omit<InjectFace<EmployeeDialogInjected>, 'useRequest'>) {
   const [loading, setLoading] = useState(true)
@@ -217,6 +220,9 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
   const [error, setError] = useState<DialogError | null>(null)
   const [saved, setSaved] = useState(false)
   const [employeeError, setEmployeeError] = useState<DialogError | null>(null)
+  // Remembered before any write so a failed later step can put the composition
+  // back; a blank Session's projection is authoritative until the first turn.
+  const [originalPreset] = useState(() => currentPreset(request.sessionId))
 
   const blank = isBlank(request.sessionId)
 
@@ -307,35 +313,56 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
 
   const templateEnabled = blank === true && !pending
   const blocked = pending || saved || loading || displayName.trim() === ''
+  const presetLabel = (id: string): string => (presets.ok
+    ? presets.value.find(preset => preset.id === id)?.name
+    : undefined) ?? id
+  const defaultPreset = presets.ok ? presets.value.find(preset => preset.isDefault)?.id : undefined
 
   const submit = async () => {
     if (blocked) return
     setPending(true)
     setError(null)
     const applied: string[] = []
-    const fail = (step: string, outcome: { code?: string; message?: string }, hint: string) => {
-      setError({ step, code: outcome.code ?? 'UNKNOWN', message: outcome.message ?? '未知错误', hint })
+    let appliedPreset: string | undefined
+    /** Put a blank Session's composition back after a later step failed. */
+    const rollbackPreset = async (): Promise<string> => {
+      if (appliedPreset === undefined) return ''
+      const target = originalPreset ?? defaultPreset
+      if (target === undefined || target === '') {
+        return `模板已切换为「${presetLabel(appliedPreset)}」，无法确认原模板，未能自动回滚；`
+      }
+      const back = await applyPreset(request.sessionId, target)
+      return back.ok
+        ? `模板已回滚为「${presetLabel(target)}」；`
+        : `模板已切换为「${presetLabel(appliedPreset)}」，自动回滚失败（${back.code ?? 'UNKNOWN'} · ${back.message ?? '未知错误'}）；`
     }
 
     if (blank === true && templateId !== '') {
       const preset = await applyPreset(request.sessionId, templateId)
       if (!preset.ok) {
         setPending(false)
-        fail('模板应用', preset, '会话仍处于空白状态，可直接重试；员工记录尚未写入。')
+        setError({
+          step: '模板应用',
+          code: preset.code ?? 'UNKNOWN',
+          message: preset.message ?? '未知错误',
+          hint: '模板未切换，员工记录未写入；会话仍处于空白状态，可直接重试。',
+        })
         return
       }
+      appliedPreset = templateId
       applied.push('模板已应用')
     }
 
     if (providerId !== '' && modelId !== '') {
       const model = await applyModel(request.sessionId, providerId, modelId, reasoningEffort)
       if (!model.ok) {
+        const rollback = await rollbackPreset()
         setPending(false)
         setError({
           step: '模型应用',
           code: model.code ?? 'UNKNOWN',
           message: model.message ?? '未知错误',
-          hint: `${applied.join('；')}${applied.length > 0 ? '；' : ''}员工记录尚未写入。检查 Provider 凭据后可重试。`,
+          hint: `${rollback}员工记录尚未写入。检查 Provider 凭据后可在本对话框直接重试。`,
         })
         return
       }
@@ -349,12 +376,14 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
       ...(providerId !== '' && modelId !== '' ? { preferredProviderId: providerId, preferredModel: modelId } : {}),
     })
     if (!savedResult.ok) {
+      const rollback = await rollbackPreset()
+      const modelText = applied.includes('模型已应用') ? `模型已切换为 ${providerId}/${modelId}；` : ''
       setPending(false)
       setError({
         step: '员工记录保存',
         code: savedResult.code ?? 'UNKNOWN',
         message: savedResult.message ?? '未知错误',
-        hint: `${applied.join('；')}${applied.length > 0 ? '；' : ''}会话已按新配置运行，但员工记录未写入；修正后重试即可。`,
+        hint: `${rollback}${modelText}员工记录尚未写入；修正后可在本对话框直接重试。`,
       })
       return
     }
@@ -382,6 +411,7 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
     ? presets.value.filter(preset => preset.broken === undefined)
     : []
   const brokenRows = presets.ok ? presets.value.filter(preset => preset.broken !== undefined) : []
+  const selectedPreset = presetRows.find(preset => preset.id === templateId)
 
   const blankHint = blank === true
     ? '当前会话尚未开始第一轮，可选择模板；模板的人格与工具会从本会话生效。'
@@ -457,14 +487,15 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
                   disabled={!templateEnabled}
                   onClick={() => { setTemplateId(preset.id); setError(null) }}
                 >
-                  <span className={css.presetOption}>
-                    <span>{preset.name}</span>
-                    {preset.description !== undefined && <span className={css.presetDesc}>{preset.description}</span>}
-                  </span>
+                  {preset.name}
                 </Button>
               ))}
             </div>
           )}
+          {selectedPreset?.description !== undefined && (
+            <p className={css.hint}>{selectedPreset.description}</p>
+          )}
+
           {brokenRows.length > 0 && (
             <p className={css.hint}>另有 {brokenRows.length} 个 cadre-* 模板不可用：{brokenRows.map(preset => preset.id).join('、')}。</p>
           )}

@@ -126,6 +126,7 @@ export function apply(ctx: ClientContext): void {
             name: preset.name ?? preset.id,
             ...(preset.description === undefined ? {} : { description: preset.description }),
             ...(preset.broken === undefined ? {} : { broken: preset.broken }),
+            ...(preset.isDefault === undefined ? {} : { isDefault: preset.isDefault }),
           })),
       }
     } catch (error) {
@@ -161,6 +162,13 @@ export function apply(ctx: ClientContext): void {
   const isBlank = (sessionId: string): boolean | undefined => {
     const byId = ctx.sessions.list.getSnapshot().byId as Record<string, { readonly blank?: boolean } | undefined>
     return byId[sessionId]?.blank
+  }
+  const currentPreset = (sessionId: string): string | undefined => {
+    const byId = ctx.sessions.list.getSnapshot().byId as Record<string, {
+      readonly projectionValues?: Readonly<Record<string, unknown>>
+    } | undefined>
+    const value = byId[sessionId]?.projectionValues?.agentPreset
+    return typeof value === 'string' ? value : undefined
   }
   const applyPreset = async (sessionId: string, presetId: string) => {
     try {
@@ -212,6 +220,7 @@ export function apply(ctx: ClientContext): void {
     listPresets,
     loadModels,
     isBlank,
+    currentPreset,
     applyPreset,
     applyModel,
     saveEmployee,

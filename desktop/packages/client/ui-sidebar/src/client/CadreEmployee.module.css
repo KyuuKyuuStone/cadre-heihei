@@ -78,20 +78,6 @@
   gap: 8px;
 }
 
-.presetOption {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  text-align: left;
-}
-
-.presetDesc {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 16px;
-}
-
 .groups {
   display: flex;
   flex-direction: column;
