@@ -1,0 +1,16 @@
+{
+  "name": "@deepseek-ai/dsh-bundle-cadre",
+  "description": "Cadre employee templates: four agent presets (development, fiction writing, general assistant, role-play) declared as bundle rows",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
