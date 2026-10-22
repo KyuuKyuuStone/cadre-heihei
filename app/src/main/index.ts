@@ -5,13 +5,14 @@
  * handlers 注入；身份失败只进 denied，不启动引擎。
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { app, BrowserWindow, ipcMain, session } from 'electron'
 import { SqliteDispatchService } from '../collab/dispatch/index.ts'
 import type { ProjectMembership } from '../collab/dispatch/store-port.ts'
 import { SessionRuntimeRegistry } from '../runtime/session-runtime-registry.ts'
 import type { IpcIdentity } from '../shared/ipc.ts'
 import { runE2eProbe } from './e2e-probe.ts'
+import { resolveDshBin } from './dsh-path.ts'
 import { createWindowEventSink, registerElectronIpc } from './electron-ipc.ts'
 import {
   DEV_SERVER_URL,
@@ -73,6 +74,20 @@ function resolveMcpServerPath(): string {
     join(app.getAppPath(), 'src', 'mcp', 'server.ts'),
   ]
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!
+}
+
+function configuredDshBin(): string | undefined {
+  // dist/main/index.cjs → app/dist/main → app → repo root。
+  const repoRoot = resolve(__dirname, '..', '..', '..')
+  const dshBin = resolveDshBin({
+    env: process.env,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    repoRoot,
+    exists: existsSync,
+  })
+  log(dshBin === undefined ? 'dsh-bin fallback=installed' : `dsh-bin path=${dshBin}`)
+  return dshBin
 }
 
 function installCsp(): void {
@@ -184,6 +199,7 @@ async function bootstrap(): Promise<void> {
   }
 
   if (identityReady && identity !== undefined) {
+    const dshBin = configuredDshBin()
     registry = new SessionRuntimeRegistry({
       dshHomeBase: join(userData, 'runtimes'),
       patchDirBase: join(userData, 'patches'),
@@ -208,6 +224,7 @@ async function bootstrap(): Promise<void> {
         maxTokens: Number(process.env.CADRE_MAX_TOKENS ?? 64) || 64,
         initializeTimeoutMs: 60_000,
         requestTimeoutMs: 180_000,
+        ...(dshBin === undefined ? {} : { dshBin }),
       },
     })
     try {

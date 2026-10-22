@@ -48,6 +48,11 @@ export interface HarnessLaunchOptions {
   maxTokens?: number
   initializeTimeoutMs?: number
   requestTimeoutMs?: number
+  /**
+   * 显式 dsh CLI 入口。SDK 在 resolveDshLaunch 中按 callerCwd 解析并作为
+   * node 的第一个参数（vendor/.../sdk/client/lib/index.js:163-164）；
+   * 未提供时 SDK 回退 installedDshNodeLaunch。此处只透传，不做二次解析。
+   */
   dshBin?: string
   profile?: string
   patches?: string[]
