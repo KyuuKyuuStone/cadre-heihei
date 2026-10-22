@@ -164,10 +164,10 @@ export function prepareDevelopmentProject(options: DevelopmentProjectOptions): s
     const cadreLink = join(destinationModules, '@deepseek-ai', 'dsh-client-ui-cadre')
     removeOwnedPath(cadreLink)
     linkDirectory(cadrePlugin, cadreLink)
-    writeFileSync(
-      join(options.projectDir, 'cordis.patch.yml'),
-      '- insert:\n    - id: ui-cadre\n      name: "@deepseek-ai/dsh-client-ui-cadre"\n',
-    )
+    const projectManifestPath = join(options.projectDir, 'package.json')
+    const projectManifest = JSON.parse(readFileSync(projectManifestPath, 'utf8'))
+    projectManifest.dsh.profile.bundles.push('@deepseek-ai/dsh-client-ui-cadre')
+    writeFileSync(projectManifestPath, `${JSON.stringify(projectManifest, undefined, 2)}\n`)
     names.push('@deepseek-ai/dsh-client-ui-cadre')
   }
   const sharedPackages = [...new Set([...names, '@deepseek-ai/dsh', '@deepseek-ai/dsh-desktop-host'])].flatMap((name) => {
