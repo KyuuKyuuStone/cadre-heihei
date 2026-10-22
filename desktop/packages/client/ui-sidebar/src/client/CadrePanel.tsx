@@ -82,6 +82,20 @@ interface CadreBridge {
     status: 'verified' | 'rework' | 'failed'
     reason?: string
   }): Promise<CadreWriteResult | undefined>
+  bindSession?(query: {
+    projectId: string
+    providerId: string
+    model: string
+  }): Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
+  listProviders?(): Promise<{
+    ok?: boolean
+    providers?: readonly {
+      providerId: string
+      name: string
+      defaultModel: string
+      models?: readonly { id: string }[]
+    }[]
+  }>
 }
 
 declare global {
@@ -161,6 +175,16 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
   const [pending, setPending] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'danger' | 'neutral'; text: string } | null>(null)
   const [acceptFor, setAcceptFor] = useState<string | null>(null)
+  const [bindOpen, setBindOpen] = useState(false)
+  const [bindProviders, setBindProviders] = useState<readonly {
+    providerId: string
+    name: string
+    defaultModel: string
+    models?: readonly { id: string }[]
+  }[]>([])
+  const [bindProviderId, setBindProviderId] = useState('')
+  const [bindModel, setBindModel] = useState('')
+  const [bindNotice, setBindNotice] = useState<string | null>(null)
   const [reasonFor, setReasonFor] = useState<{ taskId: string; status: 'rework' | 'failed' } | null>(null)
   const [reason, setReason] = useState('')
 
@@ -303,6 +327,53 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
     setReason('')
   }
 
+  const openBind = async () => {
+    setBindOpen(true)
+    setBindNotice(null)
+    setBindProviderId('')
+    setBindModel('')
+    const list = window.cadre?.listProviders
+    if (list === undefined) {
+      setBindProviders([])
+      setBindNotice('会话绑定通道待接入：window.cadre.bindSession 未注册')
+      return
+    }
+    try {
+      const result = await list()
+      setBindProviders(result?.providers ?? [])
+    } catch (cause) {
+      setBindNotice(errorMessage(cause))
+    }
+  }
+
+  const submitBind = async () => {
+    const bind = window.cadre?.bindSession
+    if (bind === undefined) {
+      setBindNotice('会话绑定通道待接入：window.cadre.bindSession 未注册')
+      return
+    }
+    if (bindProviderId === '') {
+      setBindNotice('请选择 Provider')
+      return
+    }
+    const selected = bindProviders.find(provider => provider.providerId === bindProviderId)
+    try {
+      const result = await bind({
+        projectId: PROJECT_ID,
+        providerId: bindProviderId,
+        model: bindModel.trim() === '' ? selected?.defaultModel ?? '' : bindModel.trim(),
+      })
+      if (result?.ok === false) {
+        setBindNotice(`${result.code ?? 'ERROR'} · ${result.message ?? '绑定失败'}`)
+        return
+      }
+      setBindOpen(false)
+      setNotice({ tone: 'neutral', text: '会话模型已绑定' })
+    } catch (cause) {
+      setBindNotice(errorMessage(cause))
+    }
+  }
+
   const offline = state.kind === 'fallback'
   const tasks = state.kind === 'ready'
     ? state.tasks
@@ -314,6 +385,9 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
         <h1 style={{ margin: 0, flex: 1 }}>协作</h1>
         {offline && <Tag tone="neutral">离线示例数据</Tag>}
         {!canDispatch && <Tag tone="neutral">写入通道待接入</Tag>}
+        <Button variant="outline" size="sm" onClick={() => { void openBind() }}>
+          会话模型
+        </Button>
         <Button
           variant="primary"
           size="sm"
@@ -420,6 +494,49 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
             style={{ resize: 'vertical', font: 'inherit', padding: '8px 10px' }}
           />
           {!canDispatch && <p style={{ margin: 0 }}>写入通道待接入，当前仅可预览表单。</p>}
+        </div>
+      </Modal>
+
+      <Modal
+        open={bindOpen}
+        onClose={() => { setBindOpen(false) }}
+        title="会话模型"
+        description={`项目 ${PROJECT_ID} · 绑定后由主进程决定身份`}
+        closeLabel="关闭"
+        footer={(
+          <>
+            <Button variant="outline" onClick={() => { setBindOpen(false) }}>取消</Button>
+            <Button variant="primary" onClick={() => { void submitBind() }}>绑定</Button>
+          </>
+        )}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {bindProviders.length === 0 && (
+            <p style={{ margin: 0 }}>暂无可用 Provider，请先在设置 → 模型 Providers 中添加。</p>
+          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {bindProviders.map(provider => (
+              <Button
+                key={provider.providerId}
+                variant={bindProviderId === provider.providerId ? 'primary' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setBindProviderId(provider.providerId)
+                  setBindModel(provider.defaultModel)
+                }}
+              >
+                {provider.name}
+              </Button>
+            ))}
+          </div>
+          <label htmlFor="bind-model">模型</label>
+          <Input
+            id="bind-model"
+            value={bindModel}
+            placeholder="默认使用 Provider 的默认模型"
+            onChange={event => { setBindModel(event.target.value) }}
+          />
+          {bindNotice !== null && <p role="alert" style={{ margin: 0 }}>{bindNotice}</p>}
         </div>
       </Modal>
 

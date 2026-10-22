@@ -12,6 +12,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SidebarPanelMetadata, SidebarRootInjected } from './contract/slots.ts'
 import { CadreIcon, CadrePanel } from './CadrePanel.tsx'
+import { ProviderSection } from './ProviderSection.tsx'
 import { HeaderLeadingControls } from './HeaderLeadingControls.tsx'
 import { SidebarRoot } from './SidebarRoot.tsx'
 import { en, zh, type SidebarKey } from './locales.ts'
@@ -110,5 +111,13 @@ export function apply(ctx: ClientContext): void {
     name: 'main',
     key: 'cadre',
   }, CadrePanel))
+  // Cadre providers: settings section for the model-provider roster.
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'cadre-providers',
+    order: 15,
+    label: () => '模型 Providers',
+    locale: NS,
+  }, ProviderSection))
   syncPanels()
 }
