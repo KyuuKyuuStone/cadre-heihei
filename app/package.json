@@ -1,6 +1,6 @@
 {
   "name": "@cadre-heihei/app",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "cadre-heihei 桌面端（M4 NSIS 打包）",
   "author": "cadre-heihei",
