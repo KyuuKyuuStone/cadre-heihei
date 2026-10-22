@@ -11,9 +11,8 @@ import { SqliteDispatchService } from '../collab/dispatch/index.ts'
 import type { ProjectMembership } from '../collab/dispatch/store-port.ts'
 import { SessionRuntimeRegistry } from '../runtime/session-runtime-registry.ts'
 import type { IpcIdentity } from '../shared/ipc.ts'
-import { harnessSdkEntryPath, resolveHarnessRepoRoot } from '../adapters/engine/harness/sdk.ts'
 import { runE2eProbe } from './e2e-probe.ts'
-import { resolveDshBin } from './dsh-path.ts'
+import { resolveDshBin, resolveSdkEntry } from './dsh-path.ts'
 import { createWindowEventSink, registerElectronIpc } from './electron-ipc.ts'
 import {
   DEV_SERVER_URL,
@@ -88,8 +87,20 @@ function configuredDshBin(): string | undefined {
     exists: existsSync,
   })
   log(dshBin === undefined ? 'dsh-bin fallback=installed' : `dsh-bin path=${dshBin}`)
-  log(`harness-sdk root=${resolveHarnessRepoRoot()} entry=${harnessSdkEntryPath()}`)
   return dshBin
+}
+
+function configuredSdkEntry(): string | undefined {
+  const repoRoot = resolve(__dirname, '..', '..', '..')
+  const sdkEntry = resolveSdkEntry({
+    env: process.env,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    repoRoot,
+    exists: existsSync,
+  })
+  log(sdkEntry === undefined ? 'sdk-entry fallback=repo' : `sdk-entry path=${sdkEntry}`)
+  return sdkEntry
 }
 
 function installCsp(): void {
@@ -202,6 +213,7 @@ async function bootstrap(): Promise<void> {
 
   if (identityReady && identity !== undefined) {
     const dshBin = configuredDshBin()
+    const sdkEntry = configuredSdkEntry()
     registry = new SessionRuntimeRegistry({
       dshHomeBase: join(userData, 'runtimes'),
       patchDirBase: join(userData, 'patches'),
@@ -227,6 +239,7 @@ async function bootstrap(): Promise<void> {
         initializeTimeoutMs: 60_000,
         requestTimeoutMs: 180_000,
         ...(dshBin === undefined ? {} : { dshBin }),
+        ...(sdkEntry === undefined ? {} : { sdkEntry }),
       },
     })
     try {

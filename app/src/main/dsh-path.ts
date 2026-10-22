@@ -43,3 +43,37 @@ export function resolveDshBin(inputs: DshBinInputs): string | undefined {
       )
   return inputs.exists(candidate) ? candidate : undefined
 }
+
+export const SDK_ENTRY_SUFFIX = join(
+  'node_modules',
+  '@deepseek-ai',
+  'dsh-sdk-client',
+  'lib',
+  'index.js',
+)
+
+export type SdkEntryInputs = DshBinInputs
+
+/**
+ * SDK 客户端入口（供 HarnessAdapter.loadHarnessSdk）。
+ * 打包态官方 dsh 树不带 SDK client，需由构建复制到 resources/dsh/node_modules
+ * 下的 `@deepseek-ai/dsh-sdk-client`；dev 用 repo 的 packages/sdk/client。
+ */
+export function resolveSdkEntry(inputs: SdkEntryInputs): string | undefined {
+  const override = inputs.env.CADRE_SDK_ENTRY?.trim()
+  if (override !== undefined && override !== '') return override
+
+  const candidate = inputs.isPackaged
+    ? join(inputs.resourcesPath, 'dsh', SDK_ENTRY_SUFFIX)
+    : join(
+        inputs.repoRoot,
+        'vendor',
+        'deepseek-harness',
+        'packages',
+        'sdk',
+        'client',
+        'lib',
+        'index.js',
+      )
+  return inputs.exists(candidate) ? candidate : undefined
+}

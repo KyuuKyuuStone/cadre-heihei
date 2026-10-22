@@ -146,6 +146,9 @@ function run(): Promise<{ code: number | null; signal: string | null; timedOut: 
       ? {}
       : { CADRE_PROVIDER_BASE_URL: process.env.CADRE_PROVIDER_BASE_URL }),
     ...(process.env.CADRE_DSH_BIN === undefined ? {} : { CADRE_DSH_BIN: process.env.CADRE_DSH_BIN }),
+    ...(process.env.CADRE_SDK_ENTRY === undefined
+      ? {}
+      : { CADRE_SDK_ENTRY: process.env.CADRE_SDK_ENTRY }),
     DEEPSEEK_API_KEY: key,
     DSH_TELEMETRY_MODE: 'DISABLED',
     DSH_TELEMETRY_DISABLED: '1',
@@ -251,9 +254,13 @@ async function main(): Promise<number> {
     isolation: probe?.isolation ?? null,
     residualHarness: { before, after },
     dshBin: process.env.CADRE_DSH_BIN ?? null,
+    sdkEntry: process.env.CADRE_SDK_ENTRY ?? null,
     runtimeLogs: stdout
       .split(/\r?\n/)
-      .filter((line) => line.includes('dsh-bin') || line.includes('harness-sdk')),
+      .filter(
+        (line) =>
+          line.includes('dsh-bin') || line.includes('sdk-entry') || line.includes('harness-sdk'),
+      ),
     toolEvents: events.filter(
       (event) => event.kind === 'tool.call' || event.kind === 'tool.result',
     ),
