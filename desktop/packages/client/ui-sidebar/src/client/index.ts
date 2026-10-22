@@ -1,5 +1,7 @@
 /** Registers the sidebar shell and global panel navigation. */
 import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
+// Type-only: pulls the theme service's Context merge (ctx.theme).
+import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pull the Client Remote and Session service merges (employee dialog).
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
@@ -14,6 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the Session root standard-props merge.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SidebarPanelMetadata, SidebarRootInjected } from './contract/slots.ts'
+import { CADRE_SKIN_TOKENS, CADRE_THEME_ENABLED, CADRE_THEME_SOURCE } from './cadre-skin.tokens.ts'
 import { CadreIcon, CadrePanel } from './CadrePanel.tsx'
 import {
   EmployeeDialog, EmployeeMenuItem, EmployeeRowBadge,
@@ -57,7 +60,7 @@ interface EmployeeBridge {
 
 /** Services required by the sidebar plugin. */
 export const inject = [
-  'slots', 'layout', 'uiWorkspace', 'locale', 'shortcuts',
+  'slots', 'theme', 'layout', 'uiWorkspace', 'locale', 'shortcuts',
   'sessions', 'remote', 'remote.agentPresets', 'remote.session',
 ]
 
@@ -67,6 +70,16 @@ export const inject = [
 export function apply(ctx: ClientContext): void {
   const workspaceNavigation = ctx.get('uiWorkspace') as unknown as WorkspaceNavigation
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-sidebar: dictionaries')
+
+  // Warm 「纸 · 墨 · 印」skin: alias-only layers over the user's light/dark
+  // preference. One switch (`CADRE_THEME_ENABLED`) removes the whole layer and
+  // restores the official palette; disposing the plugin does the same.
+  ctx.effect(
+    () => (CADRE_THEME_ENABLED
+      ? ctx.theme.overrideTokens(CADRE_THEME_SOURCE, CADRE_SKIN_TOKENS)
+      : () => {}),
+    'ui-sidebar: cadre warm skin',
+  )
 
   // ADR-0022 T3/T4: employee roster shared by the row menu, the badge, and the
   // upgrade dialog. The roster is local SQLite behind `window.cadre`; the

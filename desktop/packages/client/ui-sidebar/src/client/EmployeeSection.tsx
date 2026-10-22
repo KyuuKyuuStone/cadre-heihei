@@ -17,6 +17,8 @@ import {
 } from './CadreEmployee.tsx'
 
 const MAX_PERSONA_NOTE = 4000
+const TEXT_PRIMARY = 'var(--dsw-alias-label-primary)'
+const TEXT_SECONDARY = 'var(--dsw-alias-label-secondary)'
 
 /** Everything the section reads or writes. */
 export interface EmployeeSettingsInjected {
@@ -110,10 +112,10 @@ export function EmployeeSection({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <h2 style={{ margin: 0, flex: 1 }}>员工</h2>
+        <h2 style={{ margin: 0, flex: 1, color: TEXT_PRIMARY }}>员工</h2>
         <Button variant="outline" size="sm" onClick={() => { setNotice(null); refreshEmployees() }}>刷新</Button>
       </div>
-      <p style={{ margin: 0 }}>员工是会话的附加属性；删除员工只移除名称、模板、模型与人格补充，不影响会话与历史。</p>
+      <p style={{ margin: 0, color: TEXT_SECONDARY }}>员工是会话的附加属性；删除员工只移除名称、模板、模型与人格补充，不影响会话与历史。</p>
 
       {notice !== null && <p className={css.success} role="status">{notice}</p>}
       {rosterError !== null && <p className={css.error} role="alert">读取员工失败：{rosterError}</p>}
@@ -121,13 +123,13 @@ export function EmployeeSection({
       {status === 'loading' && (
         <div className={css.loadingRow} role="status" aria-busy="true">
           <StateDot state="ongoing" />
-          <span>读取员工…</span>
+          <span style={{ color: TEXT_SECONDARY }}>读取员工…</span>
         </div>
       )}
 
       {status === 'ready' && employees.length === 0 && (
         <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '8px 0' }}>
-          <span>EMPTY · 还没有员工</span>
+          <span style={{ color: TEXT_PRIMARY }}>EMPTY · 还没有员工</span>
           <span className={css.hint}>去左侧会话列表右键点击一个会话，选择「转为员工」；升格后员工会出现在这里。</span>
         </div>
       )}

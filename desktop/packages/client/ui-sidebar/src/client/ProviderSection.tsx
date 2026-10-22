@@ -10,6 +10,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button, Checkbox, Input, Modal, Pill, SegmentedControl, StateDot, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 
+/* Bare headings/paras read the semantic tokens explicitly so the warm skin and
+   every other theme override reach them. */
+const TEXT_PRIMARY = 'var(--dsw-alias-label-primary)'
+const TEXT_SECONDARY = 'var(--dsw-alias-label-secondary)'
+const TEXT_ERROR = 'var(--dsw-alias-state-error-primary)'
+const TEXT_SUCCESS = 'var(--dsw-alias-state-success-primary)'
+
 interface ProviderModel {
   readonly id: string
 }
@@ -100,7 +107,7 @@ export function ProviderSection(_props: PropsRuntime<'settings.section'>) {
   const [formError, setFormError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<CadreProvider | null>(null)
   const [busy, setBusy] = useState(false)
-  const [testResult, setTestResult] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<{ readonly ok: boolean; readonly text: string } | null>(null)
 
   const load = useCallback(async () => {
     const api = bridge()
@@ -204,30 +211,34 @@ export function ProviderSection(_props: PropsRuntime<'settings.section'>) {
   const test = async (provider: CadreProvider) => {
     const api = bridge()
     if (api?.testProvider === undefined) {
-      setTestResult('provider 通道未就绪')
+      setTestResult({ ok: false, text: 'provider 通道未就绪' })
       return
     }
     setTestResult(null)
     try {
       const result = await api.testProvider({ providerId: provider.providerId })
       setTestResult(result?.ok === false
-        ? failureText(result)
-        : `${result?.message ?? '格式与凭据校验通过'}（仅校验格式/凭据，不发起网络请求）`)
+        ? { ok: false, text: failureText(result) }
+        : { ok: true, text: `${result?.message ?? '格式与凭据校验通过'}（仅校验格式/凭据，不发起网络请求）` })
     } catch (cause) {
-      setTestResult(cause instanceof Error ? cause.message : String(cause))
+      setTestResult({ ok: false, text: cause instanceof Error ? cause.message : String(cause) })
     }
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <h2 style={{ margin: 0, flex: 1 }}>模型 / Providers</h2>
+        <h2 style={{ margin: 0, flex: 1, color: TEXT_PRIMARY }}>模型 / Providers</h2>
         <Button variant="primary" size="sm" onClick={openNew}>新增 Provider</Button>
       </div>
-      <p style={{ margin: 0 }}>API Key 仅写入本机安全存储；列表只显示脱敏值，不回显明文。</p>
+      <p style={{ margin: 0, color: TEXT_SECONDARY }}>API Key 仅写入本机安全存储；列表只显示脱敏值，不回显明文。</p>
 
-      {error !== null && <p role="alert" style={{ margin: 0 }}>{error}</p>}
-      {testResult !== null && <p role="status" style={{ margin: 0 }}>{testResult}</p>}
+      {error !== null && <p role="alert" style={{ margin: 0, color: TEXT_ERROR }}>{error}</p>}
+      {testResult !== null && (
+        <p role="status" style={{ margin: 0, color: testResult.ok ? TEXT_SUCCESS : TEXT_ERROR }}>
+          {testResult.text}
+        </p>
+      )}
 
       {providers === null && (
         <div role="status" aria-busy="true" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -327,7 +338,7 @@ export function ProviderSection(_props: PropsRuntime<'settings.section'>) {
               onChange={isDefault => { setForm({ ...form, isDefault }) }} />
           </div>
 
-          {formError !== null && <p role="alert" style={{ margin: 0 }}>{formError}</p>}
+          {formError !== null && <p role="alert" style={{ margin: 0, color: TEXT_ERROR }}>{formError}</p>}
         </div>
       </Modal>
 

@@ -7,7 +7,7 @@
  * stay interactive and report the missing channel instead of pretending success.
  * Only shipped primitives and inline layout are used; no custom palette.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import {
   Button,
   IconBranchOutlineRegular,
@@ -18,6 +18,23 @@ import {
   Tag,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+
+/* Bare headings/paras/textarea do not read component styles, so they name the
+   semantic tokens explicitly and follow every theme override. */
+const TEXT_PRIMARY = 'var(--dsw-alias-label-primary)'
+const TEXT_SECONDARY = 'var(--dsw-alias-label-secondary)'
+const TEXT_ERROR = 'var(--dsw-alias-state-error-primary)'
+const BODY_TEXTAREA: CSSProperties = {
+  boxSizing: 'border-box',
+  width: '100%',
+  resize: 'vertical',
+  font: 'inherit',
+  padding: '8px 10px',
+  border: '0.5px solid var(--dsw-alias-border-l4)',
+  borderRadius: 'var(--dsw-radius-md)',
+  background: 'var(--dsw-alias-bg-layer-1)',
+  color: TEXT_PRIMARY,
+}
 
 /** One ledger row rendered by the panel. */
 interface CadreTask {
@@ -382,7 +399,7 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <h1 style={{ margin: 0, flex: 1 }}>协作</h1>
+        <h1 style={{ margin: 0, flex: 1, color: TEXT_PRIMARY }}>协作</h1>
         {offline && <Tag tone="neutral">离线示例数据</Tag>}
         {!canDispatch && <Tag tone="neutral">写入通道待接入</Tag>}
         <Button variant="outline" size="sm" onClick={() => { void openBind() }}>
@@ -396,14 +413,17 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
           派活
         </Button>
       </div>
-      <p style={{ margin: 0 }}>
+      <p style={{ margin: 0, color: TEXT_SECONDARY }}>
         {state.kind === 'ready'
           ? `台账 · 项目 ${PROJECT_ID}`
           : `台账 · 项目 ${PROJECT_ID} · ${state.kind === 'fallback' ? state.reason : '读取中'}`}
       </p>
 
       {notice !== null && (
-        <p role={notice.tone === 'danger' ? 'alert' : 'status'} style={{ margin: 0 }}>
+        <p
+          role={notice.tone === 'danger' ? 'alert' : 'status'}
+          style={{ margin: 0, color: notice.tone === 'danger' ? TEXT_ERROR : TEXT_SECONDARY }}
+        >
           {notice.text}
         </p>
       )}
@@ -491,9 +511,9 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
             placeholder="任务详情、验收标准、参考文件…"
             rows={5}
             disabled={pending}
-            style={{ resize: 'vertical', font: 'inherit', padding: '8px 10px' }}
+            style={BODY_TEXTAREA}
           />
-          {!canDispatch && <p style={{ margin: 0 }}>写入通道待接入，当前仅可预览表单。</p>}
+          {!canDispatch && <p style={{ margin: 0, color: TEXT_SECONDARY }}>写入通道待接入，当前仅可预览表单。</p>}
         </div>
       </Modal>
 
@@ -512,7 +532,7 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {bindProviders.length === 0 && (
-            <p style={{ margin: 0 }}>暂无可用 Provider，请先在设置 → 模型 Providers 中添加。</p>
+            <p style={{ margin: 0, color: TEXT_SECONDARY }}>暂无可用 Provider，请先在设置 → 模型 Providers 中添加。</p>
           )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
             {bindProviders.map(provider => (
@@ -536,7 +556,7 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
             placeholder="默认使用 Provider 的默认模型"
             onChange={event => { setBindModel(event.target.value) }}
           />
-          {bindNotice !== null && <p role="alert" style={{ margin: 0 }}>{bindNotice}</p>}
+          {bindNotice !== null && <p role="alert" style={{ margin: 0, color: TEXT_ERROR }}>{bindNotice}</p>}
         </div>
       </Modal>
 
@@ -581,7 +601,7 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
           >
             标记失败
           </Button>
-          {!canTransition && <p style={{ margin: 0 }}>写入通道待接入，当前仅可预览操作。</p>}
+          {!canTransition && <p style={{ margin: 0, color: TEXT_SECONDARY }}>写入通道待接入，当前仅可预览操作。</p>}
         </div>
       </Modal>
 
@@ -614,7 +634,7 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
             placeholder="说明退回或失败的原因"
             rows={4}
             disabled={pending}
-            style={{ resize: 'vertical', font: 'inherit', padding: '8px 10px' }}
+            style={BODY_TEXTAREA}
           />
         </div>
       </Modal>
