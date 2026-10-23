@@ -29,3 +29,10 @@ pnpm -w run package:desktop:win:x64:unsigned # 单独构建（预检通过后）
 - 安装器 customInstall 只清 `$INSTDIR` 内程序文件；**用户数据（%APPDATA%）绝不动**。
 - installer.ico 必须与 icon.ico 同源（seal）；NSIS 编译期资源不进 runtime resources。
 - 安装包不含 `.env*`、`*.pem`、`*.pfx`、`user-data/`、`*.sqlite`（check-no-secrets 双扫）。
+
+## 发布与提交纪律（用户硬规则，2026-10-23）
+
+- **任何 `git push` 必须经用户明确授权**——团队任何人不得自行推送；口头批准不算；当前仓库无远端，将来配置远端后同样适用。
+- 工具层已落地：`release.mjs` 中 `--push` 默认被拒，须 `--push --confirm` 双重显式；无远端配置时直接 fail（step 0-push-guard）。
+- 对外发布**以版本为节点**：推送前整理成面向版本的提交集，必须同时具备 ① 版本号 ② CHANGELOG ③ 发布必过清单通过 ④ 用户确认——缺一不可。
+- 本地 commit 照常（开发/回滚需要），但不构成对外发布、不代表可以推送。

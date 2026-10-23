@@ -28,7 +28,8 @@ const LOG_ROOT = join(APP_ROOT, '.desktop-build', 'release-logs')
 
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(name)
-const versionArg = args.includes('--version') ? args[args.indexOf('--version') + 1] : null
+const versionIdx = args.indexOf('--version')
+const versionArg = versionIdx >= 0 ? (args.find((a, i) => i > versionIdx && !a.startsWith('--')) ?? null) : null
 const dryRun = flag('--dry-run')
 
 const startedAt = Date.now()
@@ -55,10 +56,25 @@ const runStep = (step, command, spawnArgs, opts = {}) => {
     encoding: 'utf8',
     timeout: opts.timeout ?? 3_600_000,
     maxBuffer: 64 * 1024 * 1024,
+    shell: opts.shell ?? (process.platform === 'win32' && command !== 'node'),
   })
   writeFileSync(join(logDir, `${step}.stdout.log`), result.stdout ?? '', 'utf8')
   writeFileSync(join(logDir, `${step}.stderr.log`), result.stderr ?? '', 'utf8')
   return result
+}
+
+// ── 0. push guard（2026-10-23 用户硬规则：任何 push 必须经用户明确授权）──
+const wantsPush = args.includes('--push')
+const confirmPush = args.includes('--confirm')
+if (wantsPush && !confirmPush) {
+  fail('0-push-guard', '--push 需要同时给出 --confirm（双重显式）', '硬规则：push 必须经用户明确授权；且需版本号+CHANGELOG+发布必过清单齐备')
+}
+if (wantsPush && confirmPush) {
+  const remotes = spawnSync('git', ['remote'], { cwd: REPO_ROOT, encoding: 'utf8' }).stdout.trim()
+  if (!remotes) {
+    fail('0-push-guard', '仓库没有配置远端（git remote 为空）', 'push 无处可去；配置远端并再次获得用户授权后再来')
+  }
+  console.log('[release] push requested AND confirmed — 仍需满足：版本节点提交集 + CHANGELOG + 发布必过清单 + 用户授权（缺一不可）')
 }
 
 // ── 0. current version ──
