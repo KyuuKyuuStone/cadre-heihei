@@ -459,6 +459,8 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
 }
 
 async function main(): Promise<void> {
+  // 用户裁决：产品默认深蓝基调；渲染器读到用户偏好后会通过 nativeThemeSet 覆盖。
+  nativeTheme.themeSource = 'dark'
   const desktopSettings = readDesktopSettings(app.getPath('userData'))
   void pruneCrashReports(app.getPath('logs'))
   const journalDirectory = process.env.DSH_DESKTOP_UPDATE_JOURNAL_DIR
