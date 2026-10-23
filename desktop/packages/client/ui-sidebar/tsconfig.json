@@ -51,6 +51,9 @@
       "path": "../shortcuts/tsconfig.client.json"
     },
     {
+      "path": "../../cadre/engine/tsconfig.client.json"
+    },
+    {
       "path": "../product-analytics/tsconfig.client.json"
     }
   ]

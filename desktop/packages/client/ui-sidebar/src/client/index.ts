@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pull the Client Remote and Session service merges (employee dialog).
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import { createClientEnginePort } from '@deepseek-ai/dsh-cadre-engine/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
@@ -69,6 +70,15 @@ export const inject = [
  */
 export function apply(ctx: ClientContext): void {
   const workspaceNavigation = ctx.get('uiWorkspace') as unknown as WorkspaceNavigation
+  // ADR-0023 §2.3 (S2): preset/model calls run through EnginePort's Client
+  // binding. The facade keeps today's UI failure codes: a thrown transport
+  // failure used to surface as REMOTE_ERROR, so ENGINE_UNAVAILABLE maps back.
+  const engine = createClientEnginePort({ remote: ctx.remote, sessions: ctx.sessions })
+  const legacyFailure = (error: { readonly code: string; readonly message: string }) => ({
+    ok: false as const,
+    code: error.code === 'ENGINE_UNAVAILABLE' ? 'REMOTE_ERROR' : error.code,
+    message: error.message,
+  })
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-sidebar: dictionaries')
 
   // Warm 「纸 · 墨 · 印」skin: alias-only layers over the user's light/dark
@@ -123,49 +133,41 @@ export function apply(ctx: ClientContext): void {
     }
   }
   const listPresets = async () => {
-    try {
-      const result = await ctx.remote.agentPresets.list()
-      if (!result.ok) return { ok: false as const, code: result.error.code, message: result.error.message }
-      return {
-        ok: true as const,
-        value: result.value.presets
-          .filter(preset => preset.id.startsWith('cadre-'))
-          .map(preset => ({
-            id: preset.id,
-            name: preset.name ?? preset.id,
-            ...(preset.description === undefined ? {} : { description: preset.description }),
-            ...(preset.broken === undefined ? {} : { broken: preset.broken }),
-            ...(preset.isDefault === undefined ? {} : { isDefault: preset.isDefault }),
-          })),
-      }
-    } catch (error) {
-      return { ok: false as const, code: 'REMOTE_ERROR', message: reason(error) }
+    const listed = await engine.presets.listPresets()
+    if (!listed.ok) return legacyFailure(listed.error)
+    return {
+      ok: true as const,
+      value: listed.value
+        .filter(preset => preset.id.startsWith('cadre-'))
+        .map(preset => ({
+          id: preset.id,
+          name: preset.name ?? preset.id,
+          ...(preset.description === undefined ? {} : { description: preset.description }),
+          ...(preset.broken === undefined ? {} : { broken: preset.broken }),
+          ...(preset.isDefault === undefined ? {} : { isDefault: preset.isDefault }),
+        })),
     }
   }
   const loadModels = async () => {
-    try {
-      const result = await ctx.remote.session.modelCatalog()
-      if (!result.ok) return { ok: false as const, code: result.error.code, message: result.error.message }
-      return {
-        ok: true as const,
-        value: {
-          groups: result.value.groups.map(group => ({
-            id: group.id,
-            name: group.name,
-            models: group.models.map(model => ({
-              id: model.id,
-              name: model.name,
-              ...(model.reasoning?.defaultEffort === undefined
-                ? {}
-                : { reasoning: { defaultEffort: model.reasoning.defaultEffort } }),
-            })),
+    const listed = await engine.models.listModels()
+    if (!listed.ok) return legacyFailure(listed.error)
+    return {
+      ok: true as const,
+      value: {
+        groups: listed.value.groups.map(group => ({
+          id: group.id,
+          name: group.name,
+          models: group.models.map(model => ({
+            id: model.id,
+            name: model.name,
+            ...(model.reasoning?.defaultEffort === undefined
+              ? {}
+              : { reasoning: { defaultEffort: model.reasoning.defaultEffort } }),
           })),
-          defaultProvider: result.value.default.provider,
-          defaultModel: result.value.default.model,
-        },
-      }
-    } catch (error) {
-      return { ok: false as const, code: 'REMOTE_ERROR', message: reason(error) }
+        })),
+        defaultProvider: listed.value.default.provider,
+        defaultModel: listed.value.default.model,
+      },
     }
   }
   const isBlank = (sessionId: string): boolean | undefined => {
@@ -180,25 +182,17 @@ export function apply(ctx: ClientContext): void {
     return typeof value === 'string' ? value : undefined
   }
   const applyPreset = async (sessionId: string, presetId: string) => {
-    try {
-      const result = await ctx.remote.agentPresets.select(sessionId as never, presetId)
-      return result.ok ? { ok: true as const } : { ok: false as const, code: result.error.code, message: result.error.message }
-    } catch (error) {
-      return { ok: false as const, code: 'REMOTE_ERROR', message: reason(error) }
-    }
+    const applied = await engine.presets.applyPreset(sessionId as never, presetId)
+    return applied.ok ? { ok: true as const } : legacyFailure(applied.error)
   }
   const applyModel = async (sessionId: string, provider: string, model: string, reasoningEffort?: string) => {
-    try {
-      const result = await ctx.remote.session.selectModel({
-        sessionId: sessionId as never,
-        provider,
-        model,
-        ...(reasoningEffort === undefined ? {} : { reasoningEffort: reasoningEffort as never }),
-      })
-      return result.ok ? { ok: true as const } : { ok: false as const, code: result.error.code, message: result.error.message }
-    } catch (error) {
-      return { ok: false as const, code: 'REMOTE_ERROR', message: reason(error) }
-    }
+    const applied = await engine.models.selectModel({
+      sessionId: sessionId as never,
+      provider,
+      model,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    })
+    return applied.ok ? { ok: true as const } : legacyFailure(applied.error)
   }
   const saveEmployee = async (input: EmployeeWrite) => {
     const bridge = employeeBridge()
