@@ -246,6 +246,7 @@
     { "path": "./packages/experimental/session-titles-bundle" },
     { "path": "./packages/experimental/translator" },
     { "path": "./packages/client/product-analytics/tsconfig.host.json" },
+    { "path": "./packages/cadre/engine/tsconfig.host.json" },
     { "path": "./packages/telemetry/otel" },
     { "path": "./packages/experimental/speech-to-text" },
     { "path": "./packages/experimental/speech-to-text-sensevoice" },
