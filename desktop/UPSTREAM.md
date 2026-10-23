@@ -1,12 +1,227 @@
-# UPSTREAM：vendor/deepseek-harness 复制基线
+# UPSTREAM：官方基线、差异登记与选择性融合
 
-- baseline pin: 687f282e（vendor/deepseek-harness commit，s28 复制时点）
-- 复制方式：apps/desktop、apps/desktop-host、apps/cli、packages/**、native/system、scripts/**、根配置（pnpm-workspace 收窄 + 保留 overrides）；未改源码，构建产物（lib/dist）除外按需补齐
-- 升级流程：重跑官方 prepare 链产出新基线 → 闭包/差异比对 → 重放本表 diff
+> 本文件是 **fork 差异的唯一登记处**。升级不再以「跟上官方」为目标，而是按 ADR-0023 的**选择性融合**逐处决策：每一行都必须能回答「我们为什么偏离官方」，升级时按 ADR-0023 §3.5 的判据（A 修过我们的坑 / B 净减代码 / C 可测性能 / D 安全变严 / E 产品冲突 / F 破坏成本）判断该合还是该留。
 
-## 与 vendor 的差异（复制后必要修改登记）
+## 基线
 
-| 文件 | 差异 |
+- **upstream pin**：`687f282e`（`vendor/deepseek-harness`，dsh `0.2.1-rc.2` 发布提交）
+- **当前产品版本**：0.5.1（`desktop/package.json`）
+- **复制方式**：`desktop/` 是 pin 的整仓副本（`apps/`、`packages/`、`vendor/`、`scripts/`、根配置），构建产物除外。
+- **官方更新来源**：`vendor/deepseek-harness`（git submodule，只读）。
+
+## 登记约定
+
+每条差异四个字段：
+
+| 字段 | 取值 |
 |---|---|
-| apps/desktop/scripts/electron-builder-config.mjs | files 白名单追加 lib/cadre-collab.cjs（主进程台账后端进 asar） |
-| apps/desktop/scripts/smoke-packaged-runtime.ts | 产品名改名同步：硬编码 DeepSeek Harness.exe/.app → Cadre Heihei（electron-builder productName 改名后 smoke 才能找到产物） |
+| 类别 | 内核补丁 / 插件新增 / 配置 / 构建脚本 / 资源品牌 / 测试基线 / 文档 |
+| 改动摘要 | 一句话说清「和官方不一样在哪」 |
+| 保留理由 | `官方没有` / `官方有但冲突` / `我方产品需要`（三选一，可加短注） |
+| 融合提示 | 升级时按 ADR-0023 §3.5 判：`A/B/C/D` 有证据才合；`E` 冲突则保留；无证据默认保留 |
+
+**版本号差异不登记**：0.2.1-rc.2 → 0.5.1 会改动 344 个 `package.json` 的 `version` 字段，自动检查会把「仅版本号不同」的清单单独列出，不要求逐条登记。
+
+## 自动发现（防漏登）
+
+```bash
+# 全量报告（只读，不写任何文件）
+node desktop/scripts/check-upstream-drift.mjs
+
+# 机器可读
+node desktop/scripts/check-upstream-drift.mjs --json
+
+# 作为门禁：有未登记改动则退出码 1
+node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
+```
+
+脚本行为：以 pin 的 `git ls-tree HEAD` 为基准，逐字节比对 `desktop/` 同名文件（忽略 CRLF），再扫描 `desktop/` 找新增文件；产出 modified / version-only / deleted / added / **build residue** / **UNREGISTERED** 六组。`UNREGISTERED` = 本文件中没有出现的路径。构建残留（`lib/`、`dist/`、`*.map`、源码旁的编译产物 `x.js`/`x.d.ts`、`vendor/src/` 等）自动归类，不算产品改动。
+
+**建议**：接入打包预检（`apps/desktop/scripts/preflight-package.mjs`）时加 `--fail-on-drift`，或在 CI 单独跑一个只读 job；本单不接线。
+
+## 计数概览（2026-10-23 实测）
+
+| 分组 | 数量 |
+|---|---|
+| 真实修改（非版本号） | 71 |
+| 新增文件（不含本文件自身） | 41 |
+| 构建残留（待清理） | 38 |
+| 仅版本号变化的 package.json | 344 |
+| 删除的上游文件 | 0 |
+
+---
+
+## 一、内核补丁（真正改官方行为的）
+
+> 判定标准：改了官方**运行时行为**（进程、插件树、UI 注册、构建产物），不是单纯文案或资源。
+
+| # | 路径 | 改动摘要 | 为什么不能只用插件解决 | 最小侵入面 |
+|---|---|---|---|---|
+| K1 | `apps/desktop/src/main.ts` | 新增 Cadre 台账/员工/provider 的 IPC handler、托盘明暗图标、provider 凭据同步；`createRequire` 加载 `cadre-collab.cjs` | SQLite、`safeStorage`、`nativeTheme`、`ipcMain` 都是 Electron 主进程 API，Cordis 客户端插件拿不到 | 后续按 ADR-0023 §2.4 把员工/账本迁到 Host 服务后，本文件 hunk 应大幅收缩 |
+| K2 | `apps/desktop/src/ipc.ts` | 新增 `cadre:*` 通道常量（任务、provider、session 绑定、员工） | 通道名必须与 preload/main 一致；无官方等价 | 随 K1 一起收缩；`window.cadre` 目标归零 |
+| K3 | `apps/desktop/src/preload-app.ts` | 暴露 `window.cadre` 桥（任务/provider/员工） | contextBridge 只能写在 preload | 迁移完成后只保留不可替代通道 |
+| K4 | `apps/desktop/src/project-manager.ts` | 桌面 profile 的 bundles 列表追加 `@deepseek-ai/dsh-bundle-cadre` | profile 由桌面端生成，官方模板不含我们 bundle | 一行常量 `DESKTOP_BUNDLES` |
+| K5 | `apps/desktop/src/tray.ts` | 托盘图标支持按系统明暗切换（`resolveIconPath` + `setDark`） | 托盘生命周期在 Electron 主进程 | 一个类内新增方法；可保持在桌面壳 |
+| K6 | `apps/desktop/src/locale.ts` | 产品名 `DeepSeek Harness` → `Cadre Heihei`（菜单/托盘/欢迎页） | 应用菜单与托盘文案由主进程提供 | 纯字符串替换，6 处 |
+| K7 | `packages/bundle/base/cordis.patch.yml` | 禁用 `llm-deepseek-account`（无账户产品） | **这是官方扩展点**（patch `disabled`），不是代码 patch | 1 行 + 注释 |
+| K8 | `packages/bundle/web-app/cordis.patch.yml` | 禁用 `ui-settings-account`（隐藏账户设置入口） | 同 K7，官方 patch 机制 | 1 行 + 注释；`account-controller` 仍由官方默认禁用 |
+| K9 | `packages/client/ui-theme/src/theme-settings.ts` | 默认主题 `system` → `dark` | 官方没有「部署默认主题」配置面 | 1 行常量（**建议改为品牌/部署注入，见 §六**） |
+| K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册协作面板、`cadre-providers` / `cadre-employees` 设置分区、员工行菜单/徽标/对话框、主题 token 覆盖 | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
+| K11 | `packages/client/ui-sidebar/src/client/SidebarRoot.module.css` | 侧栏玻璃层背景改为 `color-mix` 取主题 token | 官方没有对应视觉变体 | 4 条声明；可移入我们的主题样式 |
+| K12 | `packages/client/ui-brand-official/src/client/index.ts`、`packages/client/ui-brand-official/src/client/Brand.tsx` | 品牌占位改为 Cadre 印章（含 hero 槽位） | 官方明确要求另做品牌包，不应改包内 | **ADR-0023 §2.6 决定迁到独立品牌包，本项待删** |
+| K13 | `packages/client/web/src/boot-page.ts` | 启动页字标改为 `Cadre Heihei` | 启动页在客户端 bundle 内、早于插件加载 | 1 行；品牌包无法覆盖启动页 |
+| K14 | `scripts/client-build-environment.ts` | `DSH_CLIENT_TITLE` 改为 `Cadre Heihei` | 构建期常量，插件读不到 | 1 行 |
+| K15 | `apps/desktop/scripts/electron-builder-config.mjs` | productName/artifactName/protocol 改名；files 白名单加 `lib/cadre-collab.cjs`；安装图标换 Cadre；Windows 多尺寸 ICO | 打包配置只能改这里 | 名称与资源映射；`cadre-collab.cjs` 随迁移可删 |
+| K16 | `apps/desktop/scripts/installer.nsh` | `customInstall` 清理旧程序文件（不碰用户数据） | NSIS 钩子只能改官方脚本 | 一个 macro；改名重装期间必需 |
+| K17 | `apps/desktop/scripts/smoke-packaged-runtime.ts` | 冒烟测试按新 productName 找 `Cadre Heihei.exe/.app` | 官方脚本硬编码产品名 | 2 行 |
+
+**内核补丁结论：17 处，其中 3 处（K7/K8/K10）本可完全走官方扩展点、1 处（K12）已决定迁走、1 处（K9）应换实现方式。真正无法避免的只剩桌面壳 6 处（K1–K6）+ 构建 4 处（K14–K17）。**
+
+---
+
+## 二、插件新增（官方没有、我们用官方机制加的能力）
+
+| 路径 | 改动摘要 | 保留理由 | 融合提示 |
+|---|---|---|---|
+| `packages/bundle/cadre-app/` | 员工模板 bundle：四个 preset（dev/novel/general/roleplay），`cordis.patch.yml` + no-op 入口 | 官方没有这些模板 | 机制稳定，升级基本不动；preset 字段若变走 §3.5 F |
+| `packages/client/ui-sidebar/src/client/CadrePanel.tsx` | 协作面板（台账任务列表/派发/校验） | 官方实验 agent-team 有任务板但存 session 事件，跨会话账本没有 | 先接 agent-team spike（ADR-0023 §2.7），再决定保留范围 |
+| `packages/client/ui-sidebar/src/client/CadreEmployee.tsx` | 转员工对话框、会话行菜单、行徽标 | 官方无「员工」概念 | 走官方 `sidebar.workspaces.session.menu.item`，升级稳定 |
+| `packages/client/ui-sidebar/src/client/EmployeeSection.tsx` | 「员工」设置分区 | 官方有 `settings.section`，无员工页 | 官方扩展点 |
+| `packages/client/ui-sidebar/src/client/ProviderSection.tsx` | 「模型 Providers」设置分区 | **官方有同类（Models 页），属重复** | ADR-0023 §2.5：迁移后删除 |
+| `packages/client/ui-sidebar/src/client/cadre-skin.tokens.ts` | 昼流/夜流主题 token 覆盖 | 官方 `ctx.theme` 扩展点允许 | 保留；与官方 token 变更走 C/E 判断 |
+| `packages/client/ui-sidebar/src/client/CadreEmployee.module.css` | 员工对话框样式 | 产品 UI | 保留 |
+| `packages/client/ui-sidebar/tests/CadreEmployee.client.spec.tsx` | 员工 UI 测试 | 产品 UI | 保留 |
+| `apps/desktop/src/cadre-ledger.ts` | 台账 SQLite 读取（userData/cadre.sqlite） | 官方无跨会话账本 | ADR-0023 §2.4：迁 Host 服务后本文件移动 |
+| `apps/desktop/src/cadre-collab-api.ts` | 台账写路径的类型契约 | 同上 | 同上 |
+| `apps/desktop/src/employees-db.ts` | 员工偏好表（模板/模型/备注） | 官方无员工偏好存储 | 同上；表保留，宿主迁移 |
+| `apps/desktop/src/providers-db.ts` | provider / session_providers 表 | **与官方三处真值重复** | ADR-0023 §2.5：先迁移后删除 |
+| `apps/desktop/src/provider-credentials.ts` | provider 密钥读写与掩码 | 官方 `credentials` 已有等价 | 随 providers 一起删除 |
+| `apps/desktop/src/provider-runtime.ts` | 把 Cadre provider 同步进官方 `llm-pi-ai` settings/credentials | 官方 Models 页可直接写 | 随 providers 一起删除 |
+| `apps/desktop/src/tray-icon.ts` | 按明暗解析托盘 ICO 路径 | 官方无明暗双图标 | 保留（桌面壳） |
+| `apps/desktop/tests/employees-db.spec.ts` | 员工表测试 | 产品 | 保留 |
+| `apps/web/tests/cadre-presets.e2e.ts` | 装配态验证 cadre-* preset（roster/read/select） | 产品 | 保留 |
+| `cadre-collab/entry.ts` | 协作写路径实现（编译为 `lib/cadre-collab.cjs`） | 官方无账本 | 迁 Host 服务后移动 |
+| `scripts/build-cadre-collab.mjs` | 把 `cadre-collab/entry.ts` 打成 CJS 供 main require | 桌面壳加载方式 | 随迁移删除 |
+| `scripts/check-upstream-drift.mjs` | 本文件的自动发现脚本 | 过程工具 | 保留 |
+| `packages/client/ui-brand-official/src/client/Brand.module.css` | Cadre 印章样式 | 品牌 | 随 K12 迁到独立品牌包 |
+| `packages/client/ui-brand-official/src/client/seal-light.svg` | 浅色印章图 | 品牌 | 随 K12 迁走 |
+| `packages/client/ui-brand-official/src/client/seal-dark.svg` | 深色印章图 | 品牌 | 随 K12 迁走 |
+| `packages/client/ui-brand-official/src/client/assets.d.ts` | SVG 模块类型声明 | 构建 | 随 K12 迁走 |
+| `packages/client/ui-brand-official/src/css-modules.d.ts` | CSS Modules 类型声明 | 构建 | 随 K12 迁走 |
+| `apps/desktop/scripts/check-no-secrets.mjs` | 打包密钥泄漏门禁（afterPack 扫描） | 官方无 | 保留（安全，D 判据） |
+| `apps/desktop/scripts/preflight-package.mjs` | 打包前预检（可接漂移检查） | 官方无 | 保留 |
+| `apps/desktop/scripts/release.mjs` | 一键发布（bump→构建→校验→发布） | 官方无 | 保留 |
+| `apps/desktop/CHANGELOG.md` | 产品变更日志 | 产品 | 保留 |
+| `docs/dev/packaging-playbook.md` | 打包操作手册 | 过程文档 | 保留 |
+| `apps/desktop/.env.windows` | 本地打包测试环境变量（占位域名，无真实密钥） | 构建环境 | 保留但**建议移出版本控制或确认为公开样例** |
+
+---
+
+## 三、配置
+
+| 路径 | 改动摘要 | 保留理由 | 融合提示 |
+|---|---|---|---|
+| `apps/desktop/package.json` | 新增 `release:win` 脚本；依赖加 `@deepseek-ai/dsh-bundle-cadre` | 构建接线 | 官方新增脚本时按 B/F 判断 |
+| `apps/desktop-host/package.json` | 依赖加 `@deepseek-ai/dsh-bundle-cadre`（进核心包集闭包） | 官方闭包根只有 dsh/host，必须挂 | 官方若支持「随包 bundle 清单」可融合（B） |
+| `packages/client/ui-sidebar/package.json` | 新增 api-remotes / session-controller / connection / ui-theme 依赖；files 加 `lib/types/**/*.js` | 员工对话框与主题注入需要 | 抽独立插件包后可回滚部分 |
+| `packages/client/ui-sidebar/tsconfig.json` | 增加对应 project references | 构建 | 随包拆分收缩 |
+| `packages/client/ui-brand-official/package.json` | 增加 ui-conversation 依赖（hero 品牌槽） | 品牌 | 随 K12 迁走 |
+| `packages/client/ui-brand-official/tsconfig.json` | 增加 ui-conversation reference | 构建 | 随 K12 迁走 |
+| `tsconfig.host.json` | references 增加 `packages/bundle/cadre-app` | 构建 | 保留 |
+| `apps/web/tsconfig.json` | exclude 增加 `tests/cadre-presets.e2e.ts`（引用 scaffold，避免 TS6307） | 测试边界 | 官方改 exclude 列表时按 B 判断 |
+| `pnpm-lock.yaml` | 依赖图变化（新 workspace 包与依赖） | 构建 | 每次版本升级重生成 |
+| `apps/desktop/README.md` | 增加密钥门禁说明 | 文档 | 保留 |
+
+---
+
+## 四、构建脚本
+
+| 路径 | 改动摘要 | 保留理由 | 融合提示 |
+|---|---|---|---|
+| `apps/desktop/scripts/dev.ts` | 支持 `DSH_DESKTOP_DEV_ROOT` 指定独立开发根（避免与第二实例抢目录） | 开发体验，官方没有 | 可上游化（B），但优先保留 |
+| `apps/desktop/scripts/electron-builder-config.mjs` | 见 K15 | 打包必需 | 名称部分为 E（品牌冲突）→ 保留 |
+| `apps/desktop/scripts/installer.nsh` | 见 K16 | 打包必需 | 保留 |
+| `apps/desktop/installer/strings.nsh` | 安装器文案改名（含中文） | 品牌 | 保留 |
+| `apps/desktop/scripts/smoke-packaged-runtime.ts` | 见 K17 | 打包必需 | 保留 |
+| `scripts/client-build-environment.ts` | 见 K14 | 构建必需 | 保留 |
+
+---
+
+## 五、资源与品牌
+
+| 路径 | 改动摘要 | 保留理由 | 融合提示 |
+|---|---|---|---|
+| `apps/desktop/installer/assets/` | NSIS 头图/侧栏/深色版换 Cadre（5 个 PNG） | 品牌 | 保留（E） |
+| `apps/desktop/renderer/assets/welcome-brand.svg` | 欢迎页品牌图 | 品牌 | 保留（E） |
+| `apps/desktop/resources/icon.png` | 应用图标（512 印章） | 品牌 | 保留（E） |
+| `apps/desktop/resources/icon-macos.png` | macOS 图标 | 品牌 | 保留（E） |
+| `apps/desktop/resources/icon.ico` | Windows 多尺寸应用图标（新增） | 品牌 | 保留 |
+| `apps/desktop/resources/installer.ico` | 安装器图标（新增） | 品牌 | 保留 |
+| `apps/desktop/resources/tray.ico` | 深色任务栏托盘图标（新增） | 品牌 | 保留 |
+| `apps/desktop/resources/tray-light.ico` | 浅色任务栏托盘图标（新增） | 品牌 | 保留 |
+| `apps/web/public/favicon.svg` | 站点图标换印章 | 品牌 | 保留（E） |
+| `apps/web/public/favicon-dark.svg` | 深色站点图标 | 品牌 | 保留（E） |
+
+---
+
+## 六、测试基线与文案（官方包内）
+
+> 以下改动都是**产品改名带来的连锁更新**，不改变官方逻辑；升级时官方改同一文件，按 §3.5 A/B 判断（通常保留我们的文案，除非官方重写了该文案结构）。
+
+| 路径 | 改动摘要 |
+|---|---|
+| `apps/desktop/tests/expected/about-panel.json` | 关于面板应用名/菜单文案 |
+| `apps/desktop/tests/expected/application-menu-en-US.json` | 英文菜单快照 |
+| `apps/desktop/tests/expected/application-menu-zh-CN.json` | 中文菜单快照 |
+| `apps/desktop/tests/background-notice.spec.ts` | 通知标题断言 |
+| `apps/desktop/tests/main-startup.spec.ts` | Windows 清理重试 + 用户目录隔离 |
+| `apps/desktop/tests/tray.spec.ts` | 托盘明暗图标断言 |
+| `apps/desktop/tests/welcome-startup.spec.ts` | nativeTheme mock 补事件接口 |
+| `apps/desktop/tests/installer-packaging.spec.ts` | 图标来源与配置形状断言 |
+| `apps/desktop/tests/macos-signature.spec.ts` | 协议名断言 |
+| `packages/client/ui-settings-account/tests/expected/` | 账户/引导页文案快照（12 个文件） |
+| `packages/client/ui-settings-account/src/client/locales.ts` | 账户设置文案改名 |
+| `packages/client/ui-settings-account/src/client/locales/onboarding.ts` | 引导文案改名 |
+| `packages/client/ui-settings-models/src/client/locales.ts` | 欢迎弹窗文案改名 |
+| `packages/client/ui-settings-models/tests/welcome-notice.client.spec.tsx` | 对应断言 |
+| `packages/client/ui-plugin-manager/src/client/locales.ts` | 插件安装安全提示改名 |
+| `packages/client/ui-sidebar-documentpreview/src/client/office/locales.ts` | Office 预览提示改名 |
+| `packages/client/web/tests/boot-page.client.spec.ts` | 启动页字标断言 |
+| `packages/client/ui-brand-official/tests/browser-plugin.client.spec.tsx` | 品牌槽断言（含 hero） |
+
+---
+
+## 七、仅版本号变化
+
+344 个 `package.json` 只有 `version` 从 `0.2.1-rc.2` 变为 `0.5.1`，由发布脚本统一 bump，不逐条登记。自动检查的 `version-only package.json` 分组列出全部路径。
+
+---
+
+## 八、构建残留（非产品改动，建议清理）
+
+以下文件是构建或临时步骤落到源码树里的产物，**不属于有意改动**，自动检查已归类为 residue：
+
+| 路径 | 来源 |
+|---|---|
+| `packages/test-support/session-snapshot/src/` 下的 `*.js` / `*.d.ts` | 测试支撑包被 tsc 直接编译进 `src/`（应删除或改出到 `lib/`） |
+| `packages/test-support/llm-replay/src/` 下的 `*.js` / `*.d.ts` | 同上 |
+| `packages/test-support/loader-smoke/src/` 下的 `*.js` / `*.d.ts` | 同上 |
+| `packages/llm/deepseek-llm-api-extensions/src/` 下的 `*.js` / `*.d.ts` | 同上 |
+| `vendor/src/`、`vendor/package.json`、`vendor/tsconfig.json`、`vendor/LICENSE` | 疑似把 `vendor/cosmokit` 的包内容复制到了 `vendor/` 根（误操作残留） |
+| `.dsh-build/client-build-environment.json` | 构建记录（已在忽略列表外，建议加入忽略） |
+| `undefined/temp/tsx-*` | tsx 运行时的临时缓存目录（环境变量缺失时生成，建议清理） |
+
+> 清理不属于本单范围；登记在此，避免下次比对时重复排查。
+
+---
+
+## 九、升级流程（选择性融合）
+
+1. 更新 `vendor/deepseek-harness` pin，跑官方 prepare 链产出新基线；
+2. 运行 `node desktop/scripts/check-upstream-drift.mjs`，得到新版差异清单；
+3. 对**每一处**变更按 ADR-0023 §3.5 判据决策：融合 / 保留 / 延后，并把判据与证据写回本表；
+4. 融合：删掉我们的实现，改用官方；保留：在本表更新「官方已有但冲突」的具体冲突点与复评条件；
+5. 跑回归清单（官方 UI 启动、协作面板、账本读写、员工模板可选、模型选择无账户、多会话、打包冒烟）；
+6. 记录本次 diff 行数、融合/保留比例与未决项。
+
+**禁止**：无判据的整包重放；把「官方更新了」当作融合理由；在本表之外悄悄改官方文件。
