@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { apply, inject } from '../src/client/index.ts'
-import { OfficialBrandMark, OfficialBrandName } from '../src/client/Brand.tsx'
+import { OfficialBrandMark, OfficialBrandName, OfficialHeroBrandMark } from '../src/client/Brand.tsx'
 import { apply as hostApply } from '../src/index.ts'
 
 afterEach(() => {
@@ -71,11 +71,16 @@ describe('official browser-brand plugin', () => {
     for (const hole of HOLES) expect(after.slots.entries(hole)).toHaveLength(1)
   })
 
-  it('leaves the conversation hero on its declaring fallback even in official builds', async () => {
+  it('fills the conversation hero mark in official builds and leaves it empty otherwise', async () => {
     vi.stubEnv('DSH_CLIENT_BUILD_PROFILE', 'official')
     const subject = await bench()
     await subject.ctx.plugin({ inject: [...inject], apply }).await()
-    expect(subject.slots.entries(HERO_HOLE)).toHaveLength(0)
+    expect(subject.slots.entries(HERO_HOLE)).toHaveLength(1)
+
+    const local = await bench()
+    vi.stubEnv('DSH_CLIENT_BUILD_PROFILE', 'local')
+    await local.ctx.plugin({ inject: [...inject], apply }).await()
+    expect(local.slots.entries(HERO_HOLE)).toHaveLength(0)
   })
 
   it('renders the Cadre name and the seal at both requested sizes', () => {
@@ -88,5 +93,9 @@ describe('official browser-brand plugin', () => {
     expect(widths()).toEqual(['34', '34'])
     mark.rerender(<OfficialBrandMark size={24} />)
     expect(widths()).toEqual(['24', '24'])
+    mark.unmount()
+
+    const hero = render(<OfficialHeroBrandMark size={34} />)
+    expect([...hero.container.querySelectorAll('img')].map(image => image.getAttribute('width'))).toEqual(['34', '34'])
   })
 })

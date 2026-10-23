@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <title>Cadre Heihei · 家印笑脸 · 标准</title>
+  <rect x="56" y="56" width="912" height="912" rx="180" fill="#F4F7FA"/>
+  <path d="M 505 770 L 272 770 Q 260 770 260 758 L 260 244 Q 260 232 272 232 L 748 232 Q 760 232 760 244 L 760 696" stroke="#0E141B" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="405" r="34" fill="#0E141B"/>
+  <path d="M 558 434 Q 619 366 680 434" stroke="#0E141B" stroke-width="44" stroke-linecap="round"/>
+  <path d="M 350 545 C 400 705 620 705 672 545" stroke="#0E141B" stroke-width="44" stroke-linecap="round" fill="none"/>
+  <rect x="690" y="720" width="68" height="68" rx="12" fill="#2B4C6F"/>
+</svg>
