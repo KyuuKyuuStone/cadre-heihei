@@ -1,21 +1,45 @@
+import { useSyncExternalStore } from 'react'
 import type { SidebarBrandMarkOwnerProps } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { HeroBrandMarkOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import sealLight from './seal-light.svg'
 import sealDark from './seal-dark.svg'
 import css from './Brand.module.css'
 
+/** Attribute ui-theme keeps on <body> for the dark base palette. */
+const DARK_ATTRIBUTE = 'data-ds-dark-theme'
+
 /**
- * Both seal variants stay mounted; CSS swaps them with
- * `body[data-ds-dark-theme]`, so a theme change repaints without remounting
- * the host slot.
+ * Follow the palette attribute rather than a CSS descendant selector: exactly
+ * one seal is mounted, so a missed selector can never leave the light tile
+ * visible on a dark surface.
+ * @param onChange - React's store-change callback.
+ * @returns teardown for the body attribute observer.
+ */
+function subscribeTheme(onChange: () => void): () => void {
+  if (typeof document === 'undefined') return () => {}
+  const observer = new MutationObserver(onChange)
+  observer.observe(document.body, { attributes: true, attributeFilter: [DARK_ATTRIBUTE] })
+  return () => { observer.disconnect() }
+}
+
+/**
+ * Read the current palette from the same attribute the theme styles use.
+ * @returns whether the dark base palette is active.
+ */
+function readDark(): boolean {
+  return typeof document !== 'undefined' && document.body.hasAttribute(DARK_ATTRIBUTE)
+}
+
+/**
+ * Render one seal variant at the requested square size.
  * @param props.size - requested square edge in pixels.
- * @returns the seal at the requested size.
+ * @returns the light or dark seal for the active palette.
  */
 function Seal({ size }: { size: number }) {
+  const dark = useSyncExternalStore(subscribeTheme, readDark, () => false)
   return (
     <span className={css.seal} style={{ width: size, height: size }}>
-      <img className={css.sealLight} src={sealLight} width={size} height={size} alt="" />
-      <img className={css.sealDark} src={sealDark} width={size} height={size} alt="" />
+      <img className={css.sealImage} src={dark ? sealDark : sealLight} width={size} height={size} alt="" />
     </span>
   )
 }

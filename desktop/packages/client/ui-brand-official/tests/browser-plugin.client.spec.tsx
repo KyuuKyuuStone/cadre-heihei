@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { apply, inject } from '../src/client/index.ts'
 import { OfficialBrandMark, OfficialBrandName, OfficialHeroBrandMark } from '../src/client/Brand.tsx'
@@ -83,19 +83,36 @@ describe('official browser-brand plugin', () => {
     expect(local.slots.entries(HERO_HOLE)).toHaveLength(0)
   })
 
-  it('renders the Cadre name and the seal at both requested sizes', () => {
+  it('renders the Cadre name and one seal at both requested sizes', () => {
     const name = render(<OfficialBrandName />)
     expect(name.container.textContent).toBe('Cadre Heihei')
     name.unmount()
 
     const mark = render(<OfficialBrandMark size={34} />)
-    const widths = (): (string | null)[] => [...mark.container.querySelectorAll('img')].map(image => image.getAttribute('width'))
-    expect(widths()).toEqual(['34', '34'])
+    const image = (): HTMLImageElement => mark.container.querySelector('img')!
+    expect(image().getAttribute('width')).toBe('34')
     mark.rerender(<OfficialBrandMark size={24} />)
-    expect(widths()).toEqual(['24', '24'])
+    expect(mark.container.querySelectorAll('img')).toHaveLength(1)
+    expect(image().getAttribute('width')).toBe('24')
     mark.unmount()
 
     const hero = render(<OfficialHeroBrandMark size={34} />)
-    expect([...hero.container.querySelectorAll('img')].map(image => image.getAttribute('width'))).toEqual(['34', '34'])
+    expect(hero.container.querySelectorAll('img')).toHaveLength(1)
+    expect(hero.container.querySelector('img')!.getAttribute('width')).toBe('34')
+  })
+
+  it('swaps the seal when the palette attribute changes', async () => {
+    document.body.removeAttribute('data-ds-dark-theme')
+    const mark = render(<OfficialBrandMark size={24} />)
+    const lightSource = mark.container.querySelector('img')!.src
+    act(() => { document.body.setAttribute('data-ds-dark-theme', '') })
+    await waitFor(() => {
+      expect(mark.container.querySelector('img')!.src).not.toBe(lightSource)
+    })
+    expect(mark.container.querySelectorAll('img')).toHaveLength(1)
+    act(() => { document.body.removeAttribute('data-ds-dark-theme') })
+    await waitFor(() => {
+      expect(mark.container.querySelector('img')!.src).toBe(lightSource)
+    })
   })
 })
