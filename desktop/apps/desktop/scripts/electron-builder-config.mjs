@@ -1,4 +1,5 @@
 import { officePackageDirectories } from '../../../scripts/libreoffice-packages.mjs'
+import { scanAsar, scanDir } from './check-no-secrets.mjs'
 import { X509Certificate } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -198,6 +199,16 @@ export function createElectronBuilderConfig(
       if (policy === undefined) return
       const { resolveDesktopPolicyConfig } = await import('../lib/types/mandatory-update-policy.js')
       resolveDesktopPolicyConfig(policy)
+    },
+    afterPack: async context => {
+      // Hard gate: user API keys / credentials must never ship. Throws on any hit.
+      const resources = join(context.appOutDir, 'resources')
+      const hits = [...scanDir(resources), ...scanAsar(join(resources, 'app.asar'))]
+      if (hits.length > 0) {
+        for (const hit of hits) console.error(`[check-no-secrets] ${hit.file}:${hit.line} rule=${hit.rule} value=${hit.value}`)
+        throw new Error(`check-no-secrets: ${hits.length} secret-like hit(s) in ${context.appOutDir}; packaging aborted.`)
+      }
+      console.log('[check-no-secrets] PASS (afterPack scan of resources + app.asar).')
     },
     afterPack: async context => {
       const { verifyDesktopRuntime } = await import('../lib/types/runtime-tree.js')
