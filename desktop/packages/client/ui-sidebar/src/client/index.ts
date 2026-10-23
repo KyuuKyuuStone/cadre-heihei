@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pull the Client Remote and Session service merges (employee dialog).
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
-import { createClientEnginePort } from './cadre-engine-local.ts'
+import { createClientEnginePort } from '@deepseek-ai/dsh-cadre-engine/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'

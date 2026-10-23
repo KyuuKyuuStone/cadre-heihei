@@ -72,7 +72,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K7 | `packages/bundle/base/cordis.patch.yml` | 禁用 `llm-deepseek-account`（无账户产品） | **这是官方扩展点**（patch `disabled`），不是代码 patch | 1 行 + 注释 |
 | K8 | `packages/bundle/web-app/cordis.patch.yml` | 禁用 `ui-settings-account`（隐藏账户设置入口） | 同 K7，官方 patch 机制 | 1 行 + 注释；`account-controller` 仍由官方默认禁用 |
 | K9 | `packages/client/ui-theme/src/theme-settings.ts` | 默认主题 `system` → `dark` | 官方没有「部署默认主题」配置面 | 1 行常量（**建议改为品牌/部署注入，见 §六**） |
-| K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册协作面板、`cadre-providers` / `cadre-employees` 设置分区、员工行菜单/徽标/对话框、主题 token 覆盖；EnginePort 客户端绑定暂经本地 `cadre-engine-local.ts`（见 §二） | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
+| K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册协作面板、`cadre-providers` / `cadre-employees` 设置分区、员工行菜单/徽标/对话框、主题 token 覆盖；EnginePort 客户端绑定经 `@deepseek-ai/dsh-cadre-engine/client`（内联进本包 bundle，见 K16） | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
 | K11 | `packages/client/ui-sidebar/src/client/SidebarRoot.module.css` | 侧栏玻璃层背景改为 `color-mix` 取主题 token | 官方没有对应视觉变体 | 4 条声明；可移入我们的主题样式 |
 | K12 | `packages/client/ui-brand-official/src/client/index.ts`、`packages/client/ui-brand-official/src/client/Brand.tsx` | 品牌占位改为 Cadre 印章（含 hero 槽位） | 官方明确要求另做品牌包，不应改包内 | **ADR-0023 §2.6 决定迁到独立品牌包，本项待删** |
 | K13 | `packages/client/web/src/boot-page.ts` | 启动页字标改为 `Cadre Heihei` | 启动页在客户端 bundle 内、早于插件加载 | 1 行；品牌包无法覆盖启动页 |
@@ -80,6 +80,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K15 | `apps/desktop/scripts/electron-builder-config.mjs` | productName/artifactName/protocol 改名；files 白名单加 `lib/cadre-collab.cjs`；安装图标换 Cadre；Windows 多尺寸 ICO | 打包配置只能改这里 | 名称与资源映射；`cadre-collab.cjs` 随迁移可删 |
 | K16 | `apps/desktop/scripts/installer.nsh` | `customInstall` 清理旧程序文件（不碰用户数据） | NSIS 钩子只能改官方脚本 | 一个 macro；改名重装期间必需 |
 | K17 | `apps/desktop/scripts/smoke-packaged-runtime.ts` | 冒烟测试按新 productName 找 `Cadre Heihei.exe/.app` | 官方脚本硬编码产品名 | 2 行 |
+| K18 | `packages/client/tsdown.client.ts` | `INLINE_SAFE` 增加 `cadre-engine`，允许侧栏 bundle 内联 `@deepseek-ai/dsh-cadre-engine/client` | 该包是浏览器安全的无状态适配层（与 `session`/`brand`/`llm` 同桶）；官方 module table 的 row 键只到包名，子路径无法成为 row，做成 client 插件又会为纯库引入无谓的插件身份 | 正则里一个交替项；若官方给库级内联白名单配置面则改用它 |
 
 **内核补丁结论：17 处，其中 3 处（K7/K8/K10）本可完全走官方扩展点、1 处（K12）已决定迁走、1 处（K9）应换实现方式。真正无法避免的只剩桌面壳 6 处（K1–K6）+ 构建 4 处（K14–K17）。**
 
@@ -93,7 +94,6 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | `packages/client/ui-sidebar/src/client/CadrePanel.tsx` | 协作面板（花名册 + 台账任务列表/派发/校验） | 官方实验 agent-team 有任务板但存 session 事件，跨会话账本没有 | 先接 agent-team spike（ADR-0023 §2.7），再决定保留范围 |
 | `packages/client/ui-sidebar/src/client/CadreRoster.tsx`、`CadreRoster.module.css` | 花名册视图：主管四层标识（置顶分组/3px 靛蓝/实心方标+600/徽章）与员工行、四态图标、最后活跃 | 官方无角色概念；设计 c07dd22 | 纯 UI，官方 slot 稳定 |
 | `packages/client/ui-sidebar/src/client/cadre-roster-source.ts` | 花名册数据薄适配（IPC → 视图模型；未来切 Host Remote 只改此文件） | 官方无跨会话花名册 | 随 ADR-0023 §2.4 迁移 |
-| `packages/client/ui-sidebar/src/client/cadre-engine-local.ts` | **临时**本地 EnginePort 绑定（仅 models/presets 四个方法） | `dsh-cadre-engine/client` 尚无 client-module 注册，直接 import 会让整个侧栏启动失败（实测 web boot: import failed） | 注册落地后把 `index.ts` 的 import 换回包名并删除本文件 |
 | `packages/client/ui-sidebar/src/client/CadreEmployee.tsx` | 转员工对话框、会话行菜单、行徽标 | 官方无「员工」概念 | 走官方 `sidebar.workspaces.session.menu.item`，升级稳定 |
 | `packages/client/ui-sidebar/src/client/EmployeeSection.tsx` | 「员工」设置分区 | 官方有 `settings.section`，无员工页 | 官方扩展点 |
 | `packages/client/ui-sidebar/src/client/ProviderSection.tsx` | 「模型 Providers」设置分区 | **官方有同类（Models 页），属重复** | ADR-0023 §2.5：迁移后删除 |
