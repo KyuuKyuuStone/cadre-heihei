@@ -18,6 +18,8 @@ import {
   Tag,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { CadreRoster, type RosterState } from './CadreRoster.tsx'
+import { loadRoster, type RosterMember } from './cadre-roster-source.ts'
 
 /* Bare headings/paras/textarea do not read component styles, so they name the
    semantic tokens explicitly and follow every theme override. */
@@ -56,7 +58,10 @@ interface CadreTaskRow {
 /** One roster member returned by `cadre:listRoster`. */
 interface CadreMember {
   readonly sessionId: string
-  readonly name?: string
+  readonly role: string
+  readonly displayName?: string
+  readonly state?: string
+  readonly updatedAt?: string
 }
 
 /** Write response: the ledger reports whether the write actually landed. */
@@ -86,7 +91,13 @@ interface CadreBridge {
     rows: CadreTaskRow[]
     elapsedMs?: number
   }>
-  listRoster?(query: { projectId: string }): Promise<{ members?: CadreMember[]; rows?: CadreMember[] }>
+  listRoster?(query: { projectId: string }): Promise<{ members?: CadreMember[]; rows?: CadreMember[] } | undefined>
+  listEmployees?(query?: { projectId?: string }): Promise<{
+    ok?: boolean
+    employees?: readonly { sessionId: string; displayName?: string }[]
+    code?: string
+    message?: string
+  } | undefined>
   dispatchTask?(query: {
     projectId: string
     assigneeSessionId: string
@@ -184,7 +195,7 @@ function TaskRow({
 /** Static ledger surface; main-panel props are not used at milestone 1. */
 export function CadrePanel(_props: PropsRuntime<'main'>) {
   const [state, setState] = useState<PanelState>({ kind: 'loading' })
-  const [roster, setRoster] = useState<readonly CadreMember[]>([])
+  const [rosterState, setRosterState] = useState<RosterState>({ kind: 'loading' })
   const [dispatchOpen, setDispatchOpen] = useState(false)
   const [employee, setEmployee] = useState('')
   const [title, setTitle] = useState('')
@@ -210,16 +221,20 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
 
   const load = useCallback(async () => {
     setState({ kind: 'loading' })
+    setRosterState({ kind: 'loading' })
     const bridge = window.cadre
     if (bridge === undefined) {
       setState({ kind: 'fallback', reason: '主进程通道未就绪' })
+      setRosterState({ kind: 'error', reason: '主进程通道未就绪' })
       return
     }
+    let rows: CadreTaskRow[] = []
     try {
       const result = await bridge.listTasks({ projectId: PROJECT_ID })
+      rows = [...result.rows]
       setState({
         kind: 'ready',
-        tasks: result.rows.map(row => ({
+        tasks: rows.map(row => ({
           taskId: row.taskId,
           title: row.title,
           status: row.status,
@@ -229,21 +244,14 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
     } catch (error) {
       setState({ kind: 'fallback', reason: errorMessage(error) })
     }
-  }, [])
-
-  const loadRoster = useCallback(async () => {
-    const listRoster = window.cadre?.listRoster
-    if (listRoster === undefined) return
-    try {
-      const result = await listRoster({ projectId: PROJECT_ID })
-      setRoster(result.members ?? result.rows ?? [])
-    } catch {
-      // Roster is optional; the free-form employee input stays available.
-    }
+    // One adapter call owns roster fetching; task statuses sharpen its states.
+    const roster = await loadRoster(bridge, PROJECT_ID, rows)
+    setRosterState(roster.ok
+      ? { kind: 'ready', members: roster.members }
+      : { kind: 'error', reason: roster.reason })
   }, [])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => { void loadRoster() }, [loadRoster])
 
   // Apply the rows a write already read back, then reconcile with a fresh read.
   const applyWriteResult = (result: { tasks?: CadreTaskRow[] } | undefined) => {
@@ -395,6 +403,9 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
   const tasks = state.kind === 'ready'
     ? state.tasks
     : offline ? SAMPLE_TASKS : []
+  const workers: readonly RosterMember[] = rosterState.kind === 'ready'
+    ? rosterState.members.filter(member => member.role === 'worker')
+    : []
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
@@ -427,6 +438,16 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
           {notice.text}
         </p>
       )}
+
+      <CadreRoster
+        state={rosterState}
+        onRetry={() => { void load() }}
+        onCreateSupervisor={() => {
+          setNotice({ tone: 'neutral', text: '新建主管通道待接入：台账 members 写入尚未注册' })
+        }}
+      />
+
+      <div style={{ height: 1, background: 'var(--dsw-alias-border-l1)', margin: '4px 0 8px' }} />
 
       {state.kind === 'loading' && (
         <div role="status" aria-busy="true" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 0' }}>
@@ -478,19 +499,19 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
             id="cadre-employee"
             value={employee}
             onChange={event => { setEmployee(event.target.value) }}
-            placeholder={roster.length > 0 ? '选择或输入员工 sessionId' : '输入员工 sessionId'}
+            placeholder={workers.length > 0 ? '选择或输入员工 sessionId' : '输入员工 sessionId'}
             disabled={pending}
           />
-          {roster.length > 0 && (
+          {workers.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-              {roster.map(member => (
+              {workers.map(member => (
                 <Button
                   key={member.sessionId}
                   variant="outline"
                   size="sm"
                   onClick={() => { setEmployee(member.sessionId) }}
                 >
-                  {member.name ?? member.sessionId}
+                  {member.name}
                 </Button>
               ))}
             </div>
