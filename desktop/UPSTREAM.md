@@ -9,3 +9,4 @@
 | 文件 | 差异 |
 |---|---|
 | apps/desktop/scripts/electron-builder-config.mjs | files 白名单追加 lib/cadre-collab.cjs（主进程台账后端进 asar） |
+| apps/desktop/scripts/smoke-packaged-runtime.ts | 产品名改名同步：硬编码 DeepSeek Harness.exe/.app → Cadre Heihei（electron-builder productName 改名后 smoke 才能找到产物） |
