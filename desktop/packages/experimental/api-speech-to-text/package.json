@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-api-speech-to-text",
   "description": "Authenticated experimental speech transcription for browser clients",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publishConfig": {
     "access": "public"
   },
