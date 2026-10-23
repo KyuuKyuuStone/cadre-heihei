@@ -149,8 +149,16 @@ export function failureText(outcome: { readonly code?: string; readonly message?
   return `${outcome?.code ?? 'UNKNOWN'} · ${outcome?.message ?? '未知错误'}`
 }
 
+/**
+ * Employee templates are the registered `cadre-*` presets. A Session running
+ * any other preset (for example the official `standard`) is not an employee
+ * template, so the column stays NULL rather than recording a foreign id.
+ */
+const CADRE_TEMPLATE_ID = /^cadre-[a-z0-9][a-z0-9-]{0,63}$/
+
 /** Template glyphs keep the 16px badge legible; unknown templates fall back to 员. */
 const TEMPLATE_GLYPHS: Record<string, string> = {
+
   'cadre-dev': '开',
   'cadre-novel': '写',
   'cadre-general': '通',
@@ -296,7 +304,12 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
       if (cancelled) return
       setPresets(presetList)
       if (presetList.ok) {
-        const recorded = record?.templateId
+        // An existing row wins; otherwise a non-blank Session shows the preset it
+        // actually runs, which is what saving will record.
+        const projected = blank === false && originalPreset !== undefined && CADRE_TEMPLATE_ID.test(originalPreset)
+          ? originalPreset
+          : undefined
+        const recorded = record?.templateId ?? projected
         const listed = recorded !== undefined && presetList.value.some(preset => preset.id === recorded)
         const fallback = presetList.value.find(preset => preset.broken === undefined)?.id ?? ''
         setTemplateId(listed ? recorded : (recorded ?? fallback))
@@ -386,10 +399,17 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
       applied.push('模型已应用')
     }
 
+    // A non-blank Session keeps the composition it started with, so the employee
+    // template records that projected preset instead of staying NULL. Presets
+    // outside `cadre-*` are not employee templates and leave the column empty.
+    const projectedTemplate = blank === false && originalPreset !== undefined && CADRE_TEMPLATE_ID.test(originalPreset)
+      ? originalPreset
+      : undefined
+    const writtenTemplate = blank === true && templateId !== '' ? templateId : projectedTemplate
     const savedResult = await saveEmployee({
       sessionId: request.sessionId,
       displayName: displayName.trim(),
-      ...(blank === true && templateId !== '' ? { templateId } : {}),
+      ...(writtenTemplate === undefined ? {} : { templateId: writtenTemplate }),
       ...(providerId !== '' && modelId !== '' ? { preferredProviderId: providerId, preferredModel: modelId } : {}),
     })
     if (!savedResult.ok) {
