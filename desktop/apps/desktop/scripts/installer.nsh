@@ -234,20 +234,10 @@ ManifestDPIAware true
 !endif
 
 !macro customInstall
-  ; Stale-program cleanup: a previous install (DeepSeek Harness or an older Cadre
-  ; Heihei build) may still occupy the retargeted $INSTDIR. BOUNDARY: user data
-  ; lives in %APPDATA% and is NEVER touched — only files inside $INSTDIR.
-  ${If} ${FileExists} "$INSTDIR\resources\app.asar"
-    RMDir /r "$INSTDIR\resources"
-    RMDir /r "$INSTDIR\locales"
-    Delete "$INSTDIR\*.dll"
-    Delete "$INSTDIR\*.pak"
-    Delete "$INSTDIR\*.bin"
-    Delete "$INSTDIR\DeepSeek Harness.exe"
-    Delete "$INSTDIR\Cadre Heihei.exe"
-    Delete "$INSTDIR\DeepSeek Harness Uninstall.exe"
-    Delete "$INSTDIR\Cadre Heihei Uninstall.exe"
-  ${EndIf}
+  ; NOTE: stale-program cleanup temporarily withdrawn — the combined macro aborted
+  ; mid-install on a real machine (0.5.1 s58). Restore as its own hook after
+  ; root-causing with the original macro author. User data in %APPDATA% is
+  ; untouched either way.
   Push $0
   StrCpy $0 0
   ${If} ${Errors}
