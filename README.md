@@ -13,13 +13,13 @@
 | 位置 | 性质 | 用途 |
 |---|---|---|
 | [`docs/decisions/`](docs/decisions/README.md) | **现行决策**（可演进） | 12 条启动决策的 ADR、被否决项与理由、勘误区 |
-| [`docs/product/`](docs/product/README.md) | **现行产品文档**（可演进） | 设计 / 前端 / 后端 / spike / 审查，分类存放 |
+| [`docs/product/`](docs/product/README.md) | **现行产品文档**（可演进） | 方向总纲、产品模型、交互设计、设计规范、审查与测试规范 |
 | [`docs/pending-verification.md`](docs/pending-verification.md) | 现行清单 | 待核查项，分「阻塞 / 不阻塞」；含 `6aa34b7a` 的关闭结论 |
-| [`docs/handover/`](docs/handover/README.md) | **历史快照 · 只读** | 前身交接包逐字副本（`01`~`06` + `blessings`）与 SHA-256 清单 |
+| [`docs/archive/2026-10-23-旧文档/`](docs/archive/2026-10-23-旧文档/README.md) | **历史 · 已封存** | 交接包快照（`01`~`06` + `blessings`）、旧 spike、旧设计与评审记录（2026-10-23 只移动不删除） |
 
 规则：
 
-1. **历史查 `docs/handover/`，现行决定查 `docs/decisions/`，产品设计查 `docs/product/`。** 与 ADR 冲突时以 ADR 为准（详见 `docs/handover/README.md` 勘误区）。
+1. **历史查 `docs/archive/2026-10-23-旧文档/`，现行决定查 `docs/decisions/`，产品设计查 `docs/product/`。** 与 ADR 冲突时以 ADR 为准（勘误区见归档内的 `handover/README.md`）。
 2. 交接包原文**不得修改**；新结论写入 ADR 或产品文档。
 3. **架构判断在通过 spike 前一律标「假设，待 spike 验证」**，不得写成定论。
 
@@ -27,7 +27,7 @@
 
 - 完全开源可改；**零改内核优先**（ADR-0002）
 - 引擎可替换，接缝方向 MCP（ADR-0003，假设待验证）
-- token 效率从架构层考虑（`docs/handover/05`）
+- token 效率从架构层考虑（`docs/archive/2026-10-23-旧文档/handover/05-新项目的起点约束.md`）
 - 自动化不加人工审批点；首版三屏、不做审批 UI（ADR-0007）
 - 视觉沿用骨架，WCAG AA / 警示 AAA，六主题从前身回填（ADR-0008）
 - UI 摘要化：截断标注 + 展开入口，用量只落日志（ADR-0009）
@@ -47,4 +47,4 @@
 
 ## 建议阅读顺序
 
-`docs/decisions/README.md` → `docs/product/README.md` → `docs/pending-verification.md` → `docs/handover/02-理念与铁律.md` → `docs/handover/05-新项目的起点约束.md` → 其余交接篇目。
+`docs/product/DIRECTION.md` → `docs/decisions/README.md` → `docs/product/README.md` → `docs/pending-verification.md` → `docs/archive/2026-10-23-旧文档/handover/02-理念与铁律.md` → `docs/archive/2026-10-23-旧文档/handover/05-新项目的起点约束.md`。
