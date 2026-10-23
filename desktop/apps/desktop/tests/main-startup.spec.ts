@@ -5,6 +5,21 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+
+// Windows 上 EPERM/EBUSY 常来自句柄延迟释放（防病毒扫描/索引服务/worker 退出竞态），
+// force 只忽略 ENOENT 不重试 EPERM；统一用带退避重试的删除，避免清理阶段掩盖真实回归。
+let currentUserData: string | undefined
+const rmRf = (target: string) => {
+  try {
+    rmSync(target, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 })
+  } catch (error) {
+    // Cleanup failures must never fail the test verdict: they would mask real
+    // regressions behind environment noise. The holder is the cadre.sqlite
+    // connection still open at teardown; the OS reclaims the temp directory.
+    console.warn('[rmRf-cleanup-skipped]', String(error).slice(0, 120), target)
+  }
+}
+const fsReaddirSafe = (dir: string) => { try { return readdirSync(dir) } catch { return [] } }
 import type { MenuItemConstructorOptions, MessageBoxOptions } from 'electron'
 import { DESKTOP_IPC, type DesktopUpdateState } from '../src/ipc.ts'
 import { MANDATORY_IPC } from '../src/mandatory-update-ipc.ts'
@@ -405,8 +420,8 @@ beforeEach(() => {
   testAuth.login.mockResolvedValue('cancelled')
   vi.useFakeTimers()
   harness.reset()
-  const userData = mkdtempSync(join(tmpdir(), 'dsh-main-user-data-'))
-  onTestFinished(() => { rmSync(userData, { recursive: true, force: true }) })
+  currentUserData = mkdtempSync(join(tmpdir(), 'dsh-main-user-data-'))
+  const userData = currentUserData
   harness.app.getPath.mockImplementation(name => name === 'userData' ? userData : `desktop-test-${name}`)
   harness.dialog.showMessageBox.mockImplementation((options: { title?: string }) => {
     if (options.title !== en.startupFailed) return Promise.resolve({ response: 1 })
@@ -436,9 +451,23 @@ afterEach(async () => {
   await vi.advanceTimersByTimeAsync(0)
   for (const host of harness.hosts) { host.ready.resolve(); host.exited.resolve() }
   await harness.quitCompleted.promise
-  vi.restoreAllMocks()
+  // Real Electron emits will-quit right before the process exits; the main entry
+  // releases its cadre sqlite connections there. The harness quit never reaches
+  // it (before-quit is preventDefault-ed by the confirmation flow), so emit it
+  // here, and only then clean the temp userData — otherwise the open handles
+  // make rmSync fail with EPERM on Windows.
+  harness.app.emit('will-quit')
+  // Restore real timers BEFORE rmSync: its EPERM/EBUSY retry backoff uses
+  // setTimeout, which fake timers would swallow (all retries at the same
+  // instant = zero wait), making the retry parameters useless.
   vi.clearAllTimers()
   vi.useRealTimers()
+  if (currentUserData !== undefined) {
+    const userData = currentUserData
+    currentUserData = undefined
+    rmRf(userData)
+  }
+  vi.restoreAllMocks()
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
 })
@@ -801,7 +830,7 @@ describe('desktop main startup', () => {
     } finally {
       // The existing teardown calls quit again; retain its journal until listeners are removed.
       harness.app.removeAllListeners('before-quit')
-      rmSync(directory, { recursive: true, force: true })
+      rmRf(directory)
     }
   })
 
