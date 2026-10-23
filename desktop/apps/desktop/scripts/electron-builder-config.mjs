@@ -153,9 +153,15 @@ export function createElectronBuilderConfig(
     asarUnpack: unpack,
     extraResources: [
       { from: buildPaths.runtime, to: 'runtime' },
-      { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
-      // Windows tray bitmaps; macOS keeps the Dock and ships no menu bar icon.
-      ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
+      // 关于面板/通用图标用 512 印章 PNG；Windows 另带多尺寸 ICO 供窗口与对话框取用。
+      { from: fileURLToPath(new URL('../resources/icon.png', import.meta.url)), to: 'icon.png' },
+      // Windows tray bitmaps: dark taskbar takes the paper silhouette, light takes the colored seal;
+      // macOS keeps the Dock and ships no menu bar icon.
+      ...(packagesWindows ? [
+        { from: fileURLToPath(new URL('../resources/icon.ico', import.meta.url)), to: 'icon.ico' },
+        { from: fileURLToPath(new URL('../resources/tray.ico', import.meta.url)), to: 'tray.ico' },
+        { from: fileURLToPath(new URL('../resources/tray-light.ico', import.meta.url)), to: 'tray-light.ico' },
+      ] : []),
     ],
     mac: {
       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
@@ -237,7 +243,8 @@ export function createElectronBuilderConfig(
       )
     },
     win: {
-      icon: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)),
+      // exe 内嵌图标：多尺寸 ICO，资源管理器/开始菜单/任务栏按档取用。
+      icon: fileURLToPath(new URL('../resources/icon.ico', import.meta.url)),
       forceCodeSigning: !unsigned,
       signtoolOptions: {
         sign: windowsSigner,
@@ -247,10 +254,14 @@ export function createElectronBuilderConfig(
       target: ['nsis'],
     },
     linux: {
+      icon: fileURLToPath(new URL('../resources/icon.png', import.meta.url)),
       category: 'Development',
       target: ['AppImage'],
     },
     nsis: {
+      // 安装器/卸载器头部图标与 exe 图标分开：NSIS 用 installer.ico 的 32/48/256 档。
+      installerIcon: fileURLToPath(new URL('../resources/installer.ico', import.meta.url)),
+      uninstallerIcon: fileURLToPath(new URL('../resources/installer.ico', import.meta.url)),
       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
       uninstallerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
       include: fileURLToPath(new URL('./installer.nsh', import.meta.url)),

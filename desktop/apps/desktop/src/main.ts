@@ -78,6 +78,7 @@ import { installDesktopShortcuts } from './keyboard.ts'
 import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
+import { resolveTrayIconPath } from './tray-icon.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
 
 let focusPrimaryWindow = (): void => {}
@@ -337,6 +338,15 @@ function platformLoginUrl(authorizeUrl: string): string {
   return url.href
 }
 
+/**
+ * 印章应用图标：Windows 取多尺寸 ICO（窗口/任务栏按 DPI 选档），其它平台取 512 PNG。
+ * 开发态读项目 `resources/`，打包态读 extraResources 根目录。
+ */
+function applicationIconFile(): string {
+  const file = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
+  return app.isPackaged ? join(process.resourcesPath, file) : join(app.getAppPath(), 'resources', file)
+}
+
 function createWindow(preload: string, show = false, primary = false): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -344,6 +354,8 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     minWidth: 520,
     minHeight: 600,
     show,
+    // 开发态 electron.exe 自带默认图标；显式指定后任务栏/Alt-Tab 才是印章。
+    ...(process.platform === 'win32' ? { icon: applicationIconFile() } : {}),
     ...(process.platform === 'win32' && primary ? {
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
@@ -1496,8 +1508,7 @@ async function main(): Promise<void> {
     updates.dispose()
   })
 
-  const applicationIconPath = development ? join(app.getAppPath(), 'resources', 'icon-windows.png')
-    : join(process.resourcesPath, 'icon.png')
+  const applicationIconPath = applicationIconFile()
   app.setAboutPanelOptions({
     applicationName: 'DeepSeek Harness',
     applicationVersion: app.getVersion(),
@@ -1555,13 +1566,21 @@ async function main(): Promise<void> {
     tray?.relabel()
   }
   refreshApplicationMenu()
-  const trayIconPath = development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
+  // 托盘图标按任务栏明暗取两版：深色用纸色剪影，浅色用彩色印章。
+  const trayIconFor = (dark: boolean): string => resolveTrayIconPath({ dark, development,
+    appPath: app.getAppPath(), resourcesPath: process.resourcesPath })
   if (process.platform === 'win32') {
     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
     try {
-      tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
-        open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
+      tray = new DesktopTray({ resolveIconPath: trayIconFor, dark: nativeTheme.shouldUseDarkColors,
+        locale: currentDesktopLocale, open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
     } catch (error) { console.warn('desktop tray: unavailable', error) }
+    // themeSource 变化（含测试模拟）会触发 updated，此处换版并留下可核查的路径日志。
+    nativeTheme.on('updated', () => {
+      const dark = nativeTheme.shouldUseDarkColors
+      console.log(`desktop tray: theme=${dark ? 'dark' : 'light'} icon=${trayIconFor(dark)}`)
+      tray?.setDark(dark)
+    })
   }
   const backgroundNotice = process.platform === 'win32'
     ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
@@ -1575,9 +1594,9 @@ async function main(): Promise<void> {
     // macOS raises the open alert with the application; Electron exposes no handle to the Windows task
     // dialog, so a repeated request there only joins the open decision.
     focus: () => { if (process.platform === 'darwin') app.focus({ steal: true }) },
-    // The task dialog draws its main icon at the system icon size; the multi-size ICO yields that
-    // size directly, where the 1024 px PNG would be scaled down by GDI.
-    ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(trayIconPath) } : {}),
+    // The task dialog draws its main icon at the system icon size; the multi-size application ICO
+    // yields that size directly, where a large PNG would be scaled down by GDI.
+    ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(applicationIconPath) } : {}),
   })
 
   if (process.platform === 'win32') {
