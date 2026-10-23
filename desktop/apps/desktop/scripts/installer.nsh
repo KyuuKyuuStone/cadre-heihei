@@ -83,24 +83,8 @@ ManifestDPIAware true
   Abort
 !macroend
 
-; Stale-program cleanup: a previous install (DeepSeek Harness or an older Cadre
-; Heihei build) may still occupy the retargeted $INSTDIR. Clear its program files
-; before extraction so the user never hits a stale-executable prompt.
-; BOUNDARY: user data lives in %APPDATA% and is NEVER touched — only files inside
-; $INSTDIR are deleted.
-!macro customInstall
-  ${If} ${FileExists} "$INSTDIR\resources\app.asar"
-    RMDir /r "$INSTDIR\resources"
-    RMDir /r "$INSTDIR\locales"
-    Delete "$INSTDIR\*.dll"
-    Delete "$INSTDIR\*.pak"
-    Delete "$INSTDIR\*.bin"
-    Delete "$INSTDIR\DeepSeek Harness.exe"
-    Delete "$INSTDIR\Cadre Heihei.exe"
-    Delete "$INSTDIR\DeepSeek Harness Uninstall.exe"
-    Delete "$INSTDIR\Cadre Heihei Uninstall.exe"
-  ${EndIf}
-!macroend
+; Stale-program cleanup moved into the single customInstall macro (near the
+; registry/publish logic) — NSIS forbids redefining a macro with the same name.
 
 !macro customWelcomePage
   Page custom InstallerWelcome InstallerWelcomeLeave
@@ -250,6 +234,20 @@ ManifestDPIAware true
 !endif
 
 !macro customInstall
+  ; Stale-program cleanup: a previous install (DeepSeek Harness or an older Cadre
+  ; Heihei build) may still occupy the retargeted $INSTDIR. BOUNDARY: user data
+  ; lives in %APPDATA% and is NEVER touched — only files inside $INSTDIR.
+  ${If} ${FileExists} "$INSTDIR\resources\app.asar"
+    RMDir /r "$INSTDIR\resources"
+    RMDir /r "$INSTDIR\locales"
+    Delete "$INSTDIR\*.dll"
+    Delete "$INSTDIR\*.pak"
+    Delete "$INSTDIR\*.bin"
+    Delete "$INSTDIR\DeepSeek Harness.exe"
+    Delete "$INSTDIR\Cadre Heihei.exe"
+    Delete "$INSTDIR\DeepSeek Harness Uninstall.exe"
+    Delete "$INSTDIR\Cadre Heihei Uninstall.exe"
+  ${EndIf}
   Push $0
   StrCpy $0 0
   ${If} ${Errors}

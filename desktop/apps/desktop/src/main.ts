@@ -902,20 +902,6 @@ async function main(): Promise<void> {
     return result
   })
 
-  // Roster read: members are the ledger's authority for role/state, so the
-  // panel never infers a supervisor from the client-side session list.
-  ipcMain.handle(DESKTOP_IPC.cadreListRoster, (event, options: unknown) => {
-    assertProductSender(event)
-    const requested = typeof options === 'object' && options !== null
-      ? (options as { projectId?: unknown }).projectId
-      : undefined
-    const projectId = requested === undefined ? requireProjectId(cadreProjectId) : requireProjectId(requested)
-    const result = cadreLedger.listMembers(projectId)
-    console.log(`cadre:listRoster project=${projectId} path=${cadreLedgerPath} source=readonly ` +
-      `rows=${result.rows.length}`)
-    return result
-  })
-
   // Milestone B③: write path. All rules live in `app/src/collab/**`; these
   // handlers validate the IPC boundary and delegate with the main identity.
   ipcMain.handle(DESKTOP_IPC.cadreDispatchTask, (event, options: unknown) => {

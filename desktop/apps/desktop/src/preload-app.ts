@@ -90,8 +90,6 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
   // context bridge; ipcRenderer and require stay private to the preload.
   contextBridge.exposeInMainWorld('cadre', {
     listTasks: (options?: { projectId?: string }) => ipcRenderer.invoke(DESKTOP_IPC.cadreListTasks, options) as Promise<unknown>,
-    listRoster: (options?: { projectId?: string }) =>
-      ipcRenderer.invoke(DESKTOP_IPC.cadreListRoster, options) as Promise<unknown>,
     dispatchTask: (options: {
       projectId?: string
       to?: string

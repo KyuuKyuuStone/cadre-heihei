@@ -106,7 +106,7 @@ if (dryRun) {
 // ── 3. build ──
 const build = runStep('3-build', 'pnpm', ['-w', 'run', 'package:desktop:win:x64:unsigned'], {
   cwd: APP_ROOT,
-  env: { DSH_GATE_CONCURRENCY: '3', NODE_OPTIONS: '--max-old-space-size=8192', ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/', ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/', PATH: 'C:\\Windows\\System32;' + (process.env.PATH ?? '') },
+  env: { DSH_GATE_CONCURRENCY: '3', NODE_OPTIONS: '--max-old-space-size=8192', ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/', ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/', npm_config_verify_deps_before_run: 'false', PATH: 'C:\\Windows\\System32;' + (process.env.PATH ?? '') },
 })
 if (build.status !== 0) fail('3-build', 'official chain failed', 'tail 3-build.stderr.log; gates: host aggregate (TS) → smoke-packaged-runtime (exe name) → nsis (resources)')
 
