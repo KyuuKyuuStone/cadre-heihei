@@ -1,0 +1,24 @@
+[
+  {
+    "label": "Check for Updates…"
+  },
+  {
+    "label": "Manage dsh Command…"
+  },
+  {
+    "role": "hide",
+    "label": "Hide Cadre Heihei"
+  },
+  {
+    "role": "hideOthers",
+    "label": "Hide Others"
+  },
+  {
+    "role": "unhide",
+    "label": "Show All"
+  },
+  {
+    "role": "quit",
+    "label": "Quit Cadre Heihei"
+  }
+]

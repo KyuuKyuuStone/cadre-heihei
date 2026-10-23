@@ -1512,7 +1512,7 @@ async function main(): Promise<void> {
 
   const applicationIconPath = applicationIconFile()
   app.setAboutPanelOptions({
-    applicationName: 'DeepSeek Harness',
+    applicationName: 'Cadre Heihei',
     applicationVersion: app.getVersion(),
     // The release has no separate build number; omit Electron's bundle version.
     version: '',
@@ -1568,7 +1568,7 @@ async function main(): Promise<void> {
     tray?.relabel()
   }
   refreshApplicationMenu()
-  // 托盘图标按任务栏明暗取两版：深色用纸色剪影，浅色用彩色印章。
+  // 托盘图标按任务栏明暗取两版：深色用 seal-dark，浅色用 seal-light。
   const trayIconFor = (dark: boolean): string => resolveTrayIconPath({ dark, development,
     appPath: app.getAppPath(), resourcesPath: process.resourcesPath })
   if (process.platform === 'win32') {

@@ -15,9 +15,9 @@ export interface TrayIconPathOptions {
 }
 
 /**
- * `tray.ico` is the paper-colored silhouette for dark taskbars; `tray-light.ico`
- * is the colored seal for light taskbars. The two are not interchangeable: the
- * paper silhouette disappears on a paper-colored light taskbar.
+ * `tray.ico` packs seal-dark (16/32) for dark taskbars; `tray-light.ico` packs
+ * seal-light for light taskbars. The two are not interchangeable: the dark tile
+ * carries the light face, and the light tile carries the ink face.
  */
 export function resolveTrayIconPath(options: TrayIconPathOptions): string {
   const file = options.dark ? 'tray.ico' : 'tray-light.ico'

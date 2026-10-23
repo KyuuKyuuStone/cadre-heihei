@@ -1,0 +1,32 @@
+/* Seal artwork switches on the palette attribute ui-theme writes to <body>. */
+.seal {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.sealLight,
+.sealDark {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.sealDark {
+  display: none;
+}
+
+:global(body[data-ds-dark-theme]) .sealLight {
+  display: none;
+}
+
+:global(body[data-ds-dark-theme]) .sealDark {
+  display: block;
+}
+
+.name {
+  white-space: nowrap;
+  color: var(--dsw-alias-label-primary);
+}
