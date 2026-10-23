@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-llm",
   "description": "Provider-neutral LLM service interface for the DeepSeek Harness",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "publishConfig": {
     "access": "public"
   },
