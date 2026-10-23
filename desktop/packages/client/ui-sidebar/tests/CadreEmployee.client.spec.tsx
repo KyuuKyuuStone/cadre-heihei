@@ -3,9 +3,9 @@
  * Employee promotion dialog: what it writes as the employee template.
  *
  * A blank Session applies the chosen preset and records it. A Session that has
- * already started keeps its composition, so the dialog must record the preset
- * the Session actually projects instead of leaving `template_id` empty; a
- * preset outside `cadre-*` is not an employee template and stays empty.
+ * already started keeps its composition and records only `template_id`. The
+ * four product templates are listed even when the Session's registry view
+ * contains no cadre preset (a regular Session only sees `standard`).
  */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -106,12 +106,36 @@ describe('employee promotion template', () => {
     expect(harness.stored()?.templateId).toBe('cadre-general')
   })
 
-  it('leaves the template empty when the Session runs a non-cadre preset', async () => {
+  it('lists the four product templates even when the Session sees no cadre preset', async () => {
+    renderDialog({ blank: false, projectedPreset: 'standard', presets: [] })
+    const group = await screen.findByRole('radiogroup', { name: '员工模板' })
+    const labels = [...group.querySelectorAll('button')].map(button => button.textContent)
+    expect(labels).toEqual([
+      '开发 · Development',
+      '写小说 · Fiction Writing',
+      '通用 · General Assistant',
+      '角色扮演 · Role-play',
+    ])
+  })
+
+  it('records the chosen template for a started Session without applying it', async () => {
+    const harness = renderDialog({ blank: false, projectedPreset: 'standard', presets: [] })
+    const dev = await screen.findByRole('radio', { name: '开发 · Development' })
+    fireEvent.click(dev)
+    await submit()
+    await waitFor(() => { expect(harness.saveEmployee).toHaveBeenCalledTimes(1) })
+    const written = harness.saveEmployee.mock.calls[0]?.[0] as EmployeeWrite
+    expect(written.templateId).toBe('cadre-dev')
+    expect(harness.applyPreset).not.toHaveBeenCalled()
+    expect(harness.stored()?.templateId).toBe('cadre-dev')
+  })
+
+  it('defaults a started Session to the general template instead of leaving it empty', async () => {
     const harness = renderDialog({ blank: false, projectedPreset: 'standard' })
     await submit()
     await waitFor(() => { expect(harness.saveEmployee).toHaveBeenCalledTimes(1) })
     const written = harness.saveEmployee.mock.calls[0]?.[0] as EmployeeWrite
-    expect(written.templateId).toBeUndefined()
-    expect(harness.stored()?.templateId).toBeUndefined()
+    expect(written.templateId).toBe('cadre-general')
+    expect(harness.applyPreset).not.toHaveBeenCalled()
   })
 })

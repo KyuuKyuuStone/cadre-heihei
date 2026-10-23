@@ -2,11 +2,14 @@
  * Cadre employee surfaces (ADR-0022 T3/T4).
  *
  * The Session row menu raises one overlay dialog: promote a Session to an
- * employee, or edit the employee it already is. The dialog reads the official
- * agent-preset roster and the official model catalog; on submit it applies the
- * preset (blank Sessions only), applies the model through `session.selectModel`,
- * then records the employee row through the desktop bridge. Every step reports
- * its own structured failure — nothing is reported as saved unless it is.
+ * employee, or edit the employee it already is. The dialog always lists the
+ * four product templates (a regular Session only projects `standard`, so the
+ * registry's per-Session preset list is not the source of truth) and the
+ * official model catalog. On submit it applies the preset to blank Sessions
+ * only, applies the model through `session.selectModel`, then records the
+ * employee row — a started Session records `template_id` without re-applying
+ * the preset. Every step reports its own structured failure — nothing is
+ * reported as saved unless it is.
  *
  * The row-leading badge reads the same employee roster; an empty roster leaves
  * the 16px seat empty rather than rendering a placeholder.
@@ -152,9 +155,67 @@ export function failureText(outcome: { readonly code?: string; readonly message?
 /**
  * Employee templates are the registered `cadre-*` presets. A Session running
  * any other preset (for example the official `standard`) is not an employee
- * template, so the column stays NULL rather than recording a foreign id.
+ * template, so it is never recorded as one.
  */
 const CADRE_TEMPLATE_ID = /^cadre-[a-z0-9][a-z0-9-]{0,63}$/
+
+/**
+ * The four product templates, listed regardless of the Session's own preset:
+ * a regular Session only projects `standard`, so its preset list says nothing
+ * about which employee templates exist. Registered entries enrich these rows
+ * with live names/descriptions and broken markers (see the sidebar bridge).
+ */
+export const CADRE_TEMPLATES: readonly PresetOption[] = [
+  { id: 'cadre-dev', name: '开发 · Development', description: '读写代码、执行命令、跑测试与门禁的工程员工；先读后改，改动最小。' },
+  { id: 'cadre-novel', name: '写小说 · Fiction Writing', description: '长篇写作与改稿：读写工作区文稿、检索资料，不执行命令。' },
+  { id: 'cadre-general', name: '通用 · General Assistant', description: '常用能力的精简组合：文件、检索、网页与待办；不含命令执行与子代理。' },
+  { id: 'cadre-roleplay', name: '角色扮演 · Role-play', description: '以对话推进的沉浸式扮演；不执行命令、不写文件，需要抉择时给选项。' },
+]
+
+/** Neutral default when the Session projects no cadre template. */
+const DEFAULT_TEMPLATE_ID = 'cadre-general'
+
+/**
+ * Overlay the registry's cadre-* rows onto the four product templates and
+ * append any extra registered ones. Registered values win so live
+ * descriptions and broken markers stay authoritative.
+ * @param registered - cadre-* rows the registry advertises for this Session.
+ * @returns the dialog's template list, always containing the four templates.
+ */
+export function mergeTemplates(registered: readonly PresetOption[]): readonly PresetOption[] {
+  const live = new Map(registered.map(preset => [preset.id, preset]))
+  const merged: PresetOption[] = CADRE_TEMPLATES.map((template) => {
+    const entry = live.get(template.id)
+    live.delete(template.id)
+    if (entry === undefined) return template
+    const description = entry.description ?? template.description
+    return {
+      id: entry.id,
+      name: entry.name ?? template.name,
+      ...(description === undefined ? {} : { description }),
+      ...(entry.broken === undefined ? {} : { broken: entry.broken }),
+      ...(entry.isDefault === undefined ? {} : { isDefault: entry.isDefault }),
+    }
+  })
+  for (const entry of live.values()) merged.push(entry)
+  return merged
+}
+
+/**
+ * Pick the dialog's initial template: the recorded row, else the projected
+ * cadre preset, else the neutral general template, else the first usable one.
+ * @param presets - merged template rows.
+ * @param recorded - employee record's template id, when any.
+ * @param projected - the Session's projected cadre preset, when any.
+ * @returns selected template id (`''` when nothing is selectable).
+ */
+function initialTemplate(presets: readonly PresetOption[], recorded: string | undefined, projected: string | undefined): string {
+  const listed = (id: string | undefined): boolean => id !== undefined && presets.some(preset => preset.id === id && preset.broken === undefined)
+  if (listed(recorded)) return recorded as string
+  if (listed(projected)) return projected as string
+  if (listed(DEFAULT_TEMPLATE_ID)) return DEFAULT_TEMPLATE_ID
+  return presets.find(preset => preset.broken === undefined)?.id ?? ''
+}
 
 /** Template glyphs keep the 16px badge legible; unknown templates fall back to 员. */
 const TEMPLATE_GLYPHS: Record<string, string> = {
@@ -304,15 +365,13 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
       if (cancelled) return
       setPresets(presetList)
       if (presetList.ok) {
-        // An existing row wins; otherwise a non-blank Session shows the preset it
-        // actually runs, which is what saving will record.
+        // An existing row wins; otherwise a non-blank Session shows the cadre
+        // preset it actually projects; a regular Session (standard) gets the
+        // neutral general template so saving can still record one.
         const projected = blank === false && originalPreset !== undefined && CADRE_TEMPLATE_ID.test(originalPreset)
           ? originalPreset
           : undefined
-        const recorded = record?.templateId ?? projected
-        const listed = recorded !== undefined && presetList.value.some(preset => preset.id === recorded)
-        const fallback = presetList.value.find(preset => preset.broken === undefined)?.id ?? ''
-        setTemplateId(listed ? recorded : (recorded ?? fallback))
+        setTemplateId(initialTemplate(mergeTemplates(presetList.value), record?.templateId, projected))
       }
       applyModels(modelList, record)
       setLoading(false)
@@ -325,7 +384,7 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
     const listed = await listPresets()
     setPresets(listed)
     if (listed.ok && templateId === '') {
-      setTemplateId(listed.value.find(preset => preset.broken === undefined)?.id ?? '')
+      setTemplateId(initialTemplate(mergeTemplates(listed.value), employee?.templateId, undefined))
     }
   }
 
@@ -341,12 +400,13 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
     setError(null)
   }
 
-  const templateEnabled = blank === true && !pending
+  // A started Session may still record a template for future Sessions; only a
+  // blank Session applies it to the current composition.
+  const templateEnabled = !pending && !saved
   const blocked = pending || saved || loading || displayName.trim() === ''
-  const presetLabel = (id: string): string => (presets.ok
-    ? presets.value.find(preset => preset.id === id)?.name
-    : undefined) ?? id
-  const defaultPreset = presets.ok ? presets.value.find(preset => preset.isDefault)?.id : undefined
+  const mergedPresets = presets.ok ? mergeTemplates(presets.value) : []
+  const presetLabel = (id: string): string => mergedPresets.find(preset => preset.id === id)?.name ?? id
+  const defaultPreset = mergedPresets.find(preset => preset.isDefault)?.id
 
   const submit = async () => {
     if (blocked) return
@@ -399,13 +459,13 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
       applied.push('模型已应用')
     }
 
-    // A non-blank Session keeps the composition it started with, so the employee
-    // template records that projected preset instead of staying NULL. Presets
-    // outside `cadre-*` are not employee templates and leave the column empty.
+    // A non-blank Session keeps the composition it started with; the selected
+    // template is recorded only. Selecting nothing falls back to the projected
+    // cadre preset, if the Session already runs one.
     const projectedTemplate = blank === false && originalPreset !== undefined && CADRE_TEMPLATE_ID.test(originalPreset)
       ? originalPreset
       : undefined
-    const writtenTemplate = blank === true && templateId !== '' ? templateId : projectedTemplate
+    const writtenTemplate = templateId !== '' ? templateId : projectedTemplate
     const savedResult = await saveEmployee({
       sessionId: request.sessionId,
       displayName: displayName.trim(),
@@ -444,17 +504,15 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
     setSaved(true)
   }
 
-  const presetRows = presets.ok
-    ? presets.value.filter(preset => preset.broken === undefined)
-    : []
-  const brokenRows = presets.ok ? presets.value.filter(preset => preset.broken !== undefined) : []
+  const presetRows = mergedPresets.filter(preset => preset.broken === undefined)
+  const brokenRows = mergedPresets.filter(preset => preset.broken !== undefined)
   const selectedPreset = presetRows.find(preset => preset.id === templateId)
 
   const blankHint = blank === true
     ? '当前会话尚未开始第一轮，可选择模板；模板的人格与工具会从本会话生效。'
     : blank === false
-      ? '当前会话已开始，模板控件已禁用；模板的人格与工具从下一个新建会话生效，本次仍可改显示名与模型。'
-      : '无法确认会话是否已开始（会话列表中未找到该会话）；为避免误改模板，模板控件已禁用。仍可改显示名与模型。'
+      ? '当前会话已开始：所选模板只记录到员工档案，不改动当前会话；模板的人格与工具从新建会话生效。本次仍可改显示名与模型。'
+      : '无法确认会话是否已开始（会话列表中未找到该会话）；所选模板只记录到员工档案，不改动当前会话。仍可改显示名与模型。'
 
   const title = employee === null ? '转为员工' : '员工设置'
 
@@ -508,9 +566,6 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
               <span>模板列表读取失败：{presets.code} · {presets.message}</span>
               <span className={css.hint}>检查 Host 是否已加载 agent-preset-registry；本次仍可保存显示名与模型。</span>
             </p>
-          )}
-          {presets.ok && presetRows.length === 0 && (
-            <p className={css.notice}>未发现 cadre-* 模板。请确认 cadre-dev / cadre-novel / cadre-general / cadre-roleplay 已注册；模板缺失时仍可保存显示名与模型。</p>
           )}
           {presetRows.length > 0 && (
             <div className={css.options} role="radiogroup" aria-label="员工模板">

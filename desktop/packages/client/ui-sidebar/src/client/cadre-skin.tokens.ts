@@ -25,7 +25,7 @@ export const CADRE_THEME_ENABLED = true
 /** Override layer identity; one layer per source in the theme registry. */
 export const CADRE_THEME_SOURCE = 'ui-sidebar:cadre-warm-skin'
 
-/** 38 paired token overrides: light from tokens-v3, dark from tokens-v3.1. */
+/** 40 paired token overrides: light from tokens-v3, dark from tokens-v3.1. */
 export const CADRE_SKIN_TOKENS = {
   '--dsw-alias-bg-base': { light: '#F6F7F9', dark: '#0E141B' },
   '--dsw-alias-bg-layer-1': { light: '#F1F4F7', dark: '#1B2A41' },
@@ -41,6 +41,12 @@ export const CADRE_SKIN_TOKENS = {
   '--dsw-alias-label-primary': { light: '#1E2A35', dark: '#E8E6DE' },
   '--dsw-alias-label-secondary': { light: '#55636F', dark: '#C9CDD1' },
   '--dsw-alias-label-tertiary': { light: '#5A6874', dark: '#C9CDD1' },
+  // Official light dimmed/caption resolve to near-canvas greys (#E1E5EE /
+  // #ADB2B8); placeholders and settings descriptions were unreadable. Both map
+  // to the tertiary grey in light (≥4.5:1 on base and card); dark keeps the
+  // official values.
+  '--dsw-alias-label-dimmed': { light: '#5A6874', dark: 'rgb(67, 69, 74)' },
+  '--dsw-alias-label-caption': { light: '#5A6874', dark: 'rgb(129, 133, 140)' },
   '--dsw-alias-link': { light: '#2E6B57', dark: '#C9CDD1' },
   '--dsw-alias-state-business-primary': { light: '#2E6B57', dark: '#5B8C6E' },
   '--dsw-alias-button-primary-fill': { light: '#2E6B57', dark: '#2B4C6F' },
