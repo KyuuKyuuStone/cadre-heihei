@@ -884,7 +884,7 @@ async function main(): Promise<void> {
   const shortcuts = installDesktopShortcuts(() => mainWindow, app.getPath('userData'),
     process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux', () => { refreshApplicationMenu() }, window => updateOverlays.input(window))
   app.on('will-quit', () => { shortcuts.dispose() })
-  app.on('will-quit', () => { cadreCollab?.close(); cadreLedger.close() })
+  app.on('will-quit', () => { cadreCollab?.close(); cadreProviders?.close(); cadreLedger.close() })
 
   // Milestone B②: read-only ledger channel. Only the main application frame
   // may query; a missing `projectId` falls back to CADRE_PROJECT_ID.

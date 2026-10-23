@@ -192,7 +192,9 @@ export class ProviderStore {
   }
 
   close(): void {
-    this.db.close()
+    // 幂等：will-quit 可能多次触发，重复 close 会抛 'database is not open'；
+    // 该异常只表示「已关闭」，吞掉后退出流程不受影响。
+    try { this.db.close() } catch { /* already closed */ }
   }
 
   list(): readonly ProviderRecord[] {
