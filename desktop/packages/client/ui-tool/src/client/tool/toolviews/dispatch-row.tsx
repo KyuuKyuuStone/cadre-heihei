@@ -1,11 +1,12 @@
 /**
  * W2 dispatch status row.
  *
- * Replaces the generic Tool row for `dispatch_task` in the supervisor
- * conversation. The row reads the recorded call/result (never invents data):
- * running → 拆解中; settled → the per-item `dispatched` / `failed` lines the
- * Host render produced; then it joins the ledger so the same bar can show what
- * came back (已交付，主管正在审).
+ * Replaces the generic Tool row for `dispatch_task` / `retry_dispatch` in the
+ * supervisor conversation. The row reads the persisted `presentationMeta`
+ * (`dispatched` / `failed`) — never the rendered text — so wording changes do
+ * not affect the card. Running → 拆解中; settled → per-item dispatch / failure
+ * rows; then it joins the ledger so the same bar can show the flow back
+ * (已交付，主管正在审).
  */
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
@@ -22,7 +23,7 @@ const TEXT_PRIMARY = 'var(--dsw-alias-label-primary)'
 const TEXT_SECONDARY = 'var(--dsw-alias-label-secondary)'
 const TEXT_ERROR = 'var(--dsw-alias-state-error-primary)'
 
-/** One `已派发` line the Host render emitted. */
+/** One dispatched item from `meta.dispatched`. */
 interface DispatchedItem {
   readonly taskId: string
   readonly assigneeName: string
@@ -30,17 +31,34 @@ interface DispatchedItem {
   readonly dueAt: string
 }
 
-/** One `未派出「target」：reason` line. */
+/** One refused item from `meta.failed`; `pendingId` lets the row retry it. */
 interface FailedItem {
   readonly target: string
   readonly reason: string
+  readonly retryable: boolean
+  readonly pendingId?: string
 }
 
-interface DispatchResult {
+/** The structured card payload persisted with the tool result. */
+interface DispatchMeta {
   readonly dispatched: readonly DispatchedItem[]
   readonly failed: readonly FailedItem[]
-  readonly raw: string
 }
+
+/** Outcome of one `retry_dispatch(pendingId)` call through the desktop bridge. */
+export interface RetryOutcome {
+  readonly ok: boolean
+  readonly dispatched?: readonly DispatchedItem[]
+  readonly failed?: readonly FailedItem[]
+  readonly message?: string
+}
+
+/** Retry seam: replay one queued failure by its pending id. */
+export interface DispatchRowInjected {
+  retry(pendingId: string): Promise<RetryOutcome>
+}
+
+type DispatchRowProps = ToolCallViewProps & InjectFace<DispatchRowInjected>
 
 /** Minimal ledger row joined by task id for the returned state. */
 interface LedgerRow {
@@ -54,43 +72,41 @@ interface LedgerBridge {
   listTasks?(query?: { projectId?: string }): Promise<{ rows?: readonly LedgerRow[] } | undefined>
 }
 
-/** Retry seam: ask the supervisor to re-dispatch one failed target. */
-export interface DispatchRowInjected {
-  retry(target: string, reason: string): Promise<{ ok: boolean; message?: string }>
+/** Structural validation: any malformed row rejects the whole payload. */
+function asMeta(value: unknown): DispatchMeta | null {
+  if (typeof value !== 'object' || value === null) return null
+  const record = value as { dispatched?: unknown; failed?: unknown }
+  if (!Array.isArray(record.dispatched) || !Array.isArray(record.failed)) return null
+  const dispatched: DispatchedItem[] = []
+  for (const raw of record.dispatched) {
+    if (typeof raw !== 'object' || raw === null) return null
+    const row = raw as Record<string, unknown>
+    if (typeof row.taskId !== 'string' || typeof row.assigneeName !== 'string'
+      || typeof row.role !== 'string' || typeof row.dueAt !== 'string') return null
+    dispatched.push({ taskId: row.taskId, assigneeName: row.assigneeName, role: row.role, dueAt: row.dueAt })
+  }
+  const failed: FailedItem[] = []
+  for (const raw of record.failed) {
+    if (typeof raw !== 'object' || raw === null) return null
+    const row = raw as Record<string, unknown>
+    if (typeof row.target !== 'string' || typeof row.reason !== 'string' || typeof row.retryable !== 'boolean') return null
+    if (row.pendingId !== undefined && typeof row.pendingId !== 'string') return null
+    failed.push({
+      target: row.target,
+      reason: row.reason,
+      retryable: row.retryable,
+      ...(typeof row.pendingId === 'string' && row.pendingId !== '' ? { pendingId: row.pendingId } : {}),
+    })
+  }
+  return { dispatched, failed }
 }
 
-type DispatchRowProps = ToolCallViewProps & InjectFace<DispatchRowInjected>
-
-const DISPATCHED_LINE = /^已派发 (\S+) → (.+?)（(.+?)），截止 (.+)$/
-const FAILED_LINE = /^未派出「(.*)」：(.*)$/
-
-/** Concatenate the recorded text blocks; other block kinds are not presented. */
+/** Concatenate recorded text blocks; used only for an error or legacy fallback. */
 function textOf(content: readonly { type: string; text?: string }[]): string {
   return content
     .filter((block): block is { type: 'text'; text: string } => block.type === 'text' && typeof block.text === 'string')
     .map(block => block.text)
     .join('\n')
-}
-
-/** Parse the Host's `dispatched` / `failed` render; unknown lines stay in `raw`. */
-function parseResult(text: string): DispatchResult {
-  const dispatched: DispatchedItem[] = []
-  const failed: FailedItem[] = []
-  for (const line of text.split('\n')) {
-    const ok = DISPATCHED_LINE.exec(line.trim())
-    if (ok !== null) {
-      dispatched.push({
-        taskId: ok[1] ?? '',
-        assigneeName: ok[2] ?? '',
-        role: ok[3] ?? '',
-        dueAt: ok[4] ?? '',
-      })
-      continue
-    }
-    const bad = FAILED_LINE.exec(line.trim())
-    if (bad !== null) failed.push({ target: bad[1] ?? '', reason: bad[2] ?? '' })
-  }
-  return { dispatched, failed, raw: text.trim() }
 }
 
 /** `MM-DD HH:mm` in local time; invalid or empty timestamps stay visible. */
@@ -172,13 +188,18 @@ function RunningBar() {
 export function DispatchStatusRow(props: DispatchRowProps) {
   const [ledger, setLedger] = useState<ReadonlyMap<string, LedgerRow>>(new Map())
   const [retrying, setRetrying] = useState<string | null>(null)
-  const [retryNotice, setRetryNotice] = useState<{ target: string; tone: 'neutral' | 'danger'; text: string } | null>(null)
+  const [addedDispatched, setAddedDispatched] = useState<readonly DispatchedItem[]>([])
+  /** pendingId → null when the retry succeeded, or the replacement failure row. */
+  const [resolved, setResolved] = useState<ReadonlyMap<string, FailedItem | null>>(new Map())
+  const [retryNotices, setRetryNotices] = useState<ReadonlyMap<string, { tone: 'neutral' | 'danger'; text: string }>>(new Map())
 
-  const result: DispatchResult | null = props.phase === 'result'
-    ? parseResult(textOf(props.block.content))
-    : null
-  const dispatched = result?.dispatched ?? []
-  const failed = result?.failed ?? []
+  const meta: DispatchMeta | null = props.phase === 'result' ? asMeta(props.block.meta) : null
+  const dispatched = [...(meta?.dispatched ?? []), ...addedDispatched]
+  const failed = (meta?.failed ?? []).flatMap((item) => {
+    if (item.pendingId === undefined || !resolved.has(item.pendingId)) return [item]
+    const replacement = resolved.get(item.pendingId)
+    return replacement === null || replacement === undefined ? [] : [replacement]
+  })
   const taskKey = dispatched.map(item => item.taskId).join(',')
 
   // Join the ledger for the returned tasks so the same bar can show the flow
@@ -223,13 +244,15 @@ export function DispatchStatusRow(props: DispatchRowProps) {
     )
   }
 
-  if (dispatched.length === 0 && failed.length === 0) {
-    const reason = result?.raw === '' ? '主管没有返回可识别的派活结果' : result?.raw ?? ''
+  // Results recorded before the structured meta landed keep their recorded
+  // text visible, but are never reinterpreted as fresh dispatch data.
+  if (meta === null) {
+    const raw = textOf(block.content).trim()
     return (
-      <BarShell tone="danger">
-        <Headline title="拆解失败" tag="未派活" tagTone="danger" />
-        <span style={{ color: TEXT_PRIMARY, fontSize: 13 }}>{reason}</span>
-        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>没有产生任何任务 · 请重新说一次</span>
+      <BarShell tone="neutral">
+        <Headline title="派活结果" tag="旧格式" />
+        <span style={{ color: TEXT_PRIMARY, fontSize: 12 }}>{raw || '这条记录没有结构化数据'}</span>
+        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>该结果早于结构化回传，仅作原文展示；重新派活后按新格式显示</span>
       </BarShell>
     )
   }
@@ -239,6 +262,14 @@ export function DispatchStatusRow(props: DispatchRowProps) {
   const groupText = [...groups].map(([name, count]) => `${name}（${count} 条）`).join(' · ')
   const partial = dispatched.length > 0 && failed.length > 0
   const allFailed = dispatched.length === 0
+  if (allFailed && failed.length === 0) {
+    return (
+      <BarShell tone="neutral">
+        <Headline title="派活结果" tag="空" />
+        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>后端返回了空的 dispatched / failed</span>
+      </BarShell>
+    )
+  }
   const dueValues = [...new Set(dispatched.map(item => item.dueAt).filter(value => value !== ''))]
   const dueSummary = dueValues.length === 0
     ? ''
@@ -269,17 +300,34 @@ export function DispatchStatusRow(props: DispatchRowProps) {
     return []
   })
 
-  const onRetry = async (item: FailedItem) => {
-    setRetrying(item.target)
-    setRetryNotice(null)
+  const setNotice = (pendingId: string, notice: { tone: 'neutral' | 'danger'; text: string } | null): void => {
+    setRetryNotices((previous) => {
+      const next = new Map(previous)
+      if (notice === null) next.delete(pendingId)
+      else next.set(pendingId, notice)
+      return next
+    })
+  }
+
+  const onRetry = async (item: FailedItem): Promise<void> => {
+    const pendingId = item.pendingId
+    if (pendingId === undefined) return
+    setRetrying(pendingId)
+    setNotice(pendingId, null)
     try {
-      const outcome = await props.retry(item.target, item.reason)
-      setRetryNotice(outcome.ok
-        ? { target: item.target, tone: 'neutral', text: '已请主管重试' }
-        : { target: item.target, tone: 'danger', text: outcome.message ?? '重试请求失败' })
+      const outcome = await props.retry(pendingId)
+      if (outcome.ok) {
+        const landed = outcome.dispatched ?? []
+        setAddedDispatched(previous => [...previous, ...landed])
+        setResolved(previous => new Map(previous).set(pendingId, null))
+        setNotice(pendingId, { tone: 'neutral', text: landed.length > 0 ? '重试成功，已派出' : '重试成功' })
+        return
+      }
+      const replacement = outcome.failed?.[0]
+      if (replacement !== undefined) setResolved(previous => new Map(previous).set(pendingId, replacement))
+      setNotice(pendingId, { tone: 'danger', text: outcome.message ?? replacement?.reason ?? '重试失败' })
     } catch (error) {
-      setRetryNotice({
-        target: item.target,
+      setNotice(pendingId, {
         tone: 'danger',
         text: error instanceof Error ? error.message : String(error),
       })
@@ -325,25 +373,26 @@ export function DispatchStatusRow(props: DispatchRowProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {failed.map(item => {
             const pending = isPendingHandoff(item.reason)
-            const notice = retryNotice?.target === item.target ? retryNotice : undefined
+            const canRetry = item.retryable && item.pendingId !== undefined
+            const notice = item.pendingId === undefined ? undefined : retryNotices.get(item.pendingId)
             return (
-              <div key={`${item.target}:${item.reason}`} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div key={`${item.pendingId ?? ''}:${item.target}:${item.reason}`} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Tag tone={pending ? 'warning' : 'danger'}>{pending ? '待派' : '失败'}</Tag>
                 <span style={{ flex: 1, minWidth: 0, color: TEXT_PRIMARY, fontSize: 12 }}>
                   {`${item.target} · ${item.reason}`}
                 </span>
-                {pending
-                  ? <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>请换人</span>
-                  : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={retrying !== null}
-                      onClick={() => { void onRetry(item) }}
-                    >
-                      {retrying === item.target ? '重试中…' : '重试'}
-                    </Button>
-                  )}
+                {pending && canRetry && (
+                  <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>补人后可重试</span>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!canRetry || retrying !== null}
+                  title={canRetry ? undefined : '该失败不可重试，请重新派活'}
+                  onClick={() => { void onRetry(item) }}
+                >
+                  {retrying === item.pendingId ? '重试中…' : '重试'}
+                </Button>
                 {notice !== undefined && (
                   <span
                     role={notice.tone === 'danger' ? 'alert' : 'status'}
@@ -359,31 +408,46 @@ export function DispatchStatusRow(props: DispatchRowProps) {
       )}
 
       {allFailed && (
-        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>没有产生任何任务 · 请换人或重新说一次</span>
+        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>没有产生任何任务 · 可重试的条目不依赖重新派活</span>
       )}
     </BarShell>
   )
 }
 
-/** Registers the dispatch status row; retry asks the same Session to re-dispatch. */
+/** Registers the dispatch status row; retry replays one pending id over the app channel. */
 export const dispatchToolview = {
   name: 'dispatch-toolview',
-  inject: ['slots', 'sessions'],
+  inject: ['slots'],
   apply(ctx: Context): void {
-    ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
-      name: 'tool.call.toolview',
-      key: 'dispatch_task',
-      inject: (sessionId): DispatchRowInjected => ({
-        retry: async (target, reason) => {
-          const session = ctx.sessions.binding(sessionId)?.session
-          if (session === undefined) return { ok: false, message: '会话不可用，无法重试' }
-          const result = await session.prompt(
-            [{ type: 'text', text: `请重试未派出的任务：${target}（原因：${reason}）` }],
-            'queue',
-          )
-          return result.ok ? { ok: true } : { ok: false, message: result.error.message }
+    ctx.slots.inject('tool.call.toolview', function* () {
+      const render = (sessionId: string) => ({
+        retry: async (pendingId: string): Promise<RetryOutcome> => {
+          try {
+            const response = await fetch('/cadre/retry-dispatch', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ pendingId, dispatcherSessionId: sessionId }),
+            })
+            const payload = await response.json().catch(() => undefined) as RetryOutcome | undefined
+            if (!response.ok) {
+              return {
+                ok: false,
+                message: payload?.message ?? `重试请求失败（HTTP ${response.status}）`,
+              }
+            }
+            return payload ?? { ok: false, message: '重试通道未返回结果' }
+          } catch (error) {
+            return { ok: false, message: error instanceof Error ? error.message : String(error) }
+          }
         },
-      }),
-    }, DispatchStatusRow))
+      })
+      const register = (key: string) => ctx.slots.register({
+        name: 'tool.call.toolview',
+        key,
+        inject: (sessionId: string) => render(sessionId),
+      }, DispatchStatusRow)
+      yield register('dispatch_task')
+      yield register('retry_dispatch')
+    })
   },
 }

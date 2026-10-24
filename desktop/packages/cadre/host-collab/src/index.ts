@@ -16,6 +16,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 
 interface SessionController {
@@ -47,6 +48,8 @@ interface HostContext {
   effect(setup: () => () => void): void
   on(event: string, handler: (payload: { readonly agent: AgentLike }, next: () => unknown) => unknown): () => void
   readonly sessionController: SessionController
+  /** Optional web-server scope injection (the desktop Host mounts it). */
+  inject?(dependencies: readonly string[], callback: (scope: unknown) => void): void
 }
 
 interface ToolRun {
@@ -623,6 +626,25 @@ export function apply(ctx: HostContext): void {
     },
   })
 
+  /** Replay one queued failure; shared by the tool and the desktop retry route. */
+  const retryOne = async (pendingId: string, caller: string, signal: AbortSignal): Promise<DispatchValue> => {
+    supervisorOnly(caller)
+    const record = ledger.pending(pendingId)
+    if (record === undefined) throw new Error(`待派条目不存在：${pendingId}`)
+    if (record.status === 'dispatched') throw new Error(`该条目已派出，无需重试：${pendingId}`)
+    const item: DispatchItem = { employee: record.employee, title: record.title, body: record.body, dueAt: record.dueAt }
+    const outcome = await dispatchOne(item, record.dispatcher, signal)
+    if (outcome.ok) {
+      ledger.settlePending(record.pendingId, { taskId: outcome.value.taskId })
+      console.log(`cadre-collab: retry ok pending=${record.pendingId} task=${outcome.value.taskId}`)
+      return { dispatched: [outcome.value], failed: [] }
+    }
+    ledger.settlePending(record.pendingId, {
+      reason: outcome.reason, retryable: !outcome.reason.startsWith('dueAt 不是合法时间') })
+    console.log(`cadre-collab: retry failed pending=${record.pendingId} reason=${outcome.reason}`)
+    return { dispatched: [], failed: [failRow(item, caller, outcome.reason)] }
+  }
+
   ctx.tools.register({
     name: 'retry_dispatch',
     description: 'Re-dispatch one queued failure by its pendingId: the exact original spec is replayed, so retrying does not depend on the model understanding a prompt.',
@@ -642,25 +664,77 @@ export function apply(ctx: HostContext): void {
         : `重试仍失败：${value.failed.map(row => `${row.target}：${row.reason}`).join('；')}`)],
       presentationMeta: dispatchMeta,
     },
-    execute: async (args: { pendingId: string }, run: ToolRun) => {
-      const dispatcher = callerOf(run)
-      supervisorOnly(dispatcher)
-      const record = ledger.pending(args.pendingId)
-      if (record === undefined) throw new Error(`待派条目不存在：${args.pendingId}`)
-      if (record.status === 'dispatched') throw new Error(`该条目已派出，无需重试：${args.pendingId}`)
-      const item: DispatchItem = { employee: record.employee, title: record.title, body: record.body, dueAt: record.dueAt }
-      const outcome = await dispatchOne(item, record.dispatcher, run.signal)
-      if (outcome.ok) {
-        ledger.settlePending(record.pendingId, { taskId: outcome.value.taskId })
-        console.log(`cadre-collab: retry ok pending=${record.pendingId} task=${outcome.value.taskId}`)
-        return { dispatched: [outcome.value], failed: [] }
-      }
-      ledger.settlePending(record.pendingId, {
-        reason: outcome.reason, retryable: !outcome.reason.startsWith('dueAt 不是合法时间') })
-      console.log(`cadre-collab: retry failed pending=${record.pendingId} reason=${outcome.reason}`)
-      return { dispatched: [], failed: [failRow(item, dispatcher, outcome.reason)] }
-    },
+    execute: async (args: { pendingId: string }, run: ToolRun) =>
+      retryOne(args.pendingId, callerOf(run), run.signal),
   })
+
+  // Direct retry: the renderer's button cannot call a Host tool by name, so the
+  // app fetches this loopback route through the same protocol/cookie path as
+  // /api. Connection admission authenticates the owner before the ledger's
+  // supervisor check runs.
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['webServer', 'connection'], (scope) => {
+      const web = scope as {
+        webServer: {
+          register(route: {
+            kind: 'exact'
+            path: string
+            handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+          }): () => void
+        }
+        connection: { admit(req: IncomingMessage): { readonly rejection: number } | unknown }
+        effect(setup: () => () => void, label: string): () => void
+      }
+      const reply = (res: ServerResponse, status: number, body: unknown): void => {
+        res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(body))
+      }
+      const readBody = async (req: IncomingMessage): Promise<unknown> => {
+        const chunks: Buffer[] = []
+        let size = 0
+        for await (const chunk of req) {
+          const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk as Buffer
+          size += buffer.length
+          if (size > 16_384) throw new Error('请求体过大')
+          chunks.push(buffer)
+        }
+        return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      }
+      web.effect(() => web.webServer.register({
+        kind: 'exact',
+        path: '/cadre/retry-dispatch',
+        handler: async (req, res) => {
+          if (req.method !== 'POST') {
+            reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 POST' })
+            return
+          }
+          const admission = web.connection.admit(req)
+          if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
+            const rejection = (admission as { rejection: number }).rejection
+            reply(res, rejection, { ok: false, code: 'FORBIDDEN', message: '重试请求未授权' })
+            return
+          }
+          try {
+            const body = await readBody(req) as { pendingId?: unknown; dispatcherSessionId?: unknown }
+            const pendingId = typeof body?.pendingId === 'string' ? body.pendingId : ''
+            const dispatcher = typeof body?.dispatcherSessionId === 'string' ? body.dispatcherSessionId : ''
+            if (pendingId === '' || dispatcher === '') {
+              reply(res, 400, { ok: false, code: 'INVALID_ARGUMENT', message: 'pendingId 与 dispatcherSessionId 必填' })
+              return
+            }
+            const value = await retryOne(pendingId, dispatcher, AbortSignal.timeout(60_000))
+            reply(res, 200, { ok: true, ...value })
+          } catch (error) {
+            reply(res, 409, {
+              ok: false,
+              code: 'RETRY_FAILED',
+              message: error instanceof Error ? error.message : String(error),
+            })
+          }
+        },
+      }), 'cadre-collab: /cadre/retry-dispatch')
+    })
+  }
 
   ctx.tools.register({
     name: 'report_task',
