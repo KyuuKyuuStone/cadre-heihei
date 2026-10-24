@@ -79,7 +79,6 @@ import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { resolveTrayIconPath } from './tray-icon.ts'
-import { DesktopBackgroundNotice } from './background-notice.ts'
 
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => {}
@@ -902,6 +901,20 @@ async function main(): Promise<void> {
     return result
   })
 
+  // Roster read: members are the ledger's authority for role/state, so the
+  // panel never infers a supervisor from the client-side session list.
+  ipcMain.handle(DESKTOP_IPC.cadreListRoster, (event, options: unknown) => {
+    assertProductSender(event)
+    const requested = typeof options === 'object' && options !== null
+      ? (options as { projectId?: unknown }).projectId
+      : undefined
+    const projectId = requested === undefined ? requireProjectId(cadreProjectId) : requireProjectId(requested)
+    const result = cadreLedger.listMembers(projectId)
+    console.log(`cadre:listRoster project=${projectId} path=${cadreLedgerPath} source=readonly ` +
+      `rows=${result.rows.length}`)
+    return result
+  })
+
   // Milestone B③: write path. All rules live in `app/src/collab/**`; these
   // handlers validate the IPC boundary and delegate with the main identity.
   ipcMain.handle(DESKTOP_IPC.cadreDispatchTask, (event, options: unknown) => {
@@ -1584,10 +1597,6 @@ async function main(): Promise<void> {
       tray?.setDark(dark)
     })
   }
-  const backgroundNotice = process.platform === 'win32'
-    ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
-      locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
-    : undefined
   const quitConfirmation = new DesktopQuitConfirmation({
     locale: () => locale,
     inspect: () => backend.host?.inspectQuit(),
@@ -1671,8 +1680,7 @@ async function main(): Promise<void> {
       const hide = (): void => {
         if (!quitting && !shellInstallerOwnsQuit && !sessionEnding && !window.isDestroyed()) hideMainWindow(window)
       }
-      if (backgroundNotice === undefined) hide()
-      else backgroundNotice.close(hide)
+      hide()
     })
     if (process.platform === 'win32') {
       // Shutdown, restart, and log-off must not wait on a confirmation. query-session-end is only a
@@ -1838,7 +1846,6 @@ async function main(): Promise<void> {
     shuttingDown = true
     updateJournal?.action('quit-requested')
     quitConfirmation.dispose()
-    backgroundNotice?.dispose()
     tray?.dispose()
     stopAccount?.()
     if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.hide()
@@ -1855,7 +1862,6 @@ async function main(): Promise<void> {
     if (shellInstallerOwnsQuit) {
       shuttingDown = true
       quitConfirmation.dispose()
-      backgroundNotice?.dispose()
       updateJournal?.action('quit-requested')
       tray?.dispose()
       updateDialog.dispose()

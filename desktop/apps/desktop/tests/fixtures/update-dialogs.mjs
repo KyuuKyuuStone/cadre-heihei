@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, protocol } from 'electron'
 import { DesktopUpdateDialog } from '../../lib/types/update-dialog.js'
 import { DesktopUpdateOverlays } from '../../lib/types/update-overlay.js'
-import { DesktopBackgroundNotice } from '../../lib/types/background-notice.js'
 import { desktopUpdateReadyConfirmation, resolveDesktopLocale } from '../../lib/types/locale.js'
 
 async function rendered(window) {
@@ -117,43 +116,6 @@ export async function qualifyUpdateDialogs(root, fixture) {
     assert.equal((await pending).response, 0)
     dialogs.cancel()
     await once(errorWindow, 'closed', { signal: AbortSignal.timeout(10_000) })
-    const markerPath = join(root, 'background-close-confirmed')
-    const notice = new DesktopBackgroundNotice({ markerPath, locale: () => locale,
-      show: options => dialogs.show(parent, options), focus: () => dialogs.focus() })
-    try {
-      for (const confirm of [false, true]) {
-        parent.show()
-        const createdNotice = once(app, 'browser-window-created', { signal: AbortSignal.timeout(10_000) })
-        const hidden = Promise.withResolvers()
-        notice.close(() => { parent.hide(); hidden.resolve() })
-        const [, noticeWindow] = await createdNotice
-        await once(noticeWindow.webContents, 'did-finish-load', { signal: AbortSignal.timeout(10_000) })
-        await rendered(noticeWindow)
-        assert.equal(parent.isVisible(), true)
-        assert.deepEqual(await noticeWindow.webContents.executeJavaScript(`({
-          message: document.getElementById('title').textContent,
-          buttons: [...document.querySelectorAll('#actions button')].map(button => button.textContent),
-          detailHidden: document.getElementById('detail').hidden,
-        })`), JSON.parse(await readFile(new URL('../expected/background-close-confirmation.json', import.meta.url), 'utf8')))
-        await assert.rejects(access(markerPath))
-        const closedNotice = once(noticeWindow, 'closed', { signal: AbortSignal.timeout(10_000) })
-        if (confirm) {
-          const name = 'background-close-confirmation.png'
-          await noticeWindow.webContents.executeJavaScript(`Promise.all(document.getAnimations().map(animation => animation.finished))`)
-          await writeFile(join(root, name), (await noticeWindow.webContents.capturePage()).toPNG())
-          screenshots.push(name)
-          await noticeWindow.webContents.executeJavaScript("setTimeout(() => document.querySelector('.primary').click(), 0); undefined")
-          await hidden.promise
-        } else noticeWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
-        await closedNotice
-        assert.equal(parent.isVisible(), !confirm)
-      }
-      await access(markerPath)
-      parent.show()
-      notice.close(() => { parent.hide() })
-      assert.equal(parent.isVisible(), false)
-      assert.equal(dialogs.isOpen, false)
-    } finally { notice.dispose() }
     return screenshots
   } finally {
     dialogs.dispose()

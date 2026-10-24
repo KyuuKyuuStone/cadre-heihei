@@ -63,7 +63,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 
 | # | 路径 | 改动摘要 | 为什么不能只用插件解决 | 最小侵入面 |
 |---|---|---|---|---|
-| K1 | `apps/desktop/src/main.ts` | 新增 Cadre 台账/花名册/员工/provider 的 IPC handler、托盘明暗图标、provider 凭据同步；`createRequire` 加载 `cadre-collab.cjs` | SQLite、`safeStorage`、`nativeTheme`、`ipcMain` 都是 Electron 主进程 API，Cordis 客户端插件拿不到 | 后续按 ADR-0023 §2.4 把员工/账本迁到 Host 服务后，本文件 hunk 应大幅收缩 |
+| K1 | `apps/desktop/src/main.ts` | 新增 Cadre 台账/花名册/员工/provider 的 IPC handler、托盘明暗图标、provider 凭据同步；`createRequire` 加载 `cadre-collab.cjs`；**关窗直接隐藏到托盘，不再弹「任务不会中断」提示**（2026-10-24，用户要求无条件去掉，`background-notice.ts` 与文案一并删除） | SQLite、`safeStorage`、`nativeTheme`、`ipcMain` 都是 Electron 主进程 API，Cordis 客户端插件拿不到 | 后续按 ADR-0023 §2.4 把员工/账本迁到 Host 服务后，本文件 hunk 应大幅收缩 |
 | K2 | `apps/desktop/src/ipc.ts` | 新增 `cadre:*` 通道常量（任务、花名册、provider、session 绑定、员工） | 通道名必须与 preload/main 一致；无官方等价 | 随 K1 一起收缩；`window.cadre` 目标归零 |
 | K3 | `apps/desktop/src/preload-app.ts` | 暴露 `window.cadre` 桥（任务/花名册/provider/员工） | contextBridge 只能写在 preload | 迁移完成后只保留不可替代通道 |
 | K4 | `apps/desktop/src/project-manager.ts` | 桌面 profile 的 bundles 列表追加 `@deepseek-ai/dsh-bundle-cadre`；`applyRelease` 补齐**既有 profile** 缺失的 Desktop bundles（旧 profile 的 `package.json` 不会被 `initProfile` 重写，缺 bundle 会让所有 `cadre-*` preset 报 `agent-preset/not-found`） | profile 由桌面端生成，官方模板不含我们 bundle | 一行常量 `DESKTOP_BUNDLES` |

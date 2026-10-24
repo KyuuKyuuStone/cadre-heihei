@@ -202,12 +202,11 @@ const harness = await vi.hoisted(async () => {
     readonly destroy = vi.fn()
     constructor(readonly image: unknown) { super(); trays.push(this) }
   }
-  const backgroundNotice = { close: vi.fn((hide: () => void) => { hide() }), dispose: vi.fn(), markerPath: undefined as string | undefined }
   const shellDialog = { isOpen: false, focus: vi.fn() }
   return {
     failWindow(error: Error) { windowFailure = error },
     windows, hosts, handlers, app, FakeWindow, FakeHost, powerMonitor, nativeTheme, analytics,
-    trays, FakeTray, backgroundNotice, shellDialog,
+    trays, FakeTray, shellDialog,
     menu, popup, socketHeaders: vi.fn(), loginShell, readLoginShell, updateCheck, updateDownload, updateInstall,
     platformDispose,
     platformCloseAndWait,
@@ -255,7 +254,6 @@ const harness = await vi.hoisted(async () => {
       accountListener = undefined
       windows.length = 0; hosts.length = 0; handlers.clear(); app.removeAllListeners()
       trays.length = 0
-      backgroundNotice.markerPath = undefined
       shellDialog.isOpen = false
       powerMonitor.removeAllListeners()
       app.isPackaged = true
@@ -313,11 +311,6 @@ vi.mock('electron', () => ({
   Tray: harness.FakeTray,
   nativeImage: { createFromPath: (path: string) => ({ path }) },
 }))
-vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
-  constructor(options: { markerPath: string }) { harness.backgroundNotice.markerPath = options.markerPath }
-  readonly close = harness.backgroundNotice.close
-  readonly dispose = harness.backgroundNotice.dispose
-} }))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>()
   return { ...original, readFile: vi.fn((path: Parameters<typeof original.readFile>[0], encoding?: 'utf8') => {
@@ -1297,14 +1290,12 @@ describe('desktop main startup', () => {
     expect(harness.trays[0]!.setImage).toHaveBeenLastCalledWith({ path: join('desktop-test-resources', 'tray.ico') })
     harness.nativeTheme.shouldUseDarkColors = false
     harness.nativeTheme.emit('updated')
-    expect(harness.backgroundNotice.markerPath).toBe(join(harness.app.getPath('userData'), 'background-close-confirmed'))
     window.show.mockClear()
     window.close()
     expect(window.isDestroyed()).toBe(false)
     expect(window.hide).toHaveBeenCalledOnce()
     expect(host.stop).not.toHaveBeenCalled()
     expect(harness.app.quit).not.toHaveBeenCalled()
-    expect(harness.backgroundNotice.close).toHaveBeenCalledOnce()
     harness.trays[0]!.emit('click')
     expect(window.show).toHaveBeenCalledOnce()
     expect(window.focus).toHaveBeenCalled()
@@ -1316,26 +1307,12 @@ describe('desktop main startup', () => {
     expect(harness.trays[0]!.setContextMenu.mock.calls.length).toBe(relabels + 1)
   })
 
-  it('keeps the workspace visible while acknowledgement is pending and ignores a destroyed window', async () => {
-    await readyWorkspace()
-    const window = harness.windows[0]!
-    const approval = Promise.withResolvers<() => void>()
-    harness.backgroundNotice.close.mockImplementationOnce((hide) => { approval.resolve(hide) })
-    window.close()
-    const hide = await approval.promise
-    expect(window.hide).not.toHaveBeenCalled()
-    window.destroy()
-    hide()
-    expect(window.hide).not.toHaveBeenCalled()
-  })
-
   it('focuses an existing shell dialog instead of replacing it with a close confirmation', async () => {
     await readyWorkspace()
     const window = harness.windows[0]!
     harness.shellDialog.isOpen = true
     window.close()
     expect(harness.shellDialog.focus).toHaveBeenCalledOnce()
-    expect(harness.backgroundNotice.close).not.toHaveBeenCalled()
     expect(window.hide).not.toHaveBeenCalled()
   })
 
@@ -1348,7 +1325,6 @@ describe('desktop main startup', () => {
     window.close()
     expect(window.setFullScreen).toHaveBeenCalledWith(false)
     expect(window.hide).toHaveBeenCalledOnce()
-    expect(harness.backgroundNotice.close).not.toHaveBeenCalled()
     window.show.mockClear()
     harness.app.emit('activate', {}, false)
     expect(window.show).toHaveBeenCalledOnce()
