@@ -127,8 +127,14 @@ export type SidebarRootInjected = {
   selectPanel: (id: MainPanelId) => void
   /** Open the Cadre create dialog for a supervisor or employee from the New Session menu. */
   requestCadreCreate: (kind: 'supervisor' | 'worker') => void
+  /** Refresh the project's supervisor fact before the menu chooses an identity. */
+  refreshCadreSupervisor: () => void
   /** Private reactive sources bound to framework selector hooks. */
-  hooks: { panels: ObservableSnapshot<readonly SidebarPanelMetadata[]>; shortcuts: ObservableSnapshot<readonly ShortcutCatalogEntry[]> }
+  hooks: {
+    panels: ObservableSnapshot<readonly SidebarPanelMetadata[]>
+    shortcuts: ObservableSnapshot<readonly ShortcutCatalogEntry[]>
+    cadreSupervisor: ObservableSnapshot<boolean>
+  }
 }
 
 /**

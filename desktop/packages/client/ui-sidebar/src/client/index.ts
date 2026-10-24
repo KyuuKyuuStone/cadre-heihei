@@ -189,6 +189,23 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.slots.subscribe('sidebar.panellist', syncPanels), 'ui-sidebar: panel entries')
   ctx.effect(() => ctx.locale.subscribe(syncPanels), 'ui-sidebar: panel labels')
 
+  // One supervisor per project (ledger invariant). The sidebar menu greys its
+  // supervisor item from the same roster read the panel uses; it refreshes
+  // whenever the menu opens so a create/retire needs no cross-store plumbing.
+  const cadreSupervisor = createSnapshotStore(false)
+  const refreshCadreSupervisor = (): void => {
+    const list = window.cadre?.listRoster
+    if (list === undefined) {
+      cadreSupervisor.set(false)
+      return
+    }
+    void list({ projectId: CADRE_PROJECT_ID }).then((result) => {
+      const members = result?.members ?? result?.rows ?? []
+      cadreSupervisor.set(members.some(member => member.role === 'supervisor' && member.state !== 'departed'))
+    }).catch(() => { /* keep the last known state */ })
+  }
+  refreshCadreSupervisor()
+
   const injectProps = (): SidebarRootInjected => ({
     // The shell's New Session button rides the Workspace UI's shared action
     // (current Session Workspace, then recent Workspace).
@@ -203,7 +220,8 @@ export function apply(ctx: ClientContext): void {
       cadreCreateRequest.set({ kind, token: cadreCreateToken })
       ctx.layout.selectPanel('cadre' as MainPanelId)
     },
-    hooks: { panels, shortcuts: ctx.shortcuts.catalog },
+    refreshCadreSupervisor,
+    hooks: { panels, shortcuts: ctx.shortcuts.catalog, cadreSupervisor },
   })
   ctx.slots.inject('sidebar', () => ctx.slots.register({
     name: 'sidebar',

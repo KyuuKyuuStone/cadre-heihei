@@ -92,6 +92,8 @@ export function SidebarRoot({
   toggleSidebar,
   selectPanel,
   requestCadreCreate,
+  refreshCadreSupervisor,
+  useCadreSupervisor,
   usePanels,
   useShortcuts,
   usePanelInfo,
@@ -106,6 +108,7 @@ export function SidebarRoot({
   // .collapsed .wide), unmounts at settle, and remounts right away on expand.
   const [settled, setSettled] = useState(collapsed)
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  const hasSupervisor = useCadreSupervisor(Boolean)
   useEffect(() => {
     if (!collapsed) { setSettled(false); return }
     const timer = window.setTimeout(() => { setSettled(true) }, COLLAPSE_SETTLE_MS)
@@ -262,7 +265,7 @@ export function SidebarRoot({
         open={createMenuOpen}
         onClose={() => { setCreateMenuOpen(false) }}
         items={[
-          { id: 'supervisor', label: '主管' },
+          { id: 'supervisor', label: '主管', disabled: hasSupervisor },
           { id: 'worker', label: '员工' },
           { id: 'plain', label: '普通会话' },
         ]}
@@ -278,7 +281,10 @@ export function SidebarRoot({
               className={css.newSession}
               aria-label={t('session.new.label')}
               aria-keyshortcuts={newShortcut?.aria}
-              onClick={() => { setCreateMenuOpen(open => !open) }}
+              onClick={() => {
+                if (!createMenuOpen) refreshCadreSupervisor()
+                setCreateMenuOpen(open => !open)
+              }}
             >
               <span className={css.newSessionLabelMask}><span className={css.newSessionContent}>
                 {wide
