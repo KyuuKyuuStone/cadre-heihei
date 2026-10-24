@@ -59,6 +59,7 @@ interface CadreTask {
   readonly title: string
   readonly status: string
   readonly assignee: string
+  readonly assigneeTitle?: string
   readonly assigneeRole?: string
   readonly updatedAt?: string
   readonly report?: CadreReport
@@ -72,6 +73,7 @@ interface CadreTaskRow {
   readonly assigneeSessionId: string
   readonly updatedAt: string
   readonly assigneeName?: string
+  readonly assigneeTitle?: string
   readonly assigneeRole?: string
   readonly latestReport?: CadreReport
 }
@@ -209,9 +211,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Ledger role used as the interim position label (岗位名口径尚未定稿). */
+/** Ledger role used when the roster carries no free-text position. */
 function roleLabel(role: string | undefined): string {
   return role === 'supervisor' ? '主管' : '员工'
+}
+
+/** 岗位名: the roster's description when present, otherwise the role label. */
+function positionLabel(task: CadreTask): string {
+  const title = task.assigneeTitle?.trim()
+  return title === undefined || title === '' ? roleLabel(task.assigneeRole) : title
 }
 
 /** `MM-DD HH:mm` in local time; invalid timestamps fall back to the raw value. */
@@ -234,6 +242,7 @@ function firstSentence(text: string): string {
 /** Map a raw bridge row to the view model, keeping report data across status writes. */
 function toViewTask(row: CadreTaskRow, previous?: CadreTask): CadreTask {
   const assigneeRole = row.assigneeRole ?? previous?.assigneeRole
+  const assigneeTitle = row.assigneeTitle ?? previous?.assigneeTitle
   const updatedAt = row.updatedAt ?? previous?.updatedAt
   const report = row.latestReport ?? previous?.report
   return {
@@ -241,6 +250,7 @@ function toViewTask(row: CadreTaskRow, previous?: CadreTask): CadreTask {
     title: row.title,
     status: row.status,
     assignee: row.assigneeName?.trim() || previous?.assignee || row.assigneeSessionId,
+    ...(assigneeTitle === undefined ? {} : { assigneeTitle }),
     ...(assigneeRole === undefined ? {} : { assigneeRole }),
     ...(updatedAt === undefined ? {} : { updatedAt }),
     ...(report === undefined ? {} : { report }),
@@ -264,7 +274,7 @@ function TaskRow({
     <li style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0' }}>
       <Tag tone="neutral">{task.taskId}</Tag>
       <span style={{ flex: 1 }}>{task.title}</span>
-      <span>{task.assignee}{task.assigneeRole === undefined ? '' : ` · ${roleLabel(task.assigneeRole)}`}</span>
+      <span>{`${task.assignee} · ${positionLabel(task)}`}</span>
       <Pill>{STATUS_LABELS[task.status] ?? task.status}</Pill>
       {actionable && (
         <Button variant="outline" size="sm" onClick={() => { onAccept(task.taskId) }}>
@@ -299,7 +309,7 @@ function ReportCard({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <Tag tone="neutral">{`${task.assignee} · ${roleLabel(task.assigneeRole)}`}</Tag>
+        <Tag tone="neutral">{`${task.assignee} · ${positionLabel(task)}`}</Tag>
         <span style={{ flex: 1, minWidth: 0, fontWeight: 600, color: TEXT_PRIMARY }}>{task.title}</span>
         <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
           {timeText(report?.receivedAt ?? task.updatedAt)}

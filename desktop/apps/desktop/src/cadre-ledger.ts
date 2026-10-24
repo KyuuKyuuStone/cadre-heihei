@@ -49,7 +49,9 @@ export interface CadreTaskRow {
   readonly updatedAt: string
   /** Roster name of the assignee; falls back to the session id. */
   readonly assigneeName?: string
-  /** Ledger role (`supervisor`/`worker`) used as the interim position label. */
+  /** Free-text position from the roster row, when the project filled one in. */
+  readonly assigneeTitle?: string
+  /** Ledger role (`supervisor`/`worker`) used when the roster has no position. */
   readonly assigneeRole?: string
   /** Newest report. Absent when the task has never been reported. */
   readonly latestReport?: CadreReportRow
@@ -172,6 +174,7 @@ export class CadreLedger {
     const rows = this.#hasReports
       ? db.prepare(`SELECT t.task_id, t.title, t.status, t.assignee_session_id, t.updated_at,
           COALESCE(mem.display_name, t.assignee_session_id) AS assignee_name,
+          mem.description AS assignee_title,
           COALESCE(mem.role, 'worker') AS assignee_role,
           m.message_id AS report_message_id, m.body AS report_body, m.preview AS report_preview,
           m.deliverables_json AS report_deliverables, m.received_at AS report_received_at,
@@ -195,15 +198,24 @@ export class CadreLedger {
         assigneeSessionId: String(row.assignee_session_id),
         updatedAt: String(row.updated_at),
       }
+      const assigneeTitle = typeof row.assignee_title === 'string' && row.assignee_title.trim() !== ''
+        ? String(row.assignee_title)
+        : undefined
       if (row.report_message_id === null || row.report_message_id === undefined) {
         return this.#hasReports
-          ? { ...base, assigneeName: String(row.assignee_name ?? base.assigneeSessionId), assigneeRole: String(row.assignee_role ?? 'worker') }
+          ? {
+              ...base,
+              assigneeName: String(row.assignee_name ?? base.assigneeSessionId),
+              assigneeRole: String(row.assignee_role ?? 'worker'),
+              ...(assigneeTitle === undefined ? {} : { assigneeTitle }),
+            }
           : base
       }
       return {
         ...base,
         assigneeName: String(row.assignee_name ?? base.assigneeSessionId),
         assigneeRole: String(row.assignee_role ?? 'worker'),
+        ...(assigneeTitle === undefined ? {} : { assigneeTitle }),
         latestReport: {
           messageId: String(row.report_message_id),
           reporterSessionId: String(row.report_from ?? base.assigneeSessionId),
