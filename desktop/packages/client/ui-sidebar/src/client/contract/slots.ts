@@ -7,12 +7,11 @@
  * `sidebar.settings` registrant's (ui-settings), followed by optional footer
  * actions in `sidebar.footer.action`.
  */
-import type { HostObservable, InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, SlotHookFactory } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -134,8 +133,16 @@ export type SidebarRootInjected = {
   hooks: {
     panels: ObservableSnapshot<readonly SidebarPanelMetadata[]>
     shortcuts: ObservableSnapshot<readonly ShortcutCatalogEntry[]>
-    cadreSupervisor: ObservableSnapshot<boolean>
+    projectState: ObservableSnapshot<CadreProjectState>
   }
+}
+
+/** Cadre facts the sidebar shell reads when its New Session menu picks an identity. */
+export interface CadreProjectState {
+  /** Project ids (Workspace ids) that already have an active supervisor. */
+  readonly supervisors: ReadonlySet<string>
+  /** Project the menu's supervisor/employee options target: current or most recent Workspace. */
+  readonly defaultProjectId: string | null
 }
 
 /**
@@ -155,32 +162,3 @@ export type SidebarRootComponentProps =
     | 'sidebar.footer.action'
   >
   & InjectFace<SidebarRootInjected> & PropsLocale<'sidebar'>
-
-
-/*
- * ui-workspace owns the sidebar browsing region and declares these seats in
- * its own contract. ui-sidebar is a dependency of ui-workspace, so importing
- * that client program back would create a package cycle; the registrant-side
- * declarations below mirror the shapes this package consumes.
- */
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface SlotMap {
-    'sidebar.workspaces.project.row.action': {
-      kind: 'list'
-      scope: 'root'
-      owner: { readonly workspaceId: string; readonly label: string; readonly cwd?: string }
-    }
-    'sidebar.session.row.leading': { kind: 'list'; scope: 'root'; owner: { readonly sessionId: SessionId } }
-    'sidebar.session.row.badge': { kind: 'list'; scope: 'root'; owner: { readonly sessionId: SessionId } }
-    'sidebar.workspaces.session.menu.item': {
-      kind: 'list'
-      scope: 'root'
-      owner: { readonly sessionId: SessionId; readonly displayTitle: string }
-      hookContext: readonly [open: boolean, setOpen: (open: boolean) => void]
-      inject: { hooks: {
-        menuOpenState: SlotHookFactory<'sidebar.workspaces.session.menu.item', () => readonly [open: boolean, setOpen: (open: boolean) => void]>
-        shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>
-      } }
-    }
-  }
-}

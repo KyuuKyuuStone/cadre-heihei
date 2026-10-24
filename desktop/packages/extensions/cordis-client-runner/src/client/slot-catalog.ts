@@ -150,9 +150,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/** Owner currency of finalized-assistant actions. */\nexport interface AssistantActionOwnerProps {\n  messageId: MessageId\n}',
     ],
-    ownerPropsReferences: [
-      'MessageId',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -292,7 +290,6 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       '/** Message image group handed to the optional attachment presentation plugin. */\nexport interface MessageImagesOwnerProps {\n  /** Durable references or submission-echo previews in source order. */\n  images: readonly MessageImageSource[]\n  /** Session-authorized image URL loader for the durable arm. */\n  loadImage: MessageImageLoader\n  /** Horizontal placement inside the owning record. */\n  align: \'start\' | \'end\'\n  /** Force every image into the compact message-attachment tile size. */\n  compact?: boolean\n  /** Fixed, uncropped thumbnail for an attachment list row. */\n  thumbnail?: boolean\n}',
     ],
     ownerPropsReferences: [
-      'Message',
       'MessageImageLoader',
       'MessageImageSource',
     ],
@@ -519,7 +516,6 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       '/** Message image group handed to the optional attachment presentation plugin. */\nexport interface MessageImagesOwnerProps {\n  /** Durable references or submission-echo previews in source order. */\n  images: readonly MessageImageSource[]\n  /** Session-authorized image URL loader for the durable arm. */\n  loadImage: MessageImageLoader\n  /** Horizontal placement inside the owning record. */\n  align: \'start\' | \'end\'\n  /** Force every image into the compact message-attachment tile size. */\n  compact?: boolean\n  /** Fixed, uncropped thumbnail for an attachment list row. */\n  thumbnail?: boolean\n}',
     ],
     ownerPropsReferences: [
-      'Message',
       'MessageImageLoader',
       'MessageImageSource',
     ],
@@ -572,7 +568,6 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       '/** Owner values used to elect a composer takeover. */\nexport interface ComposerChainProps {\n  /** Current Session identity used by temporary business-owned entries. */\n  sessionId: SessionId | undefined\n  /** Current Session lifecycle state, absent without a selected Session. */\n  session: SessionSnapshot | undefined\n  /** Effective business-owned interaction awaiting the user in this Session. */\n  pendingInteraction: SessionPendingInteraction | undefined\n}',
     ],
     ownerPropsReferences: [
-      'SessionId',
       'SessionPendingInteraction',
       'SessionSnapshot',
     ],
@@ -619,9 +614,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/** Owner share of the resident composer bar. */\nexport interface ComposerBarOwnerProps {\n  /** Hero uses centered placement; composer uses the active bottom placement. */\n  variant: \'hero\' | \'composer\'\n  /** A feature-owned reason that makes message input inert while leaving model selection live. */\n  blocked?: { readonly reason: string }\n  /** Lock all message actions while preserving the resident composer surface. */\n  disabled?: boolean\n  /** Whether the shared Workspace picker is expanded. */\n  workspacePickerOpen?: boolean\n  /** Open the Workspace picker from the inert composer surface. */\n  onRequestWorkspace?: () => void\n  placeholder?: string\n  /** Optional content rendered above the composer surface. */\n  accessory?: ReactNode\n}',
     ],
-    ownerPropsReferences: [
-      'Workspace',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -846,8 +839,10 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     hookContext: '',
     slotInject: '',
     declaredBy: 'factory \'conversation.content\' (client-ui-conversation), so it exists while that definition is registered',
-    occupants: [],
-    replaceRisk: 'none',
+    occupants: [
+      'client-ui-brand-official OfficialHeroBrandMark',
+    ],
+    replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.hero.brand.mark\', () => ctx.slots.register(\n      { name: \'conversation.hero.brand.mark\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
     source: 'packages/client/ui-conversation/src/client/contract/slots.ts:264',
   },
@@ -918,9 +913,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/** Owner share common to blank-session Workspace pickers. */\nexport interface EmptyWorkspaceOwnerProps {\n  open: boolean\n  anchorRef?: RefObject<HTMLElement>\n  /** Currently selected Workspace, when available. */\n  selectedId?: WorkspaceId | undefined\n  onPick: (workspaceId: WorkspaceId) => void\n  onClose: () => void\n}',
     ],
-    ownerPropsReferences: [
-      'Workspace',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -975,7 +968,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.hero.workspace.directoryFlow\', () => ctx.slots.register(\n      { name: \'conversation.hero.workspace.directoryFlow\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:119',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:129',
   },
   {
     key: 'conversation.input.activity',
@@ -1241,10 +1234,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/** Catalog data for a model name inside the composer\'s existing controls. */\nexport interface ModelLabelOwner {\n  /** Provider identity and localized display name; contains no connection configuration. */\n  provider: Pick<ModelProviderGroup, \'id\' | \'name\'>\n  /** The exact provider\'s model catalog entry. */\n  model: ModelCatalogModel\n  /** Trigger caption, root-menu current value, or selectable model row. */\n  placement: \'trigger\' | \'menu\' | \'option\'\n  /** Whether this provider/model pair is the current selection. */\n  selected: boolean\n}',
     ],
-    ownerPropsReferences: [
-      'ModelCatalogModel',
-      'ModelProviderGroup',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -1735,9 +1725,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/** Plain breadcrumb data handed to the optional lineage renderer. */\nexport interface ConversationHeaderLineageOwnerProps {\n  /** Session represented by this breadcrumb title. */\n  lineageSessionId: SessionId\n  /** Display title available to a combined title/control renderer. */\n  displayTitle: string\n  /** Navigate to an ancestor title when present. */\n  openTitle?: () => void\n}',
     ],
-    ownerPropsReferences: [
-      'SessionId',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -1843,7 +1831,6 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       '/** Message image group handed to the optional attachment presentation plugin. */\nexport interface MessageImagesOwnerProps {\n  /** Durable references or submission-echo previews in source order. */\n  images: readonly MessageImageSource[]\n  /** Session-authorized image URL loader for the durable arm. */\n  loadImage: MessageImageLoader\n  /** Horizontal placement inside the owning record. */\n  align: \'start\' | \'end\'\n  /** Force every image into the compact message-attachment tile size. */\n  compact?: boolean\n  /** Fixed, uncropped thumbnail for an attachment list row. */\n  thumbnail?: boolean\n}',
     ],
     ownerPropsReferences: [
-      'Message',
       'MessageImageLoader',
       'MessageImageSource',
     ],
@@ -2686,9 +2673,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       '/** Right column owner share: resolved normal geometry and opening eligibility. */\nexport interface RightbarOwnerProps {\n  /** Resolved normal panel width in px, not the saved preference; zero if it cannot fit. */\n  width: number\n  /** Current frame width in px. */\n  viewportWidth: number\n  /**\n   * Whether a normal right panel can retain 300px beside a 400px center.\n   * Before a narrow opening, includes the space from collapsing the left sidebar.\n   */\n  canShow: boolean\n}',
       '/** Identity of one open tab; distinct copies of one content share `contentId`, never `TabId`. */\nexport type TabId = Branded<\'TabId\'>',
     ],
-    ownerPropsReferences: [
-      'Branded',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -3396,6 +3381,8 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-settings-general HostReleasePrompt id \'host-release-change\'',
       'client-ui-settings-session-log UploadToast id \'session-log-upload-toast\'',
       'client-ui-shortcuts ShortcutReference id \'shortcuts\'',
+      'client-ui-sidebar CadreCreateDialog id \'cadre-create\'',
+      'client-ui-sidebar CadreLedgerOverlay id \'cadre-ledger\'',
       'client-ui-workspace SessionRenameDialog id \'workspace.session-rename\'',
       'client-ui-workspace SessionArchiveConfirmDialog id \'workspace.session-archive\'',
       'client-ui-workspace RowActionToast id \'workspace.row-toast\'',
@@ -4292,6 +4279,56 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     source: 'packages/client/ui-sidebar-right/src/client/contract/slots.ts:103',
   },
   {
+    key: 'sidebar.session.row.badge',
+    kind: 'list',
+    scope: 'root',
+    summary: 'Identity badge beside one Session row\'s title, after the title and before the row\'s time label.',
+    doc: 'Identity badge beside one Session row\'s title, after the title and before\nthe row\'s time label. Mounted only for a non-blank Session row; the\noccupant reads the row\'s Session identity and decides its own visibility\n(an ordinary Session renders nothing). No shipped entry occupies the\nseat, so a product badge lands beside the official title without\nreplacing it.',
+    registerOptions: [
+      {
+        name: 'id',
+        requirement: 'required',
+        type: 'string',
+        doc: 'Your cell key. Use an id of your own: a fresh id is added beside the shipped entries, while reusing a shipped id puts you in THAT cell and replaces it. Owners that filter by id address you by it.',
+      },
+      {
+        name: 'order',
+        requirement: 'optional',
+        type: 'number',
+        doc: 'Position among the entries, ascending (default 0).',
+      },
+      {
+        name: 'label',
+        requirement: 'optional',
+        type: 'string | (() => string)',
+        doc: 'Display text where the owner projects one (nav rows, tabs). A thunk is re-read on every projection, so localized text follows the active locale without re-registering.',
+      },
+    ],
+    ownerProps: [
+      '/**\n * Owner share of the two Session-row schedule seats. Both receive only the\n * row\'s Session identity: the occupant reads that Session\'s own scheduled\n * tasks, and reading them activates nothing.\n */\nexport interface SessionRowScheduleOwnerProps {\n  /** Session this row shows; the occupant addresses its own data by this id. */\n  readonly sessionId: SessionId\n}',
+    ],
+    ownerPropsReferences: [],
+    standardProps: [
+      'useRemoteAccess: (action: RemoteEndpoint) => boolean',
+      'useResource: UseResource',
+      'useWorkspaces: SnapshotSelectorHook<WorkspaceSnapshot>',
+      'usePanelInfo: UsePanelInfo',
+      'useSessions: UseSessions',
+      'useSessionStatus: UseSessionStatus',
+      'useSessionRetainInfo: UseSessionRetainInfo',
+      'useSessionAccess: (sessionId: SessionId, action: RemoteEndpoint) => boolean',
+      'useWorkspaceAccess: (workspaceId: WorkspaceId, action: RemoteEndpoint) => boolean',
+    ],
+    keyDomain: '',
+    hookContext: '',
+    slotInject: '',
+    declaredBy: 'an entry in \'sidebar.workspaces\' (client-ui-workspace), so it exists while that entry is mounted',
+    occupants: [],
+    replaceRisk: 'none',
+    example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.session.row.badge\', () => ctx.slots.register(\n      { name: \'sidebar.session.row.badge\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:155',
+  },
+  {
     key: 'sidebar.session.row.hover',
     kind: 'list',
     scope: 'root',
@@ -4320,9 +4357,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/**\n * Owner share of the two Session-row schedule seats. Both receive only the\n * row\'s Session identity: the occupant reads that Session\'s own scheduled\n * tasks, and reading them activates nothing.\n */\nexport interface SessionRowScheduleOwnerProps {\n  /** Session this row shows; the occupant addresses its own data by this id. */\n  readonly sessionId: SessionId\n}',
     ],
-    ownerPropsReferences: [
-      'SessionId',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -4343,7 +4378,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.session.row.hover\', () => ctx.slots.register(\n      { name: \'sidebar.session.row.hover\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:136',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:146',
   },
   {
     key: 'sidebar.session.row.leading',
@@ -4374,9 +4409,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/**\n * Owner share of the two Session-row schedule seats. Both receive only the\n * row\'s Session identity: the occupant reads that Session\'s own scheduled\n * tasks, and reading them activates nothing.\n */\nexport interface SessionRowScheduleOwnerProps {\n  /** Session this row shows; the occupant addresses its own data by this id. */\n  readonly sessionId: SessionId\n}',
     ],
-    ownerPropsReferences: [
-      'SessionId',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -4397,7 +4430,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.session.row.leading\', () => ctx.slots.register(\n      { name: \'sidebar.session.row.leading\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:131',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:141',
   },
   {
     key: 'sidebar.settings',
@@ -4528,7 +4561,57 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.workspaces.directoryFlow\', () => ctx.slots.register(\n      { name: \'sidebar.workspaces.directoryFlow\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:121',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:131',
+  },
+  {
+    key: 'sidebar.workspaces.project.row.action',
+    kind: 'list',
+    scope: 'root',
+    summary: 'Action strip at the end of one project (Workspace) row, after the Workspace\'s "..." menu.',
+    doc: 'Action strip at the end of one project (Workspace) row, after the\nWorkspace\'s "..." menu. Mounted only for a real Workspace row in the\ngrouped view; the ungrouped bucket and the flat list have no project row.\nThe occupant receives the row\'s Workspace id, title, and folder path and\nowns every button it renders. While the seat is empty the shipped single\n"New Session" button renders; an occupant replaces that button, so it\nmust render its own create affordance if the row still needs one.',
+    registerOptions: [
+      {
+        name: 'id',
+        requirement: 'required',
+        type: 'string',
+        doc: 'Your cell key. Use an id of your own: a fresh id is added beside the shipped entries, while reusing a shipped id puts you in THAT cell and replaces it. Owners that filter by id address you by it.',
+      },
+      {
+        name: 'order',
+        requirement: 'optional',
+        type: 'number',
+        doc: 'Position among the entries, ascending (default 0).',
+      },
+      {
+        name: 'label',
+        requirement: 'optional',
+        type: 'string | (() => string)',
+        doc: 'Display text where the owner projects one (nav rows, tabs). A thunk is re-read on every projection, so localized text follows the active locale without re-registering.',
+      },
+    ],
+    ownerProps: [
+      '/** Owner share of one project-row action occurrence: the Workspace the row shows. */\nexport interface ProjectRowOwnerProps {\n  /** Backing Workspace id. */\n  readonly workspaceId: WorkspaceId\n  /** Row display title. */\n  readonly label: string\n  /** Workspace folder path; absent for a bucket without a backing Workspace. */\n  readonly cwd?: string\n}',
+    ],
+    ownerPropsReferences: [],
+    standardProps: [
+      'useRemoteAccess: (action: RemoteEndpoint) => boolean',
+      'useResource: UseResource',
+      'useWorkspaces: SnapshotSelectorHook<WorkspaceSnapshot>',
+      'usePanelInfo: UsePanelInfo',
+      'useSessions: UseSessions',
+      'useSessionStatus: UseSessionStatus',
+      'useSessionRetainInfo: UseSessionRetainInfo',
+      'useSessionAccess: (sessionId: SessionId, action: RemoteEndpoint) => boolean',
+      'useWorkspaceAccess: (workspaceId: WorkspaceId, action: RemoteEndpoint) => boolean',
+    ],
+    keyDomain: '',
+    hookContext: '',
+    slotInject: '',
+    declaredBy: 'an entry in \'sidebar.workspaces\' (client-ui-workspace), so it exists while that entry is mounted',
+    occupants: [],
+    replaceRisk: 'none',
+    example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.workspaces.project.row.action\', () => ctx.slots.register(\n      { name: \'sidebar.workspaces.project.row.action\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:165',
   },
   {
     key: 'sidebar.workspaces.session.menu.item',
@@ -4559,9 +4642,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/** Owner share of one Session row action occurrence: the row the action belongs to. */\nexport interface SessionRowOwnerProps {\n  /** Session the row shows. */\n  sessionId: SessionId\n  /** Row display title: persisted title, or empty when the Session has none. */\n  displayTitle: string\n}',
     ],
-    ownerPropsReferences: [
-      'SessionId',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -4586,7 +4667,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    const copyLabel = \'Copy session title\' // Localize in the contributing package.\n    ctx.slots.inject(\'sidebar.workspaces.session.menu.item\', () => ctx.slots.register(\n      { name: \'sidebar.workspaces.session.menu.item\', id: \'copy-session-title\', order: 500 },\n      ({ displayTitle, useMenuOpenState }) => {\n        const [, setMenuOpen] = useMenuOpenState()\n        return React.createElement(\n          \'button\',\n          {\n            type: \'button\', role: \'menuitem\',\n            onClick: () => { setMenuOpen(false); void navigator.clipboard.writeText(displayTitle) },\n          },\n          copyLabel,\n        )\n      },\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:171',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:200',
   },
   {
     key: 'sidebar.workspaces.session.row.action',
@@ -4617,9 +4698,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/** Owner share of one Session row action occurrence: the row the action belongs to. */\nexport interface SessionRowOwnerProps {\n  /** Session the row shows. */\n  sessionId: SessionId\n  /** Row display title: persisted title, or empty when the Session has none. */\n  displayTitle: string\n}',
     ],
-    ownerPropsReferences: [
-      'SessionId',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',
@@ -4641,7 +4720,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.workspaces.session.row.action\', () => ctx.slots.register(\n      { name: \'sidebar.workspaces.session.row.action\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:189',
+    source: 'packages/client/ui-workspace/src/client/contract/slots.ts:218',
   },
   {
     key: 'tool.call.images',
@@ -4686,14 +4765,14 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'tool.call.images\', () => ctx.slots.register(\n      { name: \'tool.call.images\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-tool/src/client/contract/slots.ts:44',
+    source: 'packages/client/ui-tool/src/client/contract/slots.ts:43',
   },
   {
     key: 'tool.call.toolview',
     kind: 'keyed',
     scope: 'session',
     summary: 'Keyed Tool call view dispatched by wire Tool name.',
-    doc: 'Keyed Tool call view dispatched by wire Tool name. Any name is allowed,\nincluding tools registered by your package. Register with\n`key: \'<tool name>\'`; a typo never renders.\n\nRegistering an occupied key replaces its view; unclaimed keys use the\ngeneric row. The owner supplies the call identity and running\nor settled node through explicit phase props. Every stage supplies\n`name` and a lazy `args` view; preparing arguments may be incomplete.',
+    doc: 'Keyed Tool call view dispatched by wire Tool name. Any name is allowed, including\ntools registered by your package. Register with `key: \'<tool name>\'`; a typo never renders.\n\nRegistering an occupied key replaces its view; unclaimed keys use the\ngeneric row. The owner supplies the call identity and running\nor settled node through explicit phase props. Every stage supplies\n`name` and a lazy `args` view; preparing arguments may be incomplete.',
     registerOptions: [
       {
         name: 'key',
@@ -4781,6 +4860,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-tool DetailsRow key \'team_task_update\'',
       'client-ui-tool DetailsRow key \'team_task_list\'',
       'client-ui-tool DetailsRow key \'wait_agent\'',
+      'client-ui-tool DispatchStatusRow',
       'client-ui-tool FileMutationRow key \'edit\'',
       'client-ui-tool FileMutationRow key \'write\'',
       'client-ui-tool ReadImageRow key \'read_image\'',
@@ -4797,7 +4877,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'tool.call.toolview\', () => ctx.slots.register(\n      { name: \'tool.call.toolview\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-tool/src/client/contract/slots.ts:26',
+    source: 'packages/client/ui-tool/src/client/contract/slots.ts:25',
   },
   {
     key: 'tool.view.cordis',
@@ -4867,9 +4947,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ownerProps: [
       '/** Owner operations available to every keyed Workspace notice. */\nexport interface WorkspaceToastOwnerProps {\n  /** Dismiss the displayed notice. */\n  dismissToast: () => void\n}',
     ],
-    ownerPropsReferences: [
-      'Workspace',
-    ],
+    ownerPropsReferences: [],
     standardProps: [
       'useRemoteAccess: (action: RemoteEndpoint) => boolean',
       'useResource: UseResource',

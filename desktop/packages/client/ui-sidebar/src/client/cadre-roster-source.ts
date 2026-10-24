@@ -13,9 +13,6 @@ export type RosterRole = 'supervisor' | 'worker'
 /** Active roster states order 待验收 > 执行中 > 空闲 > 离线; departed is history. */
 export type RosterStatus = 'review' | 'working' | 'idle' | 'offline' | 'departed'
 
-/** The project id the local IPC bridge is configured with (see main.ts). */
-export const CADRE_PROJECT_ID = 'proj-demo'
-
 /** One row the roster renders. */
 export interface RosterMember {
   readonly sessionId: string

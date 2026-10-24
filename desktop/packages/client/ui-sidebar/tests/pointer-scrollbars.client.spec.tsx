@@ -47,7 +47,7 @@ function mountColumn(): { column: HTMLElement; quiet: () => boolean } {
       {...allowAllAccess}
       startSession={vi.fn()} toggleSidebar={vi.fn()}
       requestCadreCreate={vi.fn()} refreshCadreSupervisor={vi.fn()}
-      useCadreSupervisor={selector => selector(false)} t={t}
+      useProjectState={selector => selector({ supervisors: new Set(), defaultProjectId: null })} t={t}
       renderSlot={((_key: string, owner: SidebarSectionOwnerProps) =>
         <div data-testid="region" data-wide={owner.wide} />) as SidebarRootComponentProps['renderSlot']}
     />,

@@ -357,7 +357,9 @@ function jsDocOf(member: ts.Node, sf: ts.SourceFile): string {
 
 /** Strip the shared leading indentation of a multi-line source slice. */
 function dedent(text: string): string {
-  const lines = text.split('\n')
+  // Normalize first: a Windows checkout (core.autocrlf) hands us CRLF, and a
+  // raw CR inside the generated single-quoted literal is not a valid escape.
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
   const indents = lines.slice(1).filter(line => line.trim() !== '')
     .map(line => (/^\s*/.exec(line) as RegExpExecArray)[0].length)
   const shared = indents.length === 0 ? 0 : Math.min(...indents)

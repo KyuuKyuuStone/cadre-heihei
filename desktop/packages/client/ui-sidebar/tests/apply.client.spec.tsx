@@ -36,7 +36,16 @@ async function bench(declare = true) {
   const uiWorkspace = { startSession: vi.fn() }
   ctx.provide('shortcuts', { catalog: createSnapshotStore([]) } as never)
   ctx.provide('theme', { overrideTokens: vi.fn() } as never)
-  ctx.provide('sessions', { create: vi.fn(async () => 'created-session') } as never)
+  ctx.provide('sessions', {
+    create: vi.fn(async () => 'created-session'),
+    list: { getSnapshot: () => ({ ids: [], byId: {}, phase: 'ready', projectionsBySession: {} }), subscribe: () => () => {} },
+  } as never)
+  ctx.provide('workspaces', {
+    list: {
+      getSnapshot: () => ({ items: [], archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null }),
+      subscribe: () => () => {},
+    },
+  } as never)
   ctx.provide('layout', layout)
   ctx.provide('uiWorkspace', uiWorkspace as never)
   ctx.provide('locale', new LocaleRuntime(ctx))
@@ -60,7 +69,7 @@ describe('ui-sidebar apply', () => {
   })
 
   it('declares only the services it uses', () => {
-    expect(inject).toEqual(['slots', 'theme', 'layout', 'uiWorkspace', 'locale', 'shortcuts', 'sessions'])
+    expect(inject).toEqual(['slots', 'theme', 'layout', 'uiWorkspace', 'locale', 'shortcuts', 'sessions', 'workspaces'])
   })
 
   it('registers the shell and declares its child seats', async () => {

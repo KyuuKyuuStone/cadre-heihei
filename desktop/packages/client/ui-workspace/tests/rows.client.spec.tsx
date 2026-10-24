@@ -480,6 +480,55 @@ describe('workspace browser rows', () => {
     expect(screen.getByRole('treeitem').querySelector('[data-state="done"]')).not.toBeNull()
   })
 
+  it('mounts the product project-row strip instead of the shipped New Session button', () => {
+    const group: GroupNode = {
+      key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
+      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+    }
+    const renderSlot = vi.fn((_name: string, owner: { workspaceId: string; label: string; cwd?: string }) => (
+      <button type="button" data-testid="project-actions">{owner.workspaceId}</button>
+    ))
+    render(<ProjectRowItem
+      group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t}
+      renderSlot={renderSlot as never}
+    />)
+    expect(renderSlot).toHaveBeenCalledWith('sidebar.workspaces.project.row.action', {
+      workspaceId: 'project', label: 'Project', cwd: '/projects/project',
+    })
+    expect(screen.getByTestId('project-actions').textContent).toBe('project')
+    // An occupied strip replaces the shipped create button, so the occupant
+    // owns the row's affordances.
+    expect(screen.queryByRole('button', { name: '在“Project”中新建会话' })).toBeNull()
+  })
+
+  it('keeps the shipped New Session button when the product strip is empty', () => {
+    const group: GroupNode = {
+      key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
+      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+    }
+    const onCreate = vi.fn()
+    render(<ProjectRowItem
+      group={group} onToggle={vi.fn()} onCreate={onCreate} t={t}
+      renderSlot={() => null}
+    />)
+    const create = screen.getByRole('button', { name: '在“Project”中新建会话' })
+    fireEvent.click(create)
+    expect(onCreate).toHaveBeenCalledOnce()
+  })
+
+  it('does not mount the product strip on the ungrouped bucket', () => {
+    const group: GroupNode = {
+      key: '', workspaceId: undefined, cwd: undefined, createdAt: undefined, label: '',
+      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+    }
+    const renderSlot = vi.fn(() => null)
+    render(<ProjectRowItem
+      group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t}
+      renderSlot={renderSlot as never}
+    />)
+    expect(renderSlot).not.toHaveBeenCalled()
+  })
+
   it('workspace row menu opens on the ellipsis, renames, and shows the danger delete row', () => {
     const onRename = vi.fn()
     const onDelete = vi.fn()

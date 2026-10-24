@@ -138,11 +138,31 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * An archived row keeps that cell blank — neither its status dot nor this
      * seat renders there, and its live status appears on the hover card only.
      */
+    'sidebar.session.row.leading': { kind: 'list'; scope: 'root'; owner: SessionRowScheduleOwnerProps }
     /**
      * Section of the Session row's hover card between its relative time and
      * its trailing status line. Mounted only while that card is open.
      */
     'sidebar.session.row.hover': { kind: 'list'; scope: 'root'; owner: SessionRowScheduleOwnerProps }
+    /**
+     * Identity badge beside one Session row's title, after the title and before
+     * the row's time label. Mounted only for a non-blank Session row; the
+     * occupant reads the row's Session identity and decides its own visibility
+     * (an ordinary Session renders nothing). No shipped entry occupies the
+     * seat, so a product badge lands beside the official title without
+     * replacing it.
+     */
+    'sidebar.session.row.badge': { kind: 'list'; scope: 'root'; owner: SessionRowScheduleOwnerProps }
+    /**
+     * Action strip at the end of one project (Workspace) row, after the
+     * Workspace's "..." menu. Mounted only for a real Workspace row in the
+     * grouped view; the ungrouped bucket and the flat list have no project row.
+     * The occupant receives the row's Workspace id, title, and folder path and
+     * owns every button it renders. While the seat is empty the shipped single
+     * "New Session" button renders; an occupant replaces that button, so it
+     * must render its own create affordance if the row still needs one.
+     */
+    'sidebar.workspaces.project.row.action': { kind: 'list'; scope: 'root'; owner: ProjectRowOwnerProps }
     /**
      * The rows of one Session's "..." menu, in ascending `order`. ui-workspace
      * registers the shipped rows here — `pin` (100), `rename` (200), `fork`
@@ -177,6 +197,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      *   },
      * }
      */
+    'sidebar.workspaces.session.menu.item': {
+      kind: 'list'
+      scope: 'root'
+      owner: SessionRowOwnerProps
+      hookContext: MenuOpenState
+      inject: { hooks: {
+        menuOpenState: SlotHookFactory<'sidebar.workspaces.session.menu.item', UseMenuOpenState>
+        shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>
+      } }
+    }
     /**
      * The hover buttons at the end of one Session row, in ascending `order`,
      * after the "..." menu trigger. ui-workspace registers `archive` (100) and

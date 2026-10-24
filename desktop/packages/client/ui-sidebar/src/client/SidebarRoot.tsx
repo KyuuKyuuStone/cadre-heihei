@@ -93,7 +93,7 @@ export function SidebarRoot({
   selectPanel,
   requestCadreCreate,
   refreshCadreSupervisor,
-  useCadreSupervisor,
+  useProjectState,
   usePanels,
   useShortcuts,
   usePanelInfo,
@@ -108,7 +108,8 @@ export function SidebarRoot({
   // .collapsed .wide), unmounts at settle, and remounts right away on expand.
   const [settled, setSettled] = useState(collapsed)
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
-  const hasSupervisor = useCadreSupervisor(Boolean)
+  const hasSupervisor = useProjectState(state => state.defaultProjectId !== null
+    && state.supervisors.has(state.defaultProjectId))
   useEffect(() => {
     if (!collapsed) { setSettled(false); return }
     const timer = window.setTimeout(() => { setSettled(true) }, COLLAPSE_SETTLE_MS)

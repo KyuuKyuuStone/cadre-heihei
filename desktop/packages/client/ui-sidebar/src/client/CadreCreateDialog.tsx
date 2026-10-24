@@ -15,7 +15,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  CADRE_PROJECT_ID, loadCustomRoles, removeCustomRole, saveCustomRole,
+  loadCustomRoles, removeCustomRole, saveCustomRole,
   type CustomRole,
 } from './cadre-roster-source.ts'
 import css from './CadreCreateDialog.module.css'
@@ -37,7 +37,10 @@ const BODY_TEXTAREA: CSSProperties = {
 export interface CadreCreateRequest {
   readonly kind: 'supervisor' | 'worker'
   readonly token: number
+  /** The project (official Workspace id) the new member belongs to. */
   readonly workspaceId?: string
+  /** Display title of that project, resolved by the requester. */
+  readonly projectLabel?: string
 }
 
 type RoleGroup = 'dev' | 'novel' | 'general'
@@ -178,9 +181,10 @@ function CadreCreateForm({
     let cancelled = false
     const list = bridge()
     if (kind === 'supervisor') {
+      const projectId = request.workspaceId
       const roster = list?.listRoster
-      if (roster === undefined) return
-      void roster({ projectId: CADRE_PROJECT_ID }).then((result) => {
+      if (projectId === undefined || roster === undefined) return () => { cancelled = true }
+      void roster({ projectId }).then((result) => {
         if (cancelled) return
         const members = result?.members ?? result?.rows ?? []
         setSupervisor(members.find(member => member.role === 'supervisor' && member.state !== 'departed'))
@@ -274,14 +278,15 @@ function CadreCreateForm({
   const models = selectedProvider?.models ?? []
   const efforts = selectedProvider?.models?.find(model => model.id === modelId)?.reasoning?.efforts ?? []
 
+  const projectName = request.projectLabel ?? request.workspaceId ?? '未选择项目部'
   return (
     <Modal
       open
       onClose={() => { if (!creating) closeCreate() }}
       title={kind === 'supervisor' ? '新建主管' : '新建员工'}
       description={kind === 'supervisor'
-        ? `项目部 ${CADRE_PROJECT_ID} · 主管只做调度与验收，每项目部限一名`
-        : `项目部 ${CADRE_PROJECT_ID} · 选模板自动填名称与职责，均可修改`}
+        ? `项目部 ${projectName} · 主管只做调度与验收，每项目部限一名`
+        : `项目部 ${projectName} · 选模板自动填名称与职责，均可修改`}
       closeLabel="关闭"
       className={css.wideDialog ?? ''}
       contentClassName={css.wideContent ?? ''}
@@ -290,7 +295,8 @@ function CadreCreateForm({
           <Button variant="outline" disabled={creating} onClick={() => { closeCreate() }}>取消</Button>
           <Button
             variant="primary"
-            disabled={creating || name.trim() === '' || (kind === 'supervisor' && supervisor !== undefined)}
+            disabled={creating || request.workspaceId === undefined || name.trim() === ''
+              || (kind === 'supervisor' && supervisor !== undefined)}
             onClick={() => { void submit() }}
           >
             {creating ? '创建中…' : kind === 'supervisor' ? '创建主管' : '创建员工'}
@@ -298,6 +304,11 @@ function CadreCreateForm({
         </>
       )}
     >
+      {request.workspaceId === undefined && (
+        <p role="alert" className={css.error}>
+          还没有可用的项目部：请先在侧栏新建或添加一个工作区，再从该行「＋」建人。
+        </p>
+      )}
       {kind === 'supervisor'
         ? (
           <div className={css.stack}>

@@ -58,7 +58,12 @@ function mountShell({ collapsed = false, width = 300, shortcuts = [], supervisor
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector(shortcuts)}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
-      startSession={startSession} requestCadreCreate={requestCadreCreate} refreshCadreSupervisor={refreshCadreSupervisor} useCadreSupervisor={selector => selector(supervisor)} toggleSidebar={toggleSidebar} t={t}
+      startSession={startSession} requestCadreCreate={requestCadreCreate} refreshCadreSupervisor={refreshCadreSupervisor}
+      useProjectState={selector => selector({
+        supervisors: supervisor ? new Set(['project']) : new Set(),
+        defaultProjectId: 'project',
+      })}
+      toggleSidebar={toggleSidebar} t={t}
       renderSlot={((
         key: string,
         owner: SidebarFooterActionOwnerProps | SidebarSectionOwnerProps | SidebarSettingsOwnerProps,
@@ -124,7 +129,7 @@ describe('SidebarRoot shell', () => {
       useSessionRetainInfo={neverHook} useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
       usePanels={select => select([])} useShortcuts={select => select([shortcut])}
-      useCadreSupervisor={select => select(false)} />)
+      useProjectState={select => select({ supervisors: new Set(), defaultProjectId: null })} />)
     const button = screen.getByRole('button', { name: 'New session' })
     expect(button.getAttribute('aria-keyshortcuts')).toBe('Control+N')
     fireEvent.focus(button)
@@ -165,7 +170,7 @@ describe('SidebarRoot shell', () => {
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
-      startSession={vi.fn()} requestCadreCreate={vi.fn()} refreshCadreSupervisor={() => {}} useCadreSupervisor={selector => selector(false)} toggleSidebar={vi.fn()} t={t}
+      startSession={vi.fn()} requestCadreCreate={vi.fn()} refreshCadreSupervisor={() => {}} useProjectState={selector => selector({ supervisors: new Set(), defaultProjectId: null })} toggleSidebar={vi.fn()} t={t}
       renderSlot={((_key: string, _owner: unknown, options?: { fallback?: ReactNode }) =>
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
@@ -186,7 +191,7 @@ describe('SidebarRoot shell', () => {
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
-      startSession={vi.fn()} requestCadreCreate={vi.fn()} refreshCadreSupervisor={() => {}} useCadreSupervisor={selector => selector(false)} toggleSidebar={vi.fn()} t={t}
+      startSession={vi.fn()} requestCadreCreate={vi.fn()} refreshCadreSupervisor={() => {}} useProjectState={selector => selector({ supervisors: new Set(), defaultProjectId: null })} toggleSidebar={vi.fn()} t={t}
       renderSlot={((_key: string, _owner: unknown, options?: { fallback?: ReactNode }) =>
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
@@ -202,7 +207,7 @@ describe('SidebarRoot shell', () => {
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
-      startSession={vi.fn()} requestCadreCreate={vi.fn()} refreshCadreSupervisor={() => {}} useCadreSupervisor={selector => selector(false)} toggleSidebar={vi.fn()} t={t}
+      startSession={vi.fn()} requestCadreCreate={vi.fn()} refreshCadreSupervisor={() => {}} useProjectState={selector => selector({ supervisors: new Set(), defaultProjectId: null })} toggleSidebar={vi.fn()} t={t}
       renderSlot={((_key: string, _owner: unknown, options?: { fallback?: ReactNode }) =>
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
     />)
@@ -250,7 +255,7 @@ describe('SidebarRoot shell', () => {
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector([])} useShortcuts={selector => selector([])}
       useResource={useResource} useWorkspaces={neverHook}
       {...allowAllAccess}
-      startSession={vi.fn()} requestCadreCreate={vi.fn()} refreshCadreSupervisor={() => {}} useCadreSupervisor={selector => selector(false)} toggleSidebar={vi.fn()} t={t}
+      startSession={vi.fn()} requestCadreCreate={vi.fn()} refreshCadreSupervisor={() => {}} useProjectState={selector => selector({ supervisors: new Set(), defaultProjectId: null })} toggleSidebar={vi.fn()} t={t}
       renderSlot={((key: string) => key === 'sidebar.toggle.badge'
         ? <Tooltip label="Update — V1.2.3"><span data-testid="badge" /></Tooltip>
         : null) as SidebarRootComponentProps['renderSlot']}

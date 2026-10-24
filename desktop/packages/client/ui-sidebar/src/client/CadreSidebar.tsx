@@ -14,8 +14,34 @@ import {
   Modal,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { HostObservable, InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
+import type { CadreProjectState } from './contract/slots.ts'
 import css from './CadreSidebar.module.css'
+
+/*
+ * Owner shares of the ui-workspace seats this package contributes to. They are
+ * declared here structurally rather than through `PropsRuntime`: ui-workspace
+ * depends on ui-sidebar, so this package cannot reference that client program
+ * without a project-reference cycle. The ui-workspace contract remains the
+ * authority for the exact shapes.
+ */
+interface CadreProjectRowOwner {
+  readonly workspaceId: string
+  readonly label: string
+  readonly cwd?: string
+}
+
+interface CadreSessionRowOwner {
+  readonly sessionId: string
+}
+
+interface CadreSessionMenuOwner {
+  readonly sessionId: string
+  readonly displayTitle: string
+}
+
+/** The row menu's open-state pair, bound by the owner as the slot's hookContext. */
+type UseMenuOpenState = () => readonly [open: boolean, setOpen: (open: boolean) => void]
 
 /** One member as `cadre:listRoster` returns it. */
 export interface CadreRosterMember {
@@ -34,7 +60,7 @@ export interface CadreRosterState {
 
 /** Face of the project-row action entries. */
 export interface CadreProjectActionsInjected {
-  hooks: { cadreSupervisor: HostObservable<boolean> }
+  hooks: { projectState: HostObservable<CadreProjectState> }
   startSession: (workspaceId: string) => void
   requestCadreCreate: (kind: 'supervisor' | 'worker', workspaceId: string) => void
   openLedger: (request: { projectId: string; label: string; cwd?: string }) => void
@@ -71,10 +97,10 @@ function memberOf(members: readonly CadreRosterMember[], sessionId: string): Cad
  * occupied (see ui-workspace's ProjectRowItem).
  */
 export function CadreProjectRowActions({
-  workspaceId, label, cwd, useCadreSupervisor, startSession, requestCadreCreate, openLedger,
-}: PropsRuntime<'sidebar.workspaces.project.row.action'> & InjectFace<CadreProjectActionsInjected>) {
+  workspaceId, label, cwd, useProjectState, startSession, requestCadreCreate, openLedger,
+}: CadreProjectRowOwner & InjectFace<CadreProjectActionsInjected>) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const hasSupervisor = useCadreSupervisor(Boolean)
+  const hasSupervisor = useProjectState(state => state.supervisors.has(workspaceId))
   return (
     <span className={css.projectActions} onClick={event => { event.stopPropagation() }}>
       <Menu
@@ -127,7 +153,7 @@ export function CadreProjectRowActions({
 /** Leading 16px cell: supervisor solid square, employee hollow circle. */
 export function CadreSessionMarker({
   sessionId, useRoster,
-}: PropsRuntime<'sidebar.session.row.leading'> & InjectFace<CadreRosterBadgeInjected>) {
+}: CadreSessionRowOwner & InjectFace<CadreRosterBadgeInjected>) {
   const members = useRoster(state => state.members)
   const member = memberOf(members, sessionId)
   if (member === undefined || member.state === 'departed') return null
@@ -139,7 +165,7 @@ export function CadreSessionMarker({
 /** Badge beside the title: 主管 / 员工 · 岗位; ordinary Sessions stay bare. */
 export function CadreSessionBadge({
   sessionId, useRoster,
-}: PropsRuntime<'sidebar.session.row.badge'> & InjectFace<CadreRosterBadgeInjected>) {
+}: CadreSessionRowOwner & InjectFace<CadreRosterBadgeInjected>) {
   const members = useRoster(state => state.members)
   const member = memberOf(members, sessionId)
   if (member === undefined || member.state === 'departed') return null
@@ -161,7 +187,7 @@ export function CadreSessionBadge({
  */
 export function CadreEditMemberMenuItem({
   sessionId, displayTitle, useMenuOpenState, useRoster, updateMember,
-}: PropsRuntime<'sidebar.workspaces.session.menu.item'> & InjectFace<CadreEditInjected>) {
+}: CadreSessionMenuOwner & { useMenuOpenState: UseMenuOpenState } & InjectFace<CadreEditInjected>) {
   const [, setMenuOpen] = useMenuOpenState()
   const members = useRoster(state => state.members)
   const member = memberOf(members, sessionId)
@@ -247,7 +273,7 @@ export function CadreEditMemberMenuItem({
  */
 export function CadreRetireMenuItem({
   sessionId, displayTitle, useMenuOpenState, useRoster, retire,
-}: PropsRuntime<'sidebar.workspaces.session.menu.item'> & InjectFace<CadreRetireInjected>) {
+}: CadreSessionMenuOwner & { useMenuOpenState: UseMenuOpenState } & InjectFace<CadreRetireInjected>) {
   const [, setMenuOpen] = useMenuOpenState()
   const members = useRoster(state => state.members)
   const member = memberOf(members, sessionId)
