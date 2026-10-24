@@ -2503,7 +2503,11 @@ importers:
         specifier: workspace:~
         version: link:../../../vendor/cordis
 
-  packages/bundle/cadre-app: {}
+  packages/bundle/cadre-app:
+    dependencies:
+      '@deepseek-ai/dsh-host-collab':
+        specifier: workspace:*
+        version: link:../../cadre/host-collab
 
   packages/bundle/headless:
     dependencies:
@@ -3159,6 +3163,8 @@ importers:
       '@deepseek-ai/dsh-workspace':
         specifier: workspace:*
         version: link:../../workspace/workspace
+
+  packages/cadre/host-collab: {}
 
   packages/client/connection:
     dependencies:
