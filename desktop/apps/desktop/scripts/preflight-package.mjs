@@ -122,6 +122,30 @@ try {
   check('no-secrets', false, String(error).slice(0, 120))
 }
 
+// 5b) cadre-collab 构建产物：gitignore 的 esbuild 产物，漏建/陈旧 = 主进程缺 initCadreStore
+//     （首次启动不建 schema、写请求全被 LEDGER_UNAVAILABLE 拒）。dev 由 prestart 自动重建。
+const collabOut = join(APP_ROOT, 'lib', 'cadre-collab.cjs')
+const collabSrc = join(APP_ROOT, '..', '..', 'cadre-collab')
+const newestSrcMtime = (() => {
+  let newest = 0
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else newest = Math.max(newest, statSync(full).mtimeMs)
+    }
+  }
+  walk(collabSrc)
+  return newest
+})()
+if (!existsSync(collabOut)) {
+  warn('cadre-collab-build', 'lib/cadre-collab.cjs 缺失——dev 由 pnpm prestart 自动重建；打包走 release:win 自动构建。手动：node desktop/scripts/build-cadre-collab.mjs')
+} else if (statSync(collabOut).mtimeMs < newestSrcMtime) {
+  warn('cadre-collab-build', `lib/cadre-collab.cjs 比源码旧（源码有更新未构建）——运行 node desktop/scripts/build-cadre-collab.mjs 重建，否则 initCadreStore 用的是旧状态机`)
+} else {
+  check('cadre-collab-build', true)
+}
+
 // 6) Stale-install cleanup macro must stay wired.
 // 6b) primary-runtime integrity — prepare-runtime 整树重建，中断即残缺（node.exe/python 缺失时 dev 无法启动）。
 const runtimeRoot = join(APP_ROOT, '.desktop-build', 'targets', 'win-x64', 'runtime', 'primary-runtime', 'dependencies')

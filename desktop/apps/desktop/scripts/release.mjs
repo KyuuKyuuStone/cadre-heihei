@@ -91,6 +91,11 @@ if (targetVersion !== currentVersion) {
   console.log('[release]   (version unchanged — skipping bump)')
 }
 
+// ── 1.5 cadre-collab write-path build（lib/cadre-collab.cjs 是 gitignore 的构建产物，
+//      漏建则主进程缺 initCadreStore：首次启动不建 schema、写请求全被 LEDGER_UNAVAILABLE 拒）──
+const collabBuild = runStep('1.5-cadre-collab', 'node', [join('scripts', 'build-cadre-collab.mjs')], { cwd: REPO_ROOT })
+if (collabBuild.status !== 0) fail('1.5-cadre-collab', 'build-cadre-collab 失败', '检查 1.5-cadre-collab.stderr.log；esbuild 与 cadre-collab/entry.ts 是否在位')
+
 // ── 2. preflight ──
 const preflight = runStep('2-preflight', 'node', [join('scripts', 'preflight-package.mjs')], { cwd: APP_ROOT, runInDryRun: true })
 if (preflight.status !== 0) fail('2-preflight', (preflight.stdout ?? '').match(/FAILED: .*$/)?.[0] ?? 'preflight gate rejected', 'open 2-preflight.stdout.log for the failing check; each check comments why it exists')
