@@ -49,16 +49,21 @@ function prepareCli({ platform, arch }: DesktopTarget): void {
 }
 
 async function main(): Promise<void> {
+  const started = Date.now()
+  console.error('[prepare:runtime] start')
   const { values } = parseArgs({ options: { 'defer-primary-runtime-smoke': { type: 'boolean', default: false } } })
   const target = desktopTargetPlatform(resolveDesktopBuildTarget())
   rmSync(RUNTIME_ROOT, { recursive: true, force: true })
   mkdirSync(RUNTIME_ROOT, { recursive: true })
   const nodeVersion = await prepareElectron(target)
+  console.error(`[prepare:runtime] electron extracted (node ${nodeVersion}) in ${String(Date.now() - started)}ms`)
   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:primary-runtime',
     () => preparePrimaryRuntime({ deferSmoke: values['defer-primary-runtime-smoke'] }))
+  console.error(`[prepare:runtime] primary runtime ready in ${String(Date.now() - started)}ms`)
   const { pnpm } = await readPrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime'))
   if (pnpm === undefined) throw new Error('desktop runtime: primary-runtime manifest has no pnpm version')
   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'prepare:cli', async () => { prepareCli(target) })
+  console.error(`[prepare:runtime] cli ready in ${String(Date.now() - started)}ms`)
   writeFileSync(join(RUNTIME_ROOT, 'versions.json'), `${JSON.stringify({
     schemaVersion: 1,
     node: nodeVersion,
@@ -66,4 +71,10 @@ async function main(): Promise<void> {
   }, undefined, 2)}\n`)
 }
 
-await main()
+try {
+  await main()
+  console.error('[prepare:runtime] done')
+} catch (error) {
+  console.error('[prepare:runtime] FAILED:', error)
+  process.exitCode = 1
+}

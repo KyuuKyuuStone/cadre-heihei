@@ -1,7 +1,7 @@
 /** Desktop resource locations and signing-aware verification for the shared runtime builder. */
 
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { preparePrimaryRuntime as preparePayload, smokePrimaryRuntime as smokePayload } from '../../../scripts/primary-runtime/prepare.ts'
 import { parsePrimaryRuntime, workspaceDependencyPaths } from '../../../packages/skill/tool-workspace-dependencies/src/index.ts'
 import { resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
@@ -13,10 +13,16 @@ import { scrubWindowsSigningEnvironment } from './windows-sign.mjs'
  * @returns Resolves after preparation and, unless deferred, native-target execution checks.
  */
 export async function preparePrimaryRuntime(options: { deferSmoke?: boolean } = {}): Promise<void> {
+  const started = Date.now()
+  console.error('[prepare:primary-runtime] start')
   const paths = resolveDesktopTargetBuildPaths()
   const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
   await preparePayload({ target: resolveDesktopBuildTarget(), output: paths.runtime, cache: paths.downloads, version })
-  if (!options.deferSmoke) smokePrimaryRuntime(join(paths.runtime, 'primary-runtime'))
+  console.error(`[prepare:primary-runtime] payload ready in ${String(Date.now() - started)}ms`)
+  if (!options.deferSmoke) {
+    smokePrimaryRuntime(join(paths.runtime, 'primary-runtime'))
+    console.error(`[prepare:primary-runtime] smoke passed in ${String(Date.now() - started)}ms`)
+  }
 }
 
 /**
@@ -32,4 +38,14 @@ export function smokePrimaryRuntime(root: string): void {
   smokePayload(root, scrubWindowsSigningEnvironment(process.env))
 }
 
-if (import.meta.main) await preparePrimaryRuntime()
+// `import.meta.main` is undefined on Node < 24.2, which silently turned a
+// standalone `tsx scripts/prepare-primary-runtime.ts` into a no-op. These files
+// are entrypoints when run directly, so detect the entry by argv instead.
+if (process.argv[1]?.split(sep).at(-1) === 'prepare-primary-runtime.ts') {
+  try {
+    await preparePrimaryRuntime()
+  } catch (error) {
+    console.error('[prepare:primary-runtime] FAILED:', error)
+    process.exitCode = 1
+  }
+}
