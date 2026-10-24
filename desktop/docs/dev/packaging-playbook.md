@@ -51,3 +51,19 @@ env 注入/IPC 不生效、旧行为残留）。已两次造成误判。
   `tsdown --env.DSH_BUILD_FACE host`，同样两层。
 - 快速自检：`grep -c "<新标识>" apps/desktop/lib/main.js` 与
   `packages/<pkg>/lib/index.js` 均 > 0 再启动。
+
+## primary-runtime 残缺自检与恢复（node.exe ENOENT 的真相）
+
+`primary-runtime`（`.desktop-build/targets/win-x64/runtime/`）由
+`apps/desktop/scripts/prepare-runtime.ts` 生成，**每次执行先整树删除
+`RUNTIME_ROOT` 再重建**（`prepare-runtime.ts:54` `rmSync(RUNTIME_ROOT)`）。
+构建/复制中途被中断（kill、重启、断电）就会留下**残缺树**：典型症状是
+`run start` 报 `dependencies/node/bin/node.exe ENOENT`，随后 python venv
+`ensurepip` 也失败（同一中断打断了 node 与 python 两段复制）。
+
+- **与 host tsdown 无关**：tsdown 只写 `lib/`，不会碰 `runtime/`——别朝这个方向排查。
+- **恢复**：跑官方全链（`release:win` 或 `build:official`，prepare-runtime 在链内自动重建，
+  0.5.2 已验证）；**单跑 `prepare:runtime` 在本机静默退出**（dsh 树段后无输出即死，
+  根因未明——待后端诊断，勿反复盲跑）。
+- **自检**：`ls apps/desktop/.desktop-build/targets/win-x64/runtime/primary-runtime/dependencies/node/bin/node.exe`
+  与 `dependencies/python/python.exe` 都在，才说明 runtime 完整；preflight 已加入该检查。

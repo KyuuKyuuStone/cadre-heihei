@@ -123,6 +123,12 @@ try {
 }
 
 // 6) Stale-install cleanup macro must stay wired.
+// 6b) primary-runtime integrity — prepare-runtime 整树重建，中断即残缺（node.exe/python 缺失时 dev 无法启动）。
+const runtimeRoot = join(APP_ROOT, '.desktop-build', 'targets', 'win-x64', 'runtime', 'primary-runtime', 'dependencies')
+const runtimeNode = existsSync(join(runtimeRoot, 'node', 'bin', 'node.exe'))
+const runtimePython = existsSync(join(runtimeRoot, 'python', 'python.exe'))
+if (runtimeNode && runtimePython) check('primary-runtime-integrity', true)
+else warn('primary-runtime-integrity', `runtime 残缺（node=${runtimeNode ? 'ok' : 'missing'}, python=${runtimePython ? 'ok' : 'missing'}）——dev/run start 会 ENOENT；跑官方全链重建（单跑 prepare:runtime 本机静默退出，勿盲跑）`)
 const nshText = readFileSync(join(APP_ROOT, 'scripts', 'installer.nsh'), 'utf8')
 const hasCleanup = /\!macro customInstall[\s\S]*RMDir \/r "\$INSTDIR\\resources"/.test(nshText)
 if (hasCleanup) check('stale-install-cleanup-macro', true)
