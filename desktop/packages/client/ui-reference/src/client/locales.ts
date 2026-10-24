@@ -17,7 +17,7 @@ export const zh = {
   'section.subagents': '子智能体',
   'section.sessions': '对话',
   'candidate.noCwd': '（无工作目录）',
-  'crumb.root': '工作区',
+  'crumb.root': '项目部',
   'fileOpen.title': '无法打开文件',
   'fileOpen.failed': '无法打开“{path}”，请重试或关闭此提示',
   'fileOpen.close': '关闭',

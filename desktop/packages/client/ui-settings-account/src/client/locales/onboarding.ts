@@ -3,7 +3,7 @@ export const onboardingCopy = {
   onboardingArtworkLocale: 'zh',
   onboardingWelcome: '欢迎使用',
   onboardingBrand: 'Cadre Heihei',
-  onboardingIntroduction: 'Cadre Heihei 会以本地文件夹作为工作区，通过调用各种工具，读写本机文件，完成搜索整理资料、制作文档表格、编写代码、排查问题等各种任务。',
+  onboardingIntroduction: 'Cadre Heihei 会以本地文件夹作为项目部，通过调用各种工具，读写本机文件，完成搜索整理资料、制作文档表格、编写代码、排查问题等各种任务。',
   onboardingStart: '开始设置',
   onboardingCredit: '准备可用额度',
   onboardingCreditDescription: 'Cadre Heihei 执行任务时，会根据模型与工具使用的 token 量扣除额度。请提前添加额度，避免任务在执行过程中被迫中断。你的余额只会在 Agent 实际执行任务时消耗。',

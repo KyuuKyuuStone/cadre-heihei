@@ -49,6 +49,7 @@ async function bench(collapsed = false) {
     inject: ['slots'],
     apply(ctx: Context) {
       ctx.provide('shortcuts', { catalog: createSnapshotStore([]) } as never)
+      ctx.provide('theme', { overrideTokens: vi.fn() } as never)
       ctx.provide('layout', layout)
       ctx.provide('uiWorkspace', { startSession: vi.fn() } as never)
       ctx.provide('locale', locale)

@@ -216,7 +216,7 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function ProjectRowItem({ group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag, home, newShortcut, t }: {
+export function ProjectRowItem({ group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag, home, newShortcut, renderSlot, t }: {
   group: GroupNode
   newShortcut?: ShortcutCatalogEntry | undefined
   containsCurrentDescendant?: boolean
@@ -229,7 +229,7 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
   home?: string | undefined
   t: RowTranslate
-}) {
+} & Partial<Pick<PropsRenderSlots<'sidebar.workspaces.project.row.action'>, 'renderSlot'>>) {
   const row = group
   // The ungrouped bucket has no workspace title: its label is dictionary copy.
   const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
@@ -239,6 +239,15 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
     { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
     { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true },
   ]
+  // A product-furnished project action strip replaces the shipped single
+  // New Session button; an empty slot keeps the official interaction.
+  const projectActions = row.workspaceId === undefined || renderSlot === undefined
+    ? null
+    : renderSlot('sidebar.workspaces.project.row.action', {
+      workspaceId: row.workspaceId,
+      label,
+      ...(row.cwd === undefined ? {} : { cwd: row.cwd }),
+    })
   const ownRow = (
     <div
       className={clsx(css.projectRow, menuOpen && css.menuOpen)}
@@ -264,6 +273,9 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
+        {row.cwd !== undefined && row.cwd !== '' && (
+          <span className={css.projectPath}>{abbreviateHomePath(row.cwd, home)}</span>
+        )}
       </span>
       <span className={css.rowActions}>
         {actions !== undefined && (
@@ -294,17 +306,19 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
             )}
           />
         )}
-        <Tooltip label={t('actions.newSession')} shortcutKeys={newShortcut?.keys} side="bottom" align="end" delayMs={500} portal>
-          <button
-            type="button"
-            className={css.iconButton}
-            aria-keyshortcuts={newShortcut?.aria}
-            aria-label={t('actions.newSession.aria', { name: label })}
-            onClick={(e) => { e.stopPropagation(); onCreate() }}
-          >
-            <IconNewChatOutlineRegular />
-          </button>
-        </Tooltip>
+        {projectActions ?? (
+          <Tooltip label={t('actions.newSession')} shortcutKeys={newShortcut?.keys} side="bottom" align="end" delayMs={500} portal>
+            <button
+              type="button"
+              className={css.iconButton}
+              aria-keyshortcuts={newShortcut?.aria}
+              aria-label={t('actions.newSession.aria', { name: label })}
+              onClick={(e) => { e.stopPropagation(); onCreate() }}
+            >
+              <IconNewChatOutlineRegular />
+            </button>
+          </Tooltip>
+        )}
       </span>
     </div>
   )
@@ -563,6 +577,7 @@ export function SessionNodeItem({
   | 'sidebar.workspaces.session.menu.item'
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
+  | 'sidebar.session.row.badge'
   | 'sidebar.session.row.hover'
 >) {
   const row = node
@@ -651,6 +666,7 @@ export function SessionNodeItem({
       >
         {title}
       </span>
+      {!row.blank && renderSlot('sidebar.session.row.badge', { sessionId: node.id })}
       {/* A blank New Session row is a provisional placeholder: nothing has
           happened in it yet, so a "now" timestamp and the row verbs
           (rename/fork/archive) would all act on content that does not

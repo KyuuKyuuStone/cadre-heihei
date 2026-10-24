@@ -75,7 +75,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K7 | `packages/bundle/base/cordis.patch.yml` | 禁用 `llm-deepseek-account`（无账户产品） | **这是官方扩展点**（patch `disabled`），不是代码 patch | 1 行 + 注释 |
 | K8 | `packages/bundle/web-app/cordis.patch.yml` | 禁用 `ui-settings-account`（隐藏账户设置入口） | 同 K7，官方 patch 机制 | 1 行 + 注释；`account-controller` 仍由官方默认禁用 |
 | K9 | `packages/client/ui-theme/src/theme-settings.ts` | 默认主题 `system` → `dark` | 官方没有「部署默认主题」配置面 | 1 行常量（**建议改为品牌/部署注入，见 §六**） |
-| K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册项目面板（工作区 → 项目 → 花名册）、员工行徽标、主题 token 覆盖；EnginePort 客户端绑定经 `@deepseek-ai/dsh-cadre-engine/client`（内联进本包 bundle，见 K18）。0.7.0 对齐代码：`cadre-providers` 设置分区已随官方 Models 页收敛停止注册；`cadre-employees` 设置分区与「转为员工」菜单也停止注册（文件保留），新建入口收归项目行「＋」。注意 providers 链路并未删除：建员工对话框仍用 `listProviders` + `bindSession`（见汇报） | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
+| K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册侧栏壳、项目行「＋」三选一/「台账」、会话角色标识与行列菜单、建人/台账 overlay、主题 token 覆盖。0.7.0 后**删除 CadrePanel 面板**（花名册/台账整页、`main:cadre` 路由、`sidebar.panellist:cadre` 入口全部移除）；建人改为 `shell.overlay` 弹窗，台账改为只读 overlay。EnginePort 客户端绑定经 `@deepseek-ai/dsh-cadre-engine/client`（内联进本包 bundle，见 K18） | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
 | K11 | `packages/client/ui-sidebar/src/client/SidebarRoot.module.css` | 侧栏玻璃层背景改为 `color-mix` 取主题 token | 官方没有对应视觉变体 | 4 条声明；可移入我们的主题样式 |
 | K12 | `packages/client/ui-brand-official/src/client/index.ts`、`packages/client/ui-brand-official/src/client/Brand.tsx` | 品牌占位改为 Cadre 印章（含 hero 槽位） | 官方明确要求另做品牌包，不应改包内 | **ADR-0023 §2.6 决定迁到独立品牌包，本项待删** |
 | K13 | `packages/client/web/src/boot-page.ts` | 启动页字标改为 `Cadre Heihei` | 启动页在客户端 bundle 内、早于插件加载 | 1 行；品牌包无法覆盖启动页 |
@@ -88,7 +88,11 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K20 | `packages/client/ui-tool/src/client/apply.ts` | 注册 `dispatch-row` 工具卡视图（读 tool result 的 presentationMeta） | 官方工具卡注册表在客户端包内，插件只能注册到既有视图集合 | 一条注册；可抽成客户端插件 |
 | K21 | `packages/client/ui-tool/src/client/tool/toolviews/dispatch-row.tsx` | 派活结果卡：成功/失败分列、`retryable` 决定重试按钮、用 `pendingId` 触发重试 | 跨会话任务卡官方无对应视图 | 新文件；数据全部来自 meta，可平移到独立包 |
 | K22 | `packages/client/ui-sidebar/src/client/SidebarRoot.tsx` | 项目/花名册侧栏接线与状态条挂载 | 官方侧栏组合点内部 | 接线 hunk；应随 K10 一起抽插件 |
-| K23 | `packages/client/ui-sidebar/src/client/contract/slots.ts` | 新增项目花名册/派活状态相关 slot 类型 | 类型契约在官方包内声明 | 类型声明；抽插件时并入我们自己的 contract |
+| K23 | `packages/client/ui-sidebar/src/client/contract/slots.ts` | 新增项目行/会话标识 slot 类型（与 ui-workspace 契约镜像，避免包循环） | 类型契约在官方包内声明 | 类型声明；抽插件时并入我们自己的 contract |
+| K24 | `packages/client/ui-workspace/src/client/contract/slots.ts`、`rows/Rows.tsx`、`rows/WorkspaceBrowser.tsx` | 新增 `sidebar.workspaces.project.row.action`（项目行＋/台账）与 `sidebar.session.row.badge`（角色胶囊）；项目行显示文件夹路径；已占用项目行 action 时隐藏原单按钮；按产品 rank 排序 | 官方项目行/会话行没有这些扩展点；产品要求入口在侧栏行上 | 两个 list slot + 一行排序；官方若提供行 action seat 可回退 |
+| K25 | `packages/client/ui-sidebar/src/client/cadre-session-rank.ts`（cordis 服务 `cadreSessionRank`）；`packages/client/ui-workspace/src/client/index.ts` 消费 | 产品级会话置顶 rank：主管恒置顶，其余按原派生顺序；跨包共享走 cordis 服务，避免跨插件值导入 | 官方排序无「角色」概念；bundle purity 禁止跨插件值导入 | 一个服务 + 一个稳定空 Map；抽插件后可移到独立包 |
+| K26 | `packages/client/ui-chat/src/client/chat/MessageItem.tsx`、`chat/CadreReportCard.tsx` | 主管会话里的员工汇报卡：解析 Host 汇报文本，折叠摘要 + 交付物 + 状态，卡上「通过/打回」，打回必填原因 | 官方 user 消息渲染不认识 cadre 汇报协议；验收必须回到会话 | 一个文本前缀分支 + 一张卡；协议若改为结构化消息可移除文本解析 |
+| K27 | `packages/client/*/src/client/locales*.ts`（ui-workspace、ui-conversation、ui-reference、ui-settings 等） | 用户可见「工作区」统一改为「项目部」（侧栏分组、菜单、空态、提示、权限文案） | 产品术语统一（DC-001 一层项目部） | 纯文案替换；抽插件后用 locale 覆盖更佳 |
 
 **内核补丁结论：17 处，其中 3 处（K7/K8/K10）本可完全走官方扩展点、1 处（K12）已决定迁走、1 处（K9）应换实现方式。真正无法避免的只剩桌面壳 6 处（K1–K6）+ 构建 4 处（K14–K17）。**
 
@@ -99,16 +103,19 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | 路径 | 改动摘要 | 保留理由 | 融合提示 |
 |---|---|---|---|
 | `packages/bundle/cadre-app/` | 员工模板 bundle：四个 preset（dev/novel/general/roleplay），`cordis.patch.yml` + no-op 入口 | 官方没有这些模板 | 机制稳定，升级基本不动；preset 字段若变走 §3.5 F |
-| `packages/client/ui-sidebar/src/client/CadrePanel.tsx` | 项目面板：工作区 → 项目 → 花名册分组、项目行「＋」三步创建（身份/职能/自定义角色）、离职确认、台账任务列表/派发/校验 | 官方实验 agent-team 有任务板但存 session 事件，跨会话账本没有 | 先接 agent-team spike（ADR-0023 §2.7），再决定保留范围 |
-| `packages/client/ui-sidebar/src/client/CadreRoster.tsx`、`CadreRoster.module.css` | 花名册视图：主管四层标识（置顶分组/3px 靛蓝/实心方标+600/徽章）与员工行、四态图标、最后活跃、离职入口、在职/已离职筛选 | 官方无角色概念；设计 c07dd22 | 纯 UI，官方 slot 稳定 |
+| `packages/client/ui-sidebar/src/client/CadrePanel.tsx` | **已删除**（0.7.0 侧栏重设计）：花名册/台账面板页、项目面板入口、`main:cadre` 路由全部移除；能力迁到 CadreCreateDialog / CadreLedgerOverlay / CadreSidebar | 用户明确否掉管理面板，侧栏会话列表即主界面 | 无需保留 |
+| `packages/client/ui-sidebar/src/client/CadreCreateDialog.tsx`、`CadreLedgerOverlay.tsx`、`CadreSidebar.tsx` | 建人弹窗（680px 宽）、只读台账 overlay（六列 + 时间线）、项目行＋/台账与角色标识/行菜单 | 侧栏即主界面；官方无项目/角色概念 | 官方 slot 扩展；可抽独立插件 |
+| `packages/client/ui-sidebar/src/client/CadreSidebar.module.css`、`CadreCreateDialog.module.css`、`CadreLedgerOverlay.module.css` | 上述组件的样式（只用主题 token） | 产品 UI | 随组件迁移 |
+| `packages/client/ui-sidebar/tests/cadre-custom-roles.client.spec.ts` | 自定义角色存储测试 | 产品 UI | 随组件迁移 |
+| `packages/client/ui-sidebar/src/client/CadreRoster.tsx`、`CadreRoster.module.css` | **已删除**（面板移除）；角色标识改到会话行（CadreSidebar） | 官方无角色概念；设计 c07dd22 已改到行上 | 无需保留 |
 | `packages/client/ui-sidebar/src/client/cadre-roster-source.ts` | 花名册数据薄适配（IPC → 视图模型；未来切 Host Remote 只改此文件）；自定义角色暂存 localStorage（待入台账） | 官方无跨会话花名册 | 随 ADR-0023 §2.4 迁移；自定义角色存储随后端表迁移 |
-| `packages/client/ui-sidebar/src/client/CadreEmployee.tsx` | 员工行徽标（会话行菜单/转员工对话框已停止注册，仅保留文件） | 官方无「员工」概念 | 徽标走官方 `sidebar.session.row.leading`，升级稳定 |
-| `packages/client/ui-sidebar/src/client/EmployeeSection.tsx` | 「员工」设置分区（W8 起未注册） | 官方有 `settings.section`，无员工页 | 可删除 |
+| `packages/client/ui-sidebar/src/client/CadreEmployee.tsx` | **已删除**（0.7.0）：员工编辑/离职改由 CadreSidebar 的会话行菜单（编辑资料/离职）承担 | 官方无「员工」概念 | 无需保留 |
+| `packages/client/ui-sidebar/src/client/EmployeeSection.tsx` | **已删除**（未注册且无引用） | 官方有 `settings.section`，无员工页 | 无需保留 |
 | `packages/client/ui-sidebar/src/client/ProviderSection.tsx` | 「模型 Providers」设置分区 | **官方有同类（Models 页），属重复** | ADR-0023 §2.5：迁移后删除 |
 | `packages/client/ui-sidebar/src/client/cadre-skin.tokens.ts` | 昼流/夜流主题 token 覆盖 | 官方 `ctx.theme` 扩展点允许 | 保留；与官方 token 变更走 C/E 判断 |
 | `packages/client/ui-sidebar/src/client/CadreEmployee.module.css` | 员工对话框样式 | 产品 UI | 保留 |
-| `packages/client/ui-sidebar/tests/CadreEmployee.client.spec.tsx` | 员工 UI 测试 | 产品 UI | 保留 |
-| `apps/desktop/src/cadre-ledger.ts` | 台账 SQLite 读取（userData/cadre.sqlite） | 官方无跨会话账本 | ADR-0023 §2.4：迁 Host 服务后本文件移动 |
+| `packages/client/ui-sidebar/tests/CadreEmployee.client.spec.tsx` | **已删除**（随 CadreEmployee 移除） | 产品 UI | 无需保留 |
+| `apps/desktop/src/cadre-ledger.ts` | 台账 SQLite 读取（userData/cadre.sqlite）；0.7.0 增 `due_at`、`task_events` 时间线与 member 岗位描述 | 官方无跨会话账本 | ADR-0023 §2.4：迁 Host 服务后本文件移动 |
 | `apps/desktop/src/cadre-collab-api.ts` | 台账写路径的类型契约 | 同上 | 同上 |
 | `apps/desktop/src/employees-db.ts` | 员工偏好表（模板/模型/备注）+ 台账 `members` 角色写入与离职（`saveMember` / `retireMember`，含每项目唯一在职主管校验） | 官方无员工偏好存储 | 同上；表保留，宿主迁移 |
 | `apps/desktop/src/providers-db.ts` | provider / session_providers 表 | **与官方三处真值重复** | ADR-0023 §2.5：先迁移后删除 |

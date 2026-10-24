@@ -12,6 +12,7 @@ import { CompactionItem } from './CompactionItem.tsx'
 import { ContextInjectionRow } from './ContextInjectionRow.tsx'
 import { MessageIconActions } from './MessageIconActions.tsx'
 import css from './MessageItem.module.css'
+import { CadreReportNodeView, parseCadreReport } from './CadreReportCard.tsx'
 
 const EMPTY_TEXT_FACTS: Readonly<Partial<UserTextFacts>> = {}
 
@@ -299,6 +300,10 @@ export const UserMessageNodeView = memo(function UserMessageNodeView({
   node, renderFactorySlot, loadImage, t,
 }: ChatNodeViewProps<'user' | 'steering'>) {
   const data = node.data
+  const reportText = data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
+  if (parseCadreReport(reportText) !== undefined) {
+    return <CadreReportNodeView content={reportText} />
+  }
   return (
     <UserStyleBubble
       content={data.content}

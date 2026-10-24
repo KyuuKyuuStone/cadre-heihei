@@ -21,7 +21,7 @@ export const zh = {
   'desktop.update.installNetworkFailed': '安装更新失败，请检查网络连接后重试。',
   'desktop.update.stopFailed': '未能安全停止任务，更新尚未安装，请稍后重试。',
   'desktop.update.tasksChanged': '有新任务开始运行，请重新确认是否停止任务并更新。',
-  'desktop.update.tasksUnavailable': '无法确认任务状态，请在工作区就绪后重试更新。',
+  'desktop.update.tasksUnavailable': '无法确认任务状态，请在项目部就绪后重试更新。',
   'title': '设置',
   'close': '关闭',
   'openDocument': '打开配置文件',

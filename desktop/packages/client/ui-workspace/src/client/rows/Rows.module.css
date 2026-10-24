@@ -97,7 +97,9 @@
 
 /* Compact one-line Workspace row after removing the session-count subtitle. */
 .projectRow {
-  height: 34px;
+  min-height: 34px;
+  padding-top: 3px;
+  padding-bottom: 3px;
   align-items: center;
   box-sizing: border-box;
 }
@@ -160,6 +162,16 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.projectPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+  line-height: 1.2;
 }
 
 .title {

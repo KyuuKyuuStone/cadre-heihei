@@ -74,6 +74,16 @@ export interface DirectoryFlowOwnerProps {
   onError: (message: string) => void
 }
 
+/** Owner share of one project-row action occurrence: the Workspace the row shows. */
+export interface ProjectRowOwnerProps {
+  /** Backing Workspace id. */
+  readonly workspaceId: WorkspaceId
+  /** Row display title. */
+  readonly label: string
+  /** Workspace folder path; absent for a bucket without a backing Workspace. */
+  readonly cwd?: string
+}
+
 /** Owner share of one Session row action occurrence: the row the action belongs to. */
 export interface SessionRowOwnerProps {
   /** Session the row shows. */
@@ -128,7 +138,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * An archived row keeps that cell blank — neither its status dot nor this
      * seat renders there, and its live status appears on the hover card only.
      */
-    'sidebar.session.row.leading': { kind: 'list'; scope: 'root'; owner: SessionRowScheduleOwnerProps }
     /**
      * Section of the Session row's hover card between its relative time and
      * its trailing status line. Mounted only while that card is open.
@@ -168,16 +177,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      *   },
      * }
      */
-    'sidebar.workspaces.session.menu.item': {
-      kind: 'list'
-      scope: 'root'
-      owner: SessionRowOwnerProps
-      hookContext: MenuOpenState
-      inject: { hooks: {
-        menuOpenState: SlotHookFactory<'sidebar.workspaces.session.menu.item', UseMenuOpenState>
-        shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>
-      } }
-    }
     /**
      * The hover buttons at the end of one Session row, in ascending `order`,
      * after the "..." menu trigger. ui-workspace registers `archive` (100) and
@@ -228,6 +227,8 @@ export type WorkspaceBrowserInjected = {
     hostInfo: HostObservable<RemoteHostFacts>
     workspaceShortcuts: HostObservable<WorkspaceShortcutState>
     shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>
+    /** Product-provided session rank; lower values lead a Workspace group. */
+    sessionRank: HostObservable<ReadonlyMap<string, number>>
   }
   /** Open the browser search and focus its input. */
   requestSearch: () => void
@@ -469,9 +470,11 @@ export type WorkspaceBrowserProps =
   PropsRuntime<'sidebar.workspaces'>
   & PropsRenderSlots<
     | 'sidebar.workspaces.directoryFlow'
+    | 'sidebar.workspaces.project.row.action'
     | 'sidebar.workspaces.session.menu.item'
     | 'sidebar.workspaces.session.row.action'
     | 'sidebar.session.row.leading'
+    | 'sidebar.session.row.badge'
     | 'sidebar.session.row.hover'
   >
   & PropsStore<WorkspaceViewStoreHandle>

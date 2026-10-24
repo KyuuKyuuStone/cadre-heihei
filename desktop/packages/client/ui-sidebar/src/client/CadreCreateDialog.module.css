@@ -1,0 +1,67 @@
+/* Wide create dialog: 680px keeps template cards, the duty editor, and the
+   provider/model/effort rows readable without piling controls on one line. */
+.wideDialog {
+  width: min(680px, 92vw);
+  max-height: min(88vh, 820px);
+}
+
+/* The dialog body scrolls as one surface; the footer stays pinned. */
+.wideContent {
+  overflow-y: auto;
+}
+
+.stack,
+.stackWide {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stack {
+  gap: 10px;
+}
+
+.stackWide {
+  gap: 12px;
+}
+
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.customRole {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.label {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+}
+
+.sectionTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.error {
+  margin: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.divider {
+  height: 1px;
+  background: var(--dsw-alias-border-l1);
+}

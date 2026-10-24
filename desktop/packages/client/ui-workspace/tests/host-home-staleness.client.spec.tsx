@@ -77,7 +77,7 @@ describe('Host home in the assembled browsing region', () => {
     vi.useFakeTimers()
     try {
       openHoverCard()
-      expect(screen.getByText('/home/u/Documents/project')).toBeTruthy()
+      expect(screen.getAllByText('/home/u/Documents/project')[0]!).toBeTruthy()
       closeHoverCard()
 
       // The ready frame lands: `$host.home` now answers, and the generation is
@@ -86,7 +86,7 @@ describe('Host home in the assembled browsing region', () => {
       act(() => { runtime.ctx.emit('connection/reset') })
       openHoverCard()
 
-      expect(screen.getByText('~/Documents/project')).toBeTruthy()
+      expect(screen.getAllByText('~/Documents/project')[0]!).toBeTruthy()
     } finally {
       vi.useRealTimers()
     }

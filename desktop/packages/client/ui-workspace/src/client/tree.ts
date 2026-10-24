@@ -157,6 +157,24 @@ export function orderByRecency(
 }
 
 /**
+ * Stable reorder by an explicit rank: lower rank leads, ties keep the
+ * derived order. Used after pin/manual/recency so a product's leading
+ * Session (for example a project supervisor) beats a pinned ordinary row.
+ * @param sessions - rows in the browser's derived order.
+ * @param rank - session id to rank; absent sessions default to 1.
+ * @returns the same rows in rank order.
+ */
+export function rankSessions<T extends { readonly id: string }>(
+  sessions: readonly T[],
+  rank: ReadonlyMap<string, number>,
+): T[] {
+  return sessions
+    .map((session, index) => ({ session, index, rank: rank.get(session.id) ?? 1 }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(member => member.session)
+}
+
+/**
  * Reconcile a browser-local manual order with current account membership.
  * New ordinary forks precede their sources without changing saved entries' relative order.
  * @param memberIds - authoritative account membership.

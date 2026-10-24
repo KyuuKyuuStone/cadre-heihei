@@ -40,6 +40,16 @@ export interface CadreReportRow {
   readonly deliveryState: string
 }
 
+/** One recorded task-status transition (the ledger timeline). */
+export interface CadreTaskEventRow {
+  readonly fromStatus: string | null
+  readonly toStatus: string
+  readonly actorSessionId: string
+  readonly actorName?: string
+  readonly reason?: string
+  readonly at: string
+}
+
 /** One task row projected for the renderer; camelCase mirrors the IPC payload. */
 export interface CadreTaskRow {
   readonly taskId: string
@@ -47,6 +57,10 @@ export interface CadreTaskRow {
   readonly status: string
   readonly assigneeSessionId: string
   readonly updatedAt: string
+  /** Dispatch deadline; absent on ledgers that predate the column or rows without one. */
+  readonly dueAt?: string
+  /** Status timeline in ledger order; absent when the ledger has no event table. */
+  readonly events?: readonly CadreTaskEventRow[]
   /** Roster name of the assignee; falls back to the session id. */
   readonly assigneeName?: string
   /** Free-text position from the roster row, when the project filled one in. */
@@ -80,6 +94,8 @@ export interface CadreMemberRow {
   readonly sessionId: string
   readonly role: string
   readonly displayName: string
+  /** Free-text position/job description, when the project filled one in. */
+  readonly description?: string
   readonly state: string
   readonly updatedAt: string
 }
@@ -120,6 +136,8 @@ export class CadreLedger {
   #unavailable: string | undefined
   /** Older ledgers may predate the collaboration tables; degrade to base rows. */
   #hasReports = false
+  #hasDue = false
+  #hasEvents = false
 
   /**
    * @param path - absolute ledger path, normally `<userData>/cadre.sqlite`.
@@ -141,8 +159,13 @@ export class CadreLedger {
       const tables = this.#db.prepare(`SELECT COUNT(*) AS count FROM sqlite_master
         WHERE type = 'table' AND name IN ('messages', 'members')`).get() as { count?: number } | undefined
       this.#hasReports = (tables?.count ?? 0) === 2
+      const taskColumns = this.#db.prepare('PRAGMA table_info(tasks)').all() as { name?: string }[]
+      this.#hasDue = taskColumns.some(column => column.name === 'due_at')
+      const eventTable = this.#db.prepare(`SELECT COUNT(*) AS count FROM sqlite_master
+        WHERE type = 'table' AND name = 'task_events'`).get() as { count?: number } | undefined
+      this.#hasEvents = (eventTable?.count ?? 0) === 1
       log(`cadre-ledger open path=${path} readOnly=true tables=${String(check?.count ?? 0)} ` +
-        `reports=${String(this.#hasReports)}`)
+        `reports=${String(this.#hasReports)} due=${String(this.#hasDue)} events=${String(this.#hasEvents)}`)
     } catch (error) {
       this.#db = undefined
       this.#unavailable = error instanceof Error ? error.message : String(error)
@@ -171,8 +194,9 @@ export class CadreLedger {
     const db = this.#db
     if (db === undefined) throw new Error(`cadre ledger unavailable (${this.#unavailable ?? 'unknown'})`)
     const started = performance.now()
+    const due = this.#hasDue ? ', t.due_at' : ''
     const rows = this.#hasReports
-      ? db.prepare(`SELECT t.task_id, t.title, t.status, t.assignee_session_id, t.updated_at,
+      ? db.prepare(`SELECT t.task_id, t.title, t.status, t.assignee_session_id, t.updated_at${due},
           COALESCE(mem.display_name, t.assignee_session_id) AS assignee_name,
           mem.description AS assignee_title,
           COALESCE(mem.role, 'worker') AS assignee_role,
@@ -188,8 +212,34 @@ export class CadreLedger {
            ORDER BY m2.received_at DESC LIMIT 1))
         LEFT JOIN members rm ON rm.project_id = t.project_id AND rm.session_id = m.from_session_id
         WHERE t.project_id = ? ORDER BY t.rowid DESC LIMIT ?`).all(project, TASK_LIMIT)
-      : db.prepare(`SELECT task_id, title, status, assignee_session_id, updated_at
-          FROM tasks WHERE project_id = ? ORDER BY rowid DESC LIMIT ?`).all(project, TASK_LIMIT)
+      : db.prepare(`SELECT t.task_id, t.title, t.status, t.assignee_session_id, t.updated_at${due}
+          FROM tasks t WHERE t.project_id = ? ORDER BY t.rowid DESC LIMIT ?`).all(project, TASK_LIMIT)
+    const eventsByTask = new Map<string, CadreTaskEventRow[]>()
+    if (this.#hasEvents) {
+      const actorName = this.#hasReports
+        ? `COALESCE(mem.display_name, e.actor_session_id) AS actor_name`
+        : `e.actor_session_id AS actor_name`
+      const join = this.#hasReports
+        ? `LEFT JOIN members mem ON mem.project_id = e.project_id AND mem.session_id = e.actor_session_id`
+        : ''
+      const eventRows = db.prepare(`SELECT e.task_id, e.from_status, e.to_status, e.actor_session_id,
+          ${actorName}, e.reason, e.at
+        FROM task_events e ${join}
+        WHERE e.project_id = ? ORDER BY e.at, e.rowid`).all(project)
+      for (const event of eventRows) {
+        const taskId = String(event.task_id)
+        const list = eventsByTask.get(taskId) ?? []
+        list.push({
+          fromStatus: event.from_status === null || event.from_status === undefined ? null : String(event.from_status),
+          toStatus: String(event.to_status),
+          actorSessionId: String(event.actor_session_id),
+          ...(typeof event.actor_name === 'string' && event.actor_name !== '' ? { actorName: event.actor_name } : {}),
+          ...(typeof event.reason === 'string' && event.reason !== '' ? { reason: event.reason } : {}),
+          at: String(event.at),
+        })
+        eventsByTask.set(taskId, list)
+      }
+    }
     const projected = rows.map((row) => {
       const base = {
         taskId: String(row.task_id),
@@ -197,6 +247,8 @@ export class CadreLedger {
         status: String(row.status),
         assigneeSessionId: String(row.assignee_session_id),
         updatedAt: String(row.updated_at),
+        ...(this.#hasDue && typeof row.due_at === 'string' && row.due_at !== '' ? { dueAt: row.due_at } : {}),
+        ...(eventsByTask.has(String(row.task_id)) ? { events: eventsByTask.get(String(row.task_id))! } : {}),
       }
       const assigneeTitle = typeof row.assignee_title === 'string' && row.assignee_title.trim() !== ''
         ? String(row.assignee_title)
@@ -241,7 +293,7 @@ export class CadreLedger {
     const project = requireProjectId(projectId)
     const db = this.#db
     if (db === undefined) throw new Error(`cadre ledger unavailable (${this.#unavailable ?? 'unknown'})`)
-    const rows = db.prepare(`SELECT session_id, role, display_name, state, updated_at
+    const rows = db.prepare(`SELECT session_id, role, display_name, description, state, updated_at
       FROM members WHERE project_id = ?
       ORDER BY CASE role WHEN 'supervisor' THEN 0 ELSE 1 END, updated_at DESC
       LIMIT ?`).all(project, MEMBER_LIMIT)
@@ -251,6 +303,7 @@ export class CadreLedger {
         sessionId: String(row.session_id),
         role: String(row.role),
         displayName: String(row.display_name),
+        ...(typeof row.description === 'string' && row.description !== '' ? { description: row.description } : {}),
         state: String(row.state),
         updatedAt: String(row.updated_at),
       })),

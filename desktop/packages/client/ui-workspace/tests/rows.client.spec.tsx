@@ -492,20 +492,20 @@ describe('workspace browser rows', () => {
       group={group} onToggle={onToggle} onCreate={vi.fn()}
       actions={{ rename: onRename, delete: onDelete }} t={t}
     />)
-    fireEvent.click(screen.getByRole('button', { name: '工作区“Project”的操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '项目部“Project”的操作' }))
     // Opening the menu neither toggles the group nor renames yet.
     expect(onToggle).not.toHaveBeenCalled()
-    expect(screen.getByRole('menuitem', { name: '删除工作区' }).className).toMatch(/danger/)
+    expect(screen.getByRole('menuitem', { name: '删除项目部' }).className).toMatch(/danger/)
     fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
     expect(onRename).toHaveBeenCalledOnce()
     expect(screen.queryByRole('menu')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '工作区“Project”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
+    fireEvent.click(screen.getByRole('button', { name: '项目部“Project”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除项目部' }))
     expect(screen.queryByRole('menu')).toBeNull()
     expect(onRename).toHaveBeenCalledOnce()
     expect(onDelete).toHaveBeenCalledOnce()
     // Escape closes without selecting (Menu onClose path).
-    fireEvent.click(screen.getByRole('button', { name: '工作区“Project”的操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '项目部“Project”的操作' }))
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
   })
@@ -524,7 +524,7 @@ describe('workspace browser rows', () => {
       act(() => { vi.advanceTimersByTime(800) })
       // Card body: full title + cwd + absolute creation time.
       expect(screen.getAllByText('Project')).toHaveLength(2)
-      expect(screen.getByText('/projects/project')).toBeTruthy()
+      expect(screen.getAllByText('/projects/project').length).toBeGreaterThan(0)
       expect(screen.getByText(/^创建于 \d+年\d+月\d+日 /)).toBeTruthy()
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: '复制: /projects/project' })) })
       expect(writeText).toHaveBeenCalledWith('/projects/project')
@@ -547,7 +547,7 @@ describe('workspace browser rows', () => {
       const create = screen.getByRole('button', { name: '在“Project”中新建会话' })
       fireEvent.pointerEnter(row.parentElement as HTMLElement)
       act(() => { vi.advanceTimersByTime(800) })
-      expect(screen.getByText('/projects/project')).toBeTruthy()
+      expect(screen.getAllByText('/projects/project').length).toBeGreaterThan(0)
 
       if (trigger === 'hover') {
         fireEvent.mouseEnter(create)
@@ -557,12 +557,12 @@ describe('workspace browser rows', () => {
         fireEvent.focus(create)
       }
       expect(screen.getByRole('tooltip').textContent).toBe('新会话')
-      expect(screen.getByText('/projects/project')).toBeTruthy()
+      expect(screen.getAllByText('/projects/project').length).toBeGreaterThan(0)
 
       if (trigger === 'hover') fireEvent.mouseLeave(create, { relatedTarget: row })
       else fireEvent.blur(create, { relatedTarget: row })
       expect(screen.queryByRole('tooltip')).toBeNull()
-      expect(screen.getByText('/projects/project')).toBeTruthy()
+      expect(screen.getAllByText('/projects/project').length).toBeGreaterThan(0)
     } finally {
       vi.useRealTimers()
     }
@@ -582,11 +582,11 @@ describe('workspace browser rows', () => {
       fireEvent.mouseEnter(create)
       act(() => { vi.advanceTimersByTime(1000) })
       expect(screen.getByRole('tooltip').textContent).toBe('新会话')
-      expect(screen.getByText('/projects/project')).toBeTruthy()
+      expect(screen.getAllByText('/projects/project').length).toBeGreaterThan(0)
 
       fireEvent.mouseLeave(create, { relatedTarget: row })
       expect(screen.queryByRole('tooltip')).toBeNull()
-      expect(screen.getByText('/projects/project')).toBeTruthy()
+      expect(screen.getAllByText('/projects/project').length).toBeGreaterThan(0)
     } finally {
       vi.useRealTimers()
     }
@@ -604,7 +604,7 @@ describe('workspace browser rows', () => {
       render(<ProjectRowItem group={group} home="/home/u" onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
       act(() => { vi.advanceTimersByTime(800) })
-      expect(screen.getByText('~/Documents/project')).toBeTruthy()
+      expect(screen.getAllByText('~/Documents/project').length).toBeGreaterThan(0)
       expect(screen.queryByText('/home/u/Documents/project')).toBeNull()
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: '复制: /home/u/Documents/project' })) })
       expect(writeText).toHaveBeenCalledWith('/home/u/Documents/project')
@@ -642,7 +642,7 @@ describe('workspace browser rows', () => {
       render(<ProjectRowItem group={group} home="C:\\Users\\u" onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
       act(() => { vi.advanceTimersByTime(800) })
-      expect(screen.getByText('C:\\Users\\u\\project')).toBeTruthy()
+      expect(screen.getAllByText('C:\\Users\\u\\project').length).toBeGreaterThan(0)
     } finally {
       vi.useRealTimers()
     }
@@ -654,7 +654,7 @@ describe('workspace browser rows', () => {
       sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
     }
     render(<ProjectRowItem group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
-    expect(screen.queryByRole('button', { name: /工作区/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /项目部/ })).toBeNull()
   })
 
   it('blank New Session rows carry no menu, no time label, and no hover-card time', () => {
@@ -1148,7 +1148,13 @@ describe('session row schedule seats', () => {
         .querySelector('[data-seat="sidebar.session.row.leading"]')?.parentElement
       expect(cell?.previousElementSibling ?? null).toBeNull()
       expect(cell?.nextElementSibling?.textContent).toBe('Idle Session')
-      expect(cell?.nextElementSibling?.nextElementSibling?.textContent).toBe('刚刚')
+      // The product identity badge seat follows the title; an empty slot
+      // renders no DOM, so the time is either the next or the one after it.
+      const afterTitle = cell?.nextElementSibling?.nextElementSibling
+      const time = afterTitle?.getAttribute('data-seat') === 'sidebar.session.row.badge'
+        ? afterTitle.nextElementSibling
+        : afterTitle
+      expect(time?.textContent).toBe('刚刚')
     }
     assertPlacement()
     // Rerender through the same row: the seat stays leading without the flat

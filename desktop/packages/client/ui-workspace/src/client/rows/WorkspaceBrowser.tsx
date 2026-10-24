@@ -34,7 +34,7 @@ import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
+  pinCurrentBlank, rankSessions, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { AnimatedRows } from './AnimatedRows.tsx'
@@ -253,11 +253,13 @@ function workspaceGroupHalf(e: { clientY: number; currentTarget: HTMLElement }):
 type SessionTreeProps = Pick<
   WorkspaceBrowserProps,
   'useSessionStatus' | 'startSession' | 'open'
-  | 'insertWorkspaceBefore' | 't' | 'usePanelInfo'
+  | 'insertWorkspaceBefore' | 't' | 'usePanelInfo' | 'useSessionRank'
 > & PropsRenderSlots<
+  | 'sidebar.workspaces.project.row.action'
   | 'sidebar.workspaces.session.menu.item'
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
+  | 'sidebar.session.row.badge'
   | 'sidebar.session.row.hover'
 > & {
   shortcuts: readonly import('@deepseek-ai/dsh-client-shortcuts/client').ShortcutCatalogEntry[]
@@ -316,7 +318,7 @@ function EmptySessions({ rowState, onLeaveArchivedOnly, t }: Pick<SessionTreePro
 /** The scrolling session tree; unmounting drops the sessions subscription and the session watermarks. */
 function SessionTree({
   list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
-  rowState, onLeaveArchivedOnly,
+  useSessionRank, rowState, onLeaveArchivedOnly,
   workspaceReady, animationResetKey, usePanelInfo,
   onRenameRequest, onDeleteRequest, onSessionRenameRequest,
   renderSlot,
@@ -374,12 +376,15 @@ function SessionTree({
     return [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY]
       .filter(key => groupExpansion[key] ?? ancestorKeys.has(key))
   }, [groupExpansion, parents, workspaces])
+  // A product-ranked Session (the project supervisor) leads each group,
+  // ahead of pinned rows; the default rank keeps the derived order intact.
+  const rank = useSessionRank(map => map)
   const groups = useMemo(
     () => deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
-    }),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
+    }).map(group => ({ ...group, sessions: rankSessions(group.sessions, rank) })),
+    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds, rank],
   )
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
@@ -572,6 +577,7 @@ function SessionTree({
               startSession(group.workspaceId)
             }
           }}
+          renderSlot={renderSlot}
           drag={workspaceDragProps}
           actions={group.workspaceId === undefined
             ? undefined
@@ -690,12 +696,13 @@ function SessionTree({
 
 /** The flat "In one list" body: every session is one draggable top-level row. */
 function FlatList({
-  list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, open, onSessionRenameRequest,
+  list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionRank, open, onSessionRenameRequest,
   usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
   revealSessionId, onSessionRevealed, renderSlot, t,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
+  | 'useSessionRank'
   | 'open'
   | 'onSessionRenameRequest'
   | 'renderSlot'
@@ -714,9 +721,10 @@ function FlatList({
 }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
+  const rank = useSessionRank(map => map)
   const rows = useMemo(
-    () => deriveFlat(list, sessionIds, rowState, statuses),
-    [list, sessionIds, rowState, statuses],
+    () => rankSessions(deriveFlat(list, sessionIds, rowState, statuses), rank),
+    [list, sessionIds, rowState, statuses, rank],
   )
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
@@ -920,6 +928,7 @@ export function WorkspaceBrowser({
   useDirectoryFlow,
   useHostInfo,
   useShortcuts,
+  useSessionRank,
   useWorkspaceShortcuts,
   requestSearch,
   requestAddWorkspace,
@@ -1432,6 +1441,7 @@ export function WorkspaceBrowser({
                 workspaceReady={workspaceReady}
                 animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
                 useSessionStatus={useSessionStatus}
+                useSessionRank={useSessionRank}
                 open={guardedOpen}
                 onSessionRenameRequest={requestSessionRename}
                 renderSlot={renderSlot}
@@ -1447,6 +1457,7 @@ export function WorkspaceBrowser({
                 list={list}
                 shortcuts={shortcuts}
                 useSessionStatus={useSessionStatus}
+                useSessionRank={useSessionRank}
                 onSessionRenameRequest={requestSessionRename}
                 renderSlot={renderSlot}
                 workspaces={orderedWorkspaces}

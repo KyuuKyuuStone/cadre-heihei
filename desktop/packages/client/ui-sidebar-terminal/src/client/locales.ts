@@ -11,7 +11,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const zh = {
   'shortcut.noSession': '请先选择会话',
   recoveryFailed: '恢复终端失败：{message}', retryRecovery: '重试恢复终端',
-  shell: '选择 Shell', shellLoading: '正在读取 Shell…', shellEmpty: '没有可用的 Shell', description: '在会话工作区运行命令',
+  shell: '选择 Shell', shellLoading: '正在读取 Shell…', shellEmpty: '没有可用的 Shell', description: '在会话项目部运行命令',
   title: '终端', new: '新建终端', loading: '正在读取终端环境…', creating: '正在启动…',
   connecting: '正在连接…', disconnected: '连接已断开。', reconnect: '重新连接',
   readonly: '此页面当前只读。', control: '接管输入',

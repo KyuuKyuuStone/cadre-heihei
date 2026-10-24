@@ -36,7 +36,7 @@ export function apply(ctx: ClientContext): void {
     const disposers: (() => void)[] = []
     const dictionaries: [locale: string, dict: Record<string, string>][] = [
       ['zh', {
-        'browser.title': '选择工作区目录',
+        'browser.title': '选择项目部目录',
         'browser.home': '主目录',
         'browser.newFolder': '新建文件夹',
         'browser.folderName': '文件夹名称',
