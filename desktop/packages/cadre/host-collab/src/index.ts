@@ -8,7 +8,9 @@
  * prompt was accepted.
  *
  * Configuration comes from the desktop launcher's environment:
- * `CADRE_LEDGER_PATH` (cadre.sqlite) and `CADRE_PROJECT_ID` (default proj-demo).
+ * `CADRE_LEDGER_PATH` (cadre.sqlite). The project is never configured here: each
+ * tool call resolves it from the caller's roster row (`members`), so no process
+ * default can leak tasks into another project.
  * The plugin speaks to the Host structurally (tools registry, Session prompt),
  * so this package needs no Host dependency graph of its own.
  * @module @deepseek-ai/dsh-bundle-cadre
@@ -192,11 +194,9 @@ CREATE TABLE IF NOT EXISTS idempotency (
 /** Ledger writes the collaboration tools need; one SQLite handle for the Host process. */
 class Ledger {
   readonly db: DatabaseSync
-  readonly projectId: string
 
-  constructor(path: string, projectId: string) {
+  constructor(path: string) {
     this.db = new DatabaseSync(path)
-    this.projectId = projectId
     this.db.exec('PRAGMA busy_timeout = 5000')
     this.db.exec(DDL)
     const columns = this.db.prepare('PRAGMA table_info(tasks)').all() as { name?: string }[]
@@ -207,37 +207,66 @@ class Ledger {
 
   close(): void { this.db.close() }
 
-  member(sessionId: string): { role: string; state: string } | undefined {
-    const row = this.db.prepare(
-      'SELECT role, state FROM members WHERE project_id = ? AND session_id = ?',
-    ).get(this.projectId, sessionId) as { role: string; state: string } | undefined
-    return row
+  /**
+   * The roster row for one Session across projects (the caller's identity).
+   *
+   * `sup-1` is the legacy seed row: it has no Session and is never a caller.
+   * A Session is expected to belong to exactly one project; the newest row wins
+   * only so a stale leftover row cannot crash an otherwise valid caller.
+   */
+  member(sessionId: string): { projectId: string; role: string; state: string } | undefined {
+    const row = this.db.prepare(`SELECT project_id, role, state FROM members
+      WHERE session_id = ? AND session_id != 'sup-1' ORDER BY updated_at DESC LIMIT 1`)
+      .get(sessionId) as { project_id: string; role: string; state: string } | undefined
+    if (row === undefined) return undefined
+    return { projectId: row.project_id, role: row.role, state: row.state }
+  }
+
+  /**
+   * The project this Session belongs to, resolved from the roster.
+   *
+   * There is deliberately no environment fallback: a caller without a roster
+   * row cannot guess a project, and a guessed project would write to the wrong
+   * ledger. Ambiguity is an error too, not a "pick the latest".
+   */
+  projectOf(sessionId: string): string {
+    const rows = this.db.prepare(`SELECT DISTINCT project_id FROM members
+      WHERE session_id = ? AND session_id != 'sup-1' ORDER BY project_id`).all(sessionId) as
+      { project_id: string }[]
+    const project = rows[0]?.project_id
+    if (project === undefined) {
+      throw new Error(`会话不属于任何项目部（session=${sessionId}）；请先在项目部花名册登记该会话`)
+    }
+    if (rows.length > 1) {
+      throw new Error(`会话同时属于多个项目部（session=${sessionId} projects=${rows.map(row => row.project_id).join(',')}），无法确定归属`)
+    }
+    return project
   }
 
   /** Resolve an assignee by member session id, member name, or employee name. */
-  resolveAssignee(employee: string): { sessionId: string; name: string } {
+  resolveAssignee(projectId: string, employee: string): { sessionId: string; name: string } {
     const direct = this.db.prepare(`SELECT session_id, COALESCE(display_name, session_id) AS name FROM members
-      WHERE project_id = ? AND session_id = ? AND state != 'departed'`).get(this.projectId, employee) as
+      WHERE project_id = ? AND session_id = ? AND state != 'departed'`).get(projectId, employee) as
       { session_id: string; name: string } | undefined
     if (direct !== undefined) return { sessionId: direct.session_id, name: direct.name }
     const byMemberName = this.db.prepare(`SELECT session_id, COALESCE(display_name, session_id) AS name FROM members
-      WHERE project_id = ? AND display_name = ? AND state != 'departed' LIMIT 1`).get(this.projectId, employee) as
+      WHERE project_id = ? AND display_name = ? AND state != 'departed' LIMIT 1`).get(projectId, employee) as
       { session_id: string; name: string } | undefined
     if (byMemberName !== undefined) return { sessionId: byMemberName.session_id, name: byMemberName.name }
     const byEmployee = this.db.prepare(`SELECT session_id, COALESCE(display_name, session_id) AS name FROM employees
-      WHERE project_id = ? AND (session_id = ? OR display_name = ?) LIMIT 1`).get(this.projectId, employee, employee) as
+      WHERE project_id = ? AND (session_id = ? OR display_name = ?) LIMIT 1`).get(projectId, employee, employee) as
       { session_id: string; name: string } | undefined
     if (byEmployee !== undefined) return { sessionId: byEmployee.session_id, name: byEmployee.name }
     throw new Error(`本项目没有找到员工：${employee}（先用 list_employees 查名单）`)
   }
 
-  workers(): { sessionId: string; name: string; state: string }[] {
+  workers(projectId: string): { sessionId: string; name: string; state: string }[] {
     const rows = this.db.prepare(`SELECT session_id, COALESCE(display_name, session_id) AS name, state FROM members
       WHERE project_id = ? AND role = 'worker' AND state != 'departed'
       UNION ALL
       SELECT e.session_id, COALESCE(e.display_name, e.session_id), 'available' FROM employees e
       WHERE e.project_id = ? AND NOT EXISTS (SELECT 1 FROM members m WHERE m.project_id = e.project_id AND m.session_id = e.session_id)
-      ORDER BY name`).all(this.projectId, this.projectId) as { session_id: string; name: string; state: string }[]
+      ORDER BY name`).all(projectId, projectId) as { session_id: string; name: string; state: string }[]
     return rows.map(row => ({ sessionId: row.session_id, name: row.name, state: row.state }))
   }
 
@@ -250,25 +279,25 @@ class Ledger {
    * time; when only the placeholder exists the answer is "no supervisor".
    */
   /** The roster's 「角色负责什么」 text for one employee Session, when recorded. */
-  workerRole(sessionId: string): { name: string; role: string } | undefined {
+  workerRole(projectId: string, sessionId: string): { name: string; role: string } | undefined {
     const row = this.db.prepare(`SELECT COALESCE(display_name, session_id) AS name,
       COALESCE(NULLIF(TRIM(persona_note), ''), NULLIF(TRIM(template_id), '')) AS role
-      FROM employees WHERE project_id = ? AND session_id = ?`).get(this.projectId, sessionId) as
+      FROM employees WHERE project_id = ? AND session_id = ?`).get(projectId, sessionId) as
       { name: string; role?: string | null } | undefined
     if (row === undefined || row.role == null) return undefined
     return { name: row.name, role: row.role }
   }
 
-  supervisor(): string | undefined {
+  supervisor(projectId: string): string | undefined {
     const row = this.db.prepare(`SELECT session_id FROM members WHERE project_id = ? AND role = 'supervisor'
       AND state != 'departed' AND session_id != 'sup-1' ORDER BY updated_at DESC LIMIT 1`)
-      .get(this.projectId) as { session_id?: string } | undefined
+      .get(projectId) as { session_id?: string } | undefined
     return row?.session_id
   }
 
-  task(taskId: string): { taskId: string; title: string; status: string; assignee: string; dueAt?: string } | undefined {
+  task(projectId: string, taskId: string): { taskId: string; title: string; status: string; assignee: string; dueAt?: string } | undefined {
     const row = this.db.prepare('SELECT task_id, title, status, assignee_session_id, due_at FROM tasks WHERE project_id = ? AND task_id = ?')
-      .get(this.projectId, taskId) as
+      .get(projectId, taskId) as
       { task_id: string; title: string; status: string; assignee_session_id: string; due_at?: string | null } | undefined
     if (row === undefined) return undefined
     return {
@@ -278,30 +307,30 @@ class Ledger {
   }
 
   /** Insert the task intent plus the pending dispatch message in one transaction. */
-  beginDispatch(input: {
+  beginDispatch(projectId: string, input: {
     taskId: string; title: string; body: string; dueAt: string
     dispatcher: string; assignee: string; idempotencyKey: string; messageId: string
   }): void {
     const now = new Date().toISOString()
     const sha = createHash('sha256').update(input.body).digest('hex')
     const seq = (this.db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM tasks WHERE project_id = ?')
-      .get(this.projectId) as { next: number }).next
+      .get(projectId) as { next: number }).next
     this.db.exec('BEGIN IMMEDIATE')
     try {
       this.db.prepare(`INSERT INTO tasks (task_id, project_id, seq, title, body, body_bytes, body_sha256, status,
         dispatcher_session_id, assignee_session_id, created_at, updated_at, due_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'dispatched', ?, ?, ?, ?, ?)`).run(
-        input.taskId, this.projectId, seq, input.title, input.body, Buffer.byteLength(input.body), sha,
+        input.taskId, projectId, seq, input.title, input.body, Buffer.byteLength(input.body), sha,
         input.dispatcher, input.assignee, now, now, input.dueAt)
       this.db.prepare(`INSERT INTO messages (message_id, project_id, task_id, direction, channel,
         from_session_id, to_session_id, body, body_bytes, body_sha256, preview, idempotency_key,
         delivery_state, received_at, delivered_at)
         VALUES (?, ?, ?, 'dispatch', 'session', ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
-        input.messageId, this.projectId, input.taskId, input.dispatcher, input.assignee,
+        input.messageId, projectId, input.taskId, input.dispatcher, input.assignee,
         input.body, Buffer.byteLength(input.body), sha, input.body.slice(0, 120), input.idempotencyKey, now, now)
       this.db.prepare(`INSERT INTO idempotency (project_id, idempotency_key, operation, fingerprint,
         ledger_result_json, created_at) VALUES (?, ?, 'dispatch', ?, ?, ?)`).run(
-        this.projectId, input.idempotencyKey, input.idempotencyKey, JSON.stringify({ taskId: input.taskId }), now)
+        projectId, input.idempotencyKey, input.idempotencyKey, JSON.stringify({ taskId: input.taskId }), now)
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
@@ -310,7 +339,7 @@ class Ledger {
   }
 
   /** Delivery accepted: flip the message and record the dispatch event. */
-  confirmDispatch(taskId: string, messageId: string): void {
+  confirmDispatch(projectId: string, taskId: string, messageId: string): void {
     const now = new Date().toISOString()
     const actor = (this.db.prepare('SELECT dispatcher_session_id FROM tasks WHERE task_id = ?')
       .get(taskId) as { dispatcher_session_id: string }).dispatcher_session_id
@@ -322,7 +351,7 @@ class Ledger {
       this.db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
         actor_session_id, message_id, idempotency_key, at)
         VALUES (?, ?, ?, NULL, 'dispatched', ?, ?, ?, ?)`).run(
-        randomUUID(), this.projectId, taskId, actor, messageId, `dispatch:${taskId}`, now)
+        randomUUID(), projectId, taskId, actor, messageId, `dispatch:${taskId}`, now)
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
@@ -331,13 +360,13 @@ class Ledger {
   }
 
   /** Compensation: a refused prompt leaves no task, message, event or idempotency row. */
-  rollbackDispatch(taskId: string, idempotencyKey: string): void {
+  rollbackDispatch(projectId: string, taskId: string, idempotencyKey: string): void {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       this.db.prepare('DELETE FROM messages WHERE task_id = ?').run(taskId)
       this.db.prepare('DELETE FROM task_events WHERE task_id = ?').run(taskId)
       this.db.prepare('DELETE FROM tasks WHERE task_id = ?').run(taskId)
-      this.db.prepare('DELETE FROM idempotency WHERE project_id = ? AND idempotency_key = ?').run(this.projectId, idempotencyKey)
+      this.db.prepare('DELETE FROM idempotency WHERE project_id = ? AND idempotency_key = ?').run(projectId, idempotencyKey)
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
@@ -346,18 +375,18 @@ class Ledger {
   }
 
   /** Record one employee report and move the task to `delivered`. */
-  report(input: { taskId: string; summary: string; deliverables: readonly string[]; reporter: string }): string {
+  report(projectId: string, input: { taskId: string; summary: string; deliverables: readonly string[]; reporter: string }): string {
     const now = new Date().toISOString()
     const messageId = randomUUID()
     const sha = createHash('sha256').update(input.summary).digest('hex')
-    const supervisor = this.supervisor()
+    const supervisor = this.supervisor(projectId)
     this.db.exec('BEGIN IMMEDIATE')
     try {
       this.db.prepare(`INSERT INTO messages (message_id, project_id, task_id, direction, channel,
         from_session_id, to_session_id, body, body_bytes, body_sha256, preview, deliverables_json,
         idempotency_key, delivery_state, received_at, delivered_at)
         VALUES (?, ?, ?, 'report', 'session', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
-        messageId, this.projectId, input.taskId, input.reporter, supervisor ?? null, input.summary,
+        messageId, projectId, input.taskId, input.reporter, supervisor ?? null, input.summary,
         Buffer.byteLength(input.summary), sha, input.summary.slice(0, 120),
         JSON.stringify(input.deliverables), `report:${input.taskId}`, now, now)
       this.db.prepare(`UPDATE tasks SET status = 'delivered', delivered_at = ?, latest_report_message_id = ?,
@@ -365,7 +394,7 @@ class Ledger {
       this.db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
         actor_session_id, reason, message_id, idempotency_key, at)
         VALUES (?, ?, ?, NULL, 'delivered', ?, NULL, ?, ?, ?)`).run(
-        randomUUID(), this.projectId, input.taskId, input.reporter, messageId, `report:${input.taskId}`, now)
+        randomUUID(), projectId, input.taskId, input.reporter, messageId, `report:${input.taskId}`, now)
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
@@ -375,7 +404,7 @@ class Ledger {
   }
 
   /** Record one refused dispatch so a retry can replay the exact spec. */
-  addPending(input: {
+  addPending(projectId: string, input: {
     dispatcher: string; employee: string; title: string; body: string; dueAt: string
     reason: string; retryable: boolean
   }): string {
@@ -384,18 +413,18 @@ class Ledger {
     this.db.prepare(`INSERT INTO pending_dispatch (pending_id, project_id, dispatcher_session_id,
       employee, title, body, due_at, reason, retryable, status, attempts, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`).run(
-      pendingId, this.projectId, input.dispatcher, input.employee, input.title, input.body,
+      pendingId, projectId, input.dispatcher, input.employee, input.title, input.body,
       input.dueAt, input.reason, input.retryable ? 1 : 0, now, now)
     return pendingId
   }
 
-  pending(pendingId: string): {
+  pending(projectId: string, pendingId: string): {
     pendingId: string; dispatcher: string; employee: string; title: string; body: string
     dueAt: string; status: string; retryable: boolean; attempts: number
   } | undefined {
     const row = this.db.prepare(`SELECT pending_id, dispatcher_session_id, employee, title, body,
       due_at, status, retryable, attempts FROM pending_dispatch WHERE project_id = ? AND pending_id = ?`)
-      .get(this.projectId, pendingId) as {
+      .get(projectId, pendingId) as {
         pending_id: string; dispatcher_session_id: string; employee: string; title: string
         body: string; due_at: string; status: string; retryable: number; attempts: number } | undefined
     if (row === undefined) return undefined
@@ -473,8 +502,7 @@ export function apply(ctx: HostContext): void {
     console.error('cadre-collab: CADRE_LEDGER_PATH is unset; collaboration tools are not registered')
     return
   }
-  const projectId = process.env.CADRE_PROJECT_ID?.trim() || 'proj-demo'
-  const ledger = new Ledger(databasePath, projectId)
+  const ledger = new Ledger(databasePath)
   const controller = ctx.sessionController
   ctx.effect(() => () => { ledger.close() })
 
@@ -510,17 +538,18 @@ export function apply(ctx: HostContext): void {
         : value.employees.map(row => `${row.name}（${row.sessionId}） · ${row.state}`).join('\n'))],
     },
     isConcurrencySafe: () => true,
-    execute: async () => ({ employees: ledger.workers() }),
+    execute: async (_args: unknown, run: ToolRun) =>
+      ({ employees: ledger.workers(ledger.projectOf(callerOf(run))) }),
   })
 
   /** Dispatch exactly one spec; shared by the initial and the retry path. */
-  const dispatchOne = async (item: DispatchItem, dispatcher: string, signal: AbortSignal):
+  const dispatchOne = async (item: DispatchItem, dispatcher: string, projectId: string, signal: AbortSignal):
   Promise<{ ok: true; value: DispatchValue['dispatched'][number] } | { ok: false } & DispatchFailure> => {
     try {
       if (Number.isNaN(Date.parse(item.dueAt))) {
         return { ok: false, kind: 'invalid-due-at', reason: `dueAt 不是合法时间：${item.dueAt}` }
       }
-      const assignee = ledger.resolveAssignee(item.employee)
+      const assignee = ledger.resolveAssignee(projectId, item.employee)
       const fingerprint = createHash('sha256')
         .update([dispatcher, assignee.sessionId, item.title, item.body, item.dueAt].join('\n')).digest('hex')
       const idempotencyKey = `dispatch:${fingerprint}`
@@ -533,7 +562,7 @@ export function apply(ctx: HostContext): void {
       }
       const taskId = randomUUID()
       const messageId = randomUUID()
-      ledger.beginDispatch({ taskId, title: item.title, body: item.body, dueAt: item.dueAt,
+      ledger.beginDispatch(projectId, { taskId, title: item.title, body: item.body, dueAt: item.dueAt,
         dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId })
       try {
         await controller.prompt({
@@ -545,13 +574,13 @@ export function apply(ctx: HostContext): void {
           ].join('\n'))],
         }, signal)
       } catch (error) {
-        ledger.rollbackDispatch(taskId, idempotencyKey)
+        ledger.rollbackDispatch(projectId, taskId, idempotencyKey)
         // A cancelled turn is not a dispatch failure: surface the abort so the
         // turn stops instead of queueing a bogus retry.
         if (signal.aborted) throw error
         return { ok: false, kind: 'delivery-failed', reason: `投递失败，已回滚：${error instanceof Error ? error.message : String(error)}` }
       }
-      ledger.confirmDispatch(taskId, messageId)
+      ledger.confirmDispatch(projectId, taskId, messageId)
       console.log(`cadre-collab: dispatch ok task=${taskId} assignee=${assignee.sessionId} due=${item.dueAt}`)
       return { ok: true, value: { taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt } }
     } catch (error) {
@@ -561,12 +590,12 @@ export function apply(ctx: HostContext): void {
   }
 
   /** Turn one failure into the tool-facing row, queueing retryable ones. */
-  const failRow = (item: DispatchItem, dispatcher: string, outcome: DispatchFailure): DispatchValue['failed'][number] => {
+  const failRow = (item: DispatchItem, dispatcher: string, projectId: string, outcome: DispatchFailure): DispatchValue['failed'][number] => {
     const { kind, reason } = outcome
     const retryable = kind !== 'invalid-due-at'
     const target = typeof item.employee === 'string' && item.employee !== '' ? item.employee : '(未指定员工)'
     const pendingId = retryable
-      ? ledger.addPending({ dispatcher, employee: item.employee, title: item.title, body: item.body,
+      ? ledger.addPending(projectId, { dispatcher, employee: item.employee, title: item.title, body: item.body,
         dueAt: item.dueAt, reason, retryable })
       : undefined
     return {
@@ -628,6 +657,7 @@ export function apply(ctx: HostContext): void {
     execute: async (args: DispatchArgs, run: ToolRun) => {
       const dispatcher = callerOf(run)
       supervisorOnly(dispatcher)
+      const projectId = ledger.projectOf(dispatcher)
       if (!Array.isArray(args.tasks) || args.tasks.length === 0) throw new Error('拆解失败：tasks 至少一条，请重新拆解后再派')
       if (args.tasks.length > MAX_DISPATCH_ITEMS) {
         throw new Error(`一次最多派 ${String(MAX_DISPATCH_ITEMS)} 条（收到 ${String(args.tasks.length)} 条），请分批派发`)
@@ -635,13 +665,13 @@ export function apply(ctx: HostContext): void {
       const dispatched: DispatchValue['dispatched'][number][] = []
       const failed: DispatchValue['failed'][number][] = []
       for (const item of args.tasks) {
-        const outcome = await dispatchOne(item, dispatcher, run.signal)
+        const outcome = await dispatchOne(item, dispatcher, projectId, run.signal)
         if (outcome.ok) {
           dispatched.push(outcome.value)
           continue
         }
         console.log(`cadre-collab: dispatch failed target=${item.employee} reason=${outcome.reason}`)
-        failed.push(failRow(item, dispatcher, outcome))
+        failed.push(failRow(item, dispatcher, projectId, outcome))
       }
       return { dispatched, failed }
     },
@@ -650,7 +680,8 @@ export function apply(ctx: HostContext): void {
   /** Replay one queued failure; shared by the tool and the desktop retry route. */
   const retryOne = async (pendingId: string, caller: string, signal: AbortSignal): Promise<DispatchValue> => {
     supervisorOnly(caller)
-    const record = ledger.pending(pendingId)
+    const projectId = ledger.projectOf(caller)
+    const record = ledger.pending(projectId, pendingId)
     if (record === undefined) throw new Error(`待派条目不存在：${pendingId}`)
     if (record.status === 'dispatched') throw new Error(`该条目已派出，无需重试：${pendingId}`)
     if (record.dispatcher !== caller) throw new Error(`该待派条目属于 ${record.dispatcher}，当前会话无权重试`)
@@ -658,7 +689,7 @@ export function apply(ctx: HostContext): void {
       throw new Error(`该任务已重试 ${String(record.attempts)} 次（上限 ${String(MAX_RETRIES)} 次），请换人派活或退回用户裁决`)
     }
     const item: DispatchItem = { employee: record.employee, title: record.title, body: record.body, dueAt: record.dueAt }
-    const outcome = await dispatchOne(item, caller, signal)
+    const outcome = await dispatchOne(item, caller, projectId, signal)
     if (outcome.ok) {
       ledger.settlePending(record.pendingId, { taskId: outcome.value.taskId })
       console.log(`cadre-collab: retry ok pending=${record.pendingId} task=${outcome.value.taskId}`)
@@ -666,7 +697,7 @@ export function apply(ctx: HostContext): void {
     }
     ledger.settlePending(record.pendingId, { reason: outcome.reason, retryable: outcome.kind !== 'invalid-due-at' })
     console.log(`cadre-collab: retry failed pending=${record.pendingId} reason=${outcome.reason}`)
-    return { dispatched: [], failed: [failRow(item, caller, outcome)] }
+    return { dispatched: [], failed: [failRow(item, caller, projectId, outcome)] }
   }
 
   ctx.tools.register({
@@ -786,18 +817,19 @@ export function apply(ctx: HostContext): void {
     },
     execute: async (args: ReportArgs, run: ToolRun) => {
       const reporter = callerOf(run)
+      const projectId = ledger.projectOf(reporter)
       if (typeof args.summary !== 'string' || args.summary.trim() === '') {
         throw new Error('汇报结论（summary）不能为空：必须写清做了什么与结果')
       }
       if (!Array.isArray(args.deliverables) || args.deliverables.length === 0) {
         throw new Error('汇报必须附交付物（deliverables 至少一条：文件路径或产物说明）')
       }
-      const task = ledger.task(args.taskId)
+      const task = ledger.task(projectId, args.taskId)
       if (task === undefined) throw new Error(`任务不存在：${args.taskId}`)
       if (task.assignee !== reporter) throw new Error(`只能回报派给自己的任务（该任务属于 ${task.assignee}）`)
       const deliverables = args.deliverables ?? []
-      const messageId = ledger.report({ taskId: task.taskId, summary: args.summary, deliverables, reporter })
-      const supervisor = ledger.supervisor()
+      const messageId = ledger.report(projectId, { taskId: task.taskId, summary: args.summary, deliverables, reporter })
+      const supervisor = ledger.supervisor(projectId)
       if (supervisor === undefined || supervisor === reporter) {
         appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
           `report supervisor=absent project=${projectId} task=${task.taskId} reporter=${reporter}
@@ -851,7 +883,7 @@ export function apply(ctx: HostContext): void {
           const member = ledger.member(agent.id)
           if (member === undefined) return ''
           if (member.role === 'supervisor') return SUPERVISOR_DUTY
-          const role = ledger.workerRole(agent.id)
+          const role = ledger.workerRole(member.projectId, agent.id)
           return role === undefined ? '' : workerDuty(role)
         },
       })

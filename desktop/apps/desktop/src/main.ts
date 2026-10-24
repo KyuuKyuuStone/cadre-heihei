@@ -25,6 +25,7 @@ import {
 } from 'electron'
 import { resolveDesktopPaths } from './paths.ts'
 import { CadreLedger, requireProjectId, resolveCadreLedgerPath } from './cadre-ledger.ts'
+import { CadreProjectRegistry, activeMember } from './cadre-projects.ts'
 import type {
   CadreActorRole,
   CadreCollab,
@@ -107,16 +108,58 @@ const CADRE_TITLE_MAX = 200
 const CADRE_BODY_MAX = 20_000
 const CADRE_REASON_MAX = 2_000
 
-function openCadreCollabFromDisk(options: CadreCollabOptions): CadreCollab | undefined {
+interface CadreCollabModule {
+  openCadreCollab?: (input: CadreCollabOptions) => CadreCollab
+  initCadreStore?: (databasePath: string) => void
+}
+
+/** Loaded once: null means "not attempted yet", undefined means "unavailable". */
+let cadreCollabModule: CadreCollabModule | undefined | null = null
+
+function loadCadreCollabModule(): CadreCollabModule | undefined {
+  if (cadreCollabModule !== null) return cadreCollabModule
   try {
-    const mod = cadreRequire('./cadre-collab.cjs') as {
-      openCadreCollab?: (input: CadreCollabOptions) => CadreCollab
-    }
+    const mod = cadreRequire('./cadre-collab.cjs') as CadreCollabModule
     if (typeof mod.openCadreCollab !== 'function') throw new Error('openCadreCollab export missing')
-    return mod.openCadreCollab(options)
+    cadreCollabModule = mod
+    return mod
   } catch (error) {
     console.log(`cadre-collab unavailable reason=${error instanceof Error ? error.message : String(error)}`)
+    cadreCollabModule = undefined
     return undefined
+  }
+}
+
+function openCadreCollabFromDisk(options: CadreCollabOptions): CadreCollab | undefined {
+  const mod = loadCadreCollabModule()
+  if (mod?.openCadreCollab === undefined) return undefined
+  try {
+    return mod.openCadreCollab(options)
+  } catch (error) {
+    console.log(`cadre-collab open failed project=${options.projectId} ` +
+      `reason=${error instanceof Error ? error.message : String(error)}`)
+    return undefined
+  }
+}
+
+/**
+ * Create the ledger tables before any project is known.
+ *
+ * Reads (ledger, roster) and the employee store attach to `cadre.sqlite` at
+ * startup, but the write library owns the schema. Opening a real project store
+ * here would bind a project/actor pair as a side effect; this only migrates.
+ */
+function initCadreLedgerSchema(databasePath: string): void {
+  const mod = loadCadreCollabModule()
+  if (mod?.initCadreStore === undefined) {
+    console.log('cadre-ledger schema init unavailable reason=rebuild cadre-collab.cjs')
+    return
+  }
+  try {
+    mod.initCadreStore(databasePath)
+    console.log(`cadre-ledger schema ready path=${databasePath}`)
+  } catch (error) {
+    console.log(`cadre-ledger schema init failed reason=${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -136,25 +179,36 @@ function cadreText(value: unknown, field: string, max: number): string {
 
 interface CadreDispatchOptions extends CadreDispatchInput {
   readonly projectId: string
+  /** Calling Session; the ledger actor is never a process-wide default. */
+  readonly sessionId: string
 }
 
 interface CadreTransitionOptions extends CadreTransitionInput {
   readonly projectId: string
+  /** Calling Session; the ledger actor is never a process-wide default. */
+  readonly sessionId: string
 }
 
-function parseCadreDispatchOptions(options: unknown, projectId: string): CadreDispatchOptions {
+function parseCadreDispatchOptions(options: unknown): CadreDispatchOptions {
   if (typeof options !== 'object' || options === null) throw new Error('dispatch options must be an object')
   const record = options as Record<string, unknown>
   // `assigneeSessionId` is the panel's field name; `to` is the tool contract.
   const target = cadreIdentifier(record.to ?? record.assigneeSessionId, 'to')
   const title = cadreText(record.title, 'title', CADRE_TITLE_MAX)
   const body = cadreText(record.body, 'body', CADRE_BODY_MAX)
-  const requestedProject = record.projectId === undefined ? projectId : cadreIdentifier(record.projectId, 'projectId')
+  // No fallback: a dispatch without a project would land in whichever project
+  // the process happened to be bound to.
+  const requestedProject = cadreIdentifier(record.projectId, 'projectId')
+  // The actor comes from the calling Session. A missing id is an error: the
+  // old `CADRE_SESSION_ID || 'sup-1'` fallback wrote every request as a
+  // placeholder that belongs to no actual Session.
+  const sessionId = cadreIdentifier(record.sessionId, 'sessionId')
   const idempotencyKey = record.idempotencyKey === undefined
     ? undefined
     : cadreIdentifier(record.idempotencyKey, 'idempotencyKey')
   return {
     projectId: requestedProject,
+    sessionId,
     to: target,
     title,
     body,
@@ -162,14 +216,18 @@ function parseCadreDispatchOptions(options: unknown, projectId: string): CadreDi
   }
 }
 
-function parseCadreTransitionOptions(options: unknown, projectId: string): CadreTransitionOptions {
+function parseCadreTransitionOptions(options: unknown): CadreTransitionOptions {
   if (typeof options !== 'object' || options === null) throw new Error('transition options must be an object')
   const record = options as Record<string, unknown>
   const taskId = cadreIdentifier(record.taskId, 'taskId')
   const from = record.from === undefined ? undefined : cadreIdentifier(record.from, 'from')
   // The panel sends `status` (verified/rework/failed); tools send `to`.
   const to = cadreIdentifier(record.to ?? record.status, 'to')
-  const requestedProject = record.projectId === undefined ? projectId : cadreIdentifier(record.projectId, 'projectId')
+  // Task ids are globally unique, but the actor permission is per project; a
+  // missing project must not fall back to a process-wide default.
+  const requestedProject = cadreIdentifier(record.projectId, 'projectId')
+  // Same rule as dispatch: the caller must name its Session.
+  const sessionId = cadreIdentifier(record.sessionId, 'sessionId')
   const reason = record.reason === undefined
     ? undefined
     : cadreText(record.reason, 'reason', CADRE_REASON_MAX)
@@ -178,6 +236,7 @@ function parseCadreTransitionOptions(options: unknown, projectId: string): Cadre
     : cadreIdentifier(record.idempotencyKey, 'idempotencyKey')
   return {
     projectId: requestedProject,
+    sessionId,
     taskId,
     ...(from === undefined ? {} : { from }),
     to,
@@ -547,37 +606,30 @@ async function main(): Promise<void> {
   })
   const appPreload = fileURLToPath(new URL('./preload-app.cjs', import.meta.url))
   const applicationUrl = `${SCHEME}://app/`
-  // Milestone B②: read-only cadre ledger. The official shell has no project
-  // model yet, so CADRE_PROJECT_ID supplies the interim default used when the
-  // renderer omits `projectId`; replace it once the desktop profile carries a
-  // workspace→project mapping. CADRE_LEDGER_PATH overrides the userData
-  // location because the standalone cadre app and this shell have distinct
-  // userData directories in development.
+  // Milestone B②: read-only cadre ledger. A project IS an official Workspace
+  // (DC-001 R2/R3), so every request carries the Workspace id as `projectId`;
+  // the shell holds no default project. CADRE_LEDGER_PATH overrides the
+  // userData location because the standalone cadre app and this shell have
+  // distinct userData directories in development.
   // One resolver feeds both connections (CADRE_LEDGER_PATH → CADRE_USER_DATA
   // → Electron userData), so read and write can never target different files.
   const cadreLedgerPath = resolveCadreLedgerPath(app.getPath('userData'))
-  const cadreProjectId = process.env.CADRE_PROJECT_ID?.trim() || 'proj-demo'
-  // Write-path actor (milestone B③): the shell has a single local identity
-  // until the profile owns real accounts. CADRE_ROLE=worker maps a roster
-  // worker to the ledger's `assignee` actor kind.
-  const cadreSessionId = process.env.CADRE_SESSION_ID?.trim() || 'sup-1'
+  // Write-path actor (milestone B③): the calling Session names itself in every
+  // IPC request; there is no shell-wide identity. CADRE_ROLE=worker maps a
+  // roster worker to the ledger's `assignee` actor kind.
   const cadreEnvRole = process.env.CADRE_ROLE?.trim()
   const cadreActorRole: CadreActorRole = cadreEnvRole === 'worker' || cadreEnvRole === 'assignee'
     ? 'assignee'
     : 'supervisor'
-  // Open the write store first: it creates the schema on a first run, so the
-  // read-only connection below can attach instead of degrading to missing.
-  const cadreCollab = openCadreCollabFromDisk({
+  // Migrate first, then attach the read-only connection; no project is bound.
+  initCadreLedgerSchema(cadreLedgerPath)
+  const cadreCollab = new CadreProjectRegistry({
     databasePath: cadreLedgerPath,
-    projectId: cadreProjectId,
-    sessionId: cadreSessionId,
     role: cadreActorRole,
+    open: openCadreCollabFromDisk,
   })
-  if (cadreCollab !== undefined) {
-    console.log(`cadre-ledger open path=${cadreLedgerPath} mode=readwrite actor=${cadreSessionId}/${cadreActorRole}`)
-  }
   const cadreLedger = new CadreLedger(cadreLedgerPath)
-  console.log(`cadre-ledger default-project=${cadreProjectId}`)
+  console.log(`cadre-ledger project-scoped path=${cadreLedgerPath} actor=per-request/${cadreActorRole}`)
   // Milestone ④: provider catalogue shares the cadre SQLite file; migration is
   // additive and stores credential references only.
   let cadreProviders: ProviderStore | undefined
@@ -592,7 +644,7 @@ async function main(): Promise<void> {
   let cadreEmployees: EmployeeStore | undefined
   try {
     cadreEmployees = new EmployeeStore(cadreLedgerPath)
-    console.log(`cadre-employees open path=${cadreLedgerPath} project=${cadreProjectId} rows=${cadreEmployees.list(cadreProjectId).length}`)
+    console.log(`cadre-employees open path=${cadreLedgerPath} scope=project`)
   } catch (error) {
     console.error(`cadre-employees open failed reason=${error instanceof Error ? error.message : String(error)}`)
   }
@@ -642,7 +694,7 @@ async function main(): Promise<void> {
     const hostInspectPort = developmentHostInspectPort(development)
     const host = new DesktopHostProcess(resources.node, resources.dsh, activeProject,
       hostInspectPort, { ...hostEnvironment, DSH_CLIENT_VERSION: desktopClientVersion(),
-        CADRE_LEDGER_PATH: cadreLedgerPath, CADRE_PROJECT_ID: cadreProjectId }, onFailure,
+        CADRE_LEDGER_PATH: cadreLedgerPath }, onFailure,
       primaryRuntime,
       resources, (next) => { platformView.setSession(next) })
     return {
@@ -888,16 +940,44 @@ async function main(): Promise<void> {
   const shortcuts = installDesktopShortcuts(() => mainWindow, app.getPath('userData'),
     process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux', () => { refreshApplicationMenu() }, window => updateOverlays.input(window))
   app.on('will-quit', () => { shortcuts.dispose() })
-  app.on('will-quit', () => { cadreCollab?.close(); cadreProviders?.close(); cadreLedger.close() })
+  app.on('will-quit', () => { cadreCollab.close(); cadreProviders?.close(); cadreLedger.close() })
 
-  // Milestone B②: read-only ledger channel. Only the main application frame
-  // may query; a missing `projectId` falls back to CADRE_PROJECT_ID.
-  ipcMain.handle(DESKTOP_IPC.cadreListTasks, (event, options: unknown) => {
-    assertProductSender(event)
+  /** The project a read/write request names; missing or malformed is an error. */
+  const cadreRequestedProject = (channel: string, options: unknown): string => {
     const requested = typeof options === 'object' && options !== null
       ? (options as { projectId?: unknown }).projectId
       : undefined
-    const projectId = requested === undefined ? requireProjectId(cadreProjectId) : requireProjectId(requested)
+    try {
+      return requireProjectId(requested)
+    } catch (error) {
+      console.log(`cadre:${channel} rejected reason=${error instanceof Error ? error.message : String(error)}`)
+      throw error
+    }
+  }
+
+  /**
+   * Whether the caller belongs to a project's roster.
+   *
+   * `unavailable` is distinct from `foreign`: a broken read must not be
+   * reported as an authorization failure, and a foreign project must not be
+   * opened (opening seeds a roster and would silently enrol the caller).
+   */
+  const cadreMembership = (projectId: string, sessionId: string): 'member' | 'foreign' | 'unavailable' => {
+    try {
+      const members = cadreLedger.listMembers(projectId).rows
+      return activeMember(members, sessionId) === undefined ? 'foreign' : 'member'
+    } catch (error) {
+      console.log(`cadre:membership project=${projectId} unavailable ` +
+        `reason=${error instanceof Error ? error.message : String(error)}`)
+      return 'unavailable'
+    }
+  }
+
+  // Milestone B②: read-only ledger channel. Only the main application frame
+  // may query, and every query names its project (Workspace).
+  ipcMain.handle(DESKTOP_IPC.cadreListTasks, (event, options: unknown) => {
+    assertProductSender(event)
+    const projectId = cadreRequestedProject('listTasks', options)
     const result = cadreLedger.listTasks(projectId)
     console.log(`cadre:listTasks project=${projectId} path=${cadreLedgerPath} source=readonly ` +
       `rows=${result.rows.length} elapsedMs=${result.elapsedMs}`)
@@ -908,10 +988,7 @@ async function main(): Promise<void> {
   // panel never infers a supervisor from the client-side session list.
   ipcMain.handle(DESKTOP_IPC.cadreListRoster, (event, options: unknown) => {
     assertProductSender(event)
-    const requested = typeof options === 'object' && options !== null
-      ? (options as { projectId?: unknown }).projectId
-      : undefined
-    const projectId = requested === undefined ? requireProjectId(cadreProjectId) : requireProjectId(requested)
+    const projectId = cadreRequestedProject('listRoster', options)
     const result = cadreLedger.listMembers(projectId)
     console.log(`cadre:listRoster project=${projectId} path=${cadreLedgerPath} source=readonly ` +
       `rows=${result.rows.length}`)
@@ -922,20 +999,29 @@ async function main(): Promise<void> {
   // handlers validate the IPC boundary and delegate with the main identity.
   ipcMain.handle(DESKTOP_IPC.cadreDispatchTask, (event, options: unknown) => {
     assertProductSender(event)
-    if (cadreCollab === undefined) {
-      return { ok: false, code: 'COLLAB_UNAVAILABLE', message: '协作写路径不可用' }
-    }
     let input: CadreDispatchOptions
     try {
-      input = parseCadreDispatchOptions(options, cadreProjectId)
+      input = parseCadreDispatchOptions(options)
     } catch (error) {
       return { ok: false, code: 'INVALID_ARGUMENT', message: error instanceof Error ? error.message : '参数无效' }
     }
-    if (input.projectId !== cadreProjectId) {
+    // Ownership comes from the roster, not from a process-wide project id: the
+    // caller must already be a member of the project it names.
+    const membership = cadreMembership(input.projectId, input.sessionId)
+    if (membership === 'unavailable') {
+      return { ok: false, code: 'LEDGER_UNAVAILABLE', message: '台账不可用，无法校验项目归属' }
+    }
+    if (membership === 'foreign') {
+      console.log(`cadre:dispatchTask project=${input.projectId} actor=${input.sessionId}/${cadreActorRole} ` +
+        `path=${cadreLedgerPath} ok=false code=CROSS_PROJECT_DENIED`)
       return { ok: false, code: 'CROSS_PROJECT_DENIED', message: '跨项目请求已拒绝' }
     }
+    const collab = cadreCollab.forProject(input.projectId, input.sessionId)
+    if (collab === undefined) {
+      return { ok: false, code: 'COLLAB_UNAVAILABLE', message: '协作写路径不可用' }
+    }
     try {
-      const result = cadreCollab.dispatch({
+      const result = collab.dispatch({
         to: input.to,
         title: input.title,
         body: input.body,
@@ -944,16 +1030,16 @@ async function main(): Promise<void> {
       const failure = asCadreFailure(result)
       const inputLog = `to=${input.to} idempotencyKey=${input.idempotencyKey ?? '(auto)'}`
       if (failure !== undefined) {
-        console.log(`cadre:dispatchTask project=${cadreProjectId} ${inputLog} actor=${cadreSessionId}/${cadreActorRole} ` +
+        console.log(`cadre:dispatchTask project=${input.projectId} ${inputLog} actor=${input.sessionId}/${cadreActorRole} ` +
           `path=${cadreLedgerPath} ok=false code=${failure.code}`)
         return failure
       }
       // Read back on the write connection after commit: the renderer gets the
       // new row without a second IPC round-trip or a stale read snapshot.
-      const snapshot = cadreCollab.listTasks()
+      const snapshot = collab.listTasks()
       const taskId = (result as { taskId?: unknown }).taskId
       const ledgerUpdated = (result as { ledgerUpdated?: unknown }).ledgerUpdated
-      console.log(`cadre:dispatchTask project=${cadreProjectId} ${inputLog} actor=${cadreSessionId}/${cadreActorRole} ` +
+      console.log(`cadre:dispatchTask project=${input.projectId} ${inputLog} actor=${input.sessionId}/${cadreActorRole} ` +
         `path=${cadreLedgerPath} ok=true task=${String(taskId)} ledgerUpdated=${String(ledgerUpdated)} ` +
         `rows=${snapshot.rows.length} readback=write-connection`)
       return { ...(result as Record<string, unknown>), tasks: snapshot.rows }
@@ -965,35 +1051,42 @@ async function main(): Promise<void> {
 
   ipcMain.handle(DESKTOP_IPC.cadreTransitionTask, (event, options: unknown) => {
     assertProductSender(event)
-    if (cadreCollab === undefined) {
-      return { ok: false, code: 'COLLAB_UNAVAILABLE', message: '协作写路径不可用' }
-    }
     let input: CadreTransitionOptions
     try {
-      input = parseCadreTransitionOptions(options, cadreProjectId)
+      input = parseCadreTransitionOptions(options)
     } catch (error) {
       return { ok: false, code: 'INVALID_ARGUMENT', message: error instanceof Error ? error.message : '参数无效' }
     }
-    if (input.projectId !== cadreProjectId) {
+    const membership = cadreMembership(input.projectId, input.sessionId)
+    if (membership === 'unavailable') {
+      return { ok: false, code: 'LEDGER_UNAVAILABLE', message: '台账不可用，无法校验项目归属' }
+    }
+    if (membership === 'foreign') {
+      console.log(`cadre:transitionTask project=${input.projectId} actor=${input.sessionId}/${cadreActorRole} ` +
+        `path=${cadreLedgerPath} ok=false code=CROSS_PROJECT_DENIED`)
       return { ok: false, code: 'CROSS_PROJECT_DENIED', message: '跨项目请求已拒绝' }
     }
+    const collab = cadreCollab.forProject(input.projectId, input.sessionId)
+    if (collab === undefined) {
+      return { ok: false, code: 'COLLAB_UNAVAILABLE', message: '协作写路径不可用' }
+    }
     try {
-      const view = cadreTransitionView(cadreCollab.transition({
+      const view = cadreTransitionView(collab.transition({
         taskId: input.taskId,
         ...(input.from === undefined ? {} : { from: input.from }),
         to: input.to,
         ...(input.reason === undefined ? {} : { reason: input.reason }),
         ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
       })) as { ok?: unknown; code?: unknown }
-      const fields = `task=${input.taskId} from=${input.from ?? '(current)'} to=${input.to} ` +
+      const fields = `project=${input.projectId} task=${input.taskId} from=${input.from ?? '(current)'} to=${input.to} ` +
         `reason=${input.reason ?? '(none)'} idempotencyKey=${input.idempotencyKey ?? '(auto)'}`
       if (view.ok !== true) {
-        console.log(`cadre:transitionTask ${fields} actor=${cadreSessionId}/${cadreActorRole} path=${cadreLedgerPath} ` +
+        console.log(`cadre:transitionTask ${fields} actor=${input.sessionId}/${cadreActorRole} path=${cadreLedgerPath} ` +
           `ok=false code=${String(view.code ?? 'INTERNAL_ERROR')}`)
         return view
       }
-      const snapshot = cadreCollab.listTasks()
-      console.log(`cadre:transitionTask ${fields} actor=${cadreSessionId}/${cadreActorRole} path=${cadreLedgerPath} ` +
+      const snapshot = collab.listTasks()
+      console.log(`cadre:transitionTask ${fields} actor=${input.sessionId}/${cadreActorRole} path=${cadreLedgerPath} ` +
         `ok=true status=${String((view as { status?: unknown }).status)} ledgerUpdated=true ` +
         `rows=${snapshot.rows.length} readback=write-connection`)
       return { ...view, ledgerUpdated: true, tasks: snapshot.rows }
@@ -1218,8 +1311,24 @@ async function main(): Promise<void> {
   // tests pin exactly what this path applies; a bad payload returns a structured
   // error instead of throwing, and logs carry ids only (never persona text).
   const employeeStoreMissing = { ok: false as const, code: 'INVALID_ARGUMENT' as const, message: '员工存储不可用' }
-  const employeeProject = (value: unknown): string | undefined =>
-    typeof value === 'string' && value.trim() !== '' ? value : undefined
+  /**
+   * Project (Workspace) id required by every employee operation.
+   *
+   * There is no default project: an unscoped roster write would land in
+   * whichever project the process happened to use before the Workspace switch.
+   */
+  const employeeProjectRequired = (value: unknown):
+    | { readonly ok: true; readonly projectId: string }
+    | { readonly ok: false; readonly code: 'INVALID_ARGUMENT'; readonly message: string; readonly field: string } => {
+    if (typeof value !== 'string' || value.trim() === '') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '缺少 projectId', field: 'projectId' }
+    }
+    try {
+      return { ok: true, projectId: requireProjectId(value) }
+    } catch {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
+    }
+  }
   const employeeText = (value: unknown, field: string):
     | { readonly ok: true; readonly value: string | null | undefined }
     | { readonly ok: false; readonly code: 'INVALID_ARGUMENT'; readonly message: string; readonly field: string } => {
@@ -1240,10 +1349,9 @@ async function main(): Promise<void> {
     if (typeof sessionId !== 'string') {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
     }
-    if (projectId !== undefined && typeof projectId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
-    }
-    const employee = cadreEmployees.get(sessionId, employeeProject(projectId))
+    const project = employeeProjectRequired(projectId)
+    if (project.ok === false) return project
+    const employee = cadreEmployees.get(sessionId, project.projectId)
     return { ok: true, employee: employee ?? null }
   })
 
@@ -1257,9 +1365,8 @@ async function main(): Promise<void> {
     if (typeof record.sessionId !== 'string') {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
     }
-    if (record.projectId !== undefined && typeof record.projectId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
-    }
+    const project = employeeProjectRequired(record.projectId)
+    if (project.ok === false) return project
     const displayName = employeeText(record.displayName, 'displayName')
     if (displayName.ok === false) return displayName
     const templateId = employeeText(record.templateId, 'templateId')
@@ -1272,7 +1379,7 @@ async function main(): Promise<void> {
     if (preferredModel.ok === false) return preferredModel
     const input: UpsertEmployeeInput = {
       sessionId: record.sessionId,
-      projectId: employeeProject(record.projectId) ?? cadreProjectId,
+      projectId: project.projectId,
       ...(displayName.value === undefined ? {} : { displayName: displayName.value }),
       ...(templateId.value === undefined ? {} : { templateId: templateId.value }),
       ...(personaNote.value === undefined ? {} : { personaNote: personaNote.value }),
@@ -1300,16 +1407,14 @@ async function main(): Promise<void> {
     if (typeof sessionId !== 'string') {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
     }
-    if (projectId !== undefined && typeof projectId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
-    }
-    const project = employeeProject(projectId) ?? cadreProjectId
-    const deleted = cadreEmployees.delete(sessionId, project)
+    const project = employeeProjectRequired(projectId)
+    if (project.ok === false) return project
+    const deleted = cadreEmployees.delete(sessionId, project.projectId)
     if (deleted.ok === false) {
-      console.log(`cadre:deleteEmployee session=${sessionId} project=${project} ok=false code=${deleted.code}`)
+      console.log(`cadre:deleteEmployee session=${sessionId} project=${project.projectId} ok=false code=${deleted.code}`)
       return deleted
     }
-    console.log(`cadre:deleteEmployee session=${sessionId} project=${project} ok=true`)
+    console.log(`cadre:deleteEmployee session=${sessionId} project=${project.projectId} ok=true`)
     return deleted
   })
 
@@ -1326,12 +1431,11 @@ async function main(): Promise<void> {
     if (typeof record.sessionId !== 'string' || typeof record.role !== 'string') {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId/role 无效' }
     }
-    if (record.projectId !== undefined && typeof record.projectId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
-    }
+    const project = employeeProjectRequired(record.projectId)
+    if (project.ok === false) return project
     const input: SaveMemberInput = {
       sessionId: record.sessionId,
-      projectId: employeeProject(record.projectId) ?? cadreProjectId,
+      projectId: project.projectId,
       role: record.role === 'supervisor' ? 'supervisor' : 'worker',
       ...(typeof record.displayName === 'string' ? { displayName: record.displayName } : {}),
     }
@@ -1351,28 +1455,23 @@ async function main(): Promise<void> {
     if (typeof sessionId !== 'string') {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
     }
-    if (projectId !== undefined && typeof projectId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
-    }
-    const project = employeeProject(projectId) ?? cadreProjectId
-    const retired = cadreEmployees.retireMember(sessionId, project, new Date().toISOString())
-    console.log(`cadre:retireMember session=${sessionId} project=${project} ok=${String(retired.ok)}`)
+    const project = employeeProjectRequired(projectId)
+    if (project.ok === false) return project
+    const retired = cadreEmployees.retireMember(sessionId, project.projectId, new Date().toISOString())
+    console.log(`cadre:retireMember session=${sessionId} project=${project.projectId} ok=${String(retired.ok)}`)
     return retired
   })
 
   ipcMain.handle(DESKTOP_IPC.cadreListEmployees, (event, options: unknown) => {
     assertProductSender(event)
     if (cadreEmployees === undefined) return employeeStoreMissing
-    if (options !== undefined && (typeof options !== 'object' || options === null)) {
+    if (typeof options !== 'object' || options === null) {
       return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
     }
-    const projectId = options === undefined ? undefined : (options as { projectId?: unknown }).projectId
-    if (projectId !== undefined && typeof projectId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
-    }
-    const project = employeeProject(projectId) ?? cadreProjectId
-    const employees = cadreEmployees.list(project)
-    console.log(`cadre:listEmployees project=${project} count=${employees.length}`)
+    const project = employeeProjectRequired((options as { projectId?: unknown }).projectId)
+    if (project.ok === false) return project
+    const employees = cadreEmployees.list(project.projectId)
+    console.log(`cadre:listEmployees project=${project.projectId} count=${employees.length}`)
     return { ok: true, employees }
   })
 

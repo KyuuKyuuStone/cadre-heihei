@@ -94,6 +94,8 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
       ipcRenderer.invoke(DESKTOP_IPC.cadreListRoster, options) as Promise<unknown>,
     dispatchTask: (options: {
       projectId?: string
+      /** Calling Session; required by the host, never defaulted. */
+      sessionId: string
       to?: string
       assigneeSessionId?: string
       title: string
@@ -102,6 +104,8 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
     }) => ipcRenderer.invoke(DESKTOP_IPC.cadreDispatchTask, options) as Promise<unknown>,
     transitionTask: (options: {
       projectId?: string
+      /** Calling Session; required by the host, never defaulted. */
+      sessionId: string
       taskId: string
       from?: string
       to?: string

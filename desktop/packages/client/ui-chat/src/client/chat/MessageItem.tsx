@@ -297,12 +297,16 @@ export function PendingSubmissionBubble({ submission, loadImage, renderFactorySl
 
 /** User and admitted-steering keyed Chat renderer. */
 export const UserMessageNodeView = memo(function UserMessageNodeView({
-  node, renderFactorySlot, loadImage, t,
+  node, renderFactorySlot, loadImage, t, sessionId, useWorkspaces,
 }: ChatNodeViewProps<'user' | 'steering'>) {
   const data = node.data
   const reportText = data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
+  // The ledger addresses a project by its Workspace id: resolve the Session's
+  // owning Workspace so the report card can read and write the right ledger.
+  const projectId = useWorkspaces(snapshot => snapshot.items
+    .find(item => item.sessionIds.some(id => String(id) === String(sessionId)))?.workspaceId)
   if (parseCadreReport(reportText) !== undefined) {
-    return <CadreReportNodeView content={reportText} />
+    return <CadreReportNodeView content={reportText} projectId={projectId} sessionId={String(sessionId)} />
   }
   return (
     <UserStyleBubble

@@ -49,8 +49,15 @@ interface TransitionResult {
 }
 
 interface CadreChatBridge {
-  listTasks?(query?: { projectId?: string }): Promise<{ rows?: readonly TaskRow[] } | undefined>
-  transitionTask?(query: { taskId: string; status: string; reason?: string }): Promise<TransitionResult | undefined>
+  listTasks?(query: { projectId: string }): Promise<{ rows?: readonly TaskRow[] } | undefined>
+  transitionTask?(query: {
+    projectId: string
+    /** Calling Session; the host rejects a write without it. */
+    sessionId: string
+    taskId: string
+    status: string
+    reason?: string
+  }): Promise<TransitionResult | undefined>
 }
 
 interface ParsedReport {
@@ -102,8 +109,15 @@ function failureText(result: TransitionResult | undefined): string {
 /**
  * Report card with the two acceptance actions; every write is confirmed by
  * the ledger (`ok`/`ledgerUpdated`) before the card claims success.
+ * @param props - report message text and the Workspace id of the Session
+ * that owns the card (the ledger addresses projects by Workspace id).
  */
-export function CadreReportNodeView({ content }: { readonly content: string }) {
+export function CadreReportNodeView({ content, projectId, sessionId }: {
+  readonly content: string
+  readonly projectId: string | undefined
+  /** The Session showing the card; it becomes the ledger actor. */
+  readonly sessionId: string | undefined
+}) {
   const report = parseCadreReport(content)
   const [status, setStatus] = useState<string | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -121,8 +135,12 @@ export function CadreReportNodeView({ content }: { readonly content: string }) {
       setLoadError('台账通道未接入：window.cadre.listTasks 未注册')
       return
     }
+    if (projectId === undefined) {
+      setLoadError('当前会话不属于任何项目部，无法读取台账。')
+      return
+    }
     let cancelled = false
-    void target.listTasks({}).then((response) => {
+    void target.listTasks({ projectId }).then((response) => {
       if (cancelled) return
       const row = response?.rows?.find(task => task.taskId === report.taskId)
       if (row === undefined) {
@@ -134,7 +152,7 @@ export function CadreReportNodeView({ content }: { readonly content: string }) {
       if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error))
     })
     return () => { cancelled = true }
-  }, [report])
+  }, [content, projectId])
 
   if (report === undefined) return null
 
@@ -144,19 +162,31 @@ export function CadreReportNodeView({ content }: { readonly content: string }) {
       setNotice('写入通道未接入：window.cadre.transitionTask 未注册')
       return
     }
+    if (projectId === undefined) {
+      setNotice('当前会话不属于任何项目部，无法写入台账。')
+      return
+    }
+    if (sessionId === undefined) {
+      setNotice('无法确定当前会话身份，写入已拒绝。')
+      return
+    }
     setPending(true)
     setNotice(null)
     try {
       // The ledger requires review as a mandatory stop after delivery; a
       // user verdict records that stop first instead of bypassing it.
       if (status === 'delivered') {
-        const reviewed = await target.transitionTask({ taskId: report.taskId, status: 'review' })
+        const reviewed = await target.transitionTask({
+          projectId, sessionId, taskId: report.taskId, status: 'review',
+        })
         if (reviewed?.ok === false) {
           setNotice(`主管审核步骤失败：${failureText(reviewed)}`)
           return
         }
       }
       const final = await target.transitionTask({
+        projectId,
+        sessionId,
         taskId: report.taskId,
         status: to,
         ...(reasonText === undefined ? {} : { reason: reasonText }),

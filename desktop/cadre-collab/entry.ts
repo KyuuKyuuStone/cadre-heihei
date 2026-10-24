@@ -48,6 +48,20 @@ export interface CadreCollab {
   close(): void
 }
 
+/**
+ * Create the ledger schema without binding a project or seeding a roster.
+ *
+ * The desktop main process needs the tables before the first project is known
+ * (its read-only connection and the employee roster open at startup). Opening
+ * a real project store here would bind an actor to a project that may not
+ * exist, so this only runs the forward-only migration.
+ * @param databasePath - absolute path to `cadre.sqlite`.
+ */
+export function initCadreStore(databasePath: string): void {
+  const store = new SqliteCollabStore({ databasePath })
+  store.close()
+}
+
 /** Open the SQLite collaboration store with a fixed caller identity. */
 export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
   const store = new SqliteCollabStore({
