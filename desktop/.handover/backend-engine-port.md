@@ -63,3 +63,33 @@ launch8.log:40-41 确证：`dsh: warning: 1 entry did not activate` /
   所以「bundle 自己当插件行」必然解析失败；preset 行不走 loader 才显得正常。
 - 修复：独立包 `packages/cadre/host-collab` + bundle deps 依赖它 + patch 行改名；
   同步修 CADRE_LEDGER_PATH 注入（Host env 实测缺失）。
+
+## P0 装机 file:// fallback 诊断（未完成，交接用）
+
+### 线索（已查，未定性）
+- 主窗口唯一加载点是 `apps/desktop/src/main.ts:628` 的 `window.loadURL(url)`，url 来自 Host
+  ready 消息（`dsh web: http://…`）；**main 里没有 `file://` / `loadFile` 降级分支**。
+- 全仓 `loadFile` 只出现在：`welcome-window.ts:120`（`renderer/welcome.html`）、
+  `policy-test-auth.ts:127`（登录加载页）、`mandatory-update-window.ts`（更新兜底页）。
+- `fallback` 关键词只在 `mandatory-update-policy.ts`（更新兜底页）等无关位置出现。
+- 推论（未验证）：装机看到的「官方样式页」不是 main 的显式降级，更可能是 Host 未 ready 时的
+  产物 —— 例如窗口加载了静态资源，或 `dsh-app://app` 前端在缺少 host 注入时只渲染半成品。
+
+### 下一步三条
+1. **先拿装机日志**：装 `package:win:x64:unsigned` 产物后看 userData 日志，确认 Host 是否发出
+   ready；若未 ready，需要先把 Host stderr 落盘（见下）再采一次。
+2. **对比 dev / packaged 两条启动路径**：dev = `apps/desktop/.desktop-build/development`；
+   packaged = `.desktop-build/targets/win-x64/dsh`（asar 内）。逐项比对入口、cwd（projectDir）、
+   env（`desktopNodeEnvironment`）、资源根、profile 位置。
+3. **检查 host-collab 是否进装机闭包**：`packages/cadre/host-collab/package.json` 有
+   `"private": true`，且 files 只列 lib；需确认它被 bundle 依赖闭包/`prepare-package-set` 带进
+   `targets/win-x64/dsh/node_modules`，否则 profile 行解析会失败（与 dev 的 1-entry 告警同类）。
+
+### 怀疑但未验证
+- **identity.json 门槛**：不清楚 `identity.json` + members 校验是谁加的、在启动路径哪个环节读，
+  是否会在干净装机环境阻断 Host 或窗口。
+- **host-process stderr 缓冲**：`apps/desktop/src/host-process.ts:204` 把 stderr 收进内存，
+  仅退出/fatal 时拼接打印；装机启动失败时这段诊断基本看不到，建议改成同时落盘
+  （userData/logs/host-stderr.log），这是后续所有装机诊断的前置能力。
+- 参考：dev 下同类问题（loader 解析失败）就是靠 Host stdout 的
+  `1 entry did not activate` 才定位的；装机必须先有等价可见性。
