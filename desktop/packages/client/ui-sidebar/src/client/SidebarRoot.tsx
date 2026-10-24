@@ -19,7 +19,7 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  FishLogo, IconNewChatOutlineMedium, IconNewChatOutlineRegular, IconPanelLeftOutlineRegular, isDarwinDesktop, ShortcutKeys, Tooltip,
+  FishLogo, IconNewChatOutlineMedium, IconNewChatOutlineRegular, IconPanelLeftOutlineRegular, isDarwinDesktop, Menu, ShortcutKeys, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
@@ -91,6 +91,7 @@ export function SidebarRoot({
   startSession,
   toggleSidebar,
   selectPanel,
+  requestCadreCreate,
   usePanels,
   useShortcuts,
   usePanelInfo,
@@ -104,6 +105,7 @@ export function SidebarRoot({
   // Wide content stays mounted while the collapse animates (fading via
   // .collapsed .wide), unmounts at settle, and remounts right away on expand.
   const [settled, setSettled] = useState(collapsed)
+  const [createMenuOpen, setCreateMenuOpen] = useState(false)
   useEffect(() => {
     if (!collapsed) { setSettled(false); return }
     const timer = window.setTimeout(() => { setSettled(true) }, COLLAPSE_SETTLE_MS)
@@ -256,25 +258,43 @@ export function SidebarRoot({
       </div>
 
       {/* The label fades before the hover/focus shortcut, including on translucent backgrounds. */}
-      <Tooltip label={t('session.new.label')} shortcutKeys={newShortcut?.keys} delayMs={500} side={captionTooltipSide} disabled={wide}>
-        <button
-          type="button"
-          className={css.newSession}
-          aria-label={t('session.new.label')}
-          aria-keyshortcuts={newShortcut?.aria}
-          onClick={() => { startSession() }}
-        >
-          <span className={css.newSessionLabelMask}><span className={css.newSessionContent}>
-            {wide
-              ? <IconNewChatOutlineMedium size={14} />
-              : <IconNewChatOutlineRegular size={windowsTitlebar ? 16 : 18} />}
-            {wide && <span className={clsx(css.newSessionLabel, css.wide)}>{t('session.new')}</span>}
-          </span></span>
-          {wide && newShortcut !== undefined && newShortcut.keys.length > 0 && <span className={css.newSessionShortcut} aria-hidden="true">
-            <ShortcutKeys keys={newShortcut.keys} />
-          </span>}
-        </button>
-      </Tooltip>
+      <Menu
+        open={createMenuOpen}
+        onClose={() => { setCreateMenuOpen(false) }}
+        items={[
+          { id: 'supervisor', label: '主管' },
+          { id: 'worker', label: '员工' },
+          { id: 'plain', label: '普通会话' },
+        ]}
+        onSelect={(id) => {
+          setCreateMenuOpen(false)
+          if (id === 'plain') { startSession(); return }
+          requestCadreCreate(id === 'supervisor' ? 'supervisor' : 'worker')
+        }}
+        anchor={(
+          <Tooltip label={t('session.new.label')} shortcutKeys={newShortcut?.keys} delayMs={500} side={captionTooltipSide} disabled={wide}>
+            <button
+              type="button"
+              className={css.newSession}
+              aria-label={t('session.new.label')}
+              aria-keyshortcuts={newShortcut?.aria}
+              onClick={() => { setCreateMenuOpen(open => !open) }}
+            >
+              <span className={css.newSessionLabelMask}><span className={css.newSessionContent}>
+                {wide
+                  ? <IconNewChatOutlineMedium size={14} />
+                  : <IconNewChatOutlineRegular size={windowsTitlebar ? 16 : 18} />}
+                {wide && <span className={clsx(css.newSessionLabel, css.wide)}>{t('session.new')}</span>}
+              </span></span>
+              {wide && newShortcut !== undefined && newShortcut.keys.length > 0 && <span className={css.newSessionShortcut} aria-hidden="true">
+                <ShortcutKeys keys={newShortcut.keys} />
+              </span>}
+            </button>
+          </Tooltip>
+        )}
+        portal
+        closeOnPointerLeave
+      />
 
       {panels.length > 0 && (
         <nav className={css.panelList} aria-label={t('panels.label')}>

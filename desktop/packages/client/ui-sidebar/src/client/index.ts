@@ -17,13 +17,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SidebarPanelMetadata, SidebarRootInjected } from './contract/slots.ts'
 import { CADRE_SKIN_TOKENS, CADRE_THEME_ENABLED, CADRE_THEME_SOURCE } from './cadre-skin.tokens.ts'
-import { CadreIcon, CadrePanel, type CadrePanelInjected } from './CadrePanel.tsx'
+import { CadreIcon, CadrePanel, type CadreCreateRequest, type CadrePanelInjected } from './CadrePanel.tsx'
 import { CADRE_PROJECT_ID } from './cadre-roster-source.ts'
 import {
   EmployeeRowBadge,
   type EmployeeListState, type EmployeeBadgeInjected, type EmployeeRecord, type EmployeeWrite,
 } from './CadreEmployee.tsx'
-import { ProviderSection } from './ProviderSection.tsx'
 import { HeaderLeadingControls } from './HeaderLeadingControls.tsx'
 import { SidebarRoot } from './SidebarRoot.tsx'
 import { en, zh, type SidebarKey } from './locales.ts'
@@ -47,6 +46,7 @@ const NS = 'sidebar'
 
 interface WorkspaceNavigation {
   startSession(workspaceId?: Parameters<SidebarRootInjected['startSession']>[0]): void
+  openSession(sessionId: string): void
 }
 
 /** Optional employee slice of the desktop bridge (ADR-0022 T1). */
@@ -120,7 +120,13 @@ export function apply(ctx: ClientContext): void {
   const employeeBadgeInjected = (): EmployeeBadgeInjected => ({ hooks: { employees } })
   // W8/W9 creation seam: the official Session is created first, then the member
   // row. A member-write failure is reported honestly; the Session is not deleted.
+  // The sidebar's New Session menu and the project-row ＋ share one request
+  // store; the panel owns the form.
+  const cadreCreateRequest = createSnapshotStore<CadreCreateRequest | null>(null)
+  let cadreCreateToken = 0
   const cadrePanelInjected = (): CadrePanelInjected => ({
+    openSession: (sessionId) => { workspaceNavigation.openSession(sessionId) },
+    hooks: { createRequest: cadreCreateRequest },
     createPlainSession: async () => {
       try {
         const sessionId = String(await ctx.sessions.create({}))
@@ -192,6 +198,11 @@ export function apply(ctx: ClientContext): void {
       if (id === 'plugins' || id === 'schedules') ctx.get('productAnalytics')?.track('sidebar_menu_click', { menu_name: id === 'plugins' ? 'plugin' : 'cron' })
       ctx.layout.selectPanel(id)
     },
+    requestCadreCreate: (kind) => {
+      cadreCreateToken += 1
+      cadreCreateRequest.set({ kind, token: cadreCreateToken })
+      ctx.layout.selectPanel('cadre' as MainPanelId)
+    },
     hooks: { panels, shortcuts: ctx.shortcuts.catalog },
   })
   ctx.slots.inject('sidebar', () => ctx.slots.register({
@@ -224,21 +235,15 @@ export function apply(ctx: ClientContext): void {
     name: 'sidebar.panellist',
     id: 'cadre',
     order: 30,
-    label: () => '项目',
+    label: () => '项目部',
   }, CadreIcon))
   ctx.slots.inject('main', () => ctx.slots.register({
     name: 'main',
     key: 'cadre',
     inject: cadrePanelInjected,
   }, CadrePanel))
-  // Cadre providers: settings section for the model-provider roster.
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'cadre-providers',
-    order: 15,
-    label: () => '模型 Providers',
-    locale: NS,
-  }, ProviderSection))
+  // Providers live on the official Models page; this plugin registers no
+  // settings section of its own.
   // W8: employee management moved under the project row; the global settings
   // section and the session "转为员工" menu entry are intentionally gone.
   // ADR-0022 T4: 16px leading cell, rendered only for employee Sessions.
