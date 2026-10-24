@@ -36,9 +36,24 @@ export async function hostRpc(
   const envelope = (await response.json()) as RpcEnvelope
   if (envelope.type !== 'server-response' || envelope.rpcId !== rpcId
     || typeof envelope.result !== 'object' || envelope.result === null || envelope.result.ok !== true) {
-    throw new Error(`host rpc ${rpcMethod}: rejected`)
+    const detail = envelope.result?.error === undefined ? '' : `: ${JSON.stringify(envelope.result.error).slice(0, 300)}`
+    throw new Error(`host rpc ${rpcMethod}: rejected${detail}`)
   }
   return envelope.result.value
+}
+
+/** Official session model selection, including reasoning effort (single source of truth). */
+export async function selectSessionModel(
+  hostUrl: string, cookie: string,
+  request: { sessionId: string; provider: string; model: string; reasoningEffort?: string },
+): Promise<void> {
+  await hostRpc(hostUrl, cookie, 'session', 'selectModel', { request })
+}
+
+/** Official model catalog (per-provider groups with reasoning efforts). */
+export async function fetchModelCatalog(hostUrl: string, cookie: string): Promise<readonly unknown[]> {
+  const value = await hostRpc(hostUrl, cookie, 'session', 'modelCatalog', {})
+  return Array.isArray(value) ? value : []
 }
 
 /** Store a key through the official credentials provider (never in our DB/logs). */

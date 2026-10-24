@@ -143,6 +143,7 @@ interface CadreBridge {
     sessionId: string
     providerId: string
     model: string
+    reasoningEffort?: string
   }): Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
   listProviders?(): Promise<{
     ok?: boolean
@@ -154,7 +155,13 @@ interface CadreProviderOption {
   readonly providerId: string
   readonly name: string
   readonly defaultModel: string
-  readonly models?: readonly { readonly id: string }[]
+  readonly models?: readonly {
+    readonly id: string
+    readonly reasoning?: {
+      readonly efforts?: readonly { readonly id: string; readonly name?: string }[]
+      readonly defaultEffort?: string
+    }
+  }[]
   readonly enabled?: boolean
   readonly hasKey?: boolean
 }
@@ -421,6 +428,7 @@ export function CadrePanel({
   const [providers, setProviders] = useState<readonly CadreProviderOption[]>([])
   const [providerId, setProviderId] = useState('')
   const [modelId, setModelId] = useState('')
+  const [effortId, setEffortId] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [retireFor, setRetireFor] = useState<RosterMember | null>(null)
@@ -678,7 +686,8 @@ export function CadrePanel({
           modelNote = '；模型通道未接入，已使用默认模型'
         } else {
           try {
-            const bound = await bind({ sessionId: result.sessionId, providerId, model: modelId })
+            const bound = await bind({ sessionId: result.sessionId, providerId, model: modelId,
+              ...(effortId === '' ? {} : { reasoningEffort: effortId }) })
             if (bound?.ok === false) {
               modelNote = `；模型未绑定（${bound.code ?? 'ERROR'} · ${bound.message ?? '未知错误'}）`
             }
@@ -1101,8 +1110,27 @@ export function CadrePanel({
                     </div>
                   )
                 })()}
+                {(() => {
+                  const selected = providers.find(provider => provider.providerId === providerId)
+                  const efforts = selected?.models?.find(model => model.id === modelId)?.reasoning?.efforts ?? []
+                  if (efforts.length === 0) return null
+                  return (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }} role="radiogroup" aria-label="思考强度">
+                      {efforts.map(effort => (
+                        <Button
+                          key={effort.id}
+                          variant={effortId === effort.id ? 'primary' : 'outline'}
+                          size="sm"
+                          onClick={() => { setEffortId(effort.id) }}
+                        >
+                          {effort.name ?? effort.id}
+                        </Button>
+                      ))}
+                    </div>
+                  )
+                })()}
                 <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
-                  权限默认完全权限。思考强度随模型默认；当前接口只持久化服务商与模型。
+                  权限默认完全权限。思考强度按官方模型目录选择，未选则用模型默认；写入官方会话模型选择。
                 </span>
               </div>
               {createError !== null && <p role="alert" style={{ margin: 0, color: TEXT_ERROR }}>{createError}</p>}

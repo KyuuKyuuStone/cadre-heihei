@@ -40,6 +40,8 @@ import {
   setProviderCredential,
   syncProvidersToHost,
   unsetProviderCredential,
+  fetchModelCatalog,
+  selectSessionModel,
 } from './provider-runtime.ts'
 import { DesktopProjectManager } from './project-manager.ts'
 import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError } from './host-process.ts'
@@ -1031,6 +1033,29 @@ async function main(): Promise<void> {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
     }
     const providers = await Promise.all(cadreProviders.list().map(providerView))
+    // Enrich each model with the official catalog's reasoning efforts so the
+    // create-employee dialog can offer exactly what the Host accepts.
+    if (hostUrl !== undefined && hostCookie !== undefined) {
+      try {
+        const groups = await fetchModelCatalog(hostUrl, hostCookie) as {
+          id?: unknown; models?: { id?: unknown; reasoning?: unknown }[] }[]
+        const efforts = new Map<string, unknown>()
+        for (const group of groups) {
+          for (const entry of group.models ?? []) {
+            if (typeof entry.id === 'string' && entry.reasoning !== undefined) efforts.set(entry.id, entry.reasoning)
+          }
+        }
+        for (const provider of providers) {
+          if (!Array.isArray(provider.models)) continue
+          provider.models = provider.models.map(model => {
+            const reasoning = efforts.get(model.id)
+            return reasoning === undefined ? model : { ...model, reasoning }
+          })
+        }
+      } catch (error) {
+        console.log(`cadre:listProviders catalog unavailable=${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
     console.log(`cadre:listProviders count=${providers.length} withKey=${providers.filter(p => p.hasKey).length}`)
     return { ok: true, providers }
   })
@@ -1135,7 +1160,7 @@ async function main(): Promise<void> {
     return { ok: true, providerId, hasKey: true, ...(metadata.maskedKey === undefined ? {} : { maskedKey: metadata.maskedKey }) }
   })
 
-  ipcMain.handle(DESKTOP_IPC.cadreBindSession, (event, options: unknown) => {
+  ipcMain.handle(DESKTOP_IPC.cadreBindSession, async (event, options: unknown) => {
     assertProductSender(event)
     if (cadreProviders === undefined) {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
@@ -1143,7 +1168,8 @@ async function main(): Promise<void> {
     if (typeof options !== 'object' || options === null) {
       return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
     }
-    const { sessionId, providerId, model } = options as { sessionId?: unknown; providerId?: unknown; model?: unknown }
+    const { sessionId, providerId, model, reasoningEffort } = options as {
+      sessionId?: unknown; providerId?: unknown; model?: unknown; reasoningEffort?: unknown }
     if (typeof sessionId !== 'string' || sessionId.trim() === '') {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
     }
@@ -1153,17 +1179,38 @@ async function main(): Promise<void> {
     if (model !== undefined && typeof model !== 'string') {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'model 无效', field: 'model' }
     }
+    if (reasoningEffort !== undefined && reasoningEffort !== null && typeof reasoningEffort !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'reasoningEffort 无效', field: 'reasoningEffort' }
+    }
+    const effort = typeof reasoningEffort === 'string' && reasoningEffort.trim() !== '' ? reasoningEffort.trim() : undefined
     const provider = cadreProviders.get(providerId)
     if (provider === undefined) {
       return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 不存在', field: 'providerId' }
     }
-    const binding = cadreProviders.bindSession(sessionId.trim(), providerId,
-      typeof model === 'string' && model !== '' ? model : provider.defaultModel, new Date().toISOString())
+    const chosenModel = typeof model === 'string' && model !== '' ? model : provider.defaultModel
+    // The official modelSelection projection is the truth (including reasoning
+    // effort); the local session_providers row is only a display shadow, so the
+    // official write must succeed first. Effort validity is the Host's call.
+    if (hostUrl !== undefined && hostCookie !== undefined) {
+      try {
+        await selectSessionModel(hostUrl, hostCookie, {
+          sessionId: sessionId.trim(), provider: providerId, model: chosenModel,
+          ...(effort === undefined ? {} : { reasoningEffort: effort }),
+        })
+      } catch (error) {
+        console.log(`cadre:bindSession session=${sessionId} provider=${providerId} official=false`)
+        return { ok: false, code: 'HOST_RPC_FAILED', field: 'reasoningEffort',
+          message: `官方模型选择未写入：${error instanceof Error ? error.message : String(error)}` }
+      }
+    } else {
+      return { ok: false, code: 'HOST_UNAVAILABLE', message: 'Host 未就绪，无法写入官方模型选择' }
+    }
+    const binding = cadreProviders.bindSession(sessionId.trim(), providerId, chosenModel, new Date().toISOString())
     if (binding.ok !== true) {
       console.log(`cadre:bindSession session=${sessionId} provider=${providerId} ok=false code=${binding.code}`)
       return binding
     }
-    console.log(`cadre:bindSession session=${sessionId} provider=${providerId} model=${binding.binding.model} ok=true`)
+    console.log(`cadre:bindSession session=${sessionId} provider=${providerId} model=${binding.binding.model} effort=${effort ?? '(default)'} official=true ok=true`)
     return binding
   })
 
