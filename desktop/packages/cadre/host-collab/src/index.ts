@@ -191,6 +191,11 @@ CREATE TABLE IF NOT EXISTS idempotency (
 );
 `
 
+/** One Session mapped to several projects cannot be judged by any single one. */
+function ambiguityError(sessionId: string, projects: readonly string[]): Error {
+  return new Error(`会话同时属于多个项目部（session=${sessionId} projects=${projects.join(',')}），无法确定归属`)
+}
+
 /** Ledger writes the collaboration tools need; one SQLite handle for the Host process. */
 class Ledger {
   readonly db: DatabaseSync
@@ -207,19 +212,27 @@ class Ledger {
 
   close(): void { this.db.close() }
 
+  /** All roster rows for one Session; `sup-1` is the legacy row with no Session. */
+  private memberRows(sessionId: string): { projectId: string; role: string; state: string }[] {
+    const rows = this.db.prepare(`SELECT project_id, role, state FROM members
+      WHERE session_id = ? AND session_id != 'sup-1' ORDER BY project_id`).all(sessionId) as
+      { project_id: string; role: string; state: string }[]
+    return rows.map(row => ({ projectId: row.project_id, role: row.role, state: row.state }))
+  }
+
   /**
    * The roster row for one Session across projects (the caller's identity).
    *
-   * `sup-1` is the legacy seed row: it has no Session and is never a caller.
-   * A Session is expected to belong to exactly one project; the newest row wins
-   * only so a stale leftover row cannot crash an otherwise valid caller.
+   * A Session is expected to belong to exactly one project. Ambiguity throws
+   * instead of picking the newest row: a silent pick would let restrict and
+   * the prompt section judge the caller by the wrong project.
    */
   member(sessionId: string): { projectId: string; role: string; state: string } | undefined {
-    const row = this.db.prepare(`SELECT project_id, role, state FROM members
-      WHERE session_id = ? AND session_id != 'sup-1' ORDER BY updated_at DESC LIMIT 1`)
-      .get(sessionId) as { project_id: string; role: string; state: string } | undefined
-    if (row === undefined) return undefined
-    return { projectId: row.project_id, role: row.role, state: row.state }
+    const rows = this.memberRows(sessionId)
+    const [first] = rows
+    if (first === undefined) return undefined
+    if (rows.length > 1) throw ambiguityError(sessionId, rows.map(row => row.projectId))
+    return first
   }
 
   /**
@@ -230,17 +243,11 @@ class Ledger {
    * ledger. Ambiguity is an error too, not a "pick the latest".
    */
   projectOf(sessionId: string): string {
-    const rows = this.db.prepare(`SELECT DISTINCT project_id FROM members
-      WHERE session_id = ? AND session_id != 'sup-1' ORDER BY project_id`).all(sessionId) as
-      { project_id: string }[]
-    const project = rows[0]?.project_id
-    if (project === undefined) {
+    const member = this.member(sessionId)
+    if (member === undefined) {
       throw new Error(`会话不属于任何项目部（session=${sessionId}）；请先在项目部花名册登记该会话`)
     }
-    if (rows.length > 1) {
-      throw new Error(`会话同时属于多个项目部（session=${sessionId} projects=${rows.map(row => row.project_id).join(',')}），无法确定归属`)
-    }
-    return project
+    return member.projectId
   }
 
   /** Resolve an assignee by member session id, member name, or employee name. */
@@ -864,6 +871,29 @@ export function apply(ctx: HostContext): void {
   const restricted = new Map<string, { role: string; lift: () => void }>()
   const sectioned = new Set<string>()
   const unrecognisedLogged = new Set<string>()
+  const ambiguousLogged = new Set<string>()
+  /**
+   * Roster identity for an Agent, or undefined when unknown/ambiguous.
+   *
+   * Ambiguity is logged once and treated as unknown so prompt assembly and
+   * role restriction fail open rather than judge the caller by the wrong
+   * project. Tools still reject it: `projectOf()` throws on ambiguity.
+   */
+  const memberFor = (agentId: string): { projectId: string; role: string; state: string } | undefined => {
+    try {
+      return ledger.member(agentId)
+    } catch (error) {
+      if (!ambiguousLogged.has(agentId)) {
+        ambiguousLogged.add(agentId)
+        const reason = error instanceof Error ? error.message : String(error)
+        appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+          `ambiguous-role agent=${agentId} restrict=off reason=${reason}
+`)
+        console.warn(`cadre-collab: 会话归属不唯一，角色限制与岗位段已跳过 agent=${agentId} reason=${reason}`)
+      }
+      return undefined
+    }
+  }
   /** One scoped prompt section per Agent; the provider runs at every assembly. */
   const attachSection = (agent: AgentLike): void => {
     const prompt = agent.ctx.systemPrompt
@@ -880,7 +910,7 @@ export function apply(ctx: HostContext): void {
         name: 'cadre-role',
         order: prompt.getSectionOrder('TEAM_POLICY'),
         text: () => {
-          const member = ledger.member(agent.id)
+          const member = memberFor(agent.id)
           if (member === undefined) return ''
           if (member.role === 'supervisor') return SUPERVISOR_DUTY
           const role = ledger.workerRole(member.projectId, agent.id)
@@ -896,7 +926,7 @@ export function apply(ctx: HostContext): void {
   // `undefined` to the downstream listeners, which read `decision.kind`.
   ctx.on('agent/pre-step', ({ agent }, next) => {
     attachSection(agent)
-    const member = ledger.member(agent.id)
+    const member = memberFor(agent.id)
     if (member === undefined) {
       // Unknown role = an ordinary session belonging to the user: fail open.
       // Only an explicitly recorded `supervisor` member is restricted.

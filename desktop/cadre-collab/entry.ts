@@ -88,22 +88,9 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
   return {
     databasePath: options.databasePath,
     dispatch(input) {
-      // The shell has no roster-management UI and the panel's employee field is
-      // free-form. Enrol an unknown target as a worker only when the caller is
-      // an in-roster supervisor; the service still re-checks both sides.
-      const members = store.listMembers(options.projectId as never)
-      const caller = members.find(member => member.sessionId === options.sessionId)
-      const targetKnown = members.some(member => member.sessionId === input.to)
-      if (caller?.role === 'supervisor' && !targetKnown) {
-        store.addMember({
-          projectId: options.projectId as never,
-          sessionId: input.to as never,
-          role: 'worker',
-          state: 'available',
-          displayName: input.to,
-        })
-        console.log(`cadre-ledger target enrolled project=${options.projectId} session=${input.to} role=worker`)
-      }
+      // Never enrol the target here: a hallucinated session id would become a
+      // real "ghost employee" before the service can reject it. An unknown
+      // target must fail as target-not-member on both tool and IPC paths.
       return service.dispatch(binding, {
         projectId: options.projectId,
         toSessionId: input.to,

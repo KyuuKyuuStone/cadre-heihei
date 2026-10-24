@@ -20,7 +20,17 @@ export interface CadreProjectRegistryOptions {
   /** Task-level actor kind; the Session identity is supplied per request. */
   readonly role: CadreActorRole
   readonly open: CadreCollabOpener
+  /**
+   * SQLite lock wait for every per-project connection.
+   *
+   * Several (project, caller) handles share one `cadre.sqlite`; without a wait
+   * a concurrent writer would surface `SQLITE_BUSY` as a failed dispatch.
+   * Matches the ledger default rather than weakening it.
+   */
+  readonly busyTimeoutMs?: number
 }
+
+const DEFAULT_BUSY_TIMEOUT_MS = 15_000
 
 /** Lazily opened, cached write stores keyed by project (Workspace) and caller. */
 export class CadreProjectRegistry {
@@ -46,6 +56,7 @@ export class CadreProjectRegistry {
       projectId,
       sessionId,
       role: this.#options.role,
+      busyTimeoutMs: this.#options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS,
     })
     if (opened !== undefined) this.#stores.set(key, opened)
     return opened

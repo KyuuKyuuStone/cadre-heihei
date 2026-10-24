@@ -43,7 +43,12 @@ describe('cadre project registry', () => {
     expect(other).not.toBe(first)
     expect(sameProjectOtherCaller).not.toBe(first)
     expect(opened.map(options => options.projectId)).toEqual(['workspace-a', 'workspace-b', 'workspace-a'])
-    expect(opened[0]).toMatchObject({ sessionId: 'session-a', role: 'supervisor', databasePath: '/tmp/cadre.sqlite' })
+    expect(opened[0]).toMatchObject({
+      sessionId: 'session-a',
+      role: 'supervisor',
+      databasePath: '/tmp/cadre.sqlite',
+      busyTimeoutMs: 15_000,
+    })
     expect(opened[2]).toMatchObject({ sessionId: 'session-b', role: 'supervisor' })
     expect(registry.size).toBe(3)
 
