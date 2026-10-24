@@ -3136,6 +3136,30 @@ importers:
         specifier: ^0.1.5
         version: 0.1.5
 
+  packages/cadre/engine:
+    devDependencies:
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:*
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-agent-preset-registry':
+        specifier: workspace:*
+        version: link:../../preset/agent-preset-registry
+      '@deepseek-ai/dsh-api-session-controller':
+        specifier: workspace:*
+        version: link:../../api/session-controller
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:*
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:*
+        version: link:../../core/session
+      '@deepseek-ai/dsh-util-values':
+        specifier: workspace:*
+        version: link:../../util/values
+      '@deepseek-ai/dsh-workspace':
+        specifier: workspace:*
+        version: link:../../workspace/workspace
+
   packages/client/connection:
     dependencies:
       '@deepseek-ai/dsh-credentials':
