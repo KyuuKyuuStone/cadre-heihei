@@ -66,7 +66,7 @@ interface RosterRow {
 interface CadreBridge {
   getEmployee?: (query: { sessionId: string }) => Promise<{ ok?: boolean; employee?: EmployeeRecord | null; code?: string; message?: string }>
   upsertEmployee?: (query: EmployeeWrite) => Promise<{ ok?: boolean; employee?: EmployeeRecord; code?: string; message?: string }>
-  listEmployees?: () => Promise<{ ok?: boolean; employees?: readonly EmployeeRecord[]; code?: string; message?: string }>
+  listEmployees?: (query: { projectId: string }) => Promise<{ ok?: boolean; employees?: readonly EmployeeRecord[]; code?: string; message?: string }>
   listRoster?: (query: { projectId: string }) => Promise<{
     members?: readonly RosterRow[]
     rows?: readonly RosterRow[]
@@ -133,29 +133,63 @@ export function apply(ctx: ClientContext): void {
     ? undefined
     : (window as unknown as { cadre?: CadreBridge }).cadre
 
+  /** Every project the sidebar can address: one per official Workspace. */
+  const projectItems = (): ReturnType<typeof ctx.workspaces.list.getSnapshot>['items'] =>
+    ctx.workspaces.list.getSnapshot().items
+
   // Employee profile store (name/description edits go through the same upsert
-  // write; the row menu owns the dialog).
+  // write; the row menu owns the dialog). Employees, like the roster, are
+  // project-scoped: the ledger names its project on every read.
   const employees = createSnapshotStore<EmployeeListState>({ status: 'loading', employees: [], error: null })
   const refreshEmployees = (): void => {
     const target = bridge()
-    if (target?.listEmployees === undefined) {
+    const read = target?.listEmployees
+    if (read === undefined) {
       employees.set({ status: 'error', employees: employees.getSnapshot().employees, error: '员工通道未接入：window.cadre.listEmployees 未注册' })
       return
     }
-    void target.listEmployees().then((result) => {
-      if (result?.ok === true && Array.isArray(result.employees)) {
-        employees.set({ status: 'ready', employees: result.employees, error: null })
+    const projects = projectItems().map(item => item.workspaceId)
+    if (projects.length === 0) {
+      employees.set({ status: 'ready', employees: [], error: null })
+      return
+    }
+    void Promise.allSettled(projects.map(projectId => read({ projectId }).then(result => ({
+      projectId,
+      result,
+    })))).then((results) => {
+      const rows: EmployeeRecord[] = []
+      const failures: string[] = []
+      let succeeded = 0
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          failures.push(reasonOf(result.reason))
+          continue
+        }
+        const { projectId, result: response } = result.value
+        if (response?.ok === true && Array.isArray(response.employees)) {
+          succeeded += 1
+          for (const employee of response.employees) {
+            rows.push({ ...employee, projectId: employee.projectId ?? projectId })
+          }
+          continue
+        }
+        failures.push(response?.ok === false
+          ? `${response.code ?? 'UNKNOWN'} · ${response.message ?? '未知错误'}`
+          : '响应缺少 employees')
+      }
+      if (succeeded === 0) {
+        employees.set({
+          status: 'error',
+          employees: employees.getSnapshot().employees,
+          error: `EMPLOYEES_READ_FAILED · ${failures[0] ?? '未知错误'}`,
+        })
         return
       }
       employees.set({
-        status: 'error',
-        employees: employees.getSnapshot().employees,
-        error: result?.ok === false
-          ? `${result.code ?? 'UNKNOWN'} · ${result.message ?? '未知错误'}`
-          : '响应缺少 employees',
+        status: 'ready',
+        employees: rows,
+        error: failures.length === 0 ? null : `EMPLOYEES_PARTIAL · ${failures[0] ?? '未知错误'}`,
       })
-    }).catch((error: unknown) => {
-      employees.set({ status: 'error', employees: employees.getSnapshot().employees, error: `IPC_ERROR · ${reasonOf(error)}` })
     })
   }
   refreshEmployees()
@@ -170,10 +204,6 @@ export function apply(ctx: ClientContext): void {
   const sessionRank = createSnapshotStore<ReadonlyMap<string, number>>(new Map())
   const rankService: CadreSessionRankService = { source: sessionRank }
   ctx.provide('cadreSessionRank', rankService)
-
-  /** Every project the sidebar can address: one per official Workspace. */
-  const projectItems = (): ReturnType<typeof ctx.workspaces.list.getSnapshot>['items'] =>
-    ctx.workspaces.list.getSnapshot().items
 
   /** The project a Session belongs to; undefined for an ungrouped Session. */
   const projectOfSession = (sessionId: string): string | undefined =>
