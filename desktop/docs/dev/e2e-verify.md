@@ -78,3 +78,28 @@ dispatch_task 调用失败：员工不能派活（caller=session-e60199c3… rol
 
 `D:/xxw_p/cadre-spike-env/s-loop2/`（第一轮日志与文本；无前端汇报卡截图）
 复测截图将补充到 `D:/xxw_p/cadre-spike-env/s-loop5/`。
+
+## 7. D2 / D3 实现与 B3 结论（2026-10-24 18:45）
+
+**D2（已实现，未运行时复验）**：官方 registry 支持 per-Agent 作用域限制
+（`agent.ctx.tools.restrict({deny})`，`packages/core/tools/src/index.ts:1105`）。
+host-collab 在 `agent/pre-step` 按台账角色应用并缓存（角色晚于 Agent 创建也能生效）：
+- worker → deny `dispatch_task`, `list_employees`
+- supervisor / 未知（用户会话）→ deny `report_task`
+每次限制写入 `<ledger>.plugin.log`（`restrict agent=… role=…`）。限制失败只告警，不影响回合。
+
+**D3（已实现）**：
+- `summary.trim() === ''` → 抛「汇报结论（summary）不能为空…」
+- `deliverables` 非数组或空 → 抛「汇报必须附交付物（deliverables 至少一条…）」
+两项校验在写台账之前，失败不产生任何行。
+
+**B3 结论**：倾向**测试手段问题**，不是产品 bug。依据：账号行菜单用合成
+`contextmenu` 能打开，而合成 `MouseEvent('click')` 后既没有 active 标识也未见路由变化；
+行激活很可能绑定在真实指针事件/官方 store 的 select 上，合成 click 不触发。
+判定方法（下一步）：用覆盖全窗口的 `Input.dispatchMouseEvent`（按下/抬起）点行，
+或前端加 `data-active-session`；若真实指针点击仍不切换，才升级为前端 bug。
+
+**运行时复验受阻**：本轮重启时 dev 运行时工件缺失
+（`apps/desktop/.desktop-build/targets/win-x64/runtime/primary-runtime/dependencies/node/bin/node.exe` ENOENT），
+`run start` 直接失败。需先跑一次完整 `pnpm --filter @deepseek-ai/dsh-desktop run dev`
+重建运行时后再验证 D2/D3；代码层 `tsc -b tsconfig.host.json` 与 host tsdown 均通过。

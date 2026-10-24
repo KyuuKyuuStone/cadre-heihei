@@ -27,9 +27,15 @@ interface SessionController {
   }, signal: AbortSignal): Promise<{ readonly accepted: true }>
 }
 
+interface AgentLike {
+  readonly id: string
+  readonly ctx: { readonly tools: { restrict(filter: { deny: readonly string[]; allow?: readonly string[] }): () => void } }
+}
+
 interface HostContext {
   readonly tools: { register(definition: unknown): void }
   effect(setup: () => () => void): void
+  on(event: string, handler: (payload: { readonly agent: AgentLike }) => void): () => void
   readonly sessionController: SessionController
 }
 
@@ -458,6 +464,12 @@ export function apply(ctx: HostContext): void {
     },
     execute: async (args: ReportArgs, run: ToolRun) => {
       const reporter = callerOf(run)
+      if (typeof args.summary !== 'string' || args.summary.trim() === '') {
+        throw new Error('汇报结论（summary）不能为空：必须写清做了什么与结果')
+      }
+      if (!Array.isArray(args.deliverables) || args.deliverables.length === 0) {
+        throw new Error('汇报必须附交付物（deliverables 至少一条：文件路径或产物说明）')
+      }
       const task = ledger.task(args.taskId)
       if (task === undefined) throw new Error(`任务不存在：${args.taskId}`)
       if (task.assignee !== reporter) throw new Error(`只能回报派给自己的任务（该任务属于 ${task.assignee}）`)
@@ -490,5 +502,27 @@ export function apply(ctx: HostContext): void {
         return { taskId: task.taskId, status: 'delivered', supervisorNotified: false }
       }
     },
+  })
+
+  // D2: role-scoped tool visibility. The official registry restricts per Agent
+  // scope (`agent.ctx.tools.restrict`); apply it at each step so a role written
+  // after the Agent was created is honoured on the next request.
+  const restricted = new Map<string, { role: string; lift: () => void }>()
+  ctx.on('agent/pre-step', ({ agent }) => {
+    const role = ledger.member(agent.id)?.role ?? 'supervisor'
+    const previous = restricted.get(agent.id)
+    if (previous?.role === role) return
+    previous?.lift()
+    try {
+      const deny = role === 'worker'
+        ? ['dispatch_task', 'list_employees']
+        : ['report_task']
+      restricted.set(agent.id, { role, lift: agent.ctx.tools.restrict({ deny }) })
+      appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+        `restrict agent=${agent.id} role=${role} deny=${deny.join(',')}
+`)
+    } catch (error) {
+      console.warn(`cadre-collab: tool restriction skipped agent=${agent.id} reason=${error instanceof Error ? error.message : String(error)}`)
+    }
   })
 }
