@@ -327,9 +327,11 @@ function SessionTree({
 }: SessionTreeProps) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
-  const current = panelActive
-    ? undefined
-    : Object.values(list.byId).find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
+  // Main-view retention identifies the active session even while a panel covers
+  // the conversation; only the visual highlight is suppressed in that state.
+  const activeSessionId = Object.values(list.byId)
+    .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
+  const current = panelActive ? undefined : activeSessionId
   const revealGroup = revealSessionId === undefined || !workspaceReady
     ? undefined
     : owningGroupKey(workspaces, revealSessionId)
@@ -625,6 +627,7 @@ function SessionTree({
               key={node.id}
               node={node}
               currentId={current}
+              activeSessionId={activeSessionId}
               now={now}
               onOpen={open}
               onRenameRequest={onSessionRenameRequest}
@@ -718,9 +721,9 @@ function FlatList({
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
   useNativeDragAcceptance(drag !== null)
-  const currentId = panelActive
-    ? undefined
-    : Object.values(list.byId).find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
+  const activeSessionId = Object.values(list.byId)
+    .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
+  const currentId = panelActive ? undefined : activeSessionId
   const commitDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
     if (dropCommitted.current) return
     dropCommitted.current = true
@@ -750,6 +753,7 @@ function FlatList({
               key={node.id}
               node={node}
               currentId={currentId}
+              activeSessionId={activeSessionId}
               now={now}
               onOpen={open}
               onRenameRequest={onSessionRenameRequest}

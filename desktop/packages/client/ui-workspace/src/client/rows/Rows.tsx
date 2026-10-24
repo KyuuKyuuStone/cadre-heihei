@@ -531,6 +531,7 @@ export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: 
  * neither marker renders there, and its live status stays on the hover card.
  * @param props.node - derived session node.
  * @param props.currentId - selected session id (row highlight).
+ * @param props.activeSessionId - session retained by the main view, even while a main panel covers it.
  * @param props.now - epoch ms for relative-time formatting.
  * @param props.onOpen - open a session by id.
  * @param props.onRenameRequest - open the rename dialog from a title double-click (id + current title).
@@ -543,10 +544,12 @@ export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: 
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, t,
+  node, currentId, activeSessionId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, t,
 }: {
   node: SessionNode
   currentId: string | undefined
+  /** Session retained by the main view; survives while a main panel covers it. */
+  activeSessionId?: string | undefined
   now: number
   onOpen: (id: SessionNode['id']) => void
   /** Open the rename dialog from a title double-click (id + current title). */
@@ -565,6 +568,9 @@ export function SessionNodeItem({
   const row = node
   const title = displayTitle(node, t)
   const selected = node.id === currentId
+  // `currentId` is suppressed while a main panel is open; the main-view
+  // retention still identifies the active session, which tooling needs.
+  const active = node.id === (activeSessionId ?? (selected ? node.id : undefined))
   const statuses = sessionStatuses(node, t)
   const primaryStatus = statuses[0]
   const showStatus = primaryStatus.state !== 'idle'
@@ -588,6 +594,8 @@ export function SessionNodeItem({
     <div
       ref={rowRef}
       data-row-key={`session:${node.id}`}
+      data-session-id={node.id}
+      data-active-session={active ? 'true' : undefined}
       className={clsx(
         css.sessionRow, selected && css.selected, menuOpen && css.menuOpen,
         row.archived && css.archived,
