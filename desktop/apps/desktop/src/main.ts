@@ -33,7 +33,7 @@ import type {
   CadreTransitionInput,
 } from './cadre-collab-api.ts'
 import { ProviderStore, type SaveProviderInput } from './providers-db.ts'
-import { EmployeeStore, type UpsertEmployeeInput } from './employees-db.ts'
+import { EmployeeStore, type SaveMemberInput, type UpsertEmployeeInput } from './employees-db.ts'
 import { credentialValue, maskCredential } from './provider-credentials.ts'
 import {
   providerKeyConfigured,
@@ -1263,6 +1263,53 @@ async function main(): Promise<void> {
     }
     console.log(`cadre:deleteEmployee session=${sessionId} project=${project} ok=true`)
     return deleted
+  })
+
+  // W8 creation entry: new employee/supervisor gets a ledger member row. The
+  // official Session is created by the client first; this handler owns role
+  // validation and the one-active-supervisor rule.
+  ipcMain.handle(DESKTOP_IPC.cadreSaveMember, (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (typeof options !== 'object' || options === null) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    const record = options as Record<string, unknown>
+    if (typeof record.sessionId !== 'string' || typeof record.role !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId/role 无效' }
+    }
+    if (record.projectId !== undefined && typeof record.projectId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
+    }
+    const input: SaveMemberInput = {
+      sessionId: record.sessionId,
+      projectId: employeeProject(record.projectId) ?? cadreProjectId,
+      role: record.role === 'supervisor' ? 'supervisor' : 'worker',
+      ...(typeof record.displayName === 'string' ? { displayName: record.displayName } : {}),
+    }
+    const saved = cadreEmployees.saveMember(input, new Date().toISOString())
+    console.log(`cadre:saveMember session=${input.sessionId} project=${input.projectId} role=${input.role} ` +
+      `ok=${String(saved.ok)}${saved.ok === false ? ` code=${saved.code}` : ''}`)
+    return saved
+  })
+
+  ipcMain.handle(DESKTOP_IPC.cadreRetireMember, (event, options: unknown) => {
+    assertProductSender(event)
+    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (typeof options !== 'object' || options === null) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    const { sessionId, projectId } = options as { sessionId?: unknown; projectId?: unknown }
+    if (typeof sessionId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
+    }
+    if (projectId !== undefined && typeof projectId !== 'string') {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
+    }
+    const project = employeeProject(projectId) ?? cadreProjectId
+    const retired = cadreEmployees.retireMember(sessionId, project, new Date().toISOString())
+    console.log(`cadre:retireMember session=${sessionId} project=${project} ok=${String(retired.ok)}`)
+    return retired
   })
 
   ipcMain.handle(DESKTOP_IPC.cadreListEmployees, (event, options: unknown) => {

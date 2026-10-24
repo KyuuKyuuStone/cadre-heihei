@@ -5,7 +5,6 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pull the Client Remote and Session service merges (employee dialog).
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
-import { createClientEnginePort } from '@deepseek-ai/dsh-cadre-engine/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
@@ -18,13 +17,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SidebarPanelMetadata, SidebarRootInjected } from './contract/slots.ts'
 import { CADRE_SKIN_TOKENS, CADRE_THEME_ENABLED, CADRE_THEME_SOURCE } from './cadre-skin.tokens.ts'
-import { CadreIcon, CadrePanel } from './CadrePanel.tsx'
+import { CadreIcon, CadrePanel, type CadrePanelInjected } from './CadrePanel.tsx'
+import { CADRE_PROJECT_ID } from './cadre-roster-source.ts'
 import {
-  EmployeeDialog, EmployeeMenuItem, EmployeeRowBadge,
-  type EmployeeDialogInjected, type EmployeeDialogRequest, type EmployeeListState, type EmployeeMenuInjected,
-  type EmployeeBadgeInjected, type EmployeeRecord, type EmployeeWrite,
+  EmployeeRowBadge,
+  type EmployeeListState, type EmployeeBadgeInjected, type EmployeeRecord, type EmployeeWrite,
 } from './CadreEmployee.tsx'
-import { EmployeeSection, type EmployeeSettingsInjected } from './EmployeeSection.tsx'
 import { ProviderSection } from './ProviderSection.tsx'
 import { HeaderLeadingControls } from './HeaderLeadingControls.tsx'
 import { SidebarRoot } from './SidebarRoot.tsx'
@@ -57,6 +55,14 @@ interface EmployeeBridge {
   upsertEmployee?: (query: EmployeeWrite) => Promise<{ ok?: boolean; employee?: EmployeeRecord; code?: string; message?: string }>
   deleteEmployee?: (query: { sessionId: string }) => Promise<{ ok?: boolean; code?: string; message?: string }>
   listEmployees?: () => Promise<{ ok?: boolean; employees?: readonly EmployeeRecord[]; code?: string; message?: string }>
+  saveMember?: (query: {
+    sessionId: string
+    projectId?: string
+    role: 'worker' | 'supervisor'
+    displayName?: string
+  }) => Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
+  retireMember?: (query: { sessionId: string; projectId?: string }) =>
+  Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
 }
 
 /** Services required by the sidebar plugin. */
@@ -70,15 +76,6 @@ export const inject = [
  */
 export function apply(ctx: ClientContext): void {
   const workspaceNavigation = ctx.get('uiWorkspace') as unknown as WorkspaceNavigation
-  // ADR-0023 §2.3 (S2): preset/model calls run through EnginePort's Client
-  // binding. The facade keeps today's UI failure codes: a thrown transport
-  // failure used to surface as REMOTE_ERROR, so ENGINE_UNAVAILABLE maps back.
-  const engine = createClientEnginePort({ remote: ctx.remote, sessions: ctx.sessions })
-  const legacyFailure = (error: { readonly code: string; readonly message: string }) => ({
-    ok: false as const,
-    code: error.code === 'ENGINE_UNAVAILABLE' ? 'REMOTE_ERROR' : error.code,
-    message: error.message,
-  })
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-sidebar: dictionaries')
 
   // Warm 「纸 · 墨 · 印」skin: alias-only layers over the user's light/dark
@@ -95,7 +92,6 @@ export function apply(ctx: ClientContext): void {
   // upgrade dialog. The roster is local SQLite behind `window.cadre`; the
   // dialog's preset/model reads go straight to the official Client Remote.
   const employees = createSnapshotStore<EmployeeListState>({ status: 'loading', employees: [], error: null })
-  const employeeRequest = createSnapshotStore<EmployeeDialogRequest | null>(null)
   const employeeBridge = (): EmployeeBridge | undefined => (window as unknown as { cadre?: EmployeeBridge }).cadre
   const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
   const refreshEmployees = (): void => {
@@ -121,128 +117,54 @@ export function apply(ctx: ClientContext): void {
     })
   }
   refreshEmployees()
-  const getEmployee = async (sessionId: string) => {
-    const bridge = employeeBridge()
-    if (bridge?.getEmployee === undefined) return { ok: false, code: 'CHANNEL_MISSING', message: 'window.cadre.getEmployee 未注册' }
-    try {
-      const result = await bridge.getEmployee({ sessionId })
-      if (result?.ok !== true) return { ok: false, code: result?.code ?? 'UNKNOWN', message: result?.message ?? '未知错误' }
-      return { ok: true, employee: result.employee ?? null }
-    } catch (error) {
-      return { ok: false, code: 'IPC_ERROR', message: reason(error) }
-    }
-  }
-  const listPresets = async () => {
-    const listed = await engine.presets.listPresets()
-    if (!listed.ok) return legacyFailure(listed.error)
-    return {
-      ok: true as const,
-      value: listed.value
-        .filter(preset => preset.id.startsWith('cadre-'))
-        .map(preset => ({
-          id: preset.id,
-          name: preset.name ?? preset.id,
-          ...(preset.description === undefined ? {} : { description: preset.description }),
-          ...(preset.broken === undefined ? {} : { broken: preset.broken }),
-          ...(preset.isDefault === undefined ? {} : { isDefault: preset.isDefault }),
-        })),
-    }
-  }
-  const loadModels = async () => {
-    const listed = await engine.models.listModels()
-    if (!listed.ok) return legacyFailure(listed.error)
-    return {
-      ok: true as const,
-      value: {
-        groups: listed.value.groups.map(group => ({
-          id: group.id,
-          name: group.name,
-          models: group.models.map(model => ({
-            id: model.id,
-            name: model.name,
-            ...(model.reasoning?.defaultEffort === undefined
-              ? {}
-              : { reasoning: { defaultEffort: model.reasoning.defaultEffort } }),
-          })),
-        })),
-        defaultProvider: listed.value.default.provider,
-        defaultModel: listed.value.default.model,
-      },
-    }
-  }
-  const isBlank = (sessionId: string): boolean | undefined => {
-    const byId = ctx.sessions.list.getSnapshot().byId as Record<string, { readonly blank?: boolean } | undefined>
-    return byId[sessionId]?.blank
-  }
-  const currentPreset = (sessionId: string): string | undefined => {
-    const byId = ctx.sessions.list.getSnapshot().byId as Record<string, {
-      readonly projectionValues?: Readonly<Record<string, unknown>>
-    } | undefined>
-    const value = byId[sessionId]?.projectionValues?.agentPreset
-    return typeof value === 'string' ? value : undefined
-  }
-  const applyPreset = async (sessionId: string, presetId: string) => {
-    const applied = await engine.presets.applyPreset(sessionId as never, presetId)
-    return applied.ok ? { ok: true as const } : legacyFailure(applied.error)
-  }
-  const applyModel = async (sessionId: string, provider: string, model: string, reasoningEffort?: string) => {
-    const applied = await engine.models.selectModel({
-      sessionId: sessionId as never,
-      provider,
-      model,
-      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-    })
-    return applied.ok ? { ok: true as const } : legacyFailure(applied.error)
-  }
-  const saveEmployee = async (input: EmployeeWrite) => {
-    const bridge = employeeBridge()
-    if (bridge?.upsertEmployee === undefined) return { ok: false as const, code: 'CHANNEL_MISSING', message: 'window.cadre.upsertEmployee 未注册' }
-    try {
-      const result = await bridge.upsertEmployee(input)
-      if (result?.ok !== true) return { ok: false as const, code: result?.code ?? 'UNKNOWN', message: result?.message ?? '未知错误' }
-      return { ok: true as const, ...(result.employee === undefined ? {} : { employee: result.employee }) }
-    } catch (error) {
-      return { ok: false as const, code: 'IPC_ERROR', message: reason(error) }
-    }
-  }
-  const deleteEmployee = async (sessionId: string) => {
-    const bridge = employeeBridge()
-    if (bridge?.deleteEmployee === undefined) return { ok: false as const, code: 'CHANNEL_MISSING', message: 'window.cadre.deleteEmployee 未注册' }
-    try {
-      const result = await bridge.deleteEmployee({ sessionId })
-      if (result?.ok !== true) return { ok: false as const, code: result?.code ?? 'UNKNOWN', message: result?.message ?? '未知错误' }
-      return { ok: true as const }
-    } catch (error) {
-      return { ok: false as const, code: 'IPC_ERROR', message: reason(error) }
-    }
-  }
-  const employeeMenuInjected = (): EmployeeMenuInjected => ({
-    hooks: { employees },
-    openEmployeeDialog: (request) => { employeeRequest.set(request) },
-  })
   const employeeBadgeInjected = (): EmployeeBadgeInjected => ({ hooks: { employees } })
-  const employeeDialogInjected = (): EmployeeDialogInjected => ({
-    hooks: { request: employeeRequest },
-    closeEmployeeDialog: () => { employeeRequest.set(null) },
-    getEmployee,
-    listPresets,
-    loadModels,
-    isBlank,
-    currentPreset,
-    applyPreset,
-    applyModel,
-    saveEmployee,
-    refreshEmployees,
-  })
-  const employeeSettingsInjected = (): EmployeeSettingsInjected => ({
-    hooks: { employees },
-    listPresets,
-    loadModels,
-    getEmployee,
-    saveEmployee,
-    deleteEmployee,
-    isBlank,
-    refreshEmployees,
+  // W8/W9 creation seam: the official Session is created first, then the member
+  // row. A member-write failure is reported honestly; the Session is not deleted.
+  const cadrePanelInjected = (): CadrePanelInjected => ({
+    createPlainSession: async () => {
+      try {
+        const sessionId = String(await ctx.sessions.create({}))
+        return { ok: true as const, sessionId }
+      } catch (error) {
+        return { ok: false as const, code: 'SESSION_CREATE_FAILED', message: reason(error) }
+      }
+    },
+    createRosterEntry: async ({ role, displayName, description }) => {
+      const bridge = employeeBridge()
+      if (bridge?.saveMember === undefined) {
+        return { ok: false as const, code: 'CHANNEL_MISSING', message: 'window.cadre.saveMember 未注册' }
+      }
+      let sessionId: string
+      try {
+        sessionId = String(await ctx.sessions.create({}))
+      } catch (error) {
+        return { ok: false as const, code: 'SESSION_CREATE_FAILED', message: reason(error) }
+      }
+      try {
+        const saved = await bridge.saveMember({
+          sessionId, projectId: CADRE_PROJECT_ID, role, displayName,
+        })
+        if (saved?.ok !== true) {
+          return {
+            ok: false as const,
+            code: saved?.code ?? 'MEMBER_WRITE_FAILED',
+            message: `会话已创建（${sessionId}）但花名册写入失败：${saved?.message ?? '未知错误'}`,
+          }
+        }
+        if (role === 'worker' && description !== undefined && bridge.upsertEmployee !== undefined) {
+          const noted = await bridge.upsertEmployee({
+            sessionId, displayName, personaNote: description,
+          })
+          if (noted?.ok !== true) {
+            console.warn(`cadre: employee description not stored session=${sessionId} ` +
+              `code=${noted?.code ?? 'UNKNOWN'}`)
+          }
+        }
+        return { ok: true as const, sessionId }
+      } catch (error) {
+        return { ok: false as const, code: 'MEMBER_WRITE_FAILED', message: reason(error) }
+      }
+    },
   })
   const panels = createSnapshotStore<readonly SidebarPanelMetadata[]>([])
   const syncPanels = (): void => {
@@ -302,11 +224,12 @@ export function apply(ctx: ClientContext): void {
     name: 'sidebar.panellist',
     id: 'cadre',
     order: 30,
-    label: () => '协作',
+    label: () => '项目',
   }, CadreIcon))
   ctx.slots.inject('main', () => ctx.slots.register({
     name: 'main',
     key: 'cadre',
+    inject: cadrePanelInjected,
   }, CadrePanel))
   // Cadre providers: settings section for the model-provider roster.
   ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -316,22 +239,8 @@ export function apply(ctx: ClientContext): void {
     label: () => '模型 Providers',
     locale: NS,
   }, ProviderSection))
-  // ADR-0022 §5: employee roster, between Models (15) and Agent presets (20).
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'cadre-employees',
-    order: 18,
-    label: () => '员工',
-    locale: NS,
-    inject: employeeSettingsInjected,
-  }, EmployeeSection))
-  // ADR-0022 T3: session row menu between Rename (200) and Fork (300).
-  ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register({
-    name: 'sidebar.workspaces.session.menu.item',
-    id: 'cadre-employee',
-    order: 250,
-    inject: employeeMenuInjected,
-  }, EmployeeMenuItem))
+  // W8: employee management moved under the project row; the global settings
+  // section and the session "转为员工" menu entry are intentionally gone.
   // ADR-0022 T4: 16px leading cell, rendered only for employee Sessions.
   ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register({
     name: 'sidebar.session.row.leading',
@@ -339,30 +248,5 @@ export function apply(ctx: ClientContext): void {
     order: 100,
     inject: employeeBadgeInjected,
   }, EmployeeRowBadge))
-  // The dialog outlives the row menu, so it lives in the frame-wide overlay.
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-    name: 'shell.overlay',
-    id: 'cadre-employee',
-    inject: employeeDialogInjected,
-  }, EmployeeDialog))
-  // Upstream ui-workspace renders a blank row's row-actions strip (and with it
-  // every menu entry) only after the first prompt. Blank Sessions are exactly
-  // the ones that may still choose a template, so they get a right-click
-  // fallback here; non-blank rows keep the official slot entry above.
-  ctx.effect(() => {
-    if (typeof document === 'undefined') return () => {}
-    const onContextMenu = (event: MouseEvent): void => {
-      const target = event.target
-      if (!(target instanceof Element)) return
-      const row = target.closest('[data-row-key^="session:"]')
-      if (row === null) return
-      const sessionId = (row.getAttribute('data-row-key') ?? '').slice('session:'.length)
-      if (sessionId === '' || isBlank(sessionId) !== true) return
-      event.preventDefault()
-      employeeRequest.set({ sessionId, displayTitle: row.textContent?.trim() ?? '' })
-    }
-    document.addEventListener('contextmenu', onContextMenu)
-    return () => { document.removeEventListener('contextmenu', onContextMenu) }
-  }, 'ui-sidebar: blank session employee menu')
   syncPanels()
 }

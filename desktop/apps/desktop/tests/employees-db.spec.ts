@@ -224,3 +224,56 @@ describe('employee roster validation', () => {
     store.close()
   })
 })
+
+describe('project creation members (W8)', () => {
+  function withMembers(): { store: EmployeeStore; db: DatabaseSync } {
+    const { store, path } = storeAt()
+    const db = new DatabaseSync(path)
+    db.exec(`CREATE TABLE members (project_id TEXT NOT NULL, session_id TEXT NOT NULL, role TEXT NOT NULL,
+      display_name TEXT, description TEXT, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, session_id))`)
+    return { store, db }
+  }
+
+  it('writes a worker member row', () => {
+    const { store, db } = withMembers()
+    expectOk(store.saveMember({ sessionId: 'ses-1', projectId: 'proj-1', role: 'worker', displayName: '前端' }, NOW))
+    expect(db.prepare('SELECT role, display_name, state FROM members WHERE session_id = ?').get('ses-1'))
+      .toEqual({ role: 'worker', display_name: '前端', state: 'available' })
+    db.close()
+    store.close()
+  })
+
+  it('allows one active supervisor and refuses a second', () => {
+    const { store, db } = withMembers()
+    expectOk(store.saveMember({ sessionId: 'sup-1', projectId: 'proj-1', role: 'supervisor' }, NOW))
+    const conflict = expectFailure(store.saveMember({ sessionId: 'sup-2', projectId: 'proj-1', role: 'supervisor' }, LATER))
+    expect(conflict).toMatchObject({ code: 'INVALID_ARGUMENT', field: 'role' })
+    expect(db.prepare("SELECT COUNT(*) AS n FROM members WHERE role = 'supervisor'").get()).toEqual({ n: 1 })
+    db.close()
+    store.close()
+  })
+
+  it('departure keeps the row and frees the supervisor slot', () => {
+    const { store, db } = withMembers()
+    expectOk(store.saveMember({ sessionId: 'sup-1', projectId: 'proj-1', role: 'supervisor' }, NOW))
+    expectOk(store.retireMember('sup-1', 'proj-1', LATER))
+    expect(db.prepare('SELECT role, state FROM members WHERE session_id = ?').get('sup-1'))
+      .toEqual({ role: 'supervisor', state: 'departed' })
+    expectOk(store.saveMember({ sessionId: 'sup-2', projectId: 'proj-1', role: 'supervisor' }, LATER))
+    db.close()
+    store.close()
+  })
+
+  it('rejects an unknown role and a control-character name', () => {
+    const { store, db } = withMembers()
+    expect(expectFailure(store.saveMember(
+      { sessionId: 'ses-1', projectId: 'proj-1', role: 'boss' as 'worker' }, NOW,
+    )).code).toBe('INVALID_ARGUMENT')
+    expect(expectFailure(store.saveMember(
+      { sessionId: 'ses-1', projectId: 'proj-1', role: 'worker', displayName: '坏\u0000名' }, NOW,
+    )).field).toBe('displayName')
+    db.close()
+    store.close()
+  })
+})

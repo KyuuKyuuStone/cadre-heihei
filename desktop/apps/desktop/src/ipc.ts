@@ -33,6 +33,8 @@ export const DESKTOP_IPC = {
   windowsMenu: 'dsh-desktop:windows-menu',
   /** Read-only cadre ledger query; keeps the official shell namespace untouched. */
   cadreListTasks: 'cadre:listTasks',
+  /** Read-only project roster (members with role/state). */
+  cadreListRoster: 'cadre:listRoster',
   /** Cadre write path; delegates to app/src/collab via lib/cadre-collab.cjs. */
   cadreDispatchTask: 'cadre:dispatchTask',
   cadreTransitionTask: 'cadre:transitionTask',
@@ -48,6 +50,10 @@ export const DESKTOP_IPC = {
   cadreUpsertEmployee: 'cadre:upsertEmployee',
   cadreDeleteEmployee: 'cadre:deleteEmployee',
   cadreListEmployees: 'cadre:listEmployees',
+  /** W8 project creation: write one ledger member (worker/supervisor). */
+  cadreSaveMember: 'cadre:saveMember',
+  /** W8 departure: mark a member departed, keep all history. */
+  cadreRetireMember: 'cadre:retireMember',
 } as const
 
 /** Desktop release update state rendered by desktop-owned UI. */

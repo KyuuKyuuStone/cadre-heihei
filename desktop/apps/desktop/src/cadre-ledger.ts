@@ -44,8 +44,25 @@ export interface CadreTaskList {
   readonly elapsedMs: number
 }
 
+/** One member row projected for the roster; role is the ledger's authority. */
+export interface CadreMemberRow {
+  readonly sessionId: string
+  readonly role: string
+  readonly displayName: string
+  readonly state: string
+  readonly updatedAt: string
+}
+
+/** Result of one `listMembers` call. */
+export interface CadreMemberList {
+  readonly projectId: string
+  readonly rows: readonly CadreMemberRow[]
+}
+
 /** Task-list limit; the shell never asks for the whole ledger. */
 const TASK_LIMIT = 200
+/** Project rosters are small; the cap only guards against corrupt ledgers. */
+const MEMBER_LIMIT = 200
 /** Project ids come from configuration, not free-form text; reject anything else. */
 const PROJECT_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 
@@ -127,6 +144,32 @@ export class CadreLedger {
       updatedAt: String(row.updated_at),
     }))
     return { projectId: project, rows: projected, elapsedMs: Math.round((performance.now() - started) * 100) / 100 }
+  }
+
+  /**
+   * Return the members of one project, supervisors first.
+   * @param projectId - bounded project identifier.
+   * @returns projected member rows.
+   * @throws when the ledger is unavailable or the query fails.
+   */
+  listMembers(projectId: unknown): CadreMemberList {
+    const project = requireProjectId(projectId)
+    const db = this.#db
+    if (db === undefined) throw new Error(`cadre ledger unavailable (${this.#unavailable ?? 'unknown'})`)
+    const rows = db.prepare(`SELECT session_id, role, display_name, state, updated_at
+      FROM members WHERE project_id = ?
+      ORDER BY CASE role WHEN 'supervisor' THEN 0 ELSE 1 END, updated_at DESC
+      LIMIT ?`).all(project, MEMBER_LIMIT)
+    return {
+      projectId: project,
+      rows: rows.map(row => ({
+        sessionId: String(row.session_id),
+        role: String(row.role),
+        displayName: String(row.display_name),
+        state: String(row.state),
+        updatedAt: String(row.updated_at),
+      })),
+    }
   }
 
   /** Close the connection; safe to call twice. */

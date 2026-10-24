@@ -90,6 +90,8 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
   // context bridge; ipcRenderer and require stay private to the preload.
   contextBridge.exposeInMainWorld('cadre', {
     listTasks: (options?: { projectId?: string }) => ipcRenderer.invoke(DESKTOP_IPC.cadreListTasks, options) as Promise<unknown>,
+    listRoster: (options?: { projectId?: string }) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreListRoster, options) as Promise<unknown>,
     dispatchTask: (options: {
       projectId?: string
       to?: string
@@ -140,6 +142,14 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
       ipcRenderer.invoke(DESKTOP_IPC.cadreDeleteEmployee, options) as Promise<unknown>,
     listEmployees: (options?: { projectId?: string }) =>
       ipcRenderer.invoke(DESKTOP_IPC.cadreListEmployees, options) as Promise<unknown>,
+    saveMember: (options: {
+      sessionId: string
+      projectId?: string
+      role: 'worker' | 'supervisor'
+      displayName?: string
+    }) => ipcRenderer.invoke(DESKTOP_IPC.cadreSaveMember, options) as Promise<unknown>,
+    retireMember: (options: { sessionId: string; projectId?: string }) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreRetireMember, options) as Promise<unknown>,
   })
   contextBridge.exposeInMainWorld('dshPlatform', {
     open: (page: 'usage' | 'top-up', bounds: { x: number; y: number; width: number; height: number }) => ipcRenderer.invoke(PLATFORM_IPC.open, page, bounds),

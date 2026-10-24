@@ -48,6 +48,14 @@ export interface UpsertEmployeeInput {
   readonly preferredModel?: string | null
 }
 
+/** One roster write from the project 「＋」 creation flow. */
+export interface SaveMemberInput {
+  readonly sessionId: string
+  readonly projectId: string
+  readonly role: 'worker' | 'supervisor'
+  readonly displayName?: string
+}
+
 export interface EmployeeFailure {
   readonly ok: false
   readonly code: 'INVALID_ARGUMENT' | 'NOT_FOUND' | 'STORAGE_ERROR'
@@ -211,6 +219,80 @@ export class EmployeeStore {
     } catch (error) {
       // Roster mirroring must not fail the employee write; the log keeps the cause inspectable.
       console.warn(`cadre-employees roster sync skipped reason=${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /**
+   * Insert or update one roster member from the project creation flow.
+   *
+   * The ledger's `members` table is the authority for role. A project may hold
+   * at most one supervisor that has not departed; this is enforced here, not
+   * only by the disabled button. The employee preference row is not created —
+   * it stays optional (description/model can be edited later).
+   * @param input - session, project, role and optional display name.
+   * @param now - write timestamp.
+   * @returns the stored values, or a validation/conflict failure.
+   */
+  saveMember(input: SaveMemberInput, now: string): EmployeeResult<{ member: SaveMemberInput }> {
+    if (typeof input.sessionId !== 'string' || !ID_PATTERN.test(input.sessionId)) {
+      return fail('INVALID_ARGUMENT', 'sessionId 不合法', 'sessionId')
+    }
+    if (typeof input.projectId !== 'string' || !ID_PATTERN.test(input.projectId)) {
+      return fail('INVALID_ARGUMENT', 'projectId 不合法', 'projectId')
+    }
+    if (input.role !== 'worker' && input.role !== 'supervisor') {
+      return fail('INVALID_ARGUMENT', 'role 只能是 worker 或 supervisor', 'role')
+    }
+    const displayName = input.displayName?.trim()
+    if (displayName !== undefined && displayName.length > MAX_DISPLAY_NAME) {
+      return fail('INVALID_ARGUMENT', `displayName 最多 ${MAX_DISPLAY_NAME} 字符`, 'displayName')
+    }
+    if (displayName !== undefined && CONTROL_CHARACTERS.test(displayName)) {
+      return fail('INVALID_ARGUMENT', 'displayName 含非法控制字符', 'displayName')
+    }
+    try {
+      const table = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='members'").get()
+      if (table === undefined) return fail('STORAGE_ERROR', 'members 表不存在')
+      if (input.role === 'supervisor') {
+        const occupied = this.db.prepare(`SELECT session_id FROM members
+          WHERE project_id = ? AND role = 'supervisor' AND state != 'departed' AND session_id != ? LIMIT 1`)
+          .get(input.projectId, input.sessionId) as { session_id?: string } | undefined
+        if (occupied !== undefined) {
+          return fail('INVALID_ARGUMENT', `本项目已有主管（${String(occupied.session_id)}），请先办理离职`, 'role')
+        }
+      }
+      this.db.prepare(`
+        INSERT INTO members (project_id, session_id, role, display_name, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'available', ?, ?)
+        ON CONFLICT(project_id, session_id) DO UPDATE SET
+          role = excluded.role,
+          display_name = COALESCE(excluded.display_name, members.display_name),
+          state = 'available',
+          updated_at = excluded.updated_at
+      `).run(input.projectId, input.sessionId, input.role, displayName ?? null, now, now)
+      return { ok: true, member: { ...input, ...(displayName === undefined ? {} : { displayName }) } }
+    } catch (error) {
+      return fail('STORAGE_ERROR', error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /**
+   * Departure: mark the roster row departed and keep every historical row.
+   * @param sessionId - member session.
+   * @param projectId - owning project.
+   * @param now - write timestamp.
+   * @returns success even when no row matched (idempotent).
+   */
+  retireMember(sessionId: string, projectId: string, now: string): EmployeeResult<{ retired: true }> {
+    if (!ID_PATTERN.test(sessionId) || !ID_PATTERN.test(projectId)) {
+      return fail('INVALID_ARGUMENT', 'sessionId/projectId 不合法')
+    }
+    try {
+      this.db.prepare("UPDATE members SET state = 'departed', updated_at = ? WHERE project_id = ? AND session_id = ?")
+        .run(now, projectId, sessionId)
+      return { ok: true, retired: true }
+    } catch (error) {
+      return fail('STORAGE_ERROR', error instanceof Error ? error.message : String(error))
     }
   }
 

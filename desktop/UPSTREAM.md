@@ -63,7 +63,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 
 | # | 路径 | 改动摘要 | 为什么不能只用插件解决 | 最小侵入面 |
 |---|---|---|---|---|
-| K1 | `apps/desktop/src/main.ts` | 新增 Cadre 台账/花名册/员工/provider 的 IPC handler、托盘明暗图标、provider 凭据同步；`createRequire` 加载 `cadre-collab.cjs`；**关窗直接隐藏到托盘，不再弹「任务不会中断」提示**（2026-10-24，用户要求无条件去掉，`background-notice.ts` 与文案一并删除） | SQLite、`safeStorage`、`nativeTheme`、`ipcMain` 都是 Electron 主进程 API，Cordis 客户端插件拿不到 | 后续按 ADR-0023 §2.4 把员工/账本迁到 Host 服务后，本文件 hunk 应大幅收缩 |
+| K1 | `apps/desktop/src/main.ts` | 新增 Cadre 台账/花名册/员工（含 `cadre:saveMember` / `cadre:retireMember`）/provider 的 IPC handler、托盘明暗图标、provider 凭据同步；`createRequire` 加载 `cadre-collab.cjs`；**关窗直接隐藏到托盘，不再弹「任务不会中断」提示**（2026-10-24，用户要求无条件去掉，`background-notice.ts` 与文案一并删除） | SQLite、`safeStorage`、`nativeTheme`、`ipcMain` 都是 Electron 主进程 API，Cordis 客户端插件拿不到 | 后续按 ADR-0023 §2.4 把员工/账本迁到 Host 服务后，本文件 hunk 应大幅收缩 |
 | K2 | `apps/desktop/src/ipc.ts` | 新增 `cadre:*` 通道常量（任务、花名册、provider、session 绑定、员工） | 通道名必须与 preload/main 一致；无官方等价 | 随 K1 一起收缩；`window.cadre` 目标归零 |
 | K3 | `apps/desktop/src/preload-app.ts` | 暴露 `window.cadre` 桥（任务/花名册/provider/员工） | contextBridge 只能写在 preload | 迁移完成后只保留不可替代通道 |
 | K4 | `apps/desktop/src/project-manager.ts` | 桌面 profile 的 bundles 列表追加 `@deepseek-ai/dsh-bundle-cadre`；`applyRelease` 补齐**既有 profile** 缺失的 Desktop bundles（旧 profile 的 `package.json` 不会被 `initProfile` 重写，缺 bundle 会让所有 `cadre-*` preset 报 `agent-preset/not-found`） | profile 由桌面端生成，官方模板不含我们 bundle | 一行常量 `DESKTOP_BUNDLES` |
@@ -72,7 +72,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K7 | `packages/bundle/base/cordis.patch.yml` | 禁用 `llm-deepseek-account`（无账户产品） | **这是官方扩展点**（patch `disabled`），不是代码 patch | 1 行 + 注释 |
 | K8 | `packages/bundle/web-app/cordis.patch.yml` | 禁用 `ui-settings-account`（隐藏账户设置入口） | 同 K7，官方 patch 机制 | 1 行 + 注释；`account-controller` 仍由官方默认禁用 |
 | K9 | `packages/client/ui-theme/src/theme-settings.ts` | 默认主题 `system` → `dark` | 官方没有「部署默认主题」配置面 | 1 行常量（**建议改为品牌/部署注入，见 §六**） |
-| K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册协作面板、`cadre-providers` / `cadre-employees` 设置分区、员工行菜单/徽标/对话框、主题 token 覆盖；EnginePort 客户端绑定经 `@deepseek-ai/dsh-cadre-engine/client`（内联进本包 bundle，见 K16） | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
+| K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册项目面板（工作区 → 项目 → 花名册）、`cadre-providers` 设置分区、员工行徽标、主题 token 覆盖；EnginePort 客户端绑定经 `@deepseek-ai/dsh-cadre-engine/client`（内联进本包 bundle，见 K16）。W8（2026-10-24）：`cadre-employees` 设置分区与会话「转为员工」菜单/对话框已停止注册（文件保留），新建入口收归项目行「＋」 | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
 | K11 | `packages/client/ui-sidebar/src/client/SidebarRoot.module.css` | 侧栏玻璃层背景改为 `color-mix` 取主题 token | 官方没有对应视觉变体 | 4 条声明；可移入我们的主题样式 |
 | K12 | `packages/client/ui-brand-official/src/client/index.ts`、`packages/client/ui-brand-official/src/client/Brand.tsx` | 品牌占位改为 Cadre 印章（含 hero 槽位） | 官方明确要求另做品牌包，不应改包内 | **ADR-0023 §2.6 决定迁到独立品牌包，本项待删** |
 | K13 | `packages/client/web/src/boot-page.ts` | 启动页字标改为 `Cadre Heihei` | 启动页在客户端 bundle 内、早于插件加载 | 1 行；品牌包无法覆盖启动页 |
@@ -91,18 +91,18 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | 路径 | 改动摘要 | 保留理由 | 融合提示 |
 |---|---|---|---|
 | `packages/bundle/cadre-app/` | 员工模板 bundle：四个 preset（dev/novel/general/roleplay），`cordis.patch.yml` + no-op 入口 | 官方没有这些模板 | 机制稳定，升级基本不动；preset 字段若变走 §3.5 F |
-| `packages/client/ui-sidebar/src/client/CadrePanel.tsx` | 协作面板（花名册 + 台账任务列表/派发/校验） | 官方实验 agent-team 有任务板但存 session 事件，跨会话账本没有 | 先接 agent-team spike（ADR-0023 §2.7），再决定保留范围 |
-| `packages/client/ui-sidebar/src/client/CadreRoster.tsx`、`CadreRoster.module.css` | 花名册视图：主管四层标识（置顶分组/3px 靛蓝/实心方标+600/徽章）与员工行、四态图标、最后活跃 | 官方无角色概念；设计 c07dd22 | 纯 UI，官方 slot 稳定 |
-| `packages/client/ui-sidebar/src/client/cadre-roster-source.ts` | 花名册数据薄适配（IPC → 视图模型；未来切 Host Remote 只改此文件） | 官方无跨会话花名册 | 随 ADR-0023 §2.4 迁移 |
-| `packages/client/ui-sidebar/src/client/CadreEmployee.tsx` | 转员工对话框、会话行菜单、行徽标 | 官方无「员工」概念 | 走官方 `sidebar.workspaces.session.menu.item`，升级稳定 |
-| `packages/client/ui-sidebar/src/client/EmployeeSection.tsx` | 「员工」设置分区 | 官方有 `settings.section`，无员工页 | 官方扩展点 |
+| `packages/client/ui-sidebar/src/client/CadrePanel.tsx` | 项目面板：工作区 → 项目 → 花名册分组、项目行「＋」三步创建（身份/职能/自定义角色）、离职确认、台账任务列表/派发/校验 | 官方实验 agent-team 有任务板但存 session 事件，跨会话账本没有 | 先接 agent-team spike（ADR-0023 §2.7），再决定保留范围 |
+| `packages/client/ui-sidebar/src/client/CadreRoster.tsx`、`CadreRoster.module.css` | 花名册视图：主管四层标识（置顶分组/3px 靛蓝/实心方标+600/徽章）与员工行、四态图标、最后活跃、离职入口、在职/已离职筛选 | 官方无角色概念；设计 c07dd22 | 纯 UI，官方 slot 稳定 |
+| `packages/client/ui-sidebar/src/client/cadre-roster-source.ts` | 花名册数据薄适配（IPC → 视图模型；未来切 Host Remote 只改此文件）；自定义角色暂存 localStorage（待入台账） | 官方无跨会话花名册 | 随 ADR-0023 §2.4 迁移；自定义角色存储随后端表迁移 |
+| `packages/client/ui-sidebar/src/client/CadreEmployee.tsx` | 员工行徽标（会话行菜单/转员工对话框已停止注册，仅保留文件） | 官方无「员工」概念 | 徽标走官方 `sidebar.session.row.leading`，升级稳定 |
+| `packages/client/ui-sidebar/src/client/EmployeeSection.tsx` | 「员工」设置分区（W8 起未注册） | 官方有 `settings.section`，无员工页 | 可删除 |
 | `packages/client/ui-sidebar/src/client/ProviderSection.tsx` | 「模型 Providers」设置分区 | **官方有同类（Models 页），属重复** | ADR-0023 §2.5：迁移后删除 |
 | `packages/client/ui-sidebar/src/client/cadre-skin.tokens.ts` | 昼流/夜流主题 token 覆盖 | 官方 `ctx.theme` 扩展点允许 | 保留；与官方 token 变更走 C/E 判断 |
 | `packages/client/ui-sidebar/src/client/CadreEmployee.module.css` | 员工对话框样式 | 产品 UI | 保留 |
 | `packages/client/ui-sidebar/tests/CadreEmployee.client.spec.tsx` | 员工 UI 测试 | 产品 UI | 保留 |
 | `apps/desktop/src/cadre-ledger.ts` | 台账 SQLite 读取（userData/cadre.sqlite） | 官方无跨会话账本 | ADR-0023 §2.4：迁 Host 服务后本文件移动 |
 | `apps/desktop/src/cadre-collab-api.ts` | 台账写路径的类型契约 | 同上 | 同上 |
-| `apps/desktop/src/employees-db.ts` | 员工偏好表（模板/模型/备注） | 官方无员工偏好存储 | 同上；表保留，宿主迁移 |
+| `apps/desktop/src/employees-db.ts` | 员工偏好表（模板/模型/备注）+ 台账 `members` 角色写入与离职（`saveMember` / `retireMember`，含每项目唯一在职主管校验） | 官方无员工偏好存储 | 同上；表保留，宿主迁移 |
 | `apps/desktop/src/providers-db.ts` | provider / session_providers 表 | **与官方三处真值重复** | ADR-0023 §2.5：先迁移后删除 |
 | `apps/desktop/src/provider-credentials.ts` | provider 密钥读写与掩码 | 官方 `credentials` 已有等价 | 随 providers 一起删除 |
 | `apps/desktop/src/provider-runtime.ts` | 把 Cadre provider 同步进官方 `llm-pi-ai` settings/credentials | 官方 Models 页可直接写 | 随 providers 一起删除 |

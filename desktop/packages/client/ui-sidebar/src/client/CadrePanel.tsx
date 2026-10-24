@@ -17,7 +17,12 @@ import {
   StateDot,
   Tag,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { CadreRoster, type RosterState } from './CadreRoster.tsx'
+import {
+  CADRE_PROJECT_ID, loadCustomRoles, loadRoster, removeCustomRole, saveCustomRole,
+  type CustomRole, type RosterMember, type RosterRole,
+} from './cadre-roster-source.ts'
 
 /* Bare headings/paras/textarea do not read component styles, so they name the
    semantic tokens explicitly and follow every theme override. */
@@ -56,7 +61,10 @@ interface CadreTaskRow {
 /** One roster member returned by `cadre:listRoster`. */
 interface CadreMember {
   readonly sessionId: string
-  readonly name?: string
+  readonly role: string
+  readonly displayName?: string
+  readonly state?: string
+  readonly updatedAt?: string
 }
 
 /** Write response: the ledger reports whether the write actually landed. */
@@ -86,7 +94,13 @@ interface CadreBridge {
     rows: CadreTaskRow[]
     elapsedMs?: number
   }>
-  listRoster?(query: { projectId: string }): Promise<{ members?: CadreMember[]; rows?: CadreMember[] }>
+  listRoster?(query: { projectId: string }): Promise<{ members?: CadreMember[]; rows?: CadreMember[] } | undefined>
+  listEmployees?(query?: { projectId?: string }): Promise<{
+    ok?: boolean
+    employees?: readonly { sessionId: string; displayName?: string }[]
+    code?: string
+    message?: string
+  } | undefined>
   dispatchTask?(query: {
     projectId: string
     assigneeSessionId: string
@@ -99,6 +113,16 @@ interface CadreBridge {
     status: 'verified' | 'rework' | 'failed'
     reason?: string
   }): Promise<CadreWriteResult | undefined>
+  saveMember?(query: {
+    projectId: string
+    sessionId: string
+    role: 'worker' | 'supervisor'
+    displayName?: string
+  }): Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
+  retireMember?(query: {
+    projectId: string
+    sessionId: string
+  }): Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
   bindSession?(query: {
     projectId: string
     providerId: string
@@ -122,8 +146,19 @@ declare global {
 }
 
 // Temporary project binding: replace with the launch configuration or the
-// session's project id once the main process exposes it.
-const PROJECT_ID = 'proj-demo'
+// session's project id once the main process exposes it (same value as main.ts
+// CADRE_PROJECT_ID; shared through the roster adapter).
+const PROJECT_ID = CADRE_PROJECT_ID
+
+/** Injected creation seam: the plugin creates the official Session, then the member row. */
+export interface CadrePanelInjected {
+  createRosterEntry(input: {
+    role: RosterRole
+    displayName: string
+    description?: string
+  }): Promise<{ ok: true; sessionId: string } | { ok: false; code: string; message: string }>
+  createPlainSession(): Promise<{ ok: true; sessionId: string } | { ok: false; code: string; message: string }>
+}
 
 const SAMPLE_TASKS: readonly CadreTask[] = [
   { taskId: 'task-101', title: '补齐 M3 验收矩阵', status: '已验收', assignee: '前端' },
@@ -181,10 +216,32 @@ function TaskRow({
   )
 }
 
-/** Static ledger surface; main-panel props are not used at milestone 1. */
-export function CadrePanel(_props: PropsRuntime<'main'>) {
+/** The function cards offered at creation (W9 step 2). */
+const BUILTIN_ROLES: readonly { readonly name: string; readonly description: string }[] = [
+  { name: '后端', description: '接口、数据与业务逻辑' },
+  { name: '前端', description: '界面、交互与样式' },
+  { name: '测试', description: '用例、回归与质量门禁' },
+  { name: '代码审查', description: '读 diff、找风险、给修改意见' },
+  { name: '文档', description: '设计说明、使用说明与交付文档' },
+]
+
+type CreateStep = 'identity' | 'role' | 'custom'
+
+/** Static ledger surface; creation runs through the injected seam. */
+export function CadrePanel({ createRosterEntry, createPlainSession }: PropsRuntime<'main'> & InjectFace<CadrePanelInjected>) {
   const [state, setState] = useState<PanelState>({ kind: 'loading' })
-  const [roster, setRoster] = useState<readonly CadreMember[]>([])
+  const [rosterState, setRosterState] = useState<RosterState>({ kind: 'loading' })
+  const [projectOpen, setProjectOpen] = useState(true)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createStep, setCreateStep] = useState<CreateStep>('identity')
+  const [createRole, setCreateRole] = useState<RosterRole>('worker')
+  const [roleChoice, setRoleChoice] = useState('')
+  const [customName, setCustomName] = useState('')
+  const [customDesc, setCustomDesc] = useState('')
+  const [customRoles, setCustomRoles] = useState<readonly CustomRole[]>(() => loadCustomRoles())
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [retireFor, setRetireFor] = useState<RosterMember | null>(null)
   const [dispatchOpen, setDispatchOpen] = useState(false)
   const [employee, setEmployee] = useState('')
   const [title, setTitle] = useState('')
@@ -210,16 +267,20 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
 
   const load = useCallback(async () => {
     setState({ kind: 'loading' })
+    setRosterState({ kind: 'loading' })
     const bridge = window.cadre
     if (bridge === undefined) {
       setState({ kind: 'fallback', reason: '主进程通道未就绪' })
+      setRosterState({ kind: 'error', reason: '主进程通道未就绪' })
       return
     }
+    let rows: CadreTaskRow[] = []
     try {
       const result = await bridge.listTasks({ projectId: PROJECT_ID })
+      rows = [...result.rows]
       setState({
         kind: 'ready',
-        tasks: result.rows.map(row => ({
+        tasks: rows.map(row => ({
           taskId: row.taskId,
           title: row.title,
           status: row.status,
@@ -229,21 +290,14 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
     } catch (error) {
       setState({ kind: 'fallback', reason: errorMessage(error) })
     }
-  }, [])
-
-  const loadRoster = useCallback(async () => {
-    const listRoster = window.cadre?.listRoster
-    if (listRoster === undefined) return
-    try {
-      const result = await listRoster({ projectId: PROJECT_ID })
-      setRoster(result.members ?? result.rows ?? [])
-    } catch {
-      // Roster is optional; the free-form employee input stays available.
-    }
+    // One adapter call owns roster fetching; task statuses sharpen its states.
+    const roster = await loadRoster(bridge, PROJECT_ID, rows)
+    setRosterState(roster.ok
+      ? { kind: 'ready', members: roster.members }
+      : { kind: 'error', reason: roster.reason })
   }, [])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => { void loadRoster() }, [loadRoster])
 
   // Apply the rows a write already read back, then reconcile with a fresh read.
   const applyWriteResult = (result: { tasks?: CadreTaskRow[] } | undefined) => {
@@ -395,11 +449,106 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
   const tasks = state.kind === 'ready'
     ? state.tasks
     : offline ? SAMPLE_TASKS : []
+  const workers: readonly RosterMember[] = rosterState.kind === 'ready'
+    ? rosterState.members.filter(member => member.role === 'worker')
+    : []
+  const supervisor = rosterState.kind === 'ready'
+    ? rosterState.members.find(member => member.role === 'supervisor' && member.status !== 'departed')
+    : undefined
+
+  const openCreate = () => {
+    setNotice(null)
+    setCreateError(null)
+    setCreateStep('identity')
+    setCreateRole('worker')
+    setRoleChoice('')
+    setCustomName('')
+    setCustomDesc('')
+    setCustomRoles(loadCustomRoles())
+    setCreateOpen(true)
+  }
+
+  const submitCreate = async (displayName: string, description?: string) => {
+    setCreating(true)
+    setCreateError(null)
+    try {
+      const result = await createRosterEntry({
+        role: createRole,
+        displayName,
+        ...(description === undefined || description.trim() === '' ? {} : { description: description.trim() }),
+      })
+      if (!result.ok) {
+        setCreateError(`${result.code} · ${result.message}`)
+        return
+      }
+      setCreateOpen(false)
+      await load()
+      setNotice({ tone: 'neutral', text: `已创建${createRole === 'supervisor' ? '主管' : '员工'}，花名册已刷新` })
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const submitCustomRole = async () => {
+    const name = customName.trim()
+    const description = customDesc.trim()
+    if (name === '') {
+      setCreateError('请填写角色名称')
+      return
+    }
+    if (description.length > 500) {
+      setCreateError('角色职责最多 500 字')
+      return
+    }
+    const next = saveCustomRole({ id: `role-${String(Date.now())}`, name, description })
+    setCustomRoles(next)
+    await submitCreate(name, description)
+  }
+
+  const retire = async (member: RosterMember) => {
+    const bridge = window.cadre
+    if (bridge?.retireMember === undefined) {
+      setNotice({ tone: 'danger', text: '离职通道待接入：cadre:retireMember 未注册' })
+      return
+    }
+    setPending(true)
+    setNotice(null)
+    try {
+      const result = await bridge.retireMember({ projectId: PROJECT_ID, sessionId: member.sessionId })
+      if (result?.ok === false) {
+        setNotice({ tone: 'danger', text: `${result.code ?? 'ERROR'} · ${result.message ?? '离职失败'}` })
+        return
+      }
+      setRetireFor(null)
+      await load()
+      setNotice({ tone: 'neutral', text: `${member.name} 已离职，历史保留` })
+    } catch (error) {
+      setNotice({ tone: 'danger', text: errorMessage(error) })
+    } finally {
+      setPending(false)
+    }
+  }
+
+  const createPlain = async () => {
+    setCreating(true)
+    setCreateError(null)
+    try {
+      const result = await createPlainSession()
+      if (!result.ok) {
+        setCreateError(`${result.code} · ${result.message}`)
+        return
+      }
+      setCreateOpen(false)
+      setNotice({ tone: 'neutral', text: `已新建会话 ${result.sessionId}` })
+    } finally {
+      setCreating(false)
+    }
+  }
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <h1 style={{ margin: 0, flex: 1, color: TEXT_PRIMARY }}>协作</h1>
+        <h1 style={{ margin: 0, flex: 1, color: TEXT_PRIMARY }}>项目</h1>
         {offline && <Tag tone="neutral">离线示例数据</Tag>}
         {!canDispatch && <Tag tone="neutral">写入通道待接入</Tag>}
         <Button variant="outline" size="sm" onClick={() => { void openBind() }}>
@@ -413,6 +562,46 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
           派活
         </Button>
       </div>
+
+      {/* W8: 工作区（容器）→ 项目（文件夹）→ 花名册。The project row owns the
+          only creation entry; the roster never surfaces a global one. */}
+      <div role="tree" aria-label="工作区与项目" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+          <span style={{ color: TEXT_SECONDARY, fontSize: 12, fontWeight: 600 }}>默认工作区</span>
+          <span style={{ color: TEXT_SECONDARY, fontSize: 11 }}>1 个项目</span>
+          <span style={{ flex: 1, height: 1, background: 'var(--dsw-alias-border-l1)' }} />
+        </div>
+        <div role="treeitem" aria-expanded={projectOpen} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 8 }}>
+          <Button variant="outline" size="sm" onClick={() => { setProjectOpen(open => !open) }}>
+            {projectOpen ? '▾' : '▸'}
+          </Button>
+          <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>{PROJECT_ID}</span>
+          <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
+            {state.kind === 'fallback' ? '台账不可用' : '当前项目'}
+          </span>
+          <span style={{ flex: 1 }} />
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="新建"
+            title="新建会话 / 新建员工 / 新建主管"
+            onClick={openCreate}
+          >
+            ＋
+          </Button>
+        </div>
+      </div>
+
+      {projectOpen && (
+        <div style={{ paddingLeft: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <CadreRoster
+            state={rosterState}
+            onRetry={() => { void load() }}
+            onRetire={member => { setNotice(null); setRetireFor(member) }}
+          />
+        </div>
+      )}
+
       <p style={{ margin: 0, color: TEXT_SECONDARY }}>
         {state.kind === 'ready'
           ? `台账 · 项目 ${PROJECT_ID}`
@@ -427,6 +616,8 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
           {notice.text}
         </p>
       )}
+
+      <div style={{ height: 1, background: 'var(--dsw-alias-border-l1)', margin: '4px 0 8px' }} />
 
       {state.kind === 'loading' && (
         <div role="status" aria-busy="true" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 0' }}>
@@ -460,6 +651,171 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
       )}
 
       <Modal
+        open={createOpen}
+        onClose={() => { setCreateOpen(false) }}
+        title={createStep === 'identity' ? '新建 · 选身份' : createStep === 'role' ? '新建 · 选职能' : '新建 · 自定义角色'}
+        description={`项目 ${PROJECT_ID} · 新建内容只属于当前项目`}
+        closeLabel="关闭"
+        footer={(
+          <>
+            {createStep !== 'identity' && (
+              <Button
+                variant="outline"
+                disabled={creating}
+                onClick={() => { setCreateError(null); setCreateStep(createStep === 'custom' ? 'role' : 'identity') }}
+              >
+                上一步
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => { setCreateOpen(false) }}>取消</Button>
+            {createStep === 'role' && (
+              <Button
+                variant="primary"
+                disabled={creating || roleChoice === ''}
+                onClick={() => {
+                  const builtin = BUILTIN_ROLES.find(role => role.name === roleChoice)
+                  const saved = customRoles.find(role => role.name === roleChoice)
+                  void submitCreate(roleChoice, builtin?.description ?? saved?.description)
+                }}
+              >
+                创建
+              </Button>
+            )}
+            {createStep === 'custom' && (
+              <Button variant="primary" disabled={creating} onClick={() => { void submitCustomRole() }}>
+                保存并创建
+              </Button>
+            )}
+          </>
+        )}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {createStep === 'identity' && (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <Button variant="outline" disabled={creating} onClick={() => { setCreateRole('worker'); setCreateStep('role') }}>
+                  员工
+                </Button>
+                <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>接收派活、动手做事。</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <Button
+                  variant="outline"
+                  disabled={creating || supervisor !== undefined}
+                  title={supervisor !== undefined ? '本项目已有主管，请先到该会话办理离职' : '主管'}
+                  onClick={() => { setCreateRole('supervisor'); setCreateStep('role') }}
+                >
+                  主管
+                </Button>
+                <span role={supervisor !== undefined ? 'status' : undefined} style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
+                  {supervisor !== undefined
+                    ? `本项目已有主管（${supervisor.name}），请先到该会话办理离职。`
+                    : '只读调度：派活、催办、先审交付，不直接改文件。'}
+                </span>
+              </div>
+              <div style={{ height: 1, background: 'var(--dsw-alias-border-l1)' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <Button variant="outline" disabled={creating} onClick={() => { void createPlain() }}>新建会话</Button>
+                <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>普通会话，不做员工登记。</span>
+              </div>
+              {createError !== null && <p role="alert" style={{ margin: 0, color: TEXT_ERROR }}>{createError}</p>}
+            </>
+          )}
+
+          {createStep === 'role' && (
+            <>
+              <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
+                {createRole === 'supervisor' ? '主管也选一个职能，便于说明它擅长调度什么。' : '选一张职能卡；不选模型。'}
+              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {BUILTIN_ROLES.map(role => (
+                  <Button
+                    key={role.name}
+                    variant={roleChoice === role.name ? 'primary' : 'outline'}
+                    onClick={() => { setRoleChoice(role.name) }}
+                  >
+                    {role.name} · {role.description}
+                  </Button>
+                ))}
+                {customRoles.map(role => (
+                  <div key={role.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Button
+                      variant={roleChoice === role.name ? 'primary' : 'outline'}
+                      onClick={() => { setRoleChoice(role.name) }}
+                    >
+                      {role.name}（自定义）· {role.description}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label={`删除自定义角色 ${role.name}`}
+                      title="删除这个自定义角色（不影响已创建的员工）"
+                      onClick={() => { setCustomRoles(removeCustomRole(role.id)) }}
+                    >
+                      ×
+                    </Button>
+                  </div>
+                ))}
+                <Button variant="outline" onClick={() => { setCreateStep('custom') }}>自定义角色…</Button>
+              </div>
+              {createError !== null && <p role="alert" style={{ margin: 0, color: TEXT_ERROR }}>{createError}</p>}
+            </>
+          )}
+
+          {createStep === 'custom' && (
+            <>
+              <label htmlFor="cadre-custom-name">角色名称</label>
+              <Input
+                id="cadre-custom-name"
+                value={customName}
+                placeholder="例如：数据工程"
+                disabled={creating}
+                onChange={event => { setCustomName(event.target.value) }}
+              />
+              <label htmlFor="cadre-custom-desc">这个角色负责什么（最多 500 字）</label>
+              <textarea
+                id="cadre-custom-desc"
+                value={customDesc}
+                placeholder="写清职责与边界；保存后会在下次新建时出现在角色列表里。"
+                rows={5}
+                maxLength={500}
+                disabled={creating}
+                onChange={event => { setCustomDesc(event.target.value) }}
+                style={BODY_TEXTAREA}
+              />
+              <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>保存的自定义角色可复用，也可在列表里删除。</span>
+              {createError !== null && <p role="alert" style={{ margin: 0, color: TEXT_ERROR }}>{createError}</p>}
+            </>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        open={retireFor !== null}
+        onClose={() => { setRetireFor(null) }}
+        title={retireFor?.role === 'supervisor' ? '主管离职' : '员工离职'}
+        {...(retireFor !== null ? { description: `${retireFor.name} · 项目 ${PROJECT_ID}` } : {})}
+        closeLabel="关闭"
+        footer={(
+          <>
+            <Button variant="outline" onClick={() => { setRetireFor(null) }}>取消</Button>
+            <Button
+              variant="primary"
+              disabled={pending}
+              onClick={() => { if (retireFor !== null) void retire(retireFor) }}
+            >
+              确认离职
+            </Button>
+          </>
+        )}
+      >
+        <p style={{ margin: 0, color: TEXT_SECONDARY }}>
+          离职后从在职花名册移除，进入「已离职」只读列表；会话与历史任务保留
+          {retireFor?.role === 'supervisor' ? '，本项目随后可以新建主管。' : '。'}
+        </p>
+      </Modal>
+
+      <Modal
         open={dispatchOpen}
         onClose={() => { setDispatchOpen(false) }}
         title="派活"
@@ -478,19 +834,19 @@ export function CadrePanel(_props: PropsRuntime<'main'>) {
             id="cadre-employee"
             value={employee}
             onChange={event => { setEmployee(event.target.value) }}
-            placeholder={roster.length > 0 ? '选择或输入员工 sessionId' : '输入员工 sessionId'}
+            placeholder={workers.length > 0 ? '选择或输入员工 sessionId' : '输入员工 sessionId'}
             disabled={pending}
           />
-          {roster.length > 0 && (
+          {workers.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-              {roster.map(member => (
+              {workers.map(member => (
                 <Button
                   key={member.sessionId}
                   variant="outline"
                   size="sm"
                   onClick={() => { setEmployee(member.sessionId) }}
                 >
-                  {member.name ?? member.sessionId}
+                  {member.name}
                 </Button>
               ))}
             </div>
