@@ -33,8 +33,6 @@ export const DESKTOP_IPC = {
   windowsMenu: 'dsh-desktop:windows-menu',
   /** Read-only cadre ledger query; keeps the official shell namespace untouched. */
   cadreListTasks: 'cadre:listTasks',
-  /** Read-only project roster (members with role/state). */
-  cadreListRoster: 'cadre:listRoster',
   /** Cadre write path; delegates to app/src/collab via lib/cadre-collab.cjs. */
   cadreDispatchTask: 'cadre:dispatchTask',
   cadreTransitionTask: 'cadre:transitionTask',
