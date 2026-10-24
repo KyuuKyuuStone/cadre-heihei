@@ -35,7 +35,7 @@ interface AgentLike {
 interface HostContext {
   readonly tools: { register(definition: unknown): void }
   effect(setup: () => () => void): void
-  on(event: string, handler: (payload: { readonly agent: AgentLike }) => void): () => void
+  on(event: string, handler: (payload: { readonly agent: AgentLike }, next: () => unknown) => unknown): () => void
   readonly sessionController: SessionController
 }
 
@@ -508,21 +508,26 @@ export function apply(ctx: HostContext): void {
   // scope (`agent.ctx.tools.restrict`); apply it at each step so a role written
   // after the Agent was created is honoured on the next request.
   const restricted = new Map<string, { role: string; lift: () => void }>()
-  ctx.on('agent/pre-step', ({ agent }) => {
+  // `agent/pre-step` is a waterfall: every listener must call `next()` and
+  // return its decision, even when it changes nothing. Returning early yields
+  // `undefined` to the downstream listeners, which read `decision.kind`.
+  ctx.on('agent/pre-step', ({ agent }, next) => {
     const role = ledger.member(agent.id)?.role ?? 'supervisor'
     const previous = restricted.get(agent.id)
-    if (previous?.role === role) return
-    previous?.lift()
-    try {
-      const deny = role === 'worker'
-        ? ['dispatch_task', 'list_employees']
-        : ['report_task']
-      restricted.set(agent.id, { role, lift: agent.ctx.tools.restrict({ deny }) })
-      appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
-        `restrict agent=${agent.id} role=${role} deny=${deny.join(',')}
+    if (previous?.role !== role) {
+      previous?.lift()
+      try {
+        const deny = role === 'worker'
+          ? ['dispatch_task', 'list_employees']
+          : ['report_task']
+        restricted.set(agent.id, { role, lift: agent.ctx.tools.restrict({ deny }) })
+        appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+          `restrict agent=${agent.id} role=${role} deny=${deny.join(',')}
 `)
-    } catch (error) {
-      console.warn(`cadre-collab: tool restriction skipped agent=${agent.id} reason=${error instanceof Error ? error.message : String(error)}`)
+      } catch (error) {
+        console.warn(`cadre-collab: tool restriction skipped agent=${agent.id} reason=${error instanceof Error ? error.message : String(error)}`)
+      }
     }
+    return next()
   })
 }
