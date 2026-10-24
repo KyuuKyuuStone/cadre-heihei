@@ -1,0 +1,14 @@
+/* 待验收 is the only state that waits on a human, so it pulses. */
+.waiting {
+  display: inline-flex;
+  animation: cadre-roster-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes cadre-roster-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waiting { animation: none; }
+}
