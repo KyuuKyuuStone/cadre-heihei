@@ -43,6 +43,11 @@ const useDetachedChat: ChatNodeViewProps['useChat'] = bindSnapshotSelector({
   getSnapshot: () => ({ order: [], nodes: new Map() }),
 } as never)
 
+const DETACHED_WORKSPACES = {
+  items: [], archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
+}
+const useDetachedWorkspaces: ChatNodeViewProps['useWorkspaces'] = selector => selector(DETACHED_WORKSPACES as never)
+
 interface MessageItemProps {
   readonly node: ConversationNode
   readonly t: ChatNodeViewProps['t']
@@ -78,6 +83,7 @@ function MessageItem({ node, t: translate, referenceLabels, skillNames }: Messag
   const props: Partial<Omit<ChatNodeViewProps, 'node'>> & { node: ChatConversationViewNode } = {
     node: viewNode, t: translate, loadImage: unusedImageLoader, renderFactorySlot: renderUserFactory,
     openFile: vi.fn(), useChat: useDetachedChat,
+    sessionId: 'session:fixture' as ChatNodeViewProps['sessionId'], useWorkspaces: useDetachedWorkspaces,
   }
   switch (node.kind) {
     case 'user':
