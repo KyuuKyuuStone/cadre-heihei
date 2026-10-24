@@ -391,18 +391,18 @@ class Ledger {
 
   pending(pendingId: string): {
     pendingId: string; dispatcher: string; employee: string; title: string; body: string
-    dueAt: string; status: string; retryable: boolean
+    dueAt: string; status: string; retryable: boolean; attempts: number
   } | undefined {
     const row = this.db.prepare(`SELECT pending_id, dispatcher_session_id, employee, title, body,
-      due_at, status, retryable FROM pending_dispatch WHERE project_id = ? AND pending_id = ?`)
+      due_at, status, retryable, attempts FROM pending_dispatch WHERE project_id = ? AND pending_id = ?`)
       .get(this.projectId, pendingId) as {
         pending_id: string; dispatcher_session_id: string; employee: string; title: string
-        body: string; due_at: string; status: string; retryable: number } | undefined
+        body: string; due_at: string; status: string; retryable: number; attempts: number } | undefined
     if (row === undefined) return undefined
     return {
       pendingId: row.pending_id, dispatcher: row.dispatcher_session_id, employee: row.employee,
       title: row.title, body: row.body, dueAt: row.due_at, status: row.status,
-      retryable: row.retryable === 1,
+      retryable: row.retryable === 1, attempts: row.attempts,
     }
   }
 
@@ -653,8 +653,12 @@ export function apply(ctx: HostContext): void {
     const record = ledger.pending(pendingId)
     if (record === undefined) throw new Error(`待派条目不存在：${pendingId}`)
     if (record.status === 'dispatched') throw new Error(`该条目已派出，无需重试：${pendingId}`)
+    if (record.dispatcher !== caller) throw new Error(`该待派条目属于 ${record.dispatcher}，当前会话无权重试`)
+    if (record.attempts >= MAX_RETRIES) {
+      throw new Error(`该任务已重试 ${String(record.attempts)} 次（上限 ${String(MAX_RETRIES)} 次），请换人派活或退回用户裁决`)
+    }
     const item: DispatchItem = { employee: record.employee, title: record.title, body: record.body, dueAt: record.dueAt }
-    const outcome = await dispatchOne(item, record.dispatcher, signal)
+    const outcome = await dispatchOne(item, caller, signal)
     if (outcome.ok) {
       ledger.settlePending(record.pendingId, { taskId: outcome.value.taskId })
       console.log(`cadre-collab: retry ok pending=${record.pendingId} task=${outcome.value.taskId}`)
