@@ -29,11 +29,21 @@ interface SessionController {
 
 interface AgentLike {
   readonly id: string
-  readonly ctx: { readonly tools: { restrict(filter: { deny: readonly string[]; allow?: readonly string[] }): () => void } }
+  readonly ctx: {
+    readonly tools: { restrict(filter: { deny: readonly string[]; allow?: readonly string[] }): () => void }
+    readonly systemPrompt?: {
+      readonly section: (section: {
+        readonly name: string
+        readonly order: number
+        readonly text: string | (() => string)
+      }) => () => void
+      readonly getSectionOrder: (name: 'TEAM_POLICY') => number
+    }
+  }
 }
 
 interface HostContext {
-  readonly tools: { register(definition: unknown): void }
+  readonly tools: { register(definition: unknown): void; get?(name: string): unknown }
   effect(setup: () => () => void): void
   on(event: string, handler: (payload: { readonly agent: AgentLike }, next: () => unknown) => unknown): () => void
   readonly sessionController: SessionController
@@ -44,18 +54,25 @@ interface ToolRun {
   readonly signal: AbortSignal
 }
 
-interface DispatchArgs {
+interface DispatchItem {
   readonly employee: string
   readonly title: string
   readonly body: string
   readonly dueAt: string
 }
 
+interface DispatchArgs {
+  readonly tasks: readonly DispatchItem[]
+}
+
 interface DispatchValue {
-  readonly taskId: string
-  readonly status: string
-  readonly assigneeSessionId: string
-  readonly dueAt: string
+  readonly dispatched: readonly {
+    readonly taskId: string
+    readonly assigneeName: string
+    readonly role: string
+    readonly dueAt: string
+  }[]
+  readonly failed: readonly { readonly target: string; readonly reason: string }[]
 }
 
 interface ReportArgs {
@@ -183,6 +200,16 @@ class Ledger {
    * prompt. A real supervisor (created by the user) wins regardless of update
    * time; when only the placeholder exists the answer is "no supervisor".
    */
+  /** The roster's 「角色负责什么」 text for one employee Session, when recorded. */
+  workerRole(sessionId: string): { name: string; role: string } | undefined {
+    const row = this.db.prepare(`SELECT COALESCE(display_name, session_id) AS name,
+      COALESCE(NULLIF(TRIM(persona_note), ''), NULLIF(TRIM(template_id), '')) AS role
+      FROM employees WHERE project_id = ? AND session_id = ?`).get(this.projectId, sessionId) as
+      { name: string; role?: string | null } | undefined
+    if (row === undefined || row.role == null) return undefined
+    return { name: row.name, role: row.role }
+  }
+
   supervisor(): string | undefined {
     const row = this.db.prepare(`SELECT session_id FROM members WHERE project_id = ? AND role = 'supervisor'
       AND state != 'departed' AND session_id != 'sup-1' ORDER BY updated_at DESC LIMIT 1`)
@@ -309,6 +336,22 @@ class Ledger {
   }
 }
 
+/** Supervisor duties injected into every supervisor Session's prompt (product rule). */
+const SUPERVISOR_DUTY = [
+  '你是本项目的主管，只做调度与验收，不替员工做专业执行：',
+  '1. 只做任务拆解、按花名册派活（dispatch_task）、验收汇总；',
+  '2. 有对应角色的员工时，不得代劳该员工的专业执行工作；',
+  '3. 没有对应角色时才由你补位，并明确说明缺哪个角色、为何补位；',
+  '4. 验收时对照任务的完成条件核实证据（交付物），不以口头说明代替；',
+  '5. 汇报用户时区分「已证实 / 未决 / 风险」三类，不把推测写成结论。',
+].join('\n')
+
+/** Worker role text: roster 「角色负责什么」, re-read on every assembly. */
+function workerDuty(role: { readonly name: string; readonly role: string }): string {
+  return `你是本项目的员工「${role.name}」。你的岗位职责：${role.role}\n`
+    + '只做本项目内的事，一次只做一件事；完成后用 report_task 汇报并附交付物。'
+}
+
 /** Mint the official request identity for one programmatic prompt. */
 function requestId(): string {
   return randomUUID()
@@ -374,67 +417,108 @@ export function apply(ctx: HostContext): void {
 
   ctx.tools.register({
     name: 'dispatch_task',
-    description: 'Dispatch one task to one employee of this project. The task is recorded and its prompt is delivered; a refusal leaves nothing behind.',
+    description: 'Dispatch one or more tasks from a supervisor breakdown, one item at a time. Each item is confirmed individually; a partial failure is reported per item and never swallowed.',
     parameters: {
-      type: 'object', additionalProperties: false, required: ['employee', 'title', 'body', 'dueAt'],
+      type: 'object', additionalProperties: false, required: ['tasks'],
       properties: {
-        employee: { type: 'string', description: 'Employee sessionId or display name.' },
-        title: { type: 'string', description: 'Short task title.' },
-        body: { type: 'string', description: 'Delivery requirements the employee must satisfy.' },
-        dueAt: { type: 'string', description: 'Deadline as ISO-8601 timestamp; required.' },
+        tasks: {
+          type: 'array',
+          items: {
+            type: 'object', additionalProperties: false, required: ['employee', 'title', 'body', 'dueAt'],
+            properties: {
+              employee: { type: 'string', description: 'Employee sessionId or display name.' },
+              title: { type: 'string', description: 'Short task title.' },
+              body: { type: 'string', description: 'Delivery requirements the employee must satisfy.' },
+              dueAt: { type: 'string', description: 'Deadline as ISO-8601 timestamp; required.' },
+            },
+          },
+        },
       },
     },
     output: {
       schema: {
-        type: 'object', additionalProperties: false, required: ['taskId', 'status', 'assigneeSessionId', 'dueAt'],
+        type: 'object', additionalProperties: false, required: ['dispatched', 'failed'],
         properties: {
-          taskId: { type: 'string' },
-          status: { type: 'string' },
-          assigneeSessionId: { type: 'string' },
-          dueAt: { type: 'string' },
+          dispatched: {
+            type: 'array',
+            items: {
+              type: 'object', additionalProperties: false, required: ['taskId', 'assigneeName', 'role', 'dueAt'],
+              properties: {
+                taskId: { type: 'string' },
+                assigneeName: { type: 'string' },
+                role: { type: 'string' },
+                dueAt: { type: 'string' },
+              },
+            },
+          },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object', additionalProperties: false, required: ['target', 'reason'],
+              properties: {
+                target: { type: 'string' },
+                reason: { type: 'string' },
+              },
+            },
+          },
         },
       },
-      render: (_args: unknown, value: DispatchValue) => [text(
-        `已派发 ${value.taskId} → ${value.assigneeSessionId}，状态 ${value.status}，截止 ${value.dueAt}`)],
+      render: (_args: unknown, value: DispatchValue) => {
+        const ok = value.dispatched.map(row => `已派发 ${row.taskId} → ${row.assigneeName}（${row.role}），截止 ${row.dueAt}`)
+        const bad = value.failed.map(row => `未派出「${row.target}」：${row.reason}`)
+        return [text([...ok, ...bad].join('\n') || '没有任何任务被派出')]
+      },
     },
     execute: async (args: DispatchArgs, run: ToolRun) => {
       const dispatcher = callerOf(run)
       const role = ledger.member(dispatcher)?.role
       if (role === 'worker') throw new Error(`员工不能派活（caller=${dispatcher} role=${String(role)}）；只有主管或用户会话可以派发任务`)
-      if (Number.isNaN(Date.parse(args.dueAt))) throw new Error(`dueAt 不是合法时间：${args.dueAt}`)
-      const assignee = ledger.resolveAssignee(args.employee)
-      const fingerprint = createHash('sha256')
-        .update([dispatcher, assignee.sessionId, args.title, args.body, args.dueAt].join('\n')).digest('hex')
-      const idempotencyKey = `dispatch:${fingerprint}`
-      const replay = ledger.db.prepare(`SELECT ledger_result_json FROM idempotency
-        WHERE project_id = ? AND idempotency_key = ?`).get(projectId, idempotencyKey) as
-        { ledger_result_json?: string } | undefined
-      if (replay?.ledger_result_json !== undefined) {
-        const prior = JSON.parse(replay.ledger_result_json) as { taskId: string }
-        console.log(`cadre-collab: dispatch replay task=${prior.taskId} assignee=${assignee.sessionId}`)
-        return { taskId: prior.taskId, status: 'dispatched', assigneeSessionId: assignee.sessionId, dueAt: args.dueAt }
+      if (!Array.isArray(args.tasks) || args.tasks.length === 0) throw new Error('拆解失败：tasks 至少一条，请重新拆解后再派')
+      const dispatched: DispatchValue['dispatched'][number][] = []
+      const failed: { target: string; reason: string }[] = []
+      for (const item of args.tasks) {
+        const target = typeof item.employee === 'string' && item.employee !== '' ? item.employee : '(未指定员工)'
+        try {
+          if (Number.isNaN(Date.parse(item.dueAt))) throw new Error(`dueAt 不是合法时间：${item.dueAt}`)
+          const assignee = ledger.resolveAssignee(item.employee)
+          const fingerprint = createHash('sha256')
+            .update([dispatcher, assignee.sessionId, item.title, item.body, item.dueAt].join('\n')).digest('hex')
+          const idempotencyKey = `dispatch:${fingerprint}`
+          const replay = ledger.db.prepare(`SELECT ledger_result_json FROM idempotency
+            WHERE project_id = ? AND idempotency_key = ?`).get(projectId, idempotencyKey) as
+            { ledger_result_json?: string } | undefined
+          if (replay?.ledger_result_json !== undefined) {
+            const prior = JSON.parse(replay.ledger_result_json) as { taskId: string }
+            dispatched.push({ taskId: prior.taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt })
+            continue
+          }
+          const taskId = randomUUID()
+          const messageId = randomUUID()
+          ledger.beginDispatch({ taskId, title: item.title, body: item.body, dueAt: item.dueAt,
+            dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId })
+          try {
+            await controller.prompt({
+              requestId: requestId(), sessionId: assignee.sessionId, mode: 'queue',
+              content: [text([
+                '【Cadre 任务】', `任务号：${taskId}`, `标题：${item.title}`,
+                `截止：${item.dueAt}`, '', '交付要求：', item.body, '',
+                `完成后调用 report_task 工具回报（taskId=${taskId}，summary 写结论，deliverables 列交付物路径）。`,
+              ].join('\n'))],
+            }, run.signal)
+          } catch (error) {
+            ledger.rollbackDispatch(taskId, idempotencyKey)
+            throw new Error(`投递失败，已回滚：${error instanceof Error ? error.message : String(error)}`)
+          }
+          ledger.confirmDispatch(taskId, messageId)
+          console.log(`cadre-collab: dispatch ok task=${taskId} assignee=${assignee.sessionId} due=${item.dueAt}`)
+          dispatched.push({ taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt })
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error)
+          console.log(`cadre-collab: dispatch failed target=${target} reason=${reason}`)
+          failed.push({ target, reason: reason.includes('没有找到员工') ? `待派：${reason}` : reason })
+        }
       }
-      const taskId = randomUUID()
-      const messageId = randomUUID()
-      ledger.beginDispatch({ taskId, title: args.title, body: args.body, dueAt: args.dueAt,
-        dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId })
-      try {
-        await controller.prompt({
-          requestId: requestId(), sessionId: assignee.sessionId, mode: 'queue',
-          content: [text([
-            '【Cadre 任务】', `任务号：${taskId}`, `标题：${args.title}`,
-            `截止：${args.dueAt}`, '', '交付要求：', args.body, '',
-            `完成后调用 report_task 工具回报（taskId=${taskId}，summary 写结论，deliverables 列交付物路径）。`,
-          ].join('\n'))],
-        }, run.signal)
-      } catch (error) {
-        ledger.rollbackDispatch(taskId, idempotencyKey)
-        console.log(`cadre-collab: dispatch failed task=${taskId} reason=${error instanceof Error ? error.message : String(error)}`)
-        throw new Error(`派活投递失败，已回滚：${error instanceof Error ? error.message : String(error)}`)
-      }
-      ledger.confirmDispatch(taskId, messageId)
-      console.log(`cadre-collab: dispatch ok task=${taskId} assignee=${assignee.sessionId} due=${args.dueAt}`)
-      return { taskId, status: 'dispatched', assigneeSessionId: assignee.sessionId, dueAt: args.dueAt }
+      return { dispatched, failed }
     },
   })
 
@@ -508,19 +592,67 @@ export function apply(ctx: HostContext): void {
   // scope (`agent.ctx.tools.restrict`); apply it at each step so a role written
   // after the Agent was created is honoured on the next request.
   const restricted = new Map<string, { role: string; lift: () => void }>()
+  const sectioned = new Set<string>()
+  /** One scoped prompt section per Agent; the provider runs at every assembly. */
+  const attachSection = (agent: AgentLike): void => {
+    const prompt = agent.ctx.systemPrompt
+    if (prompt === undefined) {
+      appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+        `section unavailable agent=${agent.id} service=${String((agent.ctx as unknown as Record<string, unknown>).systemPrompt)}
+`)
+      return
+    }
+    if (sectioned.has(agent.id)) return
+    sectioned.add(agent.id)
+    try {
+      prompt.section({
+        name: 'cadre-role',
+        order: prompt.getSectionOrder('TEAM_POLICY'),
+        text: () => {
+          const member = ledger.member(agent.id)
+          if (member === undefined) return ''
+          if (member.role === 'supervisor') return SUPERVISOR_DUTY
+          const role = ledger.workerRole(agent.id)
+          return role === undefined ? '' : workerDuty(role)
+        },
+      })
+    } catch (error) {
+      console.warn(`cadre-collab: role section skipped agent=${agent.id} reason=${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   // `agent/pre-step` is a waterfall: every listener must call `next()` and
   // return its decision, even when it changes nothing. Returning early yields
   // `undefined` to the downstream listeners, which read `decision.kind`.
   ctx.on('agent/pre-step', ({ agent }, next) => {
+    attachSection(agent)
     const role = ledger.member(agent.id)?.role ?? 'supervisor'
     const previous = restricted.get(agent.id)
     if (previous?.role !== role) {
       previous?.lift()
       try {
-        const deny = role === 'worker'
+        const desired = role === 'worker'
           ? ['dispatch_task', 'list_employees']
-          : ['report_task']
-        restricted.set(agent.id, { role, lift: agent.ctx.tools.restrict({ deny }) })
+          : ['report_task', 'bash', 'pwsh', 'write', 'edit', 'str_replace_editor']
+        // `restrict` throws on names this profile never registered (bash is
+        // disabled on win32, run_code only exists under PTC). It names the known
+        // set in the error, so intersect once and retry instead of guessing.
+        let deny = desired
+        let lift: () => void
+        try {
+          lift = agent.ctx.tools.restrict({ deny })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          const known = (/known global tools: (.+)$/u.exec(message)?.[1] ?? '')
+            .split(',').map(token => token.trim().replace(/^"|"$/gu, '')).filter(token => token !== '')
+          deny = desired.filter(name => known.includes(name))
+          if (deny.length === 0) {
+            appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+              `restrict parse-empty agent=${agent.id} error=${message.slice(0, 300)}
+`)
+          }
+          lift = agent.ctx.tools.restrict({ deny })
+        }
+        restricted.set(agent.id, { role, lift })
         appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
           `restrict agent=${agent.id} role=${role} deny=${deny.join(',')}
 `)

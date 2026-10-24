@@ -153,27 +153,20 @@ export function failureText(outcome: { readonly code?: string; readonly message?
 }
 
 /**
- * Employee templates are the registered `cadre-*` presets. A Session running
- * any other preset (for example the official `standard`) is not an employee
- * template, so it is never recorded as one.
- */
-const CADRE_TEMPLATE_ID = /^cadre-[a-z0-9][a-z0-9-]{0,63}$/
-
-/**
  * The four product templates, listed regardless of the Session's own preset:
  * a regular Session only projects `standard`, so its preset list says nothing
  * about which employee templates exist. Registered entries enrich these rows
  * with live names/descriptions and broken markers (see the sidebar bridge).
  */
 export const CADRE_TEMPLATES: readonly PresetOption[] = [
-  { id: 'cadre-dev', name: '开发 · Development', description: '读写代码、执行命令、跑测试与门禁的工程员工；先读后改，改动最小。' },
-  { id: 'cadre-novel', name: '写小说 · Fiction Writing', description: '长篇写作与改稿：读写工作区文稿、检索资料，不执行命令。' },
-  { id: 'cadre-general', name: '通用 · General Assistant', description: '常用能力的精简组合：文件、检索、网页与待办；不含命令执行与子代理。' },
-  { id: 'cadre-roleplay', name: '角色扮演 · Role-play', description: '以对话推进的沉浸式扮演；不执行命令、不写文件，需要抉择时给选项。' },
+  { id: 'dev', name: '开发 · Development', description: '读写代码、执行命令、跑测试与门禁的工程员工；先读后改，改动最小。' },
+  { id: 'novel', name: '写小说 · Fiction Writing', description: '长篇写作与改稿：读写工作区文稿、检索资料，不执行命令。' },
+  { id: 'general', name: '通用 · General Assistant', description: '常用能力的精简组合：文件、检索、网页与待办；不含命令执行与子代理。' },
+  { id: 'roleplay', name: '角色扮演 · Role-play', description: '以对话推进的沉浸式扮演；不执行命令、不写文件，需要抉择时给选项。' },
 ]
 
 /** Neutral default when the Session projects no cadre template. */
-const DEFAULT_TEMPLATE_ID = 'cadre-general'
+const DEFAULT_TEMPLATE_ID = 'general'
 
 /**
  * Overlay the registry's cadre-* rows onto the four product templates and
@@ -217,17 +210,10 @@ function initialTemplate(presets: readonly PresetOption[], recorded: string | un
   return presets.find(preset => preset.broken === undefined)?.id ?? ''
 }
 
-/** Template glyphs keep the 16px badge legible; unknown templates fall back to 员. */
-const TEMPLATE_GLYPHS: Record<string, string> = {
+/** Role badge stays neutral: roles are data, not a fixed glyph table. */
 
-  'cadre-dev': '开',
-  'cadre-novel': '写',
-  'cadre-general': '通',
-  'cadre-roleplay': '扮',
-}
-
-function glyphOf(employee: EmployeeRecord): string {
-  return (employee.templateId === undefined ? undefined : TEMPLATE_GLYPHS[employee.templateId]) ?? '员'
+function glyphOf(_employee: EmployeeRecord): string {
+  return '员'
 }
 
 function badgeTitle(employee: EmployeeRecord): string {
@@ -288,7 +274,7 @@ interface DialogError {
 }
 
 /** One request's dialog; all state dies with the key. */
-function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPresets, loadModels, isBlank, currentPreset, applyPreset, applyModel, saveEmployee, refreshEmployees }: {
+function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPresets, loadModels, isBlank, currentPreset, applyPreset: _applyPreset, applyModel, saveEmployee, refreshEmployees }: {
   readonly request: EmployeeDialogRequest
 } & Omit<InjectFace<EmployeeDialogInjected>, 'useRequest'>) {
   const [loading, setLoading] = useState(true)
@@ -306,9 +292,9 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
   const [error, setError] = useState<DialogError | null>(null)
   const [saved, setSaved] = useState(false)
   const [employeeError, setEmployeeError] = useState<DialogError | null>(null)
-  // Remembered before any write so a failed later step can put the composition
-  // back; a blank Session's projection is authoritative until the first turn.
-  const [originalPreset] = useState(() => currentPreset(request.sessionId))
+  // Preset projection is only informational now: templates are recorded as
+  // role data and never switch a Session's composition.
+  void currentPreset
 
   const blank = isBlank(request.sessionId)
 
@@ -365,13 +351,9 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
       if (cancelled) return
       setPresets(presetList)
       if (presetList.ok) {
-        // An existing row wins; otherwise a non-blank Session shows the cadre
-        // preset it actually projects; a regular Session (standard) gets the
-        // neutral general template so saving can still record one.
-        const projected = blank === false && originalPreset !== undefined && CADRE_TEMPLATE_ID.test(originalPreset)
-          ? originalPreset
-          : undefined
-        setTemplateId(initialTemplate(mergeTemplates(presetList.value), record?.templateId, projected))
+        // An existing row wins; otherwise the neutral general template is
+        // offered so saving can still record one (templates are role data now).
+        setTemplateId(initialTemplate(mergeTemplates(presetList.value), record?.templateId, undefined))
       }
       applyModels(modelList, record)
       setLoading(false)
@@ -406,65 +388,31 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
   const blocked = pending || saved || loading || displayName.trim() === ''
   const mergedPresets = presets.ok ? mergeTemplates(presets.value) : []
   const presetLabel = (id: string): string => mergedPresets.find(preset => preset.id === id)?.name ?? id
-  const defaultPreset = mergedPresets.find(preset => preset.isDefault)?.id
+  void presetLabel
 
   const submit = async () => {
     if (blocked) return
     setPending(true)
     setError(null)
-    const applied: string[] = []
-    let appliedPreset: string | undefined
-    /** Put a blank Session's composition back after a later step failed. */
-    const rollbackPreset = async (): Promise<string> => {
-      if (appliedPreset === undefined) return ''
-      const target = originalPreset ?? defaultPreset
-      if (target === undefined || target === '') {
-        return `模板已切换为「${presetLabel(appliedPreset)}」，无法确认原模板，未能自动回滚；`
-      }
-      const back = await applyPreset(request.sessionId, target)
-      return back.ok
-        ? `模板已回滚为「${presetLabel(target)}」；`
-        : `模板已切换为「${presetLabel(appliedPreset)}」，自动回滚失败（${back.code ?? 'UNKNOWN'} · ${back.message ?? '未知错误'}）；`
-    }
-
-    if (blank === true && templateId !== '') {
-      const preset = await applyPreset(request.sessionId, templateId)
-      if (!preset.ok) {
-        setPending(false)
-        setError({
-          step: '模板应用',
-          code: preset.code ?? 'UNKNOWN',
-          message: preset.message ?? '未知错误',
-          hint: '模板未切换，员工记录未写入；会话仍处于空白状态，可直接重试。',
-        })
-        return
-      }
-      appliedPreset = templateId
-      applied.push('模板已应用')
-    }
-
+    let modelApplied = false
     if (providerId !== '' && modelId !== '') {
       const model = await applyModel(request.sessionId, providerId, modelId, reasoningEffort)
       if (!model.ok) {
-        const rollback = await rollbackPreset()
         setPending(false)
         setError({
           step: '模型应用',
           code: model.code ?? 'UNKNOWN',
           message: model.message ?? '未知错误',
-          hint: `${rollback}员工记录尚未写入。检查 Provider 凭据后可在本对话框直接重试。`,
+          hint: '员工记录尚未写入。检查 Provider 凭据后可在本对话框直接重试。',
         })
         return
       }
-      applied.push('模型已应用')
     }
 
     // A non-blank Session keeps the composition it started with; the selected
     // template is recorded only. Selecting nothing falls back to the projected
     // cadre preset, if the Session already runs one.
-    const projectedTemplate = blank === false && originalPreset !== undefined && CADRE_TEMPLATE_ID.test(originalPreset)
-      ? originalPreset
-      : undefined
+    const projectedTemplate: string | undefined = undefined
     const writtenTemplate = templateId !== '' ? templateId : projectedTemplate
     const savedResult = await saveEmployee({
       sessionId: request.sessionId,
@@ -473,14 +421,13 @@ function EmployeeDialogForm({ request, closeEmployeeDialog, getEmployee, listPre
       ...(providerId !== '' && modelId !== '' ? { preferredProviderId: providerId, preferredModel: modelId } : {}),
     })
     if (!savedResult.ok) {
-      const rollback = await rollbackPreset()
-      const modelText = applied.includes('模型已应用') ? `模型已切换为 ${providerId}/${modelId}；` : ''
+      const modelText = modelApplied ? `模型已切换为 ${providerId}/${modelId}；` : ''
       setPending(false)
       setError({
         step: '员工记录保存',
         code: savedResult.code ?? 'UNKNOWN',
         message: savedResult.message ?? '未知错误',
-        hint: `${rollback}${modelText}员工记录尚未写入；修正后可在本对话框直接重试。`,
+        hint: `${modelText}员工记录尚未写入；修正后可在本对话框直接重试。`,
       })
       return
     }

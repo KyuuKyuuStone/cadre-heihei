@@ -12,7 +12,7 @@ import { DatabaseSync } from 'node:sqlite'
 /** Session ids and project ids share the ledger's identifier alphabet. */
 const ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 /** Registered preset ids: the `cadre-` prefix plus a lowercase slug (design/05 §2). */
-const TEMPLATE_ID_PATTERN = /^cadre-[a-z0-9][a-z0-9-]{0,62}$/
+const TEMPLATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 const PROVIDER_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 const MODEL_ID_PATTERN = /^[A-Za-z0-9._:/+-]{1,200}$/
 const MAX_DISPLAY_NAME = 80
