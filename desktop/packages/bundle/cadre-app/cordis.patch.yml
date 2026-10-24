@@ -11,7 +11,7 @@
     # report_task, list_employees). Ledger path/project come from the desktop
     # launcher environment (CADRE_LEDGER_PATH / CADRE_PROJECT_ID).
     - id: cadre-collab
-      name: '@deepseek-ai/dsh-bundle-cadre'
+      name: '@deepseek-ai/dsh-host-collab'
     # ── cadre-dev ──────────────────────────────────────────────────────────
     - id: preset-cadre-dev
       name: '@deepseek-ai/dsh-agent-preset'

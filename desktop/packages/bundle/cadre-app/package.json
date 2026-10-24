@@ -28,5 +28,8 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-host-collab": "workspace:*"
   }
 }
