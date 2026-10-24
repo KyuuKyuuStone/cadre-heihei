@@ -169,9 +169,18 @@ class Ledger {
     return rows.map(row => ({ sessionId: row.session_id, name: row.name, state: row.state }))
   }
 
+  /**
+   * The project's one active supervisor.
+   *
+   * `sup-1` is the legacy roster placeholder the ledger seeds so an empty project
+   * still shows a supervisor row; it has no Session and must never receive a
+   * prompt. A real supervisor (created by the user) wins regardless of update
+   * time; when only the placeholder exists the answer is "no supervisor".
+   */
   supervisor(): string | undefined {
     const row = this.db.prepare(`SELECT session_id FROM members WHERE project_id = ? AND role = 'supervisor'
-      AND state != 'departed' ORDER BY updated_at DESC LIMIT 1`).get(this.projectId) as { session_id?: string } | undefined
+      AND state != 'departed' AND session_id != 'sup-1' ORDER BY updated_at DESC LIMIT 1`)
+      .get(this.projectId) as { session_id?: string } | undefined
     return row?.session_id
   }
 
@@ -309,7 +318,6 @@ function text(value: string): { type: 'text'; text: string } {
  * @param ctx - Host plugin context; services are injected above.
  */
 export function apply(ctx: HostContext): void {
-  console.log('cadre-collab: apply (host-collab) tools registered')
   appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
     `apply tools=${String((ctx.tools as { register?: unknown }).register !== undefined)} pid=${process.pid} at=${new Date().toISOString()}
 `)
@@ -386,7 +394,7 @@ export function apply(ctx: HostContext): void {
     execute: async (args: DispatchArgs, run: ToolRun) => {
       const dispatcher = callerOf(run)
       const role = ledger.member(dispatcher)?.role
-      if (role === 'worker') throw new Error('员工不能派活；只有主管或用户会话可以派发任务')
+      if (role === 'worker') throw new Error(`员工不能派活（caller=${dispatcher} role=${String(role)}）；只有主管或用户会话可以派发任务`)
       if (Number.isNaN(Date.parse(args.dueAt))) throw new Error(`dueAt 不是合法时间：${args.dueAt}`)
       const assignee = ledger.resolveAssignee(args.employee)
       const fingerprint = createHash('sha256')
@@ -457,7 +465,10 @@ export function apply(ctx: HostContext): void {
       const messageId = ledger.report({ taskId: task.taskId, summary: args.summary, deliverables, reporter })
       const supervisor = ledger.supervisor()
       if (supervisor === undefined || supervisor === reporter) {
-        console.log(`cadre-collab: report ok task=${task.taskId} reporter=${reporter} supervisor=absent`)
+        appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+          `report supervisor=absent project=${projectId} task=${task.taskId} reporter=${reporter}
+`)
+        console.log(`cadre-collab: report ok task=${task.taskId} reporter=${reporter} supervisor=absent (no active supervisor session)`)
         return { taskId: task.taskId, status: 'delivered', supervisorNotified: false }
       }
       try {

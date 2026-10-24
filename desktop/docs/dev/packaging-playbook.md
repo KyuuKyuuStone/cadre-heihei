@@ -36,3 +36,18 @@ pnpm -w run package:desktop:win:x64:unsigned # 单独构建（预检通过后）
 - 工具层已落地：`release.mjs` 中 `--push` 默认被拒，须 `--push --confirm` 双重显式；无远端配置时直接 fail（step 0-push-guard）。
 - 对外发布**以版本为节点**：推送前整理成面向版本的提交集，必须同时具备 ① 版本号 ② CHANGELOG ③ 发布必过清单通过 ④ 用户确认——缺一不可。
 - 本地 commit 照常（开发/回滚需要），但不构成对外发布、不代表可以推送。
+
+## 桌面 main 必须走 `run build`，不能只跑 `tsc`
+
+`apps/desktop/lib/main.js` 由 `pnpm --filter @deepseek-ai/dsh-desktop run build`
+（= `tsc -b && tsdown bundle`）产出；`tsc -b` 只更新 `lib/types`，**不会**刷新
+`lib/main.js`。只跑 tsc 后启动 dev 或手测，实际跑的是旧 main（表现为新加的
+env 注入/IPC 不生效、旧行为残留）。已两次造成误判。
+
+- 改任何 `apps/desktop/src/*.ts` 后：`pnpm --filter @deepseek-ai/dsh-desktop run build`，再 `run start`。
+- 发布链已覆盖：`package-target.ts` 先 `run build:official`（含 tsc + tsdown 两个 face + desktop bundle），
+  所以安装包不受此坑影响；此坑只影响 dev/手测。
+- Host 侧插件（`packages/...`）除了 `tsc -b tsconfig.host.json` 还须
+  `tsdown --env.DSH_BUILD_FACE host`，同样两层。
+- 快速自检：`grep -c "<新标识>" apps/desktop/lib/main.js` 与
+  `packages/<pkg>/lib/index.js` 均 > 0 再启动。

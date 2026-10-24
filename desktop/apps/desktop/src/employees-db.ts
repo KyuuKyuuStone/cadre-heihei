@@ -255,7 +255,8 @@ export class EmployeeStore {
       if (table === undefined) return fail('STORAGE_ERROR', 'members 表不存在')
       if (input.role === 'supervisor') {
         const occupied = this.db.prepare(`SELECT session_id FROM members
-          WHERE project_id = ? AND role = 'supervisor' AND state != 'departed' AND session_id != ? LIMIT 1`)
+          WHERE project_id = ? AND role = 'supervisor' AND state != 'departed'
+            AND session_id != ? AND session_id != 'sup-1' LIMIT 1`)
           .get(input.projectId, input.sessionId) as { session_id?: string } | undefined
         if (occupied !== undefined) {
           return fail('INVALID_ARGUMENT', `本项目已有主管（${String(occupied.session_id)}），请先办理离职`, 'role')
