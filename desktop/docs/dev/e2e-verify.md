@@ -24,6 +24,22 @@
 3. `report_task`：命中主管 → prompt 主管会话并日志 `report ok … supervisor=<id>`；
    无主管 → 不阻塞，日志 `report supervisor=absent project=… task=… reporter=…`，并写 `<ledger>.plugin.log`。
 
+## 2.5 第二轮复测结果（2026-10-24 18:30，s-loop5 干净环境）
+
+- 干净 DSH_HOME/台账：是（`s-loop5`，空 userData、无历史会话）。
+- 主管建成功：`supSave {"ok":true, role:"supervisor"}` —— sup-1 不再挤占名额（B1 修复生效）。
+- 员工建成功：`empSave {"ok":true, role:"worker"}`。
+- **卡在第 4 步「在主管会话里发起派活」**：CDP 点击会话行后无法确证当前活跃会话；
+  实际执行上下文落在员工会话，工具被正确拒绝：
+  `dispatch_task 调用失败：员工不能派活（caller=session-8318b402… role=worker）`。
+  两次重试（含行点击重试与 active 探测）均未能切换到主管会话（active 探测无匹配元素）。
+- 因此第二轮未拿到「派活成功/汇报卡/验收」证据；不是链路回归，而是**会话切换在无 UI 自动化钩子时不可判定**。
+- 下一步：前端提供可测的会话激活标识（如 data-active-session 属性或路由 id 可读），
+  或改用官方路由直接打开 `/session/<id>`；之后按 §4 清单一次跑完。
+
+可能的 bug 观察（待确认，不先定性）：新建会话后点击会话行，UI 是否真的切换了当前会话；
+若点击未生效，属前端 bug（B3 候选）。
+
 ## 3. 第二轮（待复测）失败原因说明
 
 测试脚本复用旧 DSH_HOME 的历史会话列表：新脚本取的 `rows[0]` 实际是旧 worker 会话，
