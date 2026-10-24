@@ -41,12 +41,27 @@ const BODY_TEXTAREA: CSSProperties = {
   color: TEXT_PRIMARY,
 }
 
+/** Newest employee report attached to a task. */
+interface CadreReport {
+  readonly messageId: string
+  readonly reporterSessionId: string
+  readonly reporterName: string
+  readonly summary: string
+  readonly preview: string
+  readonly deliverables: readonly string[]
+  readonly receivedAt: string
+  readonly deliveryState: string
+}
+
 /** One ledger row rendered by the panel. */
 interface CadreTask {
   readonly taskId: string
   readonly title: string
   readonly status: string
   readonly assignee: string
+  readonly assigneeRole?: string
+  readonly updatedAt?: string
+  readonly report?: CadreReport
 }
 
 /** Raw row shape of `cadre:listTasks` (assignee is a session id). */
@@ -56,6 +71,9 @@ interface CadreTaskRow {
   readonly status: string
   readonly assigneeSessionId: string
   readonly updatedAt: string
+  readonly assigneeName?: string
+  readonly assigneeRole?: string
+  readonly latestReport?: CadreReport
 }
 
 /** One roster member returned by `cadre:listRoster`. */
@@ -110,7 +128,7 @@ interface CadreBridge {
   transitionTask?(query: {
     projectId: string
     taskId: string
-    status: 'verified' | 'rework' | 'failed'
+    status: TransitionStatus
     reason?: string
   }): Promise<CadreWriteResult | undefined>
   saveMember?(query: {
@@ -167,14 +185,17 @@ const SAMPLE_TASKS: readonly CadreTask[] = [
   { taskId: 'task-104', title: '官方壳协作面板挂出', status: '进行中', assignee: '前端' },
 ]
 
-/** Display labels for the ledger's status codes. */
+/** Two-level acceptance: delivered → review (主管审) → verified (用户确认). */
 const STATUS_LABELS: Record<string, string> = {
-  delivered: '已交付',
-  in_progress: '进行中',
-  verified: '已验收',
+  dispatched: '已派发',
+  accepted: '已接受',
+  in_progress: '执行中',
+  delivered: '待主管审',
+  review: '待用户确认',
+  verified: '已完成',
   failed: '失败',
   cancelled: '已取消',
-  rework: '退回重做',
+  rework: '返工',
 }
 
 type PanelState =
@@ -182,10 +203,48 @@ type PanelState =
   | { readonly kind: 'ready'; readonly tasks: readonly CadreTask[] }
   | { readonly kind: 'fallback'; readonly reason: string }
 
-type TransitionStatus = 'verified' | 'rework' | 'failed'
+type TransitionStatus = 'review' | 'verified' | 'rework' | 'failed'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Ledger role used as the interim position label (岗位名口径尚未定稿). */
+function roleLabel(role: string | undefined): string {
+  return role === 'supervisor' ? '主管' : '员工'
+}
+
+/** `MM-DD HH:mm` in local time; invalid timestamps fall back to the raw value. */
+function timeText(iso: string | undefined): string {
+  if (iso === undefined || iso === '') return '—'
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return iso
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
+}
+
+/** The first sentence of a report, bounded so one long report cannot flood the row. */
+function firstSentence(text: string): string {
+  const trimmed = text.trim()
+  if (trimmed === '') return '（汇报没有正文）'
+  const head = (trimmed.split(/[。！？!?\n]/)[0] ?? '').trim() || trimmed
+  return head.length > 120 ? `${head.slice(0, 120)}…` : head
+}
+
+/** Map a raw bridge row to the view model, keeping report data across status writes. */
+function toViewTask(row: CadreTaskRow, previous?: CadreTask): CadreTask {
+  const assigneeRole = row.assigneeRole ?? previous?.assigneeRole
+  const updatedAt = row.updatedAt ?? previous?.updatedAt
+  const report = row.latestReport ?? previous?.report
+  return {
+    taskId: row.taskId,
+    title: row.title,
+    status: row.status,
+    assignee: row.assigneeName?.trim() || previous?.assignee || row.assigneeSessionId,
+    ...(assigneeRole === undefined ? {} : { assigneeRole }),
+    ...(updatedAt === undefined ? {} : { updatedAt }),
+    ...(report === undefined ? {} : { report }),
+  }
 }
 
 /** Decorative sidebar glyph for the Cadre panel row. */
@@ -200,17 +259,71 @@ function TaskRow({
   readonly task: CadreTask
   readonly onAccept: (taskId: string) => void
 }) {
-  const delivered = task.status === 'delivered'
+  const actionable = task.status === 'delivered' || task.status === 'review'
   return (
     <li style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 0' }}>
       <Tag tone="neutral">{task.taskId}</Tag>
       <span style={{ flex: 1 }}>{task.title}</span>
-      <span>{task.assignee}</span>
+      <span>{task.assignee}{task.assigneeRole === undefined ? '' : ` · ${roleLabel(task.assigneeRole)}`}</span>
       <Pill>{STATUS_LABELS[task.status] ?? task.status}</Pill>
-      {delivered && (
+      {actionable && (
         <Button variant="outline" size="sm" onClick={() => { onAccept(task.taskId) }}>
-          验收
+          {task.status === 'review' ? '用户确认' : '主管审核'}
         </Button>
+      )}
+    </li>
+  )
+}
+
+/** W3 report card: who reported, which task, when, the verdict, deliverables, state. */
+function ReportCard({
+  task,
+  onReview,
+}: {
+  readonly task: CadreTask
+  readonly onReview: (taskId: string) => void
+}) {
+  const report = task.report
+  const actionable = task.status === 'delivered' || task.status === 'review'
+  return (
+    <li
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '12px',
+        border: '0.5px solid var(--dsw-alias-border-l2)',
+        borderRadius: 'var(--dsw-radius-md)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        minWidth: 0,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <Tag tone="neutral">{`${task.assignee} · ${roleLabel(task.assigneeRole)}`}</Tag>
+        <span style={{ flex: 1, minWidth: 0, fontWeight: 600, color: TEXT_PRIMARY }}>{task.title}</span>
+        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
+          {timeText(report?.receivedAt ?? task.updatedAt)}
+        </span>
+        <Pill>{STATUS_LABELS[task.status] ?? task.status}</Pill>
+      </div>
+      <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
+        任务号 {task.taskId}
+        {report === undefined ? '' : ` · 汇报人 ${report.reporterName}`}
+        {report === undefined ? '' : ` · 汇报 ${timeText(report.receivedAt)}`}
+      </span>
+      <p style={{ margin: 0, color: TEXT_PRIMARY }}>{report === undefined ? '该任务没有汇报正文（旧记录）。' : firstSentence(report.summary)}</p>
+      <div style={{ color: TEXT_SECONDARY, fontSize: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <span>交付物</span>
+        {report === undefined || report.deliverables.length === 0
+          ? <span>（未提供）</span>
+          : report.deliverables.map(item => <Tag key={item} tone="neutral">{item}</Tag>)}
+      </div>
+      {actionable && (
+        <div>
+          <Button variant="outline" size="sm" onClick={() => { onReview(task.taskId) }}>
+            {task.status === 'review' ? '用户确认' : '主管审核'}
+          </Button>
+        </div>
       )}
     </li>
   )
@@ -278,15 +391,13 @@ export function CadrePanel({ createRosterEntry, createPlainSession }: PropsRunti
     try {
       const result = await bridge.listTasks({ projectId: PROJECT_ID })
       rows = [...result.rows]
-      setState({
+      setState(previous => ({
         kind: 'ready',
-        tasks: rows.map(row => ({
-          taskId: row.taskId,
-          title: row.title,
-          status: row.status,
-          assignee: row.assigneeSessionId,
-        })),
-      })
+        tasks: rows.map(row => toViewTask(
+          row,
+          previous.kind === 'ready' ? previous.tasks.find(task => task.taskId === row.taskId) : undefined,
+        )),
+      }))
     } catch (error) {
       setState({ kind: 'fallback', reason: errorMessage(error) })
     }
@@ -299,18 +410,18 @@ export function CadrePanel({ createRosterEntry, createPlainSession }: PropsRunti
 
   useEffect(() => { void load() }, [load])
 
-  // Apply the rows a write already read back, then reconcile with a fresh read.
+  // Apply the rows a write already read back. The write connection returns the
+  // base row shape (no report join), so merge by taskId to keep W3 cards intact;
+  // the delayed fresh read then replaces them with the full projection.
   const applyWriteResult = (result: { tasks?: CadreTaskRow[] } | undefined) => {
     if (result?.tasks === undefined) return
-    setState({
+    setState(previous => ({
       kind: 'ready',
-      tasks: result.tasks.map(row => ({
-        taskId: row.taskId,
-        title: row.title,
-        status: row.status,
-        assignee: row.assigneeSessionId,
-      })),
-    })
+      tasks: result.tasks?.map(row => toViewTask(
+        row,
+        previous.kind === 'ready' ? previous.tasks.find(task => task.taskId === row.taskId) : undefined,
+      )) ?? [],
+    }))
   }
 
   const submitDispatch = async () => {
@@ -366,7 +477,50 @@ export function CadrePanel({ createRosterEntry, createPlainSession }: PropsRunti
     }
     setPending(true)
     setNotice(null)
+    const finish = (final: TransitionStatus) => {
+      setReasonFor(null)
+      setReason('')
+      window.setTimeout(() => { void load() }, 2000)
+      const done: Record<TransitionStatus, string> = {
+        review: '主管审核已通过，等待用户确认',
+        verified: '用户已确认，任务完成',
+        rework: '已打回重做，等待员工继续',
+        failed: '已标记失败',
+      }
+      setNotice({ tone: 'neutral', text: done[final] })
+    }
     try {
+      const current = state.kind === 'ready'
+        ? state.tasks.find(task => task.taskId === taskId)
+        : undefined
+      // The ledger requires review to be a mandatory stop: delivered cannot go
+      // straight to rework/failed. A supervisor rejection therefore records the
+      // review step first, then the verdict; a failure in the second call is
+      // reported as a partial result rather than as success.
+      if (current?.status === 'delivered' && (status === 'rework' || status === 'failed')) {
+        const reviewed = await bridge.transitionTask({ projectId: PROJECT_ID, taskId, status: 'review' })
+        if (!writeSucceeded(reviewed)) {
+          setNotice({ tone: 'danger', text: writeFailure(reviewed) })
+          return
+        }
+        applyWriteResult(reviewed)
+        const verdict = await bridge.transitionTask({
+          projectId: PROJECT_ID,
+          taskId,
+          status,
+          ...(reasonText === undefined || reasonText.trim() === '' ? {} : { reason: reasonText.trim() }),
+        })
+        if (!writeSucceeded(verdict)) {
+          setNotice({
+            tone: 'danger',
+            text: `已进入待用户确认，但${status === 'rework' ? '打回' : '标记失败'}失败：${writeFailure(verdict)}`,
+          })
+          return
+        }
+        applyWriteResult(verdict)
+        finish(status)
+        return
+      }
       const result = await bridge.transitionTask({
         projectId: PROJECT_ID,
         taskId,
@@ -378,10 +532,7 @@ export function CadrePanel({ createRosterEntry, createPlainSession }: PropsRunti
         return
       }
       applyWriteResult(result)
-      setReasonFor(null)
-      setReason('')
-      window.setTimeout(() => { void load() }, 2000)
-      setNotice({ tone: 'neutral', text: '状态已更新，列表已刷新' })
+      finish(status)
     } catch (error) {
       setNotice({ tone: 'danger', text: errorMessage(error) })
     } finally {
@@ -390,10 +541,11 @@ export function CadrePanel({ createRosterEntry, createPlainSession }: PropsRunti
   }
 
   const onTransition = (taskId: string, status: TransitionStatus) => {
-    if (status === 'verified') {
+    if (status === 'review' || status === 'verified') {
       void submitTransition(taskId, status)
       return
     }
+    // rework / failed are reason-required by the ledger's transition matrix.
     setReasonFor({ taskId, status })
     setReason('')
   }
@@ -449,12 +601,29 @@ export function CadrePanel({ createRosterEntry, createPlainSession }: PropsRunti
   const tasks = state.kind === 'ready'
     ? state.tasks
     : offline ? SAMPLE_TASKS : []
+  // W3 cards cover every task that reached a report/review state; newest
+  // report first so a burst of employee reports reads top-down.
+  const reportTasks = state.kind === 'ready'
+    ? state.tasks
+      .filter(task => task.report !== undefined
+        || task.status === 'delivered' || task.status === 'review'
+        || task.status === 'rework' || task.status === 'verified')
+      .sort((left, right) => {
+        const at = Date.parse(left.report?.receivedAt ?? left.updatedAt ?? '')
+        const bt = Date.parse(right.report?.receivedAt ?? right.updatedAt ?? '')
+        return (Number.isNaN(bt) ? 0 : bt) - (Number.isNaN(at) ? 0 : at)
+      })
+    : []
   const workers: readonly RosterMember[] = rosterState.kind === 'ready'
     ? rosterState.members.filter(member => member.role === 'worker')
     : []
   const supervisor = rosterState.kind === 'ready'
     ? rosterState.members.find(member => member.role === 'supervisor' && member.status !== 'departed')
     : undefined
+  const acceptTask = acceptFor === null ? undefined : tasks.find(task => task.taskId === acceptFor)
+  // Two visible stages so the operator knows which level they are acting on;
+  // the ledger status is the source of truth, not local UI state.
+  const acceptStage: 'review' | 'confirm' = acceptTask?.status === 'review' ? 'confirm' : 'review'
 
   const openCreate = () => {
     setNotice(null)
@@ -624,6 +793,36 @@ export function CadrePanel({ createRosterEntry, createPlainSession }: PropsRunti
           <StateDot state="ongoing" />
           <span>读取台账…</span>
         </div>
+      )}
+
+      {state.kind === 'ready' && tasks.length > 0 && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h2 style={{ margin: 0, fontSize: 14, color: TEXT_PRIMARY }}>汇报</h2>
+            <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>{reportTasks.length} 条</span>
+          </div>
+          {reportTasks.length === 0
+            ? (
+              <p role="status" style={{ margin: 0, color: TEXT_SECONDARY }}>
+                暂无汇报。员工调用 report_task 回报后，任务会出现在这里等待验收。
+              </p>
+            )
+            : (
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {reportTasks.map(task => (
+                  <ReportCard
+                    key={task.taskId}
+                    task={task}
+                    onReview={(taskId) => { setNotice(null); setAcceptFor(taskId) }}
+                  />
+                ))}
+              </ul>
+            )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <h2 style={{ margin: 0, fontSize: 14, color: TEXT_PRIMARY }}>全部任务</h2>
+            <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>{tasks.length} 条</span>
+          </div>
+        </>
       )}
 
       {state.kind === 'ready' && tasks.length === 0 && (
@@ -919,44 +1118,71 @@ export function CadrePanel({ createRosterEntry, createPlainSession }: PropsRunti
       <Modal
         open={acceptFor !== null}
         onClose={() => { setAcceptFor(null) }}
-        title="验收任务"
-        {...(acceptFor !== null ? { description: acceptFor } : {})}
+        title={acceptStage === 'confirm' ? '验收 · 用户确认' : '验收 · 主管审核'}
+        {...(acceptTask !== undefined ? { description: `${acceptTask.assignee} · ${acceptTask.title}` } : {})}
         closeLabel="关闭"
         footer={(
-          <Button variant="outline" onClick={() => { setAcceptFor(null) }}>取消</Button>
+          <>
+            <Button variant="outline" onClick={() => { setAcceptFor(null) }}>取消</Button>
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() => {
+                const taskId = acceptFor
+                setAcceptFor(null)
+                if (taskId !== null) onTransition(taskId, 'rework')
+              }}
+            >
+              打回重做
+            </Button>
+            {acceptStage === 'confirm' && (
+              <Button
+                variant="outline"
+                disabled={pending}
+                onClick={() => {
+                  const taskId = acceptFor
+                  setAcceptFor(null)
+                  if (taskId !== null) onTransition(taskId, 'failed')
+                }}
+              >
+                标记失败
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              disabled={pending}
+              onClick={() => {
+                const taskId = acceptFor
+                setAcceptFor(null)
+                if (taskId !== null) onTransition(taskId, acceptStage === 'confirm' ? 'verified' : 'review')
+              }}
+            >
+              {acceptStage === 'confirm' ? '用户确认通过' : '主管审核通过'}
+            </Button>
+          </>
         )}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <Button
-            variant="primary"
-            onClick={() => {
-              const taskId = acceptFor
-              setAcceptFor(null)
-              if (taskId !== null) void submitTransition(taskId, 'verified')
-            }}
-          >
-            通过验收
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              const taskId = acceptFor
-              setAcceptFor(null)
-              if (taskId !== null) onTransition(taskId, 'rework')
-            }}
-          >
-            退回重做
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              const taskId = acceptFor
-              setAcceptFor(null)
-              if (taskId !== null) onTransition(taskId, 'failed')
-            }}
-          >
-            标记失败
-          </Button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Tag tone="neutral">{`① 主管审核${acceptStage === 'confirm' ? ' ✓' : ''}`}</Tag>
+            <Tag tone="neutral">{`② 用户确认${acceptStage === 'confirm' ? '（当前）' : ''}`}</Tag>
+          </div>
+          {acceptTask?.report !== undefined && (
+            <>
+              <p style={{ margin: 0, color: TEXT_PRIMARY }}>{firstSentence(acceptTask.report.summary)}</p>
+              <div style={{ color: TEXT_SECONDARY, fontSize: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span>交付物</span>
+                {acceptTask.report.deliverables.length === 0
+                  ? <span>（未提供）</span>
+                  : acceptTask.report.deliverables.map(item => <Tag key={item} tone="neutral">{item}</Tag>)}
+              </div>
+            </>
+          )}
+          <p style={{ margin: 0, color: TEXT_SECONDARY }}>
+            {acceptStage === 'review'
+              ? '通过后进入「待用户确认」；打回须填写一句原因。'
+              : '确认通过后任务完成；打回须填写一句原因。'}
+          </p>
           {!canTransition && <p style={{ margin: 0, color: TEXT_SECONDARY }}>写入通道待接入，当前仅可预览操作。</p>}
         </div>
       </Modal>

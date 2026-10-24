@@ -28,6 +28,18 @@ export function resolveCadreLedgerPath(userData: string, env: NodeJS.ProcessEnv 
   return join(cadreUserData !== undefined && cadreUserData !== '' ? cadreUserData : userData, 'cadre.sqlite')
 }
 
+/** Latest employee report attached to a task (W3 report card). */
+export interface CadreReportRow {
+  readonly messageId: string
+  readonly reporterSessionId: string
+  readonly reporterName: string
+  readonly summary: string
+  readonly preview: string
+  readonly deliverables: readonly string[]
+  readonly receivedAt: string
+  readonly deliveryState: string
+}
+
 /** One task row projected for the renderer; camelCase mirrors the IPC payload. */
 export interface CadreTaskRow {
   readonly taskId: string
@@ -35,6 +47,23 @@ export interface CadreTaskRow {
   readonly status: string
   readonly assigneeSessionId: string
   readonly updatedAt: string
+  /** Roster name of the assignee; falls back to the session id. */
+  readonly assigneeName?: string
+  /** Ledger role (`supervisor`/`worker`) used as the interim position label. */
+  readonly assigneeRole?: string
+  /** Newest report. Absent when the task has never been reported. */
+  readonly latestReport?: CadreReportRow
+}
+
+/** Parse `messages.deliverables_json`; malformed history degrades to no items. */
+function parseDeliverables(raw: unknown): readonly string[] {
+  if (typeof raw !== 'string' || raw.trim() === '') return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
 }
 
 /** Result of one `listTasks` call, including the elapsed query time. */
@@ -87,6 +116,8 @@ export class CadreLedger {
   readonly #path: string
   #db: DatabaseSync | undefined
   #unavailable: string | undefined
+  /** Older ledgers may predate the collaboration tables; degrade to base rows. */
+  #hasReports = false
 
   /**
    * @param path - absolute ledger path, normally `<userData>/cadre.sqlite`.
@@ -105,7 +136,11 @@ export class CadreLedger {
       const check = this.#db.prepare('SELECT COUNT(*) AS count FROM sqlite_master WHERE type = ?').get('table') as
         | { count?: number }
         | undefined
-      log(`cadre-ledger open path=${path} readOnly=true tables=${String(check?.count ?? 0)}`)
+      const tables = this.#db.prepare(`SELECT COUNT(*) AS count FROM sqlite_master
+        WHERE type = 'table' AND name IN ('messages', 'members')`).get() as { count?: number } | undefined
+      this.#hasReports = (tables?.count ?? 0) === 2
+      log(`cadre-ledger open path=${path} readOnly=true tables=${String(check?.count ?? 0)} ` +
+        `reports=${String(this.#hasReports)}`)
     } catch (error) {
       this.#db = undefined
       this.#unavailable = error instanceof Error ? error.message : String(error)
@@ -134,15 +169,53 @@ export class CadreLedger {
     const db = this.#db
     if (db === undefined) throw new Error(`cadre ledger unavailable (${this.#unavailable ?? 'unknown'})`)
     const started = performance.now()
-    const rows = db.prepare(`SELECT task_id, title, status, assignee_session_id, updated_at
-      FROM tasks WHERE project_id = ? ORDER BY rowid DESC LIMIT ?`).all(project, TASK_LIMIT)
-    const projected = rows.map(row => ({
-      taskId: String(row.task_id),
-      title: String(row.title),
-      status: String(row.status),
-      assigneeSessionId: String(row.assignee_session_id),
-      updatedAt: String(row.updated_at),
-    }))
+    const rows = this.#hasReports
+      ? db.prepare(`SELECT t.task_id, t.title, t.status, t.assignee_session_id, t.updated_at,
+          COALESCE(mem.display_name, t.assignee_session_id) AS assignee_name,
+          COALESCE(mem.role, 'worker') AS assignee_role,
+          m.message_id AS report_message_id, m.body AS report_body, m.preview AS report_preview,
+          m.deliverables_json AS report_deliverables, m.received_at AS report_received_at,
+          m.delivery_state AS report_delivery_state, m.from_session_id AS report_from,
+          COALESCE(rm.display_name, m.from_session_id) AS report_reporter_name
+        FROM tasks t
+        LEFT JOIN members mem ON mem.project_id = t.project_id AND mem.session_id = t.assignee_session_id
+        LEFT JOIN messages m ON m.message_id = COALESCE(t.latest_report_message_id,
+          (SELECT m2.message_id FROM messages m2
+           WHERE m2.task_id = t.task_id AND m2.direction = 'report'
+           ORDER BY m2.received_at DESC LIMIT 1))
+        LEFT JOIN members rm ON rm.project_id = t.project_id AND rm.session_id = m.from_session_id
+        WHERE t.project_id = ? ORDER BY t.rowid DESC LIMIT ?`).all(project, TASK_LIMIT)
+      : db.prepare(`SELECT task_id, title, status, assignee_session_id, updated_at
+          FROM tasks WHERE project_id = ? ORDER BY rowid DESC LIMIT ?`).all(project, TASK_LIMIT)
+    const projected = rows.map((row) => {
+      const base = {
+        taskId: String(row.task_id),
+        title: String(row.title),
+        status: String(row.status),
+        assigneeSessionId: String(row.assignee_session_id),
+        updatedAt: String(row.updated_at),
+      }
+      if (row.report_message_id === null || row.report_message_id === undefined) {
+        return this.#hasReports
+          ? { ...base, assigneeName: String(row.assignee_name ?? base.assigneeSessionId), assigneeRole: String(row.assignee_role ?? 'worker') }
+          : base
+      }
+      return {
+        ...base,
+        assigneeName: String(row.assignee_name ?? base.assigneeSessionId),
+        assigneeRole: String(row.assignee_role ?? 'worker'),
+        latestReport: {
+          messageId: String(row.report_message_id),
+          reporterSessionId: String(row.report_from ?? base.assigneeSessionId),
+          reporterName: String(row.report_reporter_name ?? row.report_from ?? base.assigneeSessionId),
+          summary: String(row.report_body ?? ''),
+          preview: String(row.report_preview ?? ''),
+          deliverables: parseDeliverables(row.report_deliverables),
+          receivedAt: String(row.report_received_at ?? base.updatedAt),
+          deliveryState: String(row.report_delivery_state ?? 'delivered'),
+        },
+      }
+    })
     return { projectId: project, rows: projected, elapsedMs: Math.round((performance.now() - started) * 100) / 100 }
   }
 
