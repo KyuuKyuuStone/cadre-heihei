@@ -37,6 +37,39 @@ function expectFailure(result: EmployeeResult<unknown>): EmployeeFailure {
   return result
 }
 
+describe('roster mirror', () => {
+  it('registers the employee in the ledger roster and marks it departed on delete', () => {
+    const { store, path } = storeAt()
+    const db = new DatabaseSync(path)
+    db.exec(`CREATE TABLE members (project_id TEXT NOT NULL, session_id TEXT NOT NULL, role TEXT NOT NULL,
+      display_name TEXT, description TEXT, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, session_id))`)
+    expectOk(store.upsert(employee({ displayName: '测试员工甲', templateId: 'cadre-roleplay' }), NOW))
+    const row = db.prepare('SELECT role, display_name, state FROM members WHERE session_id = ?').get('ses-1') as {
+      role: string; display_name: string | null; state: string
+    }
+    expect(row).toEqual({ role: 'worker', display_name: '测试员工甲', state: 'available' })
+    expectOk(store.delete('ses-1', 'proj-1'))
+    expect((db.prepare('SELECT state FROM members WHERE session_id = ?').get('ses-1') as { state: string }).state).toBe('departed')
+    db.close()
+    store.close()
+  })
+
+  it('never downgrades a supervisor that happens to have an employee row', () => {
+    const { store, path } = storeAt()
+    const db = new DatabaseSync(path)
+    db.exec(`CREATE TABLE members (project_id TEXT NOT NULL, session_id TEXT NOT NULL, role TEXT NOT NULL,
+      display_name TEXT, description TEXT, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, session_id))`)
+    db.prepare(`INSERT INTO members (project_id, session_id, role, state, created_at, updated_at)
+      VALUES ('proj-1', 'sup-1', 'supervisor', 'available', ?, ?)`).run(NOW, NOW)
+    expectOk(store.upsert(employee({ sessionId: 'sup-1', displayName: '主管' }), LATER))
+    expect((db.prepare('SELECT role FROM members WHERE session_id = ?').get('sup-1') as { role: string }).role).toBe('supervisor')
+    db.close()
+    store.close()
+  })
+})
+
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true })
 })

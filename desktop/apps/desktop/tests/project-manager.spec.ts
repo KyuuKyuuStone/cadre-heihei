@@ -75,6 +75,30 @@ describe('desktop external plugin profile', () => {
     expect(lstatSync(path).isDirectory()).toBe(true)
     expect(lstatSync(join(profile, 'node_modules/plugin')).isDirectory()).toBe(true)
   })
+  it('adds Desktop bundles a pre-existing profile predates, keeping foreign bundles and pins', async () => {
+    const { manager } = setup()
+    await manager.applyRelease()
+    const manifestPath = join(manager.paths.profile, 'package.json')
+    const original = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      dsh: { profile: { bundles: string[] } }
+    }
+    // Simulate a profile first created before the cadre bundle was added.
+    writeFileSync(manifestPath, JSON.stringify({
+      ...original,
+      dependencies: { '@deepseek-ai/dsh': '0.5.1', keep: '1.0.0' },
+      dsh: { profile: { bundles: original.dsh.profile.bundles.filter(id => id !== '@deepseek-ai/dsh-bundle-cadre').concat('plugin') } },
+    }))
+    await manager.applyRelease()
+    const repaired = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      dsh: { profile: { bundles: string[] } }
+    }
+    expect(repaired.dsh.profile.bundles).toContain('@deepseek-ai/dsh-bundle-cadre')
+    expect(repaired.dsh.profile.bundles).toContain('plugin')
+    expect(repaired.dependencies).toEqual({ '@deepseek-ai/dsh': '0.5.1', keep: '1.0.0' })
+  })
+
   it('reuses plugin files without scanning manifests and can disable them', async () => {
     const { manager } = setup()
     await manager.applyRelease()

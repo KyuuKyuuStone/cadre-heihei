@@ -184,6 +184,48 @@ export class EmployeeStore {
     return rows.map(toRecord)
   }
 
+  /**
+   * Mirror a saved employee into the ledger roster.
+   *
+   * The roster panel reads `members` (role/state authority), so an employee that
+   * never gets a member row stays invisible in 花名册. The ledger schema is owned
+   * by the collab library; this write is skipped when the table is absent (for
+   * example a standalone employee database) and never downgrades a supervisor.
+   * @param input - the employee write that just succeeded.
+   * @param displayName - the stored display name, when any.
+   * @param now - write timestamp.
+   */
+  private syncRosterMember(input: UpsertEmployeeInput, displayName: string | undefined, now: string): void {
+    try {
+      const table = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='members'").get()
+      if (table === undefined) return
+      this.db.prepare(`
+        INSERT INTO members (project_id, session_id, role, display_name, state, created_at, updated_at)
+        VALUES (?, ?, 'worker', ?, 'available', ?, ?)
+        ON CONFLICT(project_id, session_id) DO UPDATE SET
+          role = CASE WHEN members.role = 'supervisor' THEN 'supervisor' ELSE 'worker' END,
+          display_name = COALESCE(excluded.display_name, members.display_name),
+          state = CASE WHEN members.state = 'departed' THEN 'available' ELSE members.state END,
+          updated_at = excluded.updated_at
+      `).run(input.projectId, input.sessionId, displayName ?? null, now, now)
+    } catch (error) {
+      // Roster mirroring must not fail the employee write; the log keeps the cause inspectable.
+      console.warn(`cadre-employees roster sync skipped reason=${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /** Mark a removed employee's roster row as departed; task history stays untouched. */
+  private retireRosterMember(sessionId: string, projectId: string, now: string): void {
+    try {
+      const table = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='members'").get()
+      if (table === undefined) return
+      this.db.prepare("UPDATE members SET state = 'departed', updated_at = ? WHERE project_id = ? AND session_id = ?")
+        .run(now, projectId, sessionId)
+    } catch (error) {
+      console.warn(`cadre-employees roster retire skipped reason=${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   /** Insert or update one employee, keeping `created_at` across updates. */
   upsert(input: UpsertEmployeeInput, now: string): EmployeeResult<{ employee: EmployeeRecord }> {
     const invalid = validateEmployeeInput(input)
@@ -226,6 +268,7 @@ export class EmployeeStore {
     }
     const employee = this.get(input.sessionId)
     if (employee === undefined) return fail('STORAGE_ERROR', '保存后读取失败', 'sessionId')
+    this.syncRosterMember(input, employee.displayName, now)
     return { ok: true, employee }
   }
 
@@ -247,6 +290,7 @@ export class EmployeeStore {
     } catch (error) {
       return fail('STORAGE_ERROR', `员工删除失败：${error instanceof Error ? error.message : String(error)}`)
     }
+    this.retireRosterMember(sessionId, projectId, new Date().toISOString())
     return { ok: true, deleted: true }
   }
 }

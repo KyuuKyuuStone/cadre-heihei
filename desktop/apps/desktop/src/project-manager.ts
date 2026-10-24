@@ -89,6 +89,7 @@ export class DesktopProjectManager {
       readDesktopRuntime(this.runtime.dsh)
       migrateProfileSettings(this.paths.profile)
       createPluginProfile(this.paths.profile)
+      ensureProfileBundles(this.paths.profile)
       removeLinkProjections(this.paths.profile)
     })
   }
@@ -176,4 +177,37 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
 /** Create the first external plugin profile without running a package manager. */
 export function createPluginProfile(projectDir: string): void {
   initProfile(projectDir, DESKTOP_BUNDLES)
+}
+
+/**
+ * Add Desktop-owned bundles an older profile manifest predates.
+ *
+ * `initProfile` only writes `package.json` when it is absent, so a profile first
+ * created before a bundle was added never composes it: the Host then has no
+ * such plugin rows (observed as `agent-preset/not-found` for every `cadre-*`
+ * preset after upgrading). This keeps the reconciliation additive and idempotent:
+ * foreign bundles and dependency pins are preserved, and nothing is written when
+ * every Desktop bundle is already present.
+ *
+ * @param projectDir - the external plugin profile directory.
+ */
+export function ensureProfileBundles(projectDir: string): void {
+  const manifestPath = join(projectDir, 'package.json')
+  let manifest: {
+    dsh?: { profile?: { bundles?: unknown } }
+    [key: string]: unknown
+  }
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as typeof manifest
+  } catch {
+    return
+  }
+  const profile = manifest.dsh?.profile
+  const current = Array.isArray(profile?.bundles) ? profile.bundles.filter((id): id is string => typeof id === 'string') : undefined
+  if (current === undefined) return
+  const missing = DESKTOP_BUNDLES.filter(bundle => !current.includes(bundle))
+  if (missing.length === 0) return
+  manifest.dsh = { ...manifest.dsh, profile: { ...profile, bundles: [...current, ...missing] } }
+  writeJson(manifestPath, manifest)
+  console.log(`desktop project: profile bundles += ${missing.join(', ')}`)
 }
