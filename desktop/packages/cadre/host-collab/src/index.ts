@@ -72,8 +72,40 @@ interface DispatchValue {
     readonly role: string
     readonly dueAt: string
   }[]
-  readonly failed: readonly { readonly target: string; readonly reason: string }[]
+  readonly failed: readonly {
+    readonly target: string
+    readonly reason: string
+    readonly retryable: boolean
+    readonly pendingId?: string
+  }[]
 }
+
+/** JSON schema fragment shared by dispatch_task and retry_dispatch results. */
+const DISPATCHED_SCHEMA = {
+  type: 'array',
+  items: {
+    type: 'object', additionalProperties: false, required: ['taskId', 'assigneeName', 'role', 'dueAt'],
+    properties: {
+      taskId: { type: 'string' },
+      assigneeName: { type: 'string' },
+      role: { type: 'string' },
+      dueAt: { type: 'string' },
+    },
+  },
+} as const
+
+const FAILED_SCHEMA = {
+  type: 'array',
+  items: {
+    type: 'object', additionalProperties: false, required: ['target', 'reason', 'retryable'],
+    properties: {
+      target: { type: 'string' },
+      reason: { type: 'string' },
+      retryable: { type: 'boolean' },
+      pendingId: { type: 'string' },
+    },
+  },
+} as const
 
 interface ReportArgs {
   readonly taskId: string
@@ -132,6 +164,12 @@ CREATE TABLE IF NOT EXISTS task_events (
   event_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, task_id TEXT NOT NULL,
   from_status TEXT, to_status TEXT NOT NULL, actor_session_id TEXT NOT NULL, reason TEXT,
   message_id TEXT, idempotency_key TEXT NOT NULL, at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pending_dispatch (
+  pending_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, dispatcher_session_id TEXT NOT NULL,
+  employee TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, due_at TEXT NOT NULL,
+  reason TEXT NOT NULL, retryable INTEGER NOT NULL, status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0, task_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS idempotency (
   project_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, operation TEXT NOT NULL,
@@ -325,6 +363,50 @@ class Ledger {
     return messageId
   }
 
+  /** Record one refused dispatch so a retry can replay the exact spec. */
+  addPending(input: {
+    dispatcher: string; employee: string; title: string; body: string; dueAt: string
+    reason: string; retryable: boolean
+  }): string {
+    const pendingId = randomUUID()
+    const now = new Date().toISOString()
+    this.db.prepare(`INSERT INTO pending_dispatch (pending_id, project_id, dispatcher_session_id,
+      employee, title, body, due_at, reason, retryable, status, attempts, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`).run(
+      pendingId, this.projectId, input.dispatcher, input.employee, input.title, input.body,
+      input.dueAt, input.reason, input.retryable ? 1 : 0, now, now)
+    return pendingId
+  }
+
+  pending(pendingId: string): {
+    pendingId: string; dispatcher: string; employee: string; title: string; body: string
+    dueAt: string; status: string; retryable: boolean
+  } | undefined {
+    const row = this.db.prepare(`SELECT pending_id, dispatcher_session_id, employee, title, body,
+      due_at, status, retryable FROM pending_dispatch WHERE project_id = ? AND pending_id = ?`)
+      .get(this.projectId, pendingId) as {
+        pending_id: string; dispatcher_session_id: string; employee: string; title: string
+        body: string; due_at: string; status: string; retryable: number } | undefined
+    if (row === undefined) return undefined
+    return {
+      pendingId: row.pending_id, dispatcher: row.dispatcher_session_id, employee: row.employee,
+      title: row.title, body: row.body, dueAt: row.due_at, status: row.status,
+      retryable: row.retryable === 1,
+    }
+  }
+
+  settlePending(pendingId: string, outcome: { taskId?: string; reason?: string; retryable?: boolean }): void {
+    const now = new Date().toISOString()
+    if (outcome.taskId !== undefined) {
+      this.db.prepare(`UPDATE pending_dispatch SET status = 'dispatched', task_id = ?,
+        attempts = attempts + 1, updated_at = ? WHERE pending_id = ?`).run(outcome.taskId, now, pendingId)
+      return
+    }
+    this.db.prepare(`UPDATE pending_dispatch SET status = 'pending', reason = ?, retryable = ?,
+      attempts = attempts + 1, updated_at = ? WHERE pending_id = ?`).run(
+      outcome.reason ?? 'retry failed', outcome.retryable === false ? 0 : 1, now, pendingId)
+  }
+
   confirmReport(messageId: string): void {
     this.db.prepare(`UPDATE messages SET delivery_state = 'delivered', delivered_at = ? WHERE message_id = ?`)
       .run(new Date().toISOString(), messageId)
@@ -415,6 +497,81 @@ export function apply(ctx: HostContext): void {
     execute: async () => ({ employees: ledger.workers() }),
   })
 
+  /** Dispatch exactly one spec; shared by the initial and the retry path. */
+  const dispatchOne = async (item: DispatchItem, dispatcher: string, signal: AbortSignal):
+  Promise<{ ok: true; value: DispatchValue['dispatched'][number] } | { ok: false; reason: string }> => {
+    try {
+      if (Number.isNaN(Date.parse(item.dueAt))) return { ok: false, reason: `dueAt 不是合法时间：${item.dueAt}` }
+      const assignee = ledger.resolveAssignee(item.employee)
+      const fingerprint = createHash('sha256')
+        .update([dispatcher, assignee.sessionId, item.title, item.body, item.dueAt].join('\n')).digest('hex')
+      const idempotencyKey = `dispatch:${fingerprint}`
+      const replay = ledger.db.prepare(`SELECT ledger_result_json FROM idempotency
+        WHERE project_id = ? AND idempotency_key = ?`).get(projectId, idempotencyKey) as
+        { ledger_result_json?: string } | undefined
+      if (replay?.ledger_result_json !== undefined) {
+        const prior = JSON.parse(replay.ledger_result_json) as { taskId: string }
+        return { ok: true, value: { taskId: prior.taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt } }
+      }
+      const taskId = randomUUID()
+      const messageId = randomUUID()
+      ledger.beginDispatch({ taskId, title: item.title, body: item.body, dueAt: item.dueAt,
+        dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId })
+      try {
+        await controller.prompt({
+          requestId: requestId(), sessionId: assignee.sessionId, mode: 'queue',
+          content: [text([
+            '【Cadre 任务】', `任务号：${taskId}`, `标题：${item.title}`,
+            `截止：${item.dueAt}`, '', '交付要求：', item.body, '',
+            `完成后调用 report_task 工具回报（taskId=${taskId}，summary 写结论，deliverables 列交付物路径）。`,
+          ].join('\n'))],
+        }, signal)
+      } catch (error) {
+        ledger.rollbackDispatch(taskId, idempotencyKey)
+        return { ok: false, reason: `投递失败，已回滚：${error instanceof Error ? error.message : String(error)}` }
+      }
+      ledger.confirmDispatch(taskId, messageId)
+      console.log(`cadre-collab: dispatch ok task=${taskId} assignee=${assignee.sessionId} due=${item.dueAt}`)
+      return { ok: true, value: { taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt } }
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** Turn one failure into the tool-facing row, queueing retryable ones. */
+  const failRow = (item: DispatchItem, dispatcher: string, reason: string): DispatchValue['failed'][number] => {
+    const retryable = reason.includes('没有找到员工') || reason.startsWith('投递失败')
+      ? true
+      : !reason.startsWith('dueAt 不是合法时间')
+    const target = typeof item.employee === 'string' && item.employee !== '' ? item.employee : '(未指定员工)'
+    const pendingId = retryable
+      ? ledger.addPending({ dispatcher, employee: item.employee, title: item.title, body: item.body,
+        dueAt: item.dueAt, reason, retryable })
+      : undefined
+    return {
+      target,
+      reason: reason.includes('没有找到员工') ? `待派：${reason}` : reason,
+      retryable,
+      ...(pendingId === undefined ? {} : { pendingId }),
+    }
+  }
+
+  const supervisorOnly = (dispatcher: string): void => {
+    const role = ledger.member(dispatcher)?.role
+    if (role === 'worker') throw new Error(`员工不能派活（caller=${dispatcher} role=${String(role)}）；只有主管或用户会话可以派发任务`)
+  }
+
+  /** Structured card data: the front end reads this meta, never the text. */
+  const dispatchMeta = (_args: unknown, value: DispatchValue) => ({
+    dispatched: value.dispatched.map(row => ({
+      taskId: row.taskId, assigneeName: row.assigneeName, role: row.role, dueAt: row.dueAt,
+    })),
+    failed: value.failed.map(row => ({
+      target: row.target, reason: row.reason, retryable: row.retryable,
+      ...(row.pendingId === undefined ? {} : { pendingId: row.pendingId }),
+    })),
+  })
+
   ctx.tools.register({
     name: 'dispatch_task',
     description: 'Dispatch one or more tasks from a supervisor breakdown, one item at a time. Each item is confirmed individually; a partial failure is reported per item and never swallowed.',
@@ -438,87 +595,70 @@ export function apply(ctx: HostContext): void {
     output: {
       schema: {
         type: 'object', additionalProperties: false, required: ['dispatched', 'failed'],
-        properties: {
-          dispatched: {
-            type: 'array',
-            items: {
-              type: 'object', additionalProperties: false, required: ['taskId', 'assigneeName', 'role', 'dueAt'],
-              properties: {
-                taskId: { type: 'string' },
-                assigneeName: { type: 'string' },
-                role: { type: 'string' },
-                dueAt: { type: 'string' },
-              },
-            },
-          },
-          failed: {
-            type: 'array',
-            items: {
-              type: 'object', additionalProperties: false, required: ['target', 'reason'],
-              properties: {
-                target: { type: 'string' },
-                reason: { type: 'string' },
-              },
-            },
-          },
-        },
+        properties: { dispatched: DISPATCHED_SCHEMA, failed: FAILED_SCHEMA },
       },
       render: (_args: unknown, value: DispatchValue) => {
         const ok = value.dispatched.map(row => `已派发 ${row.taskId} → ${row.assigneeName}（${row.role}），截止 ${row.dueAt}`)
         const bad = value.failed.map(row => `未派出「${row.target}」：${row.reason}`)
         return [text([...ok, ...bad].join('\n') || '没有任何任务被派出')]
       },
+      presentationMeta: dispatchMeta,
     },
     execute: async (args: DispatchArgs, run: ToolRun) => {
       const dispatcher = callerOf(run)
-      const role = ledger.member(dispatcher)?.role
-      if (role === 'worker') throw new Error(`员工不能派活（caller=${dispatcher} role=${String(role)}）；只有主管或用户会话可以派发任务`)
+      supervisorOnly(dispatcher)
       if (!Array.isArray(args.tasks) || args.tasks.length === 0) throw new Error('拆解失败：tasks 至少一条，请重新拆解后再派')
       const dispatched: DispatchValue['dispatched'][number][] = []
-      const failed: { target: string; reason: string }[] = []
+      const failed: DispatchValue['failed'][number][] = []
       for (const item of args.tasks) {
-        const target = typeof item.employee === 'string' && item.employee !== '' ? item.employee : '(未指定员工)'
-        try {
-          if (Number.isNaN(Date.parse(item.dueAt))) throw new Error(`dueAt 不是合法时间：${item.dueAt}`)
-          const assignee = ledger.resolveAssignee(item.employee)
-          const fingerprint = createHash('sha256')
-            .update([dispatcher, assignee.sessionId, item.title, item.body, item.dueAt].join('\n')).digest('hex')
-          const idempotencyKey = `dispatch:${fingerprint}`
-          const replay = ledger.db.prepare(`SELECT ledger_result_json FROM idempotency
-            WHERE project_id = ? AND idempotency_key = ?`).get(projectId, idempotencyKey) as
-            { ledger_result_json?: string } | undefined
-          if (replay?.ledger_result_json !== undefined) {
-            const prior = JSON.parse(replay.ledger_result_json) as { taskId: string }
-            dispatched.push({ taskId: prior.taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt })
-            continue
-          }
-          const taskId = randomUUID()
-          const messageId = randomUUID()
-          ledger.beginDispatch({ taskId, title: item.title, body: item.body, dueAt: item.dueAt,
-            dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId })
-          try {
-            await controller.prompt({
-              requestId: requestId(), sessionId: assignee.sessionId, mode: 'queue',
-              content: [text([
-                '【Cadre 任务】', `任务号：${taskId}`, `标题：${item.title}`,
-                `截止：${item.dueAt}`, '', '交付要求：', item.body, '',
-                `完成后调用 report_task 工具回报（taskId=${taskId}，summary 写结论，deliverables 列交付物路径）。`,
-              ].join('\n'))],
-            }, run.signal)
-          } catch (error) {
-            ledger.rollbackDispatch(taskId, idempotencyKey)
-            throw new Error(`投递失败，已回滚：${error instanceof Error ? error.message : String(error)}`)
-          }
-          ledger.confirmDispatch(taskId, messageId)
-          console.log(`cadre-collab: dispatch ok task=${taskId} assignee=${assignee.sessionId} due=${item.dueAt}`)
-          dispatched.push({ taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt })
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error)
-          console.log(`cadre-collab: dispatch failed target=${target} reason=${reason}`)
-          failed.push({ target, reason: reason.includes('没有找到员工') ? `待派：${reason}` : reason })
+        const outcome = await dispatchOne(item, dispatcher, run.signal)
+        if (outcome.ok) {
+          dispatched.push(outcome.value)
+          continue
         }
+        console.log(`cadre-collab: dispatch failed target=${item.employee} reason=${outcome.reason}`)
+        failed.push(failRow(item, dispatcher, outcome.reason))
       }
       return { dispatched, failed }
+    },
+  })
+
+  ctx.tools.register({
+    name: 'retry_dispatch',
+    description: 'Re-dispatch one queued failure by its pendingId: the exact original spec is replayed, so retrying does not depend on the model understanding a prompt.',
+    parameters: {
+      type: 'object', additionalProperties: false, required: ['pendingId'],
+      properties: {
+        pendingId: { type: 'string', description: 'pendingId from a failed dispatch entry.' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, required: ['dispatched', 'failed'],
+        properties: { dispatched: DISPATCHED_SCHEMA, failed: FAILED_SCHEMA },
+      },
+      render: (_args: unknown, value: DispatchValue) => [text(value.dispatched.length > 0
+        ? `重试成功：${value.dispatched.map(row => row.taskId).join(', ')}`
+        : `重试仍失败：${value.failed.map(row => `${row.target}：${row.reason}`).join('；')}`)],
+      presentationMeta: dispatchMeta,
+    },
+    execute: async (args: { pendingId: string }, run: ToolRun) => {
+      const dispatcher = callerOf(run)
+      supervisorOnly(dispatcher)
+      const record = ledger.pending(args.pendingId)
+      if (record === undefined) throw new Error(`待派条目不存在：${args.pendingId}`)
+      if (record.status === 'dispatched') throw new Error(`该条目已派出，无需重试：${args.pendingId}`)
+      const item: DispatchItem = { employee: record.employee, title: record.title, body: record.body, dueAt: record.dueAt }
+      const outcome = await dispatchOne(item, record.dispatcher, run.signal)
+      if (outcome.ok) {
+        ledger.settlePending(record.pendingId, { taskId: outcome.value.taskId })
+        console.log(`cadre-collab: retry ok pending=${record.pendingId} task=${outcome.value.taskId}`)
+        return { dispatched: [outcome.value], failed: [] }
+      }
+      ledger.settlePending(record.pendingId, {
+        reason: outcome.reason, retryable: !outcome.reason.startsWith('dueAt 不是合法时间') })
+      console.log(`cadre-collab: retry failed pending=${record.pendingId} reason=${outcome.reason}`)
+      return { dispatched: [], failed: [failRow(item, dispatcher, outcome.reason)] }
     },
   })
 
