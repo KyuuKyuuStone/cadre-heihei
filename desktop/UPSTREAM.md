@@ -72,7 +72,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K7 | `packages/bundle/base/cordis.patch.yml` | 禁用 `llm-deepseek-account`（无账户产品） | **这是官方扩展点**（patch `disabled`），不是代码 patch | 1 行 + 注释 |
 | K8 | `packages/bundle/web-app/cordis.patch.yml` | 禁用 `ui-settings-account`（隐藏账户设置入口） | 同 K7，官方 patch 机制 | 1 行 + 注释；`account-controller` 仍由官方默认禁用 |
 | K9 | `packages/client/ui-theme/src/theme-settings.ts` | 默认主题 `system` → `dark` | 官方没有「部署默认主题」配置面 | 1 行常量（**建议改为品牌/部署注入，见 §六**） |
-| K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册项目面板（工作区 → 项目 → 花名册）、`cadre-providers` 设置分区、员工行徽标、主题 token 覆盖；EnginePort 客户端绑定经 `@deepseek-ai/dsh-cadre-engine/client`（内联进本包 bundle，见 K16）。W8（2026-10-24）：`cadre-employees` 设置分区与会话「转为员工」菜单/对话框已停止注册（文件保留），新建入口收归项目行「＋」 | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
+| K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册项目面板（工作区 → 项目 → 花名册）、员工行徽标、主题 token 覆盖；EnginePort 客户端绑定经 `@deepseek-ai/dsh-cadre-engine/client`（内联进本包 bundle，见 K18）。0.7.0 对齐代码：`cadre-providers` 设置分区已随官方 Models 页收敛停止注册；`cadre-employees` 设置分区与「转为员工」菜单也停止注册（文件保留），新建入口收归项目行「＋」。注意 providers 链路并未删除：建员工对话框仍用 `listProviders` + `bindSession`（见汇报） | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
 | K11 | `packages/client/ui-sidebar/src/client/SidebarRoot.module.css` | 侧栏玻璃层背景改为 `color-mix` 取主题 token | 官方没有对应视觉变体 | 4 条声明；可移入我们的主题样式 |
 | K12 | `packages/client/ui-brand-official/src/client/index.ts`、`packages/client/ui-brand-official/src/client/Brand.tsx` | 品牌占位改为 Cadre 印章（含 hero 槽位） | 官方明确要求另做品牌包，不应改包内 | **ADR-0023 §2.6 决定迁到独立品牌包，本项待删** |
 | K13 | `packages/client/web/src/boot-page.ts` | 启动页字标改为 `Cadre Heihei` | 启动页在客户端 bundle 内、早于插件加载 | 1 行；品牌包无法覆盖启动页 |
@@ -81,6 +81,11 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K16 | `apps/desktop/scripts/installer.nsh` | `customInstall` 清理旧程序文件（不碰用户数据） | NSIS 钩子只能改官方脚本 | 一个 macro；改名重装期间必需 |
 | K17 | `apps/desktop/scripts/smoke-packaged-runtime.ts` | 冒烟测试按新 productName 找 `Cadre Heihei.exe/.app` | 官方脚本硬编码产品名 | 2 行 |
 | K18 | `packages/client/tsdown.client.ts` | `INLINE_SAFE` 增加 `cadre-engine`，允许侧栏 bundle 内联 `@deepseek-ai/dsh-cadre-engine/client` | 该包是浏览器安全的无状态适配层（与 `session`/`brand`/`llm` 同桶）；官方 module table 的 row 键只到包名，子路径无法成为 row，做成 client 插件又会为纯库引入无谓的插件身份 | 正则里一个交替项；若官方给库级内联白名单配置面则改用它 |
+| K19 | `packages/client/ui-conversation/src/client/locales.ts` | 派活/汇报状态条所需文案与术语 | 官方文案层没有产品术语位 | 若干词条；可迁移为独立插件的 locale 覆盖 |
+| K20 | `packages/client/ui-tool/src/client/apply.ts` | 注册 `dispatch-row` 工具卡视图（读 tool result 的 presentationMeta） | 官方工具卡注册表在客户端包内，插件只能注册到既有视图集合 | 一条注册；可抽成客户端插件 |
+| K21 | `packages/client/ui-tool/src/client/tool/toolviews/dispatch-row.tsx` | 派活结果卡：成功/失败分列、`retryable` 决定重试按钮、用 `pendingId` 触发重试 | 跨会话任务卡官方无对应视图 | 新文件；数据全部来自 meta，可平移到独立包 |
+| K22 | `packages/client/ui-sidebar/src/client/SidebarRoot.tsx` | 项目/花名册侧栏接线与状态条挂载 | 官方侧栏组合点内部 | 接线 hunk；应随 K10 一起抽插件 |
+| K23 | `packages/client/ui-sidebar/src/client/contract/slots.ts` | 新增项目花名册/派活状态相关 slot 类型 | 类型契约在官方包内声明 | 类型声明；抽插件时并入我们自己的 contract |
 
 **内核补丁结论：17 处，其中 3 处（K7/K8/K10）本可完全走官方扩展点、1 处（K12）已决定迁走、1 处（K9）应换实现方式。真正无法避免的只剩桌面壳 6 处（K1–K6）+ 构建 4 处（K14–K17）。**
 

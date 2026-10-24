@@ -83,6 +83,14 @@ interface DispatchValue {
   }[]
 }
 
+/** Machine-readable failure kind; retryability derives from this, not from prose. */
+type DispatchFailureKind = 'missing-employee' | 'delivery-failed' | 'invalid-due-at'
+
+interface DispatchFailure {
+  readonly kind: DispatchFailureKind
+  readonly reason: string
+}
+
 /** JSON schema fragment shared by dispatch_task and retry_dispatch results. */
 const DISPATCHED_SCHEMA = {
   type: 'array',
@@ -421,6 +429,10 @@ class Ledger {
   }
 }
 
+/** Hard caps enforced by the tools themselves (persona repeats them only as a reminder). */
+const MAX_DISPATCH_ITEMS = 5
+const MAX_RETRIES = 3
+
 /** Supervisor duties injected into every supervisor Session's prompt (product rule). */
 const SUPERVISOR_DUTY = [
   '你是本项目的主管，只做调度与验收，不替员工做专业执行：',
@@ -428,7 +440,8 @@ const SUPERVISOR_DUTY = [
   '2. 有对应角色的员工时，不得代劳该员工的专业执行工作；',
   '3. 没有对应角色时才由你补位，并明确说明缺哪个角色、为何补位；',
   '4. 验收时对照任务的完成条件核实证据（交付物），不以口头说明代替；',
-  '5. 汇报用户时区分「已证实 / 未决 / 风险」三类，不把推测写成结论。',
+  '5. 汇报用户时区分「已证实 / 未决 / 风险」三类，不把推测写成结论；',
+  `6. 一次最多派 ${String(MAX_DISPATCH_ITEMS)} 条任务（多了要分批）；同一失败重试最多 ${String(MAX_RETRIES)} 次，超过必须换人或找用户裁决。`,
 ].join('\n')
 
 /** Worker role text: roster 「角色负责什么」, re-read on every assembly. */
@@ -502,9 +515,11 @@ export function apply(ctx: HostContext): void {
 
   /** Dispatch exactly one spec; shared by the initial and the retry path. */
   const dispatchOne = async (item: DispatchItem, dispatcher: string, signal: AbortSignal):
-  Promise<{ ok: true; value: DispatchValue['dispatched'][number] } | { ok: false; reason: string }> => {
+  Promise<{ ok: true; value: DispatchValue['dispatched'][number] } | { ok: false } & DispatchFailure> => {
     try {
-      if (Number.isNaN(Date.parse(item.dueAt))) return { ok: false, reason: `dueAt 不是合法时间：${item.dueAt}` }
+      if (Number.isNaN(Date.parse(item.dueAt))) {
+        return { ok: false, kind: 'invalid-due-at', reason: `dueAt 不是合法时间：${item.dueAt}` }
+      }
       const assignee = ledger.resolveAssignee(item.employee)
       const fingerprint = createHash('sha256')
         .update([dispatcher, assignee.sessionId, item.title, item.body, item.dueAt].join('\n')).digest('hex')
@@ -531,21 +546,24 @@ export function apply(ctx: HostContext): void {
         }, signal)
       } catch (error) {
         ledger.rollbackDispatch(taskId, idempotencyKey)
-        return { ok: false, reason: `投递失败，已回滚：${error instanceof Error ? error.message : String(error)}` }
+        // A cancelled turn is not a dispatch failure: surface the abort so the
+        // turn stops instead of queueing a bogus retry.
+        if (signal.aborted) throw error
+        return { ok: false, kind: 'delivery-failed', reason: `投递失败，已回滚：${error instanceof Error ? error.message : String(error)}` }
       }
       ledger.confirmDispatch(taskId, messageId)
       console.log(`cadre-collab: dispatch ok task=${taskId} assignee=${assignee.sessionId} due=${item.dueAt}`)
       return { ok: true, value: { taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt } }
     } catch (error) {
-      return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      if (signal.aborted) throw error
+      return { ok: false, kind: 'missing-employee', reason: error instanceof Error ? error.message : String(error) }
     }
   }
 
   /** Turn one failure into the tool-facing row, queueing retryable ones. */
-  const failRow = (item: DispatchItem, dispatcher: string, reason: string): DispatchValue['failed'][number] => {
-    const retryable = reason.includes('没有找到员工') || reason.startsWith('投递失败')
-      ? true
-      : !reason.startsWith('dueAt 不是合法时间')
+  const failRow = (item: DispatchItem, dispatcher: string, outcome: DispatchFailure): DispatchValue['failed'][number] => {
+    const { kind, reason } = outcome
+    const retryable = kind !== 'invalid-due-at'
     const target = typeof item.employee === 'string' && item.employee !== '' ? item.employee : '(未指定员工)'
     const pendingId = retryable
       ? ledger.addPending({ dispatcher, employee: item.employee, title: item.title, body: item.body,
@@ -553,7 +571,7 @@ export function apply(ctx: HostContext): void {
       : undefined
     return {
       target,
-      reason: reason.includes('没有找到员工') ? `待派：${reason}` : reason,
+      reason: kind === 'missing-employee' ? `待派：${reason}` : reason,
       retryable,
       ...(pendingId === undefined ? {} : { pendingId }),
     }
@@ -611,6 +629,9 @@ export function apply(ctx: HostContext): void {
       const dispatcher = callerOf(run)
       supervisorOnly(dispatcher)
       if (!Array.isArray(args.tasks) || args.tasks.length === 0) throw new Error('拆解失败：tasks 至少一条，请重新拆解后再派')
+      if (args.tasks.length > MAX_DISPATCH_ITEMS) {
+        throw new Error(`一次最多派 ${String(MAX_DISPATCH_ITEMS)} 条（收到 ${String(args.tasks.length)} 条），请分批派发`)
+      }
       const dispatched: DispatchValue['dispatched'][number][] = []
       const failed: DispatchValue['failed'][number][] = []
       for (const item of args.tasks) {
@@ -620,7 +641,7 @@ export function apply(ctx: HostContext): void {
           continue
         }
         console.log(`cadre-collab: dispatch failed target=${item.employee} reason=${outcome.reason}`)
-        failed.push(failRow(item, dispatcher, outcome.reason))
+        failed.push(failRow(item, dispatcher, outcome))
       }
       return { dispatched, failed }
     },
@@ -639,10 +660,9 @@ export function apply(ctx: HostContext): void {
       console.log(`cadre-collab: retry ok pending=${record.pendingId} task=${outcome.value.taskId}`)
       return { dispatched: [outcome.value], failed: [] }
     }
-    ledger.settlePending(record.pendingId, {
-      reason: outcome.reason, retryable: !outcome.reason.startsWith('dueAt 不是合法时间') })
+    ledger.settlePending(record.pendingId, { reason: outcome.reason, retryable: outcome.kind !== 'invalid-due-at' })
     console.log(`cadre-collab: retry failed pending=${record.pendingId} reason=${outcome.reason}`)
-    return { dispatched: [], failed: [failRow(item, caller, outcome.reason)] }
+    return { dispatched: [], failed: [failRow(item, caller, outcome)] }
   }
 
   ctx.tools.register({
@@ -807,6 +827,7 @@ export function apply(ctx: HostContext): void {
   // after the Agent was created is honoured on the next request.
   const restricted = new Map<string, { role: string; lift: () => void }>()
   const sectioned = new Set<string>()
+  const unrecognisedLogged = new Set<string>()
   /** One scoped prompt section per Agent; the provider runs at every assembly. */
   const attachSection = (agent: AgentLike): void => {
     const prompt = agent.ctx.systemPrompt
@@ -839,7 +860,20 @@ export function apply(ctx: HostContext): void {
   // `undefined` to the downstream listeners, which read `decision.kind`.
   ctx.on('agent/pre-step', ({ agent }, next) => {
     attachSection(agent)
-    const role = ledger.member(agent.id)?.role ?? 'supervisor'
+    const member = ledger.member(agent.id)
+    if (member === undefined) {
+      // Unknown role = an ordinary session belonging to the user: fail open.
+      // Only an explicitly recorded `supervisor` member is restricted.
+      if (!unrecognisedLogged.has(agent.id)) {
+        unrecognisedLogged.add(agent.id)
+        appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+          `unrecognised-role agent=${agent.id} role=(none) restrict=off
+`)
+        console.log(`cadre-collab: 未识别角色，不限制 agent=${agent.id}`)
+      }
+      return next()
+    }
+    const role = member.role
     const previous = restricted.get(agent.id)
     if (previous?.role !== role) {
       previous?.lift()
