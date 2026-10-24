@@ -51,3 +51,15 @@
 - P0 的安装包复验（dev 等价运行态已验证）。
 - 20 条已知失败测试按用户口径本期不修。
 - B1（Host 单写者）未开工。
+
+## 根因已定位（2026-10-24 18:10）
+
+launch8.log:40-41 确证：`dsh: warning: 1 entry did not activate` /
+`cadre-collab (@deepseek-ai/dsh-bundle-cadre): failed to import: ERR_MODULE_NOT_FOUND
+… imported from $DSH_HOME/profiles/desktop/`。
+
+- loader baseUrl = profile 目录；profile 无 node_modules；bundle 自身被
+  `collectProfileScopePackages` 从 profile 链接里显式删除（profile.ts:594-604），
+  所以「bundle 自己当插件行」必然解析失败；preset 行不走 loader 才显得正常。
+- 修复：独立包 `packages/cadre/host-collab` + bundle deps 依赖它 + patch 行改名；
+  同步修 CADRE_LEDGER_PATH 注入（Host env 实测缺失）。
