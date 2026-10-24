@@ -1,21 +1,482 @@
 /**
- * Cadre employee-template bundle.
+ * Cadre employee-template bundle and the collaboration tools.
  *
- * The bundle's whole contribution is its patch (`cordis.patch.yml`): four
- * `@deepseek-ai/dsh-agent-preset` declarations that the preset registry mounts
- * per Session. Nothing in the patch mounts this module, so it provides no
- * service, registers nothing, and holds no state.
+ * The bundle still ships the preset patch; it also mounts one Host plugin row
+ * (`cadre-collab` in `cordis.patch.yml`) that registers the supervisor /
+ * employee tools. Those tools write the SQLite ledger and deliver messages
+ * through the official Session prompt channel, so a task exists only after its
+ * prompt was accepted.
  *
- * It exists because the workspace Host build compiles every
- * `packages/<group>/<name>` bundle from `lib/types/{index,startup}.js`
- * (`tsdown.config.ts` entry); a package without those outputs fails the build
- * with `Cannot find entry`. Keeping the entry a no-op preserves that contract
- * without inventing a runtime surface the bundle does not need.
+ * Configuration comes from the desktop launcher's environment:
+ * `CADRE_LEDGER_PATH` (cadre.sqlite) and `CADRE_PROJECT_ID` (default proj-demo).
+ * The plugin speaks to the Host structurally (tools registry, Session prompt),
+ * so this package needs no Host dependency graph of its own.
  * @module @deepseek-ai/dsh-bundle-cadre
  */
 
-/** Stable Cordis plugin name; never composed by the patch. */
-export const name = 'cadre-bundle'
+import { createHash, randomUUID } from 'node:crypto'
+import { appendFileSync } from 'node:fs'
+import { DatabaseSync } from 'node:sqlite'
 
-/** No-op plugin body: the patch, not this row, carries the presets. */
-export function apply(): void {}
+interface SessionController {
+  prompt(request: {
+    readonly requestId: string
+    readonly sessionId: string
+    readonly mode: 'queue' | 'steer'
+    readonly content: readonly { readonly type: 'text'; readonly text: string }[]
+  }, signal: AbortSignal): Promise<{ readonly accepted: true }>
+}
+
+interface HostContext {
+  readonly tools: { register(definition: unknown): void }
+  effect(setup: () => () => void): void
+  readonly sessionController: SessionController
+}
+
+interface ToolRun {
+  readonly agent?: { readonly id: string }
+  readonly signal: AbortSignal
+}
+
+interface DispatchArgs {
+  readonly employee: string
+  readonly title: string
+  readonly body: string
+  readonly dueAt: string
+}
+
+interface DispatchValue {
+  readonly taskId: string
+  readonly status: string
+  readonly assigneeSessionId: string
+  readonly dueAt: string
+}
+
+interface ReportArgs {
+  readonly taskId: string
+  readonly summary: string
+  readonly deliverables?: readonly string[]
+}
+
+interface ReportValue {
+  readonly taskId: string
+  readonly status: string
+  readonly supervisorNotified: boolean
+}
+
+interface EmployeesValue {
+  readonly employees: readonly { readonly sessionId: string; readonly name: string; readonly state: string }[]
+}
+
+/** Stable Cordis plugin name. */
+export const name = 'cadre-collab'
+
+/** Host services the tools use. */
+export const inject = ['tools', 'sessionController']
+
+const DDL = `
+CREATE TABLE IF NOT EXISTS members (
+  project_id TEXT NOT NULL, session_id TEXT NOT NULL, role TEXT NOT NULL,
+  display_name TEXT, description TEXT, state TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, session_id)
+);
+CREATE TABLE IF NOT EXISTS employees (
+  session_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, display_name TEXT, template_id TEXT,
+  persona_note TEXT, preferred_provider_id TEXT, preferred_model TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tasks (
+  task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, seq INTEGER NOT NULL,
+  title TEXT NOT NULL, body TEXT NOT NULL, body_bytes INTEGER NOT NULL, body_sha256 TEXT NOT NULL,
+  status TEXT NOT NULL, dispatcher_session_id TEXT NOT NULL, assignee_session_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 0, supersedes_task_id TEXT, superseded_by_task_id TEXT,
+  latest_dispatch_message_id TEXT, latest_report_message_id TEXT,
+  created_at TEXT NOT NULL, dispatched_at TEXT, accepted_at TEXT, started_at TEXT,
+  delivered_at TEXT, review_started_at TEXT, closed_at TEXT, updated_at TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1, due_at TEXT,
+  UNIQUE (project_id, seq)
+);
+CREATE TABLE IF NOT EXISTS messages (
+  message_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, task_id TEXT NOT NULL,
+  direction TEXT NOT NULL, channel TEXT NOT NULL, from_session_id TEXT NOT NULL, to_session_id TEXT,
+  body TEXT NOT NULL, body_bytes INTEGER NOT NULL, body_sha256 TEXT NOT NULL, preview TEXT NOT NULL,
+  deliverables_json TEXT, idempotency_key TEXT NOT NULL,
+  delivery_state TEXT NOT NULL DEFAULT 'delivered', error_code TEXT,
+  received_at TEXT NOT NULL, delivered_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_events (
+  event_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, task_id TEXT NOT NULL,
+  from_status TEXT, to_status TEXT NOT NULL, actor_session_id TEXT NOT NULL, reason TEXT,
+  message_id TEXT, idempotency_key TEXT NOT NULL, at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS idempotency (
+  project_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, operation TEXT NOT NULL,
+  fingerprint TEXT NOT NULL, ledger_result_json TEXT, receipt_json TEXT, created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, idempotency_key)
+);
+`
+
+/** Ledger writes the collaboration tools need; one SQLite handle for the Host process. */
+class Ledger {
+  readonly db: DatabaseSync
+  readonly projectId: string
+
+  constructor(path: string, projectId: string) {
+    this.db = new DatabaseSync(path)
+    this.projectId = projectId
+    this.db.exec('PRAGMA busy_timeout = 5000')
+    this.db.exec(DDL)
+    const columns = this.db.prepare('PRAGMA table_info(tasks)').all() as { name?: string }[]
+    if (!columns.some(column => column.name === 'due_at')) {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN due_at TEXT')
+    }
+  }
+
+  close(): void { this.db.close() }
+
+  member(sessionId: string): { role: string; state: string } | undefined {
+    const row = this.db.prepare(
+      'SELECT role, state FROM members WHERE project_id = ? AND session_id = ?',
+    ).get(this.projectId, sessionId) as { role: string; state: string } | undefined
+    return row
+  }
+
+  /** Resolve an assignee by member session id, member name, or employee name. */
+  resolveAssignee(employee: string): { sessionId: string; name: string } {
+    const direct = this.db.prepare(`SELECT session_id, COALESCE(display_name, session_id) AS name FROM members
+      WHERE project_id = ? AND session_id = ? AND state != 'departed'`).get(this.projectId, employee) as
+      { session_id: string; name: string } | undefined
+    if (direct !== undefined) return { sessionId: direct.session_id, name: direct.name }
+    const byMemberName = this.db.prepare(`SELECT session_id, COALESCE(display_name, session_id) AS name FROM members
+      WHERE project_id = ? AND display_name = ? AND state != 'departed' LIMIT 1`).get(this.projectId, employee) as
+      { session_id: string; name: string } | undefined
+    if (byMemberName !== undefined) return { sessionId: byMemberName.session_id, name: byMemberName.name }
+    const byEmployee = this.db.prepare(`SELECT session_id, COALESCE(display_name, session_id) AS name FROM employees
+      WHERE project_id = ? AND (session_id = ? OR display_name = ?) LIMIT 1`).get(this.projectId, employee, employee) as
+      { session_id: string; name: string } | undefined
+    if (byEmployee !== undefined) return { sessionId: byEmployee.session_id, name: byEmployee.name }
+    throw new Error(`本项目没有找到员工：${employee}（先用 list_employees 查名单）`)
+  }
+
+  workers(): { sessionId: string; name: string; state: string }[] {
+    const rows = this.db.prepare(`SELECT session_id, COALESCE(display_name, session_id) AS name, state FROM members
+      WHERE project_id = ? AND role = 'worker' AND state != 'departed'
+      UNION ALL
+      SELECT e.session_id, COALESCE(e.display_name, e.session_id), 'available' FROM employees e
+      WHERE e.project_id = ? AND NOT EXISTS (SELECT 1 FROM members m WHERE m.project_id = e.project_id AND m.session_id = e.session_id)
+      ORDER BY name`).all(this.projectId, this.projectId) as { session_id: string; name: string; state: string }[]
+    return rows.map(row => ({ sessionId: row.session_id, name: row.name, state: row.state }))
+  }
+
+  supervisor(): string | undefined {
+    const row = this.db.prepare(`SELECT session_id FROM members WHERE project_id = ? AND role = 'supervisor'
+      AND state != 'departed' ORDER BY updated_at DESC LIMIT 1`).get(this.projectId) as { session_id?: string } | undefined
+    return row?.session_id
+  }
+
+  task(taskId: string): { taskId: string; title: string; status: string; assignee: string; dueAt?: string } | undefined {
+    const row = this.db.prepare('SELECT task_id, title, status, assignee_session_id, due_at FROM tasks WHERE project_id = ? AND task_id = ?')
+      .get(this.projectId, taskId) as
+      { task_id: string; title: string; status: string; assignee_session_id: string; due_at?: string | null } | undefined
+    if (row === undefined) return undefined
+    return {
+      taskId: row.task_id, title: row.title, status: row.status, assignee: row.assignee_session_id,
+      ...(row.due_at == null ? {} : { dueAt: row.due_at }),
+    }
+  }
+
+  /** Insert the task intent plus the pending dispatch message in one transaction. */
+  beginDispatch(input: {
+    taskId: string; title: string; body: string; dueAt: string
+    dispatcher: string; assignee: string; idempotencyKey: string; messageId: string
+  }): void {
+    const now = new Date().toISOString()
+    const sha = createHash('sha256').update(input.body).digest('hex')
+    const seq = (this.db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM tasks WHERE project_id = ?')
+      .get(this.projectId) as { next: number }).next
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.db.prepare(`INSERT INTO tasks (task_id, project_id, seq, title, body, body_bytes, body_sha256, status,
+        dispatcher_session_id, assignee_session_id, created_at, updated_at, due_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'dispatched', ?, ?, ?, ?, ?)`).run(
+        input.taskId, this.projectId, seq, input.title, input.body, Buffer.byteLength(input.body), sha,
+        input.dispatcher, input.assignee, now, now, input.dueAt)
+      this.db.prepare(`INSERT INTO messages (message_id, project_id, task_id, direction, channel,
+        from_session_id, to_session_id, body, body_bytes, body_sha256, preview, idempotency_key,
+        delivery_state, received_at, delivered_at)
+        VALUES (?, ?, ?, 'dispatch', 'session', ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
+        input.messageId, this.projectId, input.taskId, input.dispatcher, input.assignee,
+        input.body, Buffer.byteLength(input.body), sha, input.body.slice(0, 120), input.idempotencyKey, now, now)
+      this.db.prepare(`INSERT INTO idempotency (project_id, idempotency_key, operation, fingerprint,
+        ledger_result_json, created_at) VALUES (?, ?, 'dispatch', ?, ?, ?)`).run(
+        this.projectId, input.idempotencyKey, input.idempotencyKey, JSON.stringify({ taskId: input.taskId }), now)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  /** Delivery accepted: flip the message and record the dispatch event. */
+  confirmDispatch(taskId: string, messageId: string): void {
+    const now = new Date().toISOString()
+    const actor = (this.db.prepare('SELECT dispatcher_session_id FROM tasks WHERE task_id = ?')
+      .get(taskId) as { dispatcher_session_id: string }).dispatcher_session_id
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.db.prepare(`UPDATE messages SET delivery_state = 'delivered', delivered_at = ? WHERE message_id = ?`).run(now, messageId)
+      this.db.prepare(`UPDATE tasks SET latest_dispatch_message_id = ?, dispatched_at = ?, updated_at = ? WHERE task_id = ?`)
+        .run(messageId, now, now, taskId)
+      this.db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
+        actor_session_id, message_id, idempotency_key, at)
+        VALUES (?, ?, ?, NULL, 'dispatched', ?, ?, ?, ?)`).run(
+        randomUUID(), this.projectId, taskId, actor, messageId, `dispatch:${taskId}`, now)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  /** Compensation: a refused prompt leaves no task, message, event or idempotency row. */
+  rollbackDispatch(taskId: string, idempotencyKey: string): void {
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.db.prepare('DELETE FROM messages WHERE task_id = ?').run(taskId)
+      this.db.prepare('DELETE FROM task_events WHERE task_id = ?').run(taskId)
+      this.db.prepare('DELETE FROM tasks WHERE task_id = ?').run(taskId)
+      this.db.prepare('DELETE FROM idempotency WHERE project_id = ? AND idempotency_key = ?').run(this.projectId, idempotencyKey)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  /** Record one employee report and move the task to `delivered`. */
+  report(input: { taskId: string; summary: string; deliverables: readonly string[]; reporter: string }): string {
+    const now = new Date().toISOString()
+    const messageId = randomUUID()
+    const sha = createHash('sha256').update(input.summary).digest('hex')
+    const supervisor = this.supervisor()
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.db.prepare(`INSERT INTO messages (message_id, project_id, task_id, direction, channel,
+        from_session_id, to_session_id, body, body_bytes, body_sha256, preview, deliverables_json,
+        idempotency_key, delivery_state, received_at, delivered_at)
+        VALUES (?, ?, ?, 'report', 'session', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
+        messageId, this.projectId, input.taskId, input.reporter, supervisor ?? null, input.summary,
+        Buffer.byteLength(input.summary), sha, input.summary.slice(0, 120),
+        JSON.stringify(input.deliverables), `report:${input.taskId}`, now, now)
+      this.db.prepare(`UPDATE tasks SET status = 'delivered', delivered_at = ?, latest_report_message_id = ?,
+        updated_at = ?, version = version + 1 WHERE task_id = ?`).run(now, messageId, now, input.taskId)
+      this.db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
+        actor_session_id, reason, message_id, idempotency_key, at)
+        VALUES (?, ?, ?, NULL, 'delivered', ?, NULL, ?, ?, ?)`).run(
+        randomUUID(), this.projectId, input.taskId, input.reporter, messageId, `report:${input.taskId}`, now)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+    return messageId
+  }
+
+  confirmReport(messageId: string): void {
+    this.db.prepare(`UPDATE messages SET delivery_state = 'delivered', delivered_at = ? WHERE message_id = ?`)
+      .run(new Date().toISOString(), messageId)
+  }
+
+  failReport(messageId: string, reason: string): void {
+    this.db.prepare(`UPDATE messages SET delivery_state = 'failed', error_code = ? WHERE message_id = ?`)
+      .run(reason.slice(0, 200), messageId)
+  }
+}
+
+/** Mint the official request identity for one programmatic prompt. */
+function requestId(): string {
+  return randomUUID()
+}
+
+/** Text content part used by both tools. */
+function text(value: string): { type: 'text'; text: string } {
+  return { type: 'text', text: value }
+}
+
+/**
+ * Register the collaboration tools over the ledger and Session prompt channel.
+ * @param ctx - Host plugin context; services are injected above.
+ */
+export function apply(ctx: HostContext): void {
+  appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+    `apply tools=${String((ctx.tools as { register?: unknown }).register !== undefined)} pid=${process.pid} at=${new Date().toISOString()}
+`)
+  const databasePath = process.env.CADRE_LEDGER_PATH?.trim()
+  if (databasePath === undefined || databasePath === '') {
+    console.error('cadre-collab: CADRE_LEDGER_PATH is unset; collaboration tools are not registered')
+    return
+  }
+  const projectId = process.env.CADRE_PROJECT_ID?.trim() || 'proj-demo'
+  const ledger = new Ledger(databasePath, projectId)
+  const controller = ctx.sessionController
+  ctx.effect(() => () => { ledger.close() })
+
+  const callerOf = (run: ToolRun): string => {
+    const id = run.agent?.id
+    if (id === undefined) throw new Error('cadre-collab: 工具必须由会话内的 Agent 调用')
+    return id
+  }
+
+  ctx.tools.register({
+    name: 'list_employees',
+    description: 'List the active employees of this project (sessionId, name, state).',
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, required: ['employees'],
+        properties: {
+          employees: {
+            type: 'array',
+            items: {
+              type: 'object', additionalProperties: false, required: ['sessionId', 'name', 'state'],
+              properties: {
+                sessionId: { type: 'string' },
+                name: { type: 'string' },
+                state: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+      render: (_args: unknown, value: EmployeesValue) => [text(value.employees.length === 0
+        ? '本项目还没有员工。'
+        : value.employees.map(row => `${row.name}（${row.sessionId}） · ${row.state}`).join('\n'))],
+    },
+    isConcurrencySafe: () => true,
+    execute: async () => ({ employees: ledger.workers() }),
+  })
+
+  ctx.tools.register({
+    name: 'dispatch_task',
+    description: 'Dispatch one task to one employee of this project. The task is recorded and its prompt is delivered; a refusal leaves nothing behind.',
+    parameters: {
+      type: 'object', additionalProperties: false, required: ['employee', 'title', 'body', 'dueAt'],
+      properties: {
+        employee: { type: 'string', description: 'Employee sessionId or display name.' },
+        title: { type: 'string', description: 'Short task title.' },
+        body: { type: 'string', description: 'Delivery requirements the employee must satisfy.' },
+        dueAt: { type: 'string', description: 'Deadline as ISO-8601 timestamp; required.' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, required: ['taskId', 'status', 'assigneeSessionId', 'dueAt'],
+        properties: {
+          taskId: { type: 'string' },
+          status: { type: 'string' },
+          assigneeSessionId: { type: 'string' },
+          dueAt: { type: 'string' },
+        },
+      },
+      render: (_args: unknown, value: DispatchValue) => [text(
+        `已派发 ${value.taskId} → ${value.assigneeSessionId}，状态 ${value.status}，截止 ${value.dueAt}`)],
+    },
+    execute: async (args: DispatchArgs, run: ToolRun) => {
+      const dispatcher = callerOf(run)
+      const role = ledger.member(dispatcher)?.role
+      if (role === 'worker') throw new Error('员工不能派活；只有主管或用户会话可以派发任务')
+      if (Number.isNaN(Date.parse(args.dueAt))) throw new Error(`dueAt 不是合法时间：${args.dueAt}`)
+      const assignee = ledger.resolveAssignee(args.employee)
+      const fingerprint = createHash('sha256')
+        .update([dispatcher, assignee.sessionId, args.title, args.body, args.dueAt].join('\n')).digest('hex')
+      const idempotencyKey = `dispatch:${fingerprint}`
+      const replay = ledger.db.prepare(`SELECT ledger_result_json FROM idempotency
+        WHERE project_id = ? AND idempotency_key = ?`).get(projectId, idempotencyKey) as
+        { ledger_result_json?: string } | undefined
+      if (replay?.ledger_result_json !== undefined) {
+        const prior = JSON.parse(replay.ledger_result_json) as { taskId: string }
+        console.log(`cadre-collab: dispatch replay task=${prior.taskId} assignee=${assignee.sessionId}`)
+        return { taskId: prior.taskId, status: 'dispatched', assigneeSessionId: assignee.sessionId, dueAt: args.dueAt }
+      }
+      const taskId = randomUUID()
+      const messageId = randomUUID()
+      ledger.beginDispatch({ taskId, title: args.title, body: args.body, dueAt: args.dueAt,
+        dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId })
+      try {
+        await controller.prompt({
+          requestId: requestId(), sessionId: assignee.sessionId, mode: 'queue',
+          content: [text([
+            '【Cadre 任务】', `任务号：${taskId}`, `标题：${args.title}`,
+            `截止：${args.dueAt}`, '', '交付要求：', args.body, '',
+            `完成后调用 report_task 工具回报（taskId=${taskId}，summary 写结论，deliverables 列交付物路径）。`,
+          ].join('\n'))],
+        }, run.signal)
+      } catch (error) {
+        ledger.rollbackDispatch(taskId, idempotencyKey)
+        console.log(`cadre-collab: dispatch failed task=${taskId} reason=${error instanceof Error ? error.message : String(error)}`)
+        throw new Error(`派活投递失败，已回滚：${error instanceof Error ? error.message : String(error)}`)
+      }
+      ledger.confirmDispatch(taskId, messageId)
+      console.log(`cadre-collab: dispatch ok task=${taskId} assignee=${assignee.sessionId} due=${args.dueAt}`)
+      return { taskId, status: 'dispatched', assigneeSessionId: assignee.sessionId, dueAt: args.dueAt }
+    },
+  })
+
+  ctx.tools.register({
+    name: 'report_task',
+    description: 'Report the result of one dispatched task back to the supervisor. Only the assignee may report.',
+    parameters: {
+      type: 'object', additionalProperties: false, required: ['taskId', 'summary'],
+      properties: {
+        taskId: { type: 'string', description: 'Task id from the dispatch message.' },
+        summary: { type: 'string', description: 'What was done and the outcome.' },
+        deliverables: { type: 'array', items: { type: 'string' }, description: 'Files or artifacts produced.' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, required: ['taskId', 'status', 'supervisorNotified'],
+        properties: {
+          taskId: { type: 'string' },
+          status: { type: 'string' },
+          supervisorNotified: { type: 'boolean' },
+        },
+      },
+      render: (_args: unknown, value: ReportValue) => [text(
+        `已回报 ${value.taskId}，任务状态 ${value.status}` +
+        (value.supervisorNotified ? '，主管已收到消息。' : '；本项目暂无主管，消息已记录。'))],
+    },
+    execute: async (args: ReportArgs, run: ToolRun) => {
+      const reporter = callerOf(run)
+      const task = ledger.task(args.taskId)
+      if (task === undefined) throw new Error(`任务不存在：${args.taskId}`)
+      if (task.assignee !== reporter) throw new Error(`只能回报派给自己的任务（该任务属于 ${task.assignee}）`)
+      const deliverables = args.deliverables ?? []
+      const messageId = ledger.report({ taskId: task.taskId, summary: args.summary, deliverables, reporter })
+      const supervisor = ledger.supervisor()
+      if (supervisor === undefined || supervisor === reporter) {
+        console.log(`cadre-collab: report ok task=${task.taskId} reporter=${reporter} supervisor=absent`)
+        return { taskId: task.taskId, status: 'delivered', supervisorNotified: false }
+      }
+      try {
+        await controller.prompt({
+          requestId: requestId(), sessionId: supervisor, mode: 'queue',
+          content: [text([
+            '【员工汇报】', `任务号：${task.taskId}`, `标题：${task.title}`,
+            `回报人：${reporter}`, '', args.summary, '',
+            `交付物：${deliverables.length === 0 ? '（未提供）' : deliverables.join(', ')}`,
+            '任务已置 delivered，可用 transition_task 验收（verified / rework）。',
+          ].join('\n'))],
+        }, run.signal)
+        ledger.confirmReport(messageId)
+        console.log(`cadre-collab: report ok task=${task.taskId} reporter=${reporter} supervisor=${supervisor}`)
+        return { taskId: task.taskId, status: 'delivered', supervisorNotified: true }
+      } catch (error) {
+        ledger.failReport(messageId, error instanceof Error ? error.message : String(error))
+        console.log(`cadre-collab: report delivery failed task=${task.taskId} reason=${error instanceof Error ? error.message : String(error)}`)
+        return { taskId: task.taskId, status: 'delivered', supervisorNotified: false }
+      }
+    },
+  })
+}

@@ -6,6 +6,12 @@
 # session plane, so no model appears here (ADR-0022 §1.1).
 
 - insert:
+    # ── collaboration tools ────────────────────────────────────────────────
+    # One Host plugin row mounting the bundle's tools (dispatch_task,
+    # report_task, list_employees). Ledger path/project come from the desktop
+    # launcher environment (CADRE_LEDGER_PATH / CADRE_PROJECT_ID).
+    - id: cadre-collab
+      name: '@deepseek-ai/dsh-bundle-cadre'
     # ── cadre-dev ──────────────────────────────────────────────────────────
     - id: preset-cadre-dev
       name: '@deepseek-ai/dsh-agent-preset'

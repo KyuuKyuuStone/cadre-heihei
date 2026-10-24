@@ -639,7 +639,8 @@ async function main(): Promise<void> {
   const backend = new DesktopBackendController((onFailure) => {
     const hostInspectPort = developmentHostInspectPort(development)
     const host = new DesktopHostProcess(resources.node, resources.dsh, activeProject,
-      hostInspectPort, { ...hostEnvironment, DSH_CLIENT_VERSION: desktopClientVersion() }, onFailure,
+      hostInspectPort, { ...hostEnvironment, DSH_CLIENT_VERSION: desktopClientVersion(),
+        CADRE_LEDGER_PATH: cadreLedgerPath, CADRE_PROJECT_ID: cadreProjectId }, onFailure,
       primaryRuntime,
       resources, (next) => { platformView.setSession(next) })
     return {
