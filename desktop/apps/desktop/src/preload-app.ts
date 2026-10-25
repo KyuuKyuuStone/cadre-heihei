@@ -136,6 +136,13 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
       reasoningEffort?: string
     }) =>
       ipcRenderer.invoke(DESKTOP_IPC.cadreBindSession, options) as Promise<unknown>,
+    reportIn: (options: {
+      sessionId: string
+      projectId: string
+      role: 'supervisor' | 'worker'
+      displayName: string
+      duty?: string
+    }) => ipcRenderer.invoke(DESKTOP_IPC.cadreReportIn, options) as Promise<unknown>,
     getEmployee: (options: { sessionId: string; projectId?: string }) =>
       ipcRenderer.invoke(DESKTOP_IPC.cadreGetEmployee, options) as Promise<unknown>,
     upsertEmployee: (options: {

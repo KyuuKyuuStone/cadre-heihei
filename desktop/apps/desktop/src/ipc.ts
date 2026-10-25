@@ -45,6 +45,8 @@ export const DESKTOP_IPC = {
   cadreTestProvider: 'cadre:testProvider',
   /** Session→provider binding used by new-session defaults and switching. */
   cadreBindSession: 'cadre:bindSession',
+  /** First-turn report-in so a newly created supervisor/employee is not blank. */
+  cadreReportIn: 'cadre:reportIn',
   /** ADR-0022 T1 employee roster; optional columns are preferences, not runtime truth. */
   cadreGetEmployee: 'cadre:getEmployee',
   cadreUpsertEmployee: 'cadre:upsertEmployee',

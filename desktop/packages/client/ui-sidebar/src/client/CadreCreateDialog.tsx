@@ -110,13 +110,25 @@ interface RosterRow {
 
 interface CadreCreateBridge {
   listRoster?(query: { projectId: string }): Promise<{ members?: readonly RosterRow[]; rows?: readonly RosterRow[] } | undefined>
-  listProviders?(): Promise<{ ok?: boolean; providers?: readonly ProviderOption[] } | undefined>
+  listProviders?(): Promise<{
+    ok?: boolean
+    providers?: readonly ProviderOption[]
+    code?: string
+    message?: string
+  } | undefined>
   bindSession?(query: {
     sessionId: string
     providerId: string
     model: string
     reasoningEffort?: string
   }): Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
+  reportIn?: (query: {
+    sessionId: string
+    projectId: string
+    role: 'supervisor' | 'worker'
+    displayName: string
+    duty?: string
+  }) => Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
 }
 
 /** Injected create seam: the plugin owns Session + roster writes and navigation. */
@@ -201,6 +213,11 @@ function CadreCreateForm({
     }
     void read().then((result) => {
       if (cancelled) return
+      if (result?.ok === false) {
+        setProviders([])
+        setError(`读取官方模型目录失败：${result.message ?? result.code ?? '未知错误'}`)
+        return
+      }
       const usable = (result?.providers ?? []).filter(provider => provider.enabled !== false)
       setProviders(usable)
       const first = usable[0]
@@ -249,6 +266,7 @@ function CadreCreateForm({
         setError(`${result.code} · ${result.message}`)
         return
       }
+      let warning: string | undefined
       if (kind === 'worker' && providerId !== '' && modelId !== '') {
         const bind = bridge()?.bindSession
         if (bind !== undefined) {
@@ -261,16 +279,37 @@ function CadreCreateForm({
           if (bound?.ok === false) {
             // The Session and roster row exist; report the model step honestly
             // instead of claiming a complete create.
-            setError(`员工已创建，但模型未绑定（${bound.code ?? 'ERROR'} · ${bound.message ?? '未知错误'}）`)
-            refreshSupervisor()
-            return
+            warning = `员工已创建，但模型未绑定（${bound.code ?? 'ERROR'} · ${bound.message ?? '未知错误'}）`
           }
         }
       }
       if (kind === 'worker' && saveAsCustom) {
         setCustomRoles(saveCustomRole({ id: `role-${String(Date.now())}`, name: displayName, description: duty.trim() }))
       }
+      // First-turn report-in: an empty Session is hidden by the official shell,
+      // and both roles must state what they understood before taking work.
+      const projectId = request.workspaceId
+      const report = bridge()?.reportIn
+      if (projectId !== undefined) {
+        const welcomed = report === undefined
+          ? { ok: false, code: 'CHANNEL_MISSING', message: 'window.cadre.reportIn 未注册' }
+          : await report({
+            sessionId: result.sessionId,
+            projectId,
+            role: kind,
+            displayName,
+            ...(kind === 'worker' ? { duty: duty.trim() } : {}),
+          }).catch((reason: unknown) => ({ ok: false, code: 'REPORT_FAILED', message: errorMessage(reason) }))
+        if (welcomed?.ok === false) {
+          const detail = `报到消息发送失败（${welcomed.code ?? 'ERROR'} · ${welcomed.message ?? '未知错误'}）`
+          warning = warning === undefined ? `${kind === 'supervisor' ? '主管' : '员工'}已创建，但${detail}` : `${warning}；${detail}`
+        }
+      }
       refreshSupervisor()
+      if (warning !== undefined) {
+        setError(warning)
+        return
+      }
       closeCreate()
     } catch (reason) {
       setError(errorMessage(reason))

@@ -42,10 +42,12 @@ import {
   syncProvidersToHost,
   unsetProviderCredential,
   fetchModelCatalog,
+  promptSession,
   providerOptionsFromCatalog,
   selectSessionModel,
 } from './provider-runtime.ts'
 import { DesktopProjectManager } from './project-manager.ts'
+import { reportInText } from './report-in.ts'
 import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError } from './host-process.ts'
 import { DesktopPlatformView, PLATFORM_IPC, platformBounds } from './platform-view.ts'
 import { installDesktopDirectoryPicker } from './directory-picker.ts'
@@ -1295,6 +1297,77 @@ async function main(): Promise<void> {
     console.log(`cadre:bindSession session=${sessionId} provider=${providerId} model=${model} ` +
       `effort=${effort ?? '(default)'} official=true ok=true`)
     return { ok: true, binding: { sessionId: sessionId.trim(), providerId, model, updatedAt } }
+  })
+
+  /**
+   * First-turn report-in for a freshly created supervisor/employee.
+   *
+   * The official shell hides Sessions with no messages, so the creation flow
+   * asks the Session to speak once: a supervisor lists the roster, an employee
+   * restates its duty. The prompt is a user message from the shell; the reply
+   * is what proves the Session is visible and has understood its role.
+   */
+  ipcMain.handle(DESKTOP_IPC.cadreReportIn, async (event, options: unknown) => {
+    assertProductSender(event)
+    if (typeof options !== 'object' || options === null) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+    }
+    const record = options as Record<string, unknown>
+    let sessionId: string
+    let projectId: string
+    let displayName: string
+    let role: 'supervisor' | 'worker'
+    let duty: string | undefined
+    try {
+      sessionId = cadreIdentifier(record.sessionId, 'sessionId')
+      projectId = requireProjectId(record.projectId)
+      displayName = cadreText(record.displayName, 'displayName', 200)
+      if (record.role !== 'supervisor' && record.role !== 'worker') {
+        throw new Error('role must be supervisor or worker')
+      }
+      role = record.role
+      duty = record.duty === undefined ? undefined : cadreText(record.duty, 'duty', 2_000)
+    } catch (error) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: error instanceof Error ? error.message : '参数无效' }
+    }
+    let members
+    try {
+      members = cadreLedger.listMembers(projectId).rows
+    } catch (error) {
+      console.log(`cadre:reportIn project=${projectId} ledger=unavailable reason=${error instanceof Error ? error.message : String(error)}`)
+      return { ok: false, code: 'LEDGER_UNAVAILABLE', message: '台账不可用，无法确认花名册身份' }
+    }
+    const self = activeMember(members, sessionId)
+    if (self === undefined) {
+      return { ok: false, code: 'NOT_A_MEMBER', message: '该会话不在本项目花名册中' }
+    }
+    if (self.role !== role) {
+      return { ok: false, code: 'ROLE_MISMATCH', message: `花名册角色为 ${self.role}，与请求的 ${role} 不一致` }
+    }
+    const name = self.displayName.trim() === '' ? displayName : self.displayName
+    const storedDuty = (() => {
+      try {
+        return cadreEmployees?.get(sessionId, projectId)?.personaNote ?? undefined
+      } catch {
+        return undefined
+      }
+    })()
+    const effectiveDuty = storedDuty !== undefined && storedDuty.trim() !== '' ? storedDuty : duty
+    const text = role === 'supervisor'
+      ? reportInText({ role, name, roster: members })
+      : reportInText({ role, name, ...(effectiveDuty === undefined ? {} : { duty: effectiveDuty }) })
+    if (hostUrl === undefined || hostCookie === undefined) {
+      return { ok: false, code: 'HOST_UNAVAILABLE', message: 'Host 未就绪，无法发送报到消息' }
+    }
+    try {
+      await promptSession(hostUrl, hostCookie, { sessionId, text })
+    } catch (error) {
+      console.log(`cadre:reportIn session=${sessionId} project=${projectId} ok=false ` +
+        `reason=${error instanceof Error ? error.message : String(error)}`)
+      return { ok: false, code: 'PROMPT_FAILED', message: error instanceof Error ? error.message : String(error) }
+    }
+    console.log(`cadre:reportIn session=${sessionId} project=${projectId} role=${role} ok=true`)
+    return { ok: true }
   })
 
   // ADR-0022 T1 employee roster. Validation rules live in employees-db so the
