@@ -33,6 +33,14 @@ const WEB_PROFILE = PROFILE_TEMPLATES.web as ProfileTemplate
 /** Cadre employee-template preset rows, layered over the shipped Web bundles. */
 const CADRE_BUNDLE = '@deepseek-ai/dsh-bundle-cadre'
 const DESKTOP_BUNDLES = [...WEB_PROFILE.bundles, CADRE_BUNDLE]
+/**
+ * Bundles this product deliberately does not ship.
+ *
+ * The official Agent Teams experiment is kept in source and devDependencies
+ * only; a profile that enabled it before the split still names it, which fails
+ * to resolve because the runtime closure no longer contains the package.
+ */
+const RETIRED_BUNDLES = new Set(['@deepseek-ai/dsh-experimental-agent-team-profile'])
 const WORKSPACE_SETTINGS = 'nodeLinker: hoisted\nautoInstallPeers: false\n'
 function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, undefined, 2)}\n`, { mode: 0o600 })
@@ -180,20 +188,23 @@ export function createPluginProfile(projectDir: string): void {
 }
 
 /**
- * Add Desktop-owned bundles an older profile manifest predates.
+ * Reconcile Desktop-owned bundles with a profile manifest written by an older
+ * or different build.
  *
  * `initProfile` only writes `package.json` when it is absent, so a profile first
  * created before a bundle was added never composes it: the Host then has no
  * such plugin rows (observed as `agent-preset/not-found` for every `cadre-*`
- * preset after upgrading). This keeps the reconciliation additive and idempotent:
- * foreign bundles and dependency pins are preserved, and nothing is written when
- * every Desktop bundle is already present.
+ * preset after upgrading). This keeps the reconciliation idempotent: foreign
+ * bundles and dependency pins are preserved, retired bundles (and their
+ * dependencies) are dropped, and nothing is written when the manifest already
+ * matches.
  *
  * @param projectDir - the external plugin profile directory.
  */
 export function ensureProfileBundles(projectDir: string): void {
   const manifestPath = join(projectDir, 'package.json')
   let manifest: {
+    dependencies?: unknown
     dsh?: { profile?: { bundles?: unknown } }
     [key: string]: unknown
   }
@@ -205,9 +216,30 @@ export function ensureProfileBundles(projectDir: string): void {
   const profile = manifest.dsh?.profile
   const current = Array.isArray(profile?.bundles) ? profile.bundles.filter((id): id is string => typeof id === 'string') : undefined
   if (current === undefined) return
-  const missing = DESKTOP_BUNDLES.filter(bundle => !current.includes(bundle))
-  if (missing.length === 0) return
-  manifest.dsh = { ...manifest.dsh, profile: { ...profile, bundles: [...current, ...missing] } }
+  const retained = current.filter(bundle => !RETIRED_BUNDLES.has(bundle))
+  const retired = current.filter(bundle => RETIRED_BUNDLES.has(bundle))
+  const missing = DESKTOP_BUNDLES.filter(bundle => !retained.includes(bundle))
+  // A dependency keeps the package in listBundles even after the selection is
+  // gone, so drop it in the same pass instead of leaving a zombie row.
+  let dependencies = manifest.dependencies
+  let droppedDependency = false
+  if (typeof dependencies === 'object' && dependencies !== null && !Array.isArray(dependencies)) {
+    const next = { ...(dependencies as Record<string, unknown>) }
+    for (const name of RETIRED_BUNDLES) {
+      if (Object.hasOwn(next, name)) {
+        delete next[name]
+        droppedDependency = true
+      }
+    }
+    if (droppedDependency) dependencies = next
+  }
+  if (retired.length === 0 && missing.length === 0 && !droppedDependency) return
+  if (droppedDependency) manifest.dependencies = dependencies
+  manifest.dsh = { ...manifest.dsh, profile: { ...profile, bundles: [...retained, ...missing] } }
   writeJson(manifestPath, manifest)
-  console.log(`desktop project: profile bundles += ${missing.join(', ')}`)
+  const changes = [
+    ...(retired.length === 0 ? [] : [`-= ${retired.join(', ')}`]),
+    ...(missing.length === 0 ? [] : [`+= ${missing.join(', ')}`]),
+  ]
+  console.log(`desktop project: profile bundles ${changes.join(' ')}`)
 }

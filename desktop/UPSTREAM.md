@@ -69,7 +69,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K1 | `apps/desktop/src/main.ts` | 新增 Cadre 台账/花名册/员工（含 `cadre:saveMember` / `cadre:retireMember`）/provider 的 IPC handler、托盘明暗图标、provider 凭据同步；`createRequire` 加载 `cadre-collab.cjs`；**关窗直接隐藏到托盘，不再弹「任务不会中断」提示**（2026-10-24，用户要求无条件去掉，`background-notice.ts` 与文案一并删除） | SQLite、`safeStorage`、`nativeTheme`、`ipcMain` 都是 Electron 主进程 API，Cordis 客户端插件拿不到 | 后续按 ADR-0023 §2.4 把员工/账本迁到 Host 服务后，本文件 hunk 应大幅收缩 |
 | K2 | `apps/desktop/src/ipc.ts` | 新增 `cadre:*` 通道常量（任务、花名册、provider、session 绑定、员工） | 通道名必须与 preload/main 一致；无官方等价 | 随 K1 一起收缩；`window.cadre` 目标归零 |
 | K3 | `apps/desktop/src/preload-app.ts` | 暴露 `window.cadre` 桥（任务/花名册/provider/员工） | contextBridge 只能写在 preload | 迁移完成后只保留不可替代通道 |
-| K4 | `apps/desktop/src/project-manager.ts` | 桌面 profile 的 bundles 列表追加 `@deepseek-ai/dsh-bundle-cadre`；`applyRelease` 补齐**既有 profile** 缺失的 Desktop bundles（旧 profile 的 `package.json` 不会被 `initProfile` 重写，缺 bundle 会让所有 `cadre-*` preset 报 `agent-preset/not-found`） | profile 由桌面端生成，官方模板不含我们 bundle | 一行常量 `DESKTOP_BUNDLES` |
+| K4 | `apps/desktop/src/project-manager.ts` | 桌面 profile 的 bundles 列表追加 `@deepseek-ai/dsh-bundle-cadre`；`applyRelease` 补齐**既有 profile** 缺失的 Desktop bundles（旧 profile 的 `package.json` 不会被 `initProfile` 重写，缺 bundle 会让所有 `cadre-*` preset 报 `agent-preset/not-found`）；并从旧 manifest 删除已下线的 `agent-team-profile` bundle 及其依赖 | profile 由桌面端生成，官方模板不含我们 bundle | 一个常量 `DESKTOP_BUNDLES` + 一个 `RETIRED_BUNDLES` |
 | K5 | `apps/desktop/src/tray.ts` | 托盘图标支持按系统明暗切换（`resolveIconPath` + `setDark`） | 托盘生命周期在 Electron 主进程 | 一个类内新增方法；可保持在桌面壳 |
 | K6 | `apps/desktop/src/locale.ts` | 产品名 `DeepSeek Harness` → `Cadre Heihei`（菜单/托盘/欢迎页） | 应用菜单与托盘文案由主进程提供 | 纯字符串替换，6 处 |
 | K7 | `packages/bundle/base/cordis.patch.yml` | 禁用 `llm-deepseek-account`（无账户产品） | **这是官方扩展点**（patch `disabled`），不是代码 patch | 1 行 + 注释 |
@@ -151,6 +151,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 |---|---|---|---|
 | `apps/desktop/package.json` | 新增 `release:win` 脚本；依赖加 `@deepseek-ai/dsh-bundle-cadre` | 构建接线 | 官方新增脚本时按 B/F 判断 |
 | `apps/desktop-host/package.json` | 依赖加 `@deepseek-ai/dsh-bundle-cadre`（进核心包集闭包） | 官方闭包根只有 dsh/host，必须挂 | 官方若支持「随包 bundle 清单」可融合（B） |
+| `apps/cli/package.json` | 把 `@deepseek-ai/dsh-experimental-agent-team-profile` 从 `dependencies` 移到 `devDependencies`（另两个 agent-team 包上游已在 devDependencies） | 产品不交付官方实验团队「Agent Teams」；源码与官方测试保留 | **官方升级时需重放**；闭包断言见 `apps/desktop/scripts/prepare-package-set.ts`；评估见 `docs/dev/agent-team-removal-plan.md` |
 | `packages/client/ui-sidebar/package.json` | 新增 api-remotes / session-controller / connection / ui-theme 依赖；files 加 `lib/types/**/*.js` | 员工对话框与主题注入需要 | 抽独立插件包后可回滚部分 |
 | `packages/client/ui-sidebar/tsconfig.json` | 增加对应 project references | 构建 | 随包拆分收缩 |
 | `packages/client/ui-brand-official/package.json` | 增加 ui-conversation 依赖（hero 品牌槽） | 品牌 | 随 K12 迁走 |

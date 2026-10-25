@@ -63,6 +63,16 @@ describe('desktop package-set selection', () => {
     ]))).toThrow(/omit @deepseek-ai\/dsh-desktop-host/u)
   })
 
+  it('rejects the official Agent Teams experiment in the runtime closure', () => {
+    const forbidden = '@deepseek-ai/dsh-experimental-agent-team-profile'
+    const available = new Map<string, PackedDesktopPackage>([
+      ['@deepseek-ai/dsh', packed('@deepseek-ai/dsh', { dependencies: { [forbidden]: '^0.8.0' } })],
+      ['@deepseek-ai/dsh-desktop-host', packed('@deepseek-ai/dsh-desktop-host')],
+      [forbidden, packed(forbidden)],
+    ])
+    expect(() => selectDesktopPackageClosure(available)).toThrow(/unsupported experimental package/u)
+  })
+
   it('leaves independently published Office packages to npm resolution', () => {
     const available = new Map<string, PackedDesktopPackage>([
       ['@deepseek-ai/dsh', packed('@deepseek-ai/dsh', {

@@ -35,6 +35,21 @@ const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
 const REQUIRED_DEPENDENCY_SECTIONS = ['dependencies', 'peerDependencies'] as const
 const OPTIONAL_DEPENDENCY_SECTION = 'optionalDependencies'
 
+/**
+ * Packages the product deliberately does not ship.
+ *
+ * The official Agent Teams experiment stays in source and devDependencies so
+ * upstream tests still run, but it must never re-enter the runtime closure:
+ * a dependency move during an upstream merge would otherwise silently restore
+ * a user-visible entry point this product does not support.
+ */
+export const FORBIDDEN_DESKTOP_PACKAGES = [
+  '@deepseek-ai/dsh-experimental-agent-team',
+  '@deepseek-ai/dsh-experimental-agent-team-profile',
+  '@deepseek-ai/dsh-experimental-tool-agent-team',
+  '@deepseek-ai/dsh-experimental-client-ui-agent-team',
+] as const
+
 /** Packed package information needed to form the local Desktop closure. */
 export interface PackedDesktopPackage {
   readonly tarball: string
@@ -83,6 +98,10 @@ export function selectDesktopPackageClosure(
   for (const name of ROOT_PACKAGES) {
     if (!available.has(name)) throw new Error(`desktop package set: packed inputs omit ${name}`)
     visit(name)
+  }
+  const forbidden = FORBIDDEN_DESKTOP_PACKAGES.filter(name => selected.has(name))
+  if (forbidden.length > 0) {
+    throw new Error(`desktop package set: runtime closure contains unsupported experimental package(s): ${forbidden.join(', ')}`)
   }
   return [...selected.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, packed]) => packed)
 }

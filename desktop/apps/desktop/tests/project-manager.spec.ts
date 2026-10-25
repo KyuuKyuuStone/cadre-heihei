@@ -99,6 +99,31 @@ describe('desktop external plugin profile', () => {
     expect(repaired.dependencies).toEqual({ '@deepseek-ai/dsh': '0.5.1', keep: '1.0.0' })
   })
 
+  it('drops a retired Agent Teams bundle and its dependency from an old profile', async () => {
+    const { manager } = setup()
+    await manager.applyRelease()
+    const manifestPath = join(manager.paths.profile, 'package.json')
+    const original = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      dsh: { profile: { bundles: string[] } }
+    }
+    const retired = '@deepseek-ai/dsh-experimental-agent-team-profile'
+    writeFileSync(manifestPath, JSON.stringify({
+      ...original,
+      dependencies: { ...original.dependencies, [retired]: '0.8.0', keep: '1.0.0' },
+      dsh: { profile: { bundles: [...original.dsh.profile.bundles, retired, 'plugin'] } },
+    }))
+    await manager.applyRelease()
+    const repaired = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      dependencies: Record<string, string>
+      dsh: { profile: { bundles: string[] } }
+    }
+    expect(repaired.dsh.profile.bundles).not.toContain(retired)
+    expect(repaired.dsh.profile.bundles).toContain('plugin')
+    expect(repaired.dsh.profile.bundles).toContain('@deepseek-ai/dsh-bundle-cadre')
+    expect(repaired.dependencies).toEqual({ keep: '1.0.0' })
+  })
+
   it('reuses plugin files without scanning manifests and can disable them', async () => {
     const { manager } = setup()
     await manager.applyRelease()
