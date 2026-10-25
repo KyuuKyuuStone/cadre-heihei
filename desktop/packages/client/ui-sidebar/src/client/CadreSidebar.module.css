@@ -24,36 +24,6 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* Full-width New Session entry under a project header */
-.newSessionRowMenu {
-  display: flex;
-  width: 100%;
-}
-
-.newSessionRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  width: calc(100% - 16px);
-  height: 32px;
-  margin: 2px 8px 4px;
-  padding: 0 10px 0 14px;
-  border: 0;
-  border-radius: var(--dsw-radius-sm);
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.newSessionRow:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
 /* Session role markers (16px leading cell) */
 .supervisorMarker {
   display: inline-block;
@@ -146,11 +116,6 @@
 
 .statusDotIdle {
   background: var(--dsw-alias-label-tertiary);
-}
-
-.newSessionHover {
-  display: flex;
-  width: 100%;
 }
 
 /* Retire menu + dialog */
