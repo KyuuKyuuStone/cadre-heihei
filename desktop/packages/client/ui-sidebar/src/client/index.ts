@@ -21,10 +21,10 @@ import { CADRE_SKIN_TOKENS, CADRE_THEME_ENABLED, CADRE_THEME_SOURCE } from './ca
 import { CadreCreateDialog, type CadreCreateInjected, type CadreCreateRequest } from './CadreCreateDialog.tsx'
 import { CadreLedgerOverlay, type CadreLedgerInjected, type CadreLedgerRequest } from './CadreLedgerOverlay.tsx'
 import {
-  CadreEditMemberMenuItem, CadreNewSessionRow, CadreProjectRowActions, CadreRetireMenuItem, CadreSessionBadge,
-  CadreSessionMarker, CadreSessionSubtitle,
-  type CadreEditInjected, type CadreNewSessionRowInjected, type CadreProjectActionsInjected,
-  type CadreRetireInjected,
+  CadreEditMemberMenuItem, CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
+  CadreSessionBadge, CadreSessionMarker, CadreSessionSubtitle,
+  type CadreEditInjected, type CadreProjectActionsInjected,
+  type CadreRetireInjected, type CadreRetireRequest,
   type CadreRosterBadgeInjected, type CadreRosterMember, type CadreRosterState,
   type CadreSessionSubtitleInjected, type CadreSessionsState, type CadreTaskFact,
 } from './CadreSidebar.tsx'
@@ -389,6 +389,15 @@ export function apply(ctx: ClientContext): void {
       ...(project === undefined ? {} : { projectLabel: project.title }),
     })
   }
+  // Retire owns a frame-wide dialog for the same reason: the row menu unmounts
+  // its subtree on selection, taking any dialog rendered inside it along.
+  const cadreRetireRequest = createSnapshotStore<CadreRetireRequest | null>(null)
+  let cadreRetireToken = 0
+  const requestRetire = (sessionId: string, displayTitle: string): void => {
+    cadreRetireToken += 1
+    cadreRetireRequest.set({ sessionId, displayTitle, token: cadreRetireToken })
+  }
+  const settleRetire = (): void => { cadreRetireRequest.set(null) }
   const ledgerRequest = createSnapshotStore<CadreLedgerRequest | null>(null)
   let ledgerToken = 0
   const openLedger = (request: { projectId: string; label: string; cwd?: string }): void => {
@@ -486,17 +495,10 @@ export function apply(ctx: ClientContext): void {
     openLedger,
   })
 
-  const newSessionRowInjected = (): CadreNewSessionRowInjected => ({
-    hooks: { projectState },
-    startSession: (workspaceId) => {
-      workspaceNavigation.startSession(workspaceId as Parameters<WorkspaceNavigation['startSession']>[0])
-    },
-    requestCadreCreate: requestCreate,
-    refreshSupervisor: refreshRoster,
-  })
-
   const retireInjected = (): CadreRetireInjected => ({
-    hooks: { roster },
+    hooks: { roster, request: cadreRetireRequest },
+    requestRetire,
+    settleRetire,
     retire: async (sessionId) => {
       const target = bridge()
       if (target?.retireMember === undefined) {
@@ -610,6 +612,9 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay', id: 'cadre-ledger', locale: NS, inject: ledgerInjected,
   }, CadreLedgerOverlay))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay', id: 'cadre-retire', locale: NS, inject: retireInjected,
+  }, CadreRetireDialog))
 
   // ui-sidebar cannot reference ui-workspace's SlotMap: ui-workspace depends
   // on this package, so a reverse type import would form a project-reference
@@ -623,15 +628,6 @@ export function apply(ctx: ClientContext): void {
     order: 100,
     inject: projectActionsInjected,
   } as never, CadreProjectRowActions as never))
-
-  // Full-width New Session row under each project header: the position the
-  // official blank-session row used to occupy, opening the same three-way menu.
-  ctx.slots.inject('sidebar.workspaces.project.row.create' as never, () => ctx.slots.register({
-    name: 'sidebar.workspaces.project.row.create',
-    id: 'cadre-new-session-row',
-    order: 100,
-    inject: newSessionRowInjected,
-  } as never, CadreNewSessionRow as never))
 
   // Session identity: marker in the leading cell + role badge beside the title.
   ctx.slots.inject('sidebar.session.row.leading' as never, () => ctx.slots.register({

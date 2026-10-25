@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { CadreNewSessionRow, CadreProjectRowActions } from '../src/client/CadreSidebar.tsx'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
+  type CadreRosterState,
+} from '../src/client/CadreSidebar.tsx'
 import type { CadreProjectState } from '../src/client/contract/slots.ts'
 
 afterEach(cleanup)
@@ -33,57 +36,6 @@ function mount(overrides: {
   render(<CadreProjectRowActions {...props} />)
   return { startSession, requestCadreCreate, openLedger }
 }
-
-type RowProps = ComponentProps<typeof CadreNewSessionRow>
-
-function mountRow(supervisors: readonly string[] = []) {
-  const startSession = vi.fn()
-  const requestCadreCreate = vi.fn()
-  const refreshSupervisor = vi.fn()
-  const state = projectState(supervisors)
-  const props: RowProps = {
-    workspaceId: 'ws-1',
-    label: '项目部 A',
-    cwd: '/tmp/a',
-    useProjectState: ((selector: (value: CadreProjectState) => unknown) => selector(state)) as never,
-    startSession,
-    requestCadreCreate,
-    refreshSupervisor,
-  }
-  render(<CadreNewSessionRow {...props} />)
-  return { startSession, requestCadreCreate, refreshSupervisor }
-}
-
-describe('CadreNewSessionRow', () => {
-  it('renders a full-width New Session entry and opens the three-way menu', () => {
-    const b = mountRow()
-    fireEvent.click(screen.getByRole('button', { name: '新会话' }))
-    expect(b.refreshSupervisor).toHaveBeenCalledOnce()
-    expect(screen.getByRole('menuitem', { name: '主管' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: '员工' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: '普通会话' })).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('menuitem', { name: '员工' }))
-    expect(b.requestCadreCreate).toHaveBeenCalledExactlyOnceWith('worker', 'ws-1')
-    expect(b.startSession).not.toHaveBeenCalled()
-  })
-
-  it('routes a plain choice to the official startSession for this project', () => {
-    const b = mountRow()
-    fireEvent.click(screen.getByRole('button', { name: '新会话' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '普通会话' }))
-    expect(b.startSession).toHaveBeenCalledExactlyOnceWith('ws-1')
-  })
-
-  it('greys the supervisor item when this project already has one', () => {
-    const b = mountRow(['ws-1'])
-    fireEvent.click(screen.getByRole('button', { name: '新会话' }))
-    const supervisor = screen.getByRole('menuitem', { name: '主管（已有）' })
-    expect(supervisor.hasAttribute('disabled')).toBe(true)
-    fireEvent.click(supervisor)
-    expect(b.requestCadreCreate).not.toHaveBeenCalled()
-  })
-})
 
 describe('CadreProjectRowActions', () => {
   it('renders the ＋ and 台账 affordances on a project row', () => {
@@ -166,5 +118,66 @@ describe('CadreProjectRowActions', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看“项目部 A”台账' }))
     expect(openLedger).toHaveBeenCalledOnce()
     expect(outer).not.toHaveBeenCalled()
+  })
+})
+
+describe('member retirement', () => {
+  const roster: CadreRosterState = {
+    status: 'ready',
+    members: [{ sessionId: 's1', role: 'worker', displayName: '前端', state: 'available' }],
+    error: null,
+  }
+  const useRoster = ((selector: (value: CadreRosterState) => unknown) => selector(roster)) as never
+
+  it('raises a request from the row menu instead of rendering its dialog there', () => {
+    const setMenuOpen = vi.fn()
+    const requestRetire = vi.fn()
+    render(
+      <CadreRetireMenuItem
+        sessionId="s1" displayTitle="前端"
+        useMenuOpenState={() => [true, setMenuOpen]}
+        useRoster={useRoster}
+        useRequest={((selector: (value: null) => unknown) => selector(null)) as never}
+        requestRetire={requestRetire} settleRetire={vi.fn()} retire={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('menuitem', { name: '离职…' }))
+    expect(setMenuOpen).toHaveBeenCalledWith(false)
+    expect(requestRetire).toHaveBeenCalledWith('s1', '前端')
+    expect(screen.queryByText('确认离职')).toBeNull()
+  })
+
+  it('confirms through the retire hop and settles the request', async () => {
+    const retire = vi.fn(async () => ({ ok: true }))
+    const settleRetire = vi.fn()
+    render(
+      <CadreRetireDialog
+        useRoster={useRoster}
+        useRequest={((selector: (value: unknown) => unknown) => selector(
+          { sessionId: 's1', displayTitle: '前端', token: 1 },
+        )) as never}
+        requestRetire={vi.fn()} settleRetire={settleRetire} retire={retire}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '确认离职' }))
+    await waitFor(() => { expect(retire).toHaveBeenCalledWith('s1') })
+    await waitFor(() => { expect(settleRetire).toHaveBeenCalledOnce() })
+  })
+
+  it('shows the backend refusal instead of closing on a failed retire', async () => {
+    const retire = vi.fn(async () => ({ ok: false, code: 'NOT_FOUND', message: '不在花名册' }))
+    const settleRetire = vi.fn()
+    render(
+      <CadreRetireDialog
+        useRoster={useRoster}
+        useRequest={((selector: (value: unknown) => unknown) => selector(
+          { sessionId: 's1', displayTitle: '前端', token: 2 },
+        )) as never}
+        requestRetire={vi.fn()} settleRetire={settleRetire} retire={retire}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '确认离职' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('NOT_FOUND · 不在花名册')
+    expect(settleRetire).not.toHaveBeenCalled()
   })
 })

@@ -299,15 +299,20 @@ export class EmployeeStore {
    * @param sessionId - member session.
    * @param projectId - owning project.
    * @param now - write timestamp.
-   * @returns success even when no row matched (idempotent).
+   * @returns success only when a roster row was actually marked; a mismatched
+   * project or unknown session is a 404 instead of a silent no-op.
    */
   retireMember(sessionId: string, projectId: string, now: string): EmployeeResult<{ retired: true }> {
     if (!ID_PATTERN.test(sessionId) || !ID_PATTERN.test(projectId)) {
       return fail('INVALID_ARGUMENT', 'sessionId/projectId 不合法')
     }
     try {
-      this.db.prepare("UPDATE members SET state = 'departed', updated_at = ? WHERE project_id = ? AND session_id = ?")
-        .run(now, projectId, sessionId)
+      const result = this.db.prepare(
+        "UPDATE members SET state = 'departed', updated_at = ? WHERE project_id = ? AND session_id = ?",
+      ).run(now, projectId, sessionId)
+      if (Number(result.changes) === 0) {
+        return fail('NOT_FOUND', '该会话不在本项目花名册中（可能已离职或项目不匹配）', 'sessionId')
+      }
       return { ok: true, retired: true }
     } catch (error) {
       return fail('STORAGE_ERROR', error instanceof Error ? error.message : String(error))

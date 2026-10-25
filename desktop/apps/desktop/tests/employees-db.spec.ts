@@ -265,6 +265,14 @@ describe('project creation members (W8)', () => {
     store.close()
   })
 
+  it('reports a missing roster row instead of a silent successful departure', () => {
+    const { store, db } = withMembers()
+    const failure = expectFailure(store.retireMember('ses-missing', 'proj-1', LATER))
+    expect(failure).toMatchObject({ code: 'NOT_FOUND', field: 'sessionId' })
+    db.close()
+    store.close()
+  })
+
   it('rejects an unknown role and a control-character name', () => {
     const { store, db } = withMembers()
     expect(expectFailure(store.saveMember(

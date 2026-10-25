@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
-  IconNewChatOutlineRegular,
   IconPlusOutlineRegular,
   Input,
   Menu,
@@ -88,14 +87,6 @@ export interface CadreProjectActionsInjected {
   openLedger: (request: { projectId: string; label: string; cwd?: string }) => void
 }
 
-/** Face of the full-width New Session row under a project header. */
-export interface CadreNewSessionRowInjected {
-  hooks: { projectState: HostObservable<CadreProjectState> }
-  startSession: (workspaceId: string) => void
-  requestCadreCreate: (kind: 'supervisor' | 'worker', workspaceId: string) => void
-  refreshSupervisor: () => void
-}
-
 /** Face of the Session identity entries. */
 export interface CadreRosterBadgeInjected {
   hooks: {
@@ -113,9 +104,21 @@ export interface CadreSessionSubtitleInjected {
   }
 }
 
-/** Face of the row-menu retire action. */
+/** A retire request raised by the row menu; the dialog lives outside it. */
+export interface CadreRetireRequest {
+  readonly sessionId: string
+  readonly displayTitle: string
+  readonly token: number
+}
+
+/** Face of the retire action: the menu row raises, the overlay dialog answers. */
 export interface CadreRetireInjected {
-  hooks: { roster: HostObservable<CadreRosterState> }
+  hooks: {
+    roster: HostObservable<CadreRosterState>
+    request: HostObservable<CadreRetireRequest | null>
+  }
+  requestRetire: (sessionId: string, displayTitle: string) => void
+  settleRetire: () => void
   retire: (sessionId: string) => Promise<{ ok: boolean; code?: string; message?: string }>
 }
 
@@ -272,69 +275,6 @@ export function CadreProjectRowActions({
       >
         台账
       </Button>
-    </span>
-  )
-}
-
-/**
- * Full-width New Session entry directly under a project header. It opens the
- * same three-way menu as the project-row ＋, so the position the official
- * blank-session row used to occupy always offers a create affordance.
- */
-export function CadreNewSessionRow({
-  workspaceId, useProjectState, startSession, requestCadreCreate, refreshSupervisor,
-}: CadreProjectRowOwner & InjectFace<CadreNewSessionRowInjected>) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuClass = useMenuListClass()
-  const closeMenu = useCallback(() => { setMenuOpen(false) }, [])
-  const hover = useHoverMenuGuard(menuOpen, closeMenu, menuClass)
-  const hasSupervisor = useProjectState(state => state.supervisors.has(workspaceId))
-  return (
-    <span
-      className={css.newSessionHover}
-      onPointerEnter={hover.enter}
-      onPointerLeave={hover.leave}
-    >
-    <Menu
-      className={css.newSessionRowMenu}
-      open={menuOpen}
-      onClose={closeMenu}
-      listClassName={menuClass}
-      items={[
-        {
-          id: 'supervisor',
-          label: hasSupervisor ? '主管（已有）' : '主管',
-          disabled: hasSupervisor,
-        },
-        { id: 'worker', label: '员工' },
-        { id: 'plain', label: '普通会话' },
-      ]}
-      onSelect={(id) => {
-        setMenuOpen(false)
-        if (id === 'plain') {
-          startSession(workspaceId)
-          return
-        }
-        if (id === 'supervisor' || id === 'worker') requestCadreCreate(id, workspaceId)
-      }}
-      anchor={(
-        <button
-          type="button"
-          className={css.newSessionRow}
-          data-cadre-new-session=""
-          onClick={() => {
-            if (!menuOpen) refreshSupervisor()
-            setMenuOpen(open => !open)
-          }}
-        >
-          <IconNewChatOutlineRegular size={14} />
-          <span>新会话</span>
-        </button>
-      )}
-      portal
-      side="bottom"
-      align="start"
-    />
     </span>
   )
 }
@@ -508,68 +448,99 @@ export function CadreEditMemberMenuItem({
 }
 
 /**
- * Row-menu retire action for members. Ordinary Sessions do not get it; the
- * confirm dialog keeps the destructive step explicit.
+ * Row-menu retire action for members. Ordinary Sessions do not get it. The
+ * menu row only raises the request: this subtree unmounts when the menu
+ * closes, so a dialog rendered here would never appear.
  */
 export function CadreRetireMenuItem({
-  sessionId, displayTitle, useMenuOpenState, useRoster, retire,
+  sessionId, displayTitle, useMenuOpenState, useRoster, requestRetire,
 }: CadreSessionMenuOwner & { useMenuOpenState: UseMenuOpenState } & InjectFace<CadreRetireInjected>) {
   const [, setMenuOpen] = useMenuOpenState()
   const members = useRoster(state => state.members)
   const member = memberOf(members, sessionId)
-  const [open, setOpen] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   if (member === undefined || member.state === 'departed') return null
   const supervisor = member.role === 'supervisor'
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={css.menuItem}
+      onClick={() => {
+        setMenuOpen(false)
+        requestRetire(sessionId, displayTitle)
+      }}
+    >
+      {supervisor ? '主管离职（取消任命）…' : '离职…'}
+    </button>
+  )
+}
+
+/**
+ * The `shell.overlay` dialog that answers a retire request. It sits outside
+ * the row menu so closing the menu does not unmount it mid-confirmation.
+ * @param props - request hook, roster, the retire hop, and settlement.
+ * @returns the dialog for the current request, or null.
+ */
+export function CadreRetireDialog({ useRoster, useRequest, retire, settleRetire }: InjectFace<CadreRetireInjected>) {
+  const request = useRequest(value => value)
+  if (request === null) return null
+  return (
+    <RetireForm
+      key={request.token}
+      request={request}
+      useRoster={useRoster}
+      retire={retire}
+      settleRetire={settleRetire}
+    />
+  )
+}
+
+function RetireForm({ request, useRoster, retire, settleRetire }: {
+  readonly request: CadreRetireRequest
+  readonly useRoster: InjectFace<CadreRetireInjected>['useRoster']
+  readonly retire: CadreRetireInjected['retire']
+  readonly settleRetire: () => void
+}) {
+  const members = useRoster(state => state.members)
+  const member = memberOf(members, request.sessionId)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const supervisor = member?.role === 'supervisor'
+  const close = (): void => { if (!pending) settleRetire() }
   const run = async (): Promise<void> => {
     setPending(true)
     setError(null)
-    const result = await retire(sessionId)
+    const result = await retire(request.sessionId)
     setPending(false)
     if (!result.ok) {
       setError(`${result.code ?? 'ERROR'} · ${result.message ?? '离职失败'}`)
       return
     }
-    setOpen(false)
+    settleRetire()
   }
   return (
-    <>
-      <button
-        type="button"
-        role="menuitem"
-        className={css.menuItem}
-        onClick={() => {
-          setMenuOpen(false)
-          setError(null)
-          setOpen(true)
-        }}
-      >
-        {supervisor ? '主管离职（取消任命）…' : '离职…'}
-      </button>
-      <Modal
-        open={open}
-        onClose={() => { if (!pending) setOpen(false) }}
-        title={supervisor ? '主管离职' : '员工离职'}
-        description={`${member.displayName ?? displayTitle} · ${sessionId}`}
-        closeLabel="关闭"
-        footer={(
-          <>
-            <Button variant="outline" disabled={pending} onClick={() => { setOpen(false) }}>取消</Button>
-            <Button variant="primary" disabled={pending} onClick={() => { void run() }}>
-              {pending ? '处理中…' : '确认离职'}
-            </Button>
-          </>
-        )}
-      >
-        <div className={css.dialogBody}>
-          <p className={css.hint}>
-            离职后从在职花名册移除，会话与历史任务保留
-            {supervisor ? '；该项目部随后可以新建主管。' : '。'}
-          </p>
-          {error !== null && <p role="alert" className={css.error}>{error}</p>}
-        </div>
-      </Modal>
-    </>
+    <Modal
+      open
+      onClose={close}
+      title={supervisor ? '主管离职' : '员工离职'}
+      description={`${member?.displayName ?? request.displayTitle} · ${request.sessionId}`}
+      closeLabel="关闭"
+      footer={(
+        <>
+          <Button variant="outline" disabled={pending} onClick={close}>取消</Button>
+          <Button variant="primary" disabled={pending} onClick={() => { void run() }}>
+            {pending ? '处理中…' : '确认离职'}
+          </Button>
+        </>
+      )}
+    >
+      <div className={css.dialogBody}>
+        <p className={css.hint}>
+          离职后从在职花名册移除，会话与历史任务保留
+          {supervisor ? '；该项目部随后可以新建主管。' : '。'}
+        </p>
+        {error !== null && <p role="alert" className={css.error}>{error}</p>}
+      </div>
+    </Modal>
   )
 }

@@ -212,10 +212,15 @@ class Ledger {
 
   close(): void { this.db.close() }
 
-  /** All roster rows for one Session; `sup-1` is the legacy row with no Session. */
+  /**
+   * Active roster rows for one Session; `sup-1` is the legacy row with no
+   * Session, and a departed row no longer confers a role (its tools, prompt
+   * section and restrictions all fall away while task history stays).
+   */
   private memberRows(sessionId: string): { projectId: string; role: string; state: string }[] {
     const rows = this.db.prepare(`SELECT project_id, role, state FROM members
-      WHERE session_id = ? AND session_id != 'sup-1' ORDER BY project_id`).all(sessionId) as
+      WHERE session_id = ? AND session_id != 'sup-1' AND state != 'departed'
+      ORDER BY project_id`).all(sessionId) as
       { project_id: string; role: string; state: string }[]
     return rows.map(row => ({ projectId: row.project_id, role: row.role, state: row.state }))
   }
@@ -287,12 +292,32 @@ class Ledger {
    */
   /** The roster's 「角色负责什么」 text for one employee Session, when recorded. */
   workerRole(projectId: string, sessionId: string): { name: string; role: string } | undefined {
-    const row = this.db.prepare(`SELECT COALESCE(display_name, session_id) AS name,
-      COALESCE(NULLIF(TRIM(persona_note), ''), NULLIF(TRIM(template_id), '')) AS role
-      FROM employees WHERE project_id = ? AND session_id = ?`).get(projectId, sessionId) as
+    const row = this.db.prepare(`SELECT COALESCE(e.display_name, e.session_id) AS name,
+      COALESCE(NULLIF(TRIM(e.persona_note), ''), NULLIF(TRIM(e.template_id), ''),
+        (SELECT NULLIF(TRIM(m.description), '') FROM members m
+          WHERE m.project_id = e.project_id AND m.session_id = e.session_id)) AS role
+      FROM employees e WHERE e.project_id = ? AND e.session_id = ?`).get(projectId, sessionId) as
       { name: string; role?: string | null } | undefined
     if (row === undefined || row.role == null) return undefined
     return { name: row.name, role: row.role }
+  }
+
+  /**
+   * Active members of one project for the supervisor prompt, supervisors
+   * first. Read on every prompt assembly so a newly created employee appears
+   * without restarting the supervisor Session.
+   */
+  roster(projectId: string): { name: string; role: string; description?: string }[] {
+    const rows = this.db.prepare(`SELECT COALESCE(NULLIF(TRIM(display_name), ''), session_id) AS name,
+      role, NULLIF(TRIM(description), '') AS description
+      FROM members WHERE project_id = ? AND state != 'departed' AND session_id != 'sup-1'
+      ORDER BY CASE role WHEN 'supervisor' THEN 0 ELSE 1 END, name`).all(projectId) as
+      { name: string; role: string; description?: string | null }[]
+    return rows.map(row => ({
+      name: row.name,
+      role: row.role,
+      ...(row.description == null ? {} : { description: row.description }),
+    }))
   }
 
   supervisor(projectId: string): string | undefined {
@@ -474,16 +499,40 @@ const SUPERVISOR_DUTY = [
   '你是本项目的主管，只做调度与验收，不替员工做专业执行：',
   '1. 只做任务拆解、按花名册派活（dispatch_task）、验收汇总；',
   '2. 有对应角色的员工时，不得代劳该员工的专业执行工作；',
-  '3. 没有对应角色时才由你补位，并明确说明缺哪个角色、为何补位；',
+  '3. 花名册没有对应角色时，不得自行补位做该专业工作，也不得停在旧印象上：向用户说明缺哪个角色并请其新建员工；dispatch_task 对不在册员工会返回 missing-employee；',
   '4. 验收时对照任务的完成条件核实证据（交付物），不以口头说明代替；',
   '5. 汇报用户时区分「已证实 / 未决 / 风险」三类，不把推测写成结论；',
   `6. 一次最多派 ${String(MAX_DISPATCH_ITEMS)} 条任务（多了要分批）；同一失败重试最多 ${String(MAX_RETRIES)} 次，超过必须换人或找用户裁决。`,
 ].join('\n')
 
-/** Worker role text: roster 「角色负责什么」, re-read on every assembly. */
+/** Roster rows as prompt lines: 名字 + 角色（岗位描述前 80 字）. */
+function rosterLines(rows: readonly { name: string; role: string; description?: string }[]): string {
+  return rows.map((row) => {
+    const title = row.role === 'supervisor' ? '主管' : '员工'
+    const duty = row.description === undefined ? '' : ` · ${row.description.slice(0, 80)}`
+    return `- ${row.name}（${title}${duty}）`
+  }).join('\n')
+}
+
+/**
+ * Supervisor text. The roster is interpolated on every assembly (the section
+ * callback re-reads the ledger), so a new employee is visible on the next turn
+ * instead of only in the first report-in snapshot.
+ */
+function supervisorDuty(roster: string): string {
+  return [
+    SUPERVISOR_DUTY,
+    '',
+    '以下是当前花名册（每轮重新读取）。派活前必须先核对；名单可能在上一次对话后变化，不要沿用旧印象：',
+    roster === '' ? '（暂无成员；先创建员工再派活）' : roster,
+    '',
+    '派活时用花名册里的名字指认员工；人不在名单里就明确报缺角色，不要猜、不要补位。',
+  ].join('\n')
+}
+
+/** Worker role text: one line, roster 「角色负责什么」, re-read on every assembly. */
 function workerDuty(role: { readonly name: string; readonly role: string }): string {
-  return `你是本项目的员工「${role.name}」。你的岗位职责：${role.role}\n`
-    + '只做本项目内的事，一次只做一件事；完成后用 report_task 汇报并附交付物。'
+  return `你的角色：${role.name}——${role.role}`
 }
 
 /** Mint the official request identity for one programmatic prompt. */
@@ -912,7 +961,9 @@ export function apply(ctx: HostContext): void {
         text: () => {
           const member = memberFor(agent.id)
           if (member === undefined) return ''
-          if (member.role === 'supervisor') return SUPERVISOR_DUTY
+          if (member.role === 'supervisor') {
+            return supervisorDuty(rosterLines(ledger.roster(member.projectId)))
+          }
           const role = ledger.workerRole(member.projectId, agent.id)
           return role === undefined ? '' : workerDuty(role)
         },
