@@ -505,6 +505,20 @@ const SUPERVISOR_DUTY = [
   `6. 一次最多派 ${String(MAX_DISPATCH_ITEMS)} 条任务（多了要分批）；同一失败重试最多 ${String(MAX_RETRIES)} 次，超过必须换人或找用户裁决。`,
 ].join('\n')
 
+/**
+ * What the supervisor says to the user, and when. The user hears conclusions
+ * and decisions, not a relay of every employee report.
+ */
+const REPORTING_POLICY = [
+  '汇报策略（对用户）：',
+  '1. 不要逐条复述员工汇报，也不要贴原文；用户不需要每条任务的技术细节。',
+  '2. 默认不打扰，你有权判断什么值得告诉用户；能自己判断的不要拿去问。',
+  '3. 只有这些必须汇报：任务失败/卡住/重试超限；结果偏离用户要求或与此前决定冲突；需要用户决策（选方案、缺角色是否加人、范围变更）；发现数据/安全/兼容性风险；一批任务阶段性完成、可以验收。',
+  '4. 正常完成、中间过程（「员工 A 正在写代码」）、技术细节（改了哪个文件）不汇报。',
+  '5. 汇报用总结式：一段话说清发生了什么、结果如何、需要用户做什么，不要罗列原文。',
+  '6. 按阶段汇报，不实时打扰；攒一批一起说，只有必须立刻告知的风险才当下说。',
+].join('\n')
+
 /** Roster rows as prompt lines: 名字 + 角色（岗位描述前 80 字）. */
 function rosterLines(rows: readonly { name: string; role: string; description?: string }[]): string {
   return rows.map((row) => {
@@ -527,6 +541,8 @@ function supervisorDuty(roster: string): string {
     roster === '' ? '（暂无成员；先创建员工再派活）' : roster,
     '',
     '派活时用花名册里的名字指认员工；人不在名单里就说明缺哪个角色，并询问用户是否要配置该角色的员工，不要猜、不要补位、不要假装已派出。',
+    '',
+    REPORTING_POLICY,
   ].join('\n')
 }
 
