@@ -736,6 +736,17 @@ describe('workspace browser rows', () => {
     }
   })
 
+  it('appends the local creation time to a blank New Session row', () => {
+    // A blank row has no prompt, so the Host list's updatedAt is its createdAt.
+    const createdAt = new Date(2026, 9, 25, 14, 32).getTime()
+    const node: SessionNode = {
+      id: sid('s-blank-timed'), title: 'ignored', blank: true, running: false,
+      runningSubagentCount: 0, completed: false, updatedAt: createdAt, pinned: false, archived: false,
+    }
+    render(<SessionNodeItem node={node} currentId={node.id} now={0} onOpen={vi.fn()} t={t} />)
+    expect(screen.getByText('新会话 · 14:32')).toBeTruthy()
+  })
+
   it('session row menu opens without opening the session and Escape closes it', () => {
     const onOpen = vi.fn()
     const node: SessionNode = {

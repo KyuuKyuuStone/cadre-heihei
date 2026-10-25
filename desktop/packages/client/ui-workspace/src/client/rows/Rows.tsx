@@ -46,9 +46,24 @@ type RowRenderSlots = PropsRenderSlots<
   | 'sidebar.session.row.hover'
 >['renderSlot']
 
-/** Row display title: blank rows show the localized New Session label. */
+/**
+ * Local HH:mm for a blank row's creation time. A blank Session has no prompt,
+ * so the Host list's `updatedAt` is exactly its `createdAt`
+ * (`updatedAt = max(createdAt, lastPromptAt)` with no last prompt).
+ */
+function blankTimestamp(createdAt: number): string {
+  if (!Number.isFinite(createdAt) || createdAt <= 0) return ''
+  const date = new Date(createdAt)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return ` · ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/** Row display title: blank rows show the localized New Session label plus their creation time. */
 function displayTitle(node: SessionNode, t: RowTranslate): string {
-  return node.blank ? t('session.new') : (node.title || t('session.untitled'))
+  return node.blank
+    ? `${t('session.new')}${blankTimestamp(node.updatedAt)}`
+    : (node.title || t('session.untitled'))
 }
 
 /* Overflow this small hides no meaningful tail; scrolling for it reads as an

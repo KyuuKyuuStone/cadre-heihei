@@ -84,6 +84,11 @@ function hook<T>(snapshot: T) {
   return function select<S>(selector: (state: T) => S): S { return selector(snapshot) }
 }
 
+/** Blank rows append their creation time; title assertions compare the shared prefix. */
+function normalizedTitle(title: string | null | undefined): string | null | undefined {
+  return title?.startsWith('新会话 · ') ? '新会话' : title
+}
+
 /** jsdom lacks DragEvent — the fireEvent fallback drops clientY, so pin it on the built event. */
 function fireDrag(row: HTMLElement, kind: 'dragOver' | 'drop', clientY: number): void {
   const event = kind === 'dragOver' ? createEvent.dragOver(row) : createEvent.drop(row)
@@ -202,7 +207,7 @@ describe('WorkspaceBrowser', () => {
       useWorkspaces: hook(workspaceState(mode === 'ungrouped' ? [] : [workspace('alpha', ['c', 'a', 'b'])])),
     })
     const names = () => screen.getAllByRole('treeitem').filter(row => row.getAttribute('aria-expanded') === null)
-      .map(row => row.querySelector('[class*="title"]')?.textContent)
+      .map(row => normalizedTitle(row.querySelector('[class*="title"]')?.textContent))
     const pick = (name: string) => {
       fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
       fireEvent.click(screen.getByRole('menuitem', { name }))
@@ -943,7 +948,7 @@ describe('WorkspaceBrowser', () => {
         expect(screen.queryByText(item.displayTitle) !== null).toBe(index < count)
       }
       expect(screen.getAllByRole('treeitem')).toHaveLength(count + 1 + Number(withBlank))
-      expect(screen.queryByText('新会话') !== null).toBe(withBlank)
+      expect(screen.queryByText(/^新会话/) !== null).toBe(withBlank)
     }
     expectVisible(5)
     const labels: string[] = []
@@ -1011,7 +1016,7 @@ describe('WorkspaceBrowser', () => {
       useSessions: hook(sessionState([blank, ...ordinary], { main: blank.id })),
       useWorkspaces: hook(workspaceState([workspace('alpha', [blank.id, ...ordinary.map(item => item.id)])])),
     })
-    expect(screen.getByText('新会话')).toBeTruthy()
+    expect(screen.getByText(/^新会话/)).toBeTruthy()
     for (const item of ordinary.slice(0, 5)) expect(screen.getByText(item.displayTitle)).toBeTruthy()
     expect(screen.queryByText('session-6')).toBeNull()
     expect(screen.getByRole('button', { name: '展开其余 1 个会话' })).toBeTruthy()
@@ -1041,7 +1046,7 @@ describe('WorkspaceBrowser', () => {
         .toEqual(['blank', 'session-1', 'session-2', 'session-3', 'session-4', 'session-5', 'session-6'])
     })
 
-    const blankRow = screen.getByText('新会话').closest('[role="treeitem"]') as HTMLElement
+    const blankRow = screen.getByText(/^新会话/).closest('[role="treeitem"]') as HTMLElement
     expect(blankRow.draggable).toBe(false)
     fireEvent.dragStart(blankRow, { dataTransfer: dragData() })
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha)
@@ -1081,7 +1086,8 @@ describe('WorkspaceBrowser', () => {
       'blank', 'session-1', 'session-2', 'session-3', 'session-4', 'session-5',
       'session-10', 'session-6', 'session-7', 'session-8', 'session-9', 'session-11', 'session-12',
     ])
-    expect(screen.getAllByRole('treeitem').slice(1).map(row => row.querySelector('[class*="title"]')?.textContent)).toEqual([
+    expect(screen.getAllByRole('treeitem').slice(1)
+      .map(row => normalizedTitle(row.querySelector('[class*="title"]')?.textContent))).toEqual([
       '新会话', 'session-1', 'session-2', 'session-3', 'session-4', 'session-5',
       'session-10', 'session-6', 'session-7', 'session-8', 'session-9',
     ])
@@ -1371,21 +1377,21 @@ describe('WorkspaceBrowser', () => {
         workspace('alpha', ['alpha-blank']), workspace('beta', ['beta-blank']),
       ])),
     })
-    expect(screen.getByText('新会话')).toBeTruthy()
+    expect(screen.getByText(/^新会话/)).toBeTruthy()
     expect(screen.queryByText('alpha-blank')).toBeNull()
     expect(screen.queryByText('beta-blank')).toBeNull()
 
     rerender(b, { useSessions: hook({ ...sessions, main: staleBlank.id }) })
-    expect(screen.getAllByText('新会话')).toHaveLength(1)
+    expect(screen.getAllByText(/^新会话/)).toHaveLength(1)
     b.store.actions.setGroupBy('flat')
     rerender(b, {})
-    expect(screen.getAllByText('新会话')).toHaveLength(1)
+    expect(screen.getAllByText(/^新会话/)).toHaveLength(1)
     // Search excludes blank rows entirely — neither the canonical stored
     // title nor the localized display label participates in matching.
     fireEvent.change(screen.getByPlaceholderText('搜索会话名称'), { target: { value: 'new session' } })
-    expect(screen.queryByText('新会话')).toBeNull()
+    expect(screen.queryByText(/^新会话/)).toBeNull()
     fireEvent.change(screen.getByPlaceholderText('搜索会话名称'), { target: { value: '新会话' } })
-    expect(screen.queryByText('新会话')).toBeNull()
+    expect(screen.queryByText(/^新会话/)).toBeNull()
   })
 
   it.each(['workspace', 'flat', 'ungrouped'] as const)('keeps a new blank first across %s mode switches and enables drag after the first prompt', (mode) => {
@@ -1400,7 +1406,7 @@ describe('WorkspaceBrowser', () => {
       useWorkspaces: groups(['old', 'mid']),
     })
     const names = () => screen.getAllByRole('treeitem').filter(row => row.getAttribute('aria-expanded') === null)
-      .map(row => row.querySelector('[class*="title"]')?.textContent)
+      .map(row => normalizedTitle(row.querySelector('[class*="title"]')?.textContent))
     const pick = (name: string) => {
       fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
       fireEvent.click(screen.getByRole('menuitem', { name }))
@@ -1418,7 +1424,7 @@ describe('WorkspaceBrowser', () => {
     pick('手动排序')
     expect(names()).toEqual(['新会话', 'mid', 'old'])
     pick('最近更新')
-    const blank = screen.getByText('新会话').closest('[role="treeitem"]') as HTMLElement
+    const blank = screen.getByText(/^新会话/).closest('[role="treeitem"]') as HTMLElement
     expect(blank.draggable).toBe(false)
     const old = screen.getByText('old').closest('[role="treeitem"]') as HTMLElement
     old.getBoundingClientRect = () => ({

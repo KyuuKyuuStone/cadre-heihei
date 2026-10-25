@@ -17,6 +17,9 @@
 - **待办（基线）**：本基线数字来自 0.2.1-rc.2 快照（非官方最新——本机代理不可达未能拉取）；
   网络恢复后重跑一次真最新基线（`package:desktop:win:x64:unsigned`，快照与实测见
   `D:\xxw_p\cadre-release\upstream-baseline\README.txt`）。
+- **开发态已知问题（2026-10-26 核实）**：dev 实例运行中执行 `pnpm run build:artifacts`，官方 HMR 会热替换含 `ui-session` 在内的插件；替换间隙根节点抛
+  `scope 'session-maybe' rendered without an installed adapter` 并白屏（官方 `ui-renderer` 失败不回滚，见 `packages/client/hmr/README.md` 失败策略）。
+  `bindings.tsx` / `scoped-slots.tsx` / `ui-session/index.ts` 与 pin **逐字节一致**，非本 fork 引入；正常启动 + 稳定产物页面刷新不触发，安装包运行期无 bundle 重建写入。
 
 ## 登记约定
 
@@ -89,7 +92,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K21 | `packages/client/ui-tool/src/client/tool/toolviews/dispatch-row.tsx` | 派活结果卡：成功/失败分列、`retryable` 决定重试按钮、用 `pendingId` 触发重试 | 跨会话任务卡官方无对应视图 | 新文件；数据全部来自 meta，可平移到独立包 |
 | K22 | `packages/client/ui-sidebar/src/client/SidebarRoot.tsx` | 项目/花名册侧栏接线与状态条挂载；新建会话按钮改为三选一 Menu，`.newSessionMenu` 让包裹层拉伸（修复按钮宽度塌陷到 26px） | 官方侧栏组合点内部 | 接线 hunk；应随 K10 一起抽插件 |
 | K23 | `packages/client/ui-sidebar/src/client/contract/slots.ts` | ~~新增项目行/会话标识 slot 类型（与 ui-workspace 契约镜像，避免包循环）~~ **2026-10-25 撤销**：镜像声明已移除，槽声明归位 ui-workspace（owner）；ui-sidebar 注册处改为局部类型化 + 注释说明包循环，见 K28 | 类型契约在官方包内声明 | 类型声明；抽插件时并入我们自己的 contract |
-| K24 | `packages/client/ui-workspace/src/client/contract/slots.ts`、`rows/Rows.tsx`、`rows/WorkspaceBrowser.tsx` | 新增 `sidebar.workspaces.project.row.action`（项目行＋/台账）、`sidebar.workspaces.project.row.create`（项目头下通用创建座位，当前不注册条目）、`sidebar.session.row.badge`（角色胶囊）与 `sidebar.session.row.subtitle`（第二行：岗位 + 运行中/空闲 + 当前任务）；项目行显示文件夹路径；会话行改为两行 56px；项目行动作条常显（避免悬停菜单时触发器被隐藏）；已占用项目行 action 时隐藏原单按钮；按产品 rank 排序 | 官方项目行/会话行没有这些扩展点；产品要求入口和身份/状态都在侧栏行上 | 四个 list slot + 一行排序 + 行高；官方若提供行 action/subtitle seat 可回退 |
+| K24 | `packages/client/ui-workspace/src/client/contract/slots.ts`、`rows/Rows.tsx`、`rows/WorkspaceBrowser.tsx` | 新增 `sidebar.workspaces.project.row.action`（项目行＋/台账）、`sidebar.workspaces.project.row.create`（项目头下通用创建座位，当前不注册条目）、`sidebar.session.row.badge`（角色胶囊）与 `sidebar.session.row.subtitle`（第二行：岗位 + 运行中/空闲 + 当前任务）；项目行显示文件夹路径；会话行改为两行 56px；项目行动作条常显（避免悬停菜单时触发器被隐藏）；已占用项目行 action 时隐藏原单按钮；按产品 rank 排序；空白会话行标题附创建时间（`新会话 · HH:mm`，空白行无 prompt，Host 的 `updatedAt` 即 `createdAt`） | 官方项目行/会话行没有这些扩展点；产品要求入口和身份/状态都在侧栏行上；空行与顶部「新会话」按钮撞名 | 四个 list slot + 一行排序 + 行高 + 标题时间后缀；官方若提供行 action/subtitle seat 可回退 |
 | K25 | `packages/client/ui-sidebar/src/client/cadre-session-rank.ts`（cordis 服务 `cadreSessionRank`）；`packages/client/ui-workspace/src/client/index.ts` 消费 | 产品级会话置顶 rank：主管恒置顶，其余按原派生顺序；跨包共享走 cordis 服务，避免跨插件值导入 | 官方排序无「角色」概念；bundle purity 禁止跨插件值导入 | 一个服务 + 一个稳定空 Map；抽插件后可移到独立包 |
 | K26 | `packages/client/ui-chat/src/client/chat/MessageItem.tsx`、`chat/CadreReportCard.tsx` | 主管会话里的员工汇报卡：解析 Host 汇报文本，默认折叠为一行（标签 + 任务号 + 一句话摘要），展开后显示全文、交付物、状态与「通过/打回」，打回必填原因；展开状态按汇报内容记入 localStorage | 官方 user 消息渲染不认识 cadre 汇报协议；验收必须回到会话；多条汇报不应刷屏 | 一个文本前缀分支 + 一张卡；协议若改为结构化消息可移除文本解析 |
 | K27 | `packages/client/*/src/client/locales*.ts`（ui-workspace、ui-conversation、ui-reference、ui-settings 等） | 用户可见「工作区」统一改为「项目部」（侧栏分组、菜单、空态、提示、权限文案） | 产品术语统一（DC-001 一层项目部） | 纯文案替换；抽插件后用 locale 覆盖更佳 |
