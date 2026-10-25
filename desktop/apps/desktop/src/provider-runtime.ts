@@ -50,10 +50,136 @@ export async function selectSessionModel(
   await hostRpc(hostUrl, cookie, 'session', 'selectModel', { request })
 }
 
-/** Official model catalog (per-provider groups with reasoning efforts). */
-export async function fetchModelCatalog(hostUrl: string, cookie: string): Promise<readonly unknown[]> {
+/**
+ * Admit one text prompt from the shell (the Session source is a user message).
+ *
+ * Used for first-turn report-in: the official shell hides Sessions with no
+ * messages, so a newly created supervisor/employee must speak once.
+ */
+export async function promptSession(
+  hostUrl: string, cookie: string, request: { sessionId: string; text: string },
+): Promise<void> {
+  await hostRpc(hostUrl, cookie, 'session', 'prompt', {
+    request: {
+      requestId: randomUUID(),
+      sessionId: request.sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text: request.text }],
+    },
+  })
+}
+
+/** One routable provider group from the official model catalog. */
+export interface ModelCatalogGroup {
+  readonly id: string
+  readonly name: string
+  readonly models: readonly {
+    readonly id: string
+    readonly name?: string
+    readonly description?: string
+    readonly reasoning?: {
+      readonly efforts: readonly { readonly id: string; readonly name: string; readonly description?: string }[]
+      readonly defaultEffort?: string
+    }
+  }[]
+}
+
+/** Dialog-facing option derived from one official provider group. */
+export interface ProviderOptionView {
+  readonly providerId: string
+  readonly name: string
+  readonly defaultModel: string
+  readonly models: ModelCatalogGroup['models']
+  readonly enabled: true
+  readonly hasKey: true
+  readonly isDefault: boolean
+}
+
+/**
+ * Map the official catalog to the create-employee dialog options.
+ *
+ * Providers with no catalog models are omitted (there is nothing to bind);
+ * the deployment default model wins when it belongs to the group.
+ */
+export function providerOptionsFromCatalog(catalog: ModelCatalog): ProviderOptionView[] {
+  return catalog.groups.flatMap((group) => {
+    const first = group.models[0]
+    if (first === undefined) return []
+    const preferred = catalog.default?.provider === group.id
+      && catalog.default.model !== undefined
+      && group.models.some(model => model.id === catalog.default?.model)
+      ? catalog.default.model
+      : first.id
+    return [{
+      providerId: group.id,
+      name: group.name,
+      defaultModel: preferred,
+      models: group.models,
+      enabled: true as const,
+      // A provider only appears in the catalog when its models are routable.
+      hasKey: true as const,
+      isDefault: catalog.default?.provider === group.id,
+    }]
+  })
+}
+
+/** `session/modelCatalog` value: the official source of providers and models. */
+export interface ModelCatalog {
+  readonly default?: { readonly provider?: string; readonly model?: string }
+  readonly groups: readonly ModelCatalogGroup[]
+  readonly failures: readonly { readonly id: string; readonly name: string; readonly message: string }[]
+}
+
+/**
+ * Official model catalog (per-provider groups with reasoning efforts).
+ *
+ * This is the same directory the official "Models" page writes: a provider
+ * configured there appears here, even when this app's legacy provider table is
+ * empty. The value is an object, not an array; groups/failures are optional.
+ */
+export async function fetchModelCatalog(hostUrl: string, cookie: string): Promise<ModelCatalog> {
   const value = await hostRpc(hostUrl, cookie, 'session', 'modelCatalog', {})
-  return Array.isArray(value) ? value : []
+  if (typeof value !== 'object' || value === null) return { groups: [], failures: [] }
+  const record = value as {
+    default?: { provider?: unknown; model?: unknown }
+    groups?: unknown
+    failures?: unknown
+  }
+  const defaultSelection = typeof record.default?.provider === 'string'
+    ? {
+      provider: record.default.provider,
+      ...(typeof record.default.model === 'string' ? { model: record.default.model } : {}),
+    }
+    : undefined
+  const groups: ModelCatalogGroup[] = Array.isArray(record.groups)
+    ? record.groups.flatMap((group: unknown) => {
+      if (typeof group !== 'object' || group === null) return []
+      const entry = group as { id?: unknown; name?: unknown; models?: unknown }
+      if (typeof entry.id !== 'string' || !Array.isArray(entry.models)) return []
+      return [{
+        id: entry.id,
+        name: typeof entry.name === 'string' ? entry.name : entry.id,
+        models: entry.models as ModelCatalogGroup['models'],
+      }]
+    })
+    : []
+  const failures: ModelCatalog['failures'] = Array.isArray(record.failures)
+    ? record.failures.flatMap((failure: unknown) => {
+      if (typeof failure !== 'object' || failure === null) return []
+      const entry = failure as { id?: unknown; name?: unknown; message?: unknown }
+      if (typeof entry.id !== 'string') return []
+      return [{
+        id: entry.id,
+        name: typeof entry.name === 'string' ? entry.name : entry.id,
+        message: typeof entry.message === 'string' ? entry.message : '',
+      }]
+    })
+    : []
+  return {
+    groups,
+    failures,
+    ...(defaultSelection === undefined ? {} : { default: defaultSelection }),
+  }
 }
 
 /** Store a key through the official credentials provider (never in our DB/logs). */
