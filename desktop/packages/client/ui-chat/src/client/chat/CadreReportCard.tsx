@@ -8,7 +8,15 @@
  * requires a reason because the ledger's transition rule requires one.
  */
 import { useEffect, useState, type CSSProperties } from 'react'
-import { Button, Modal, Pill, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  Button,
+  IconChevronDownOutlineRegular,
+  IconChevronUpOutlineRegular,
+  IconDeliverDocRegular,
+  Modal,
+  Pill,
+  Tag,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 
 const TEXT_PRIMARY = 'var(--dsw-alias-label-primary)'
 const TEXT_SECONDARY = 'var(--dsw-alias-label-secondary)'
@@ -23,6 +31,19 @@ const CARD: CSSProperties = {
   background: 'var(--dsw-alias-bg-layer-1)',
   color: TEXT_PRIMARY,
   minWidth: 0,
+}
+
+/** One-line collapsed report: compact, so many reports can stack without noise. */
+const BAR: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  minWidth: 0,
+  padding: '6px 10px',
+  border: '0.5px solid var(--dsw-alias-border-l2)',
+  borderRadius: 'var(--dsw-radius-md)',
+  background: 'var(--dsw-alias-bg-layer-1)',
+  color: TEXT_PRIMARY,
 }
 
 const STATUS_LABELS: Readonly<Record<string, string>> = {
@@ -95,11 +116,44 @@ export function parseCadreReport(content: string): ParsedReport | undefined {
   return { taskId, title: title ?? taskId, reporter, summary, deliverables }
 }
 
+/** Prefer a conclusion/completion sentence, then fall back to the first line. */
 function firstLine(text: string): string {
   const trimmed = text.trim()
   if (trimmed === '') return '（汇报没有正文）'
-  const head = (trimmed.split(/[。！？!?\n]/)[0] ?? '').trim() || trimmed
-  return head.length > 120 ? `${head.slice(0, 120)}…` : head
+  const lines = trimmed.split('\n').map(line => line.trim()).filter(line => line !== '')
+  const conclusion = lines.find(line => /^(结论|完成|已完成|结果|交付)[:：]?/.test(line)) ?? lines[0] ?? trimmed
+  const sentence = (conclusion.split(/[。！？!?]/)[0] ?? '').trim() || conclusion
+  return sentence.length > 80 ? `${sentence.slice(0, 80)}…` : sentence
+}
+
+/**
+ * Stable per-report key so a user's expanded choice survives a Session refresh.
+ * The content hash distinguishes a rework report from the earlier one.
+ */
+function expansionKey(taskId: string, content: string): string {
+  let hash = 5381
+  for (let index = 0; index < content.length; index += 1) {
+    hash = ((hash << 5) + hash + content.charCodeAt(index)) | 0
+  }
+  return `cadre.report.expanded:${taskId}:${Math.abs(hash).toString(36)}`
+}
+
+function readExpanded(key: string): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(key) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeExpanded(key: string, value: boolean): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(key, value ? '1' : '0')
+  } catch {
+    // Storage disabled: keep the in-memory state for this mount.
+  }
 }
 
 function failureText(result: TransitionResult | undefined): string {
@@ -119,11 +173,12 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
   readonly sessionId: string | undefined
 }) {
   const report = parseCadreReport(content)
+  const expandKey = report === undefined ? '' : expansionKey(report.taskId, content)
   const [status, setStatus] = useState<string | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(() => readExpanded(expandKey))
   const [reasonOpen, setReasonOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [result, setResult] = useState<string | null>(null)
@@ -154,7 +209,19 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
     return () => { cancelled = true }
   }, [content, projectId])
 
+  useEffect(() => {
+    setExpanded(readExpanded(expandKey))
+  }, [expandKey])
+
   if (report === undefined) return null
+
+  const toggleExpanded = (): void => {
+    setExpanded((value) => {
+      const next = !value
+      writeExpanded(expandKey, next)
+      return next
+    })
+  }
 
   const transition = async (to: string, reasonText?: string): Promise<void> => {
     const target = bridge()
@@ -208,6 +275,31 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
 
   const final = status === 'verified' || status === 'rework' || status === 'failed' || status === 'cancelled'
   const actionable = status === 'delivered' || status === 'review'
+  const preview = firstLine(report.summary)
+
+  if (!expanded) {
+    return (
+      <div style={BAR} data-cadre-report-collapsed="">
+        <span aria-hidden="true" style={{ display: 'inline-flex', flex: 'none', color: TEXT_SECONDARY }}>
+          <IconDeliverDocRegular size={14} />
+        </span>
+        <span style={{ flex: 'none', fontWeight: 500 }}>员工汇报</span>
+        <span style={{ flex: 'none', color: TEXT_SECONDARY, fontSize: 12 }}>{report.taskId}</span>
+        <span
+          title={report.summary}
+          style={{
+            flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap', color: TEXT_PRIMARY, fontSize: 13,
+          }}
+        >
+          {preview}
+        </span>
+        <Button variant="ghost" size="sm" onClick={toggleExpanded} aria-expanded={false}>
+          展开 <IconChevronDownOutlineRegular size={12} />
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div style={CARD}>
@@ -218,20 +310,16 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
         {status === undefined
           ? <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>读取状态…</span>
           : <Pill>{STATUS_LABELS[status] ?? status}</Pill>}
+        <Button variant="ghost" size="sm" onClick={toggleExpanded} aria-expanded={true}>
+          收起 <IconChevronUpOutlineRegular size={12} />
+        </Button>
       </div>
       <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
         {report.reporter} · 任务号 {report.taskId}
       </span>
       <p style={{ margin: 0, color: TEXT_PRIMARY, lineHeight: 1.55 }}>
-        {expanded ? report.summary : firstLine(report.summary)}
+        {report.summary}
       </p>
-      {report.summary.trim() !== '' && (
-        <div>
-          <Button variant="outline" size="sm" onClick={() => { setExpanded(value => !value) }}>
-            {expanded ? '收起全文' : '展开全文'}
-          </Button>
-        </div>
-      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>交付物</span>
         {report.deliverables.length === 0
