@@ -511,7 +511,9 @@ describe('web e2e: plugin manager', () => {
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 
-  it('lists the installed bundles with their switches and leaves the installation\'s own to Settings', async () => {
+  // Cadre Heihei 不交付官方实验团队（见 desktop/UPSTREAM.md 的 agent-team 配置行 /
+  // docs/dev/agent-team-removal-plan.md）；本用例的 bundle 计数与快照依赖该卡存在，故 skip。
+  it.skip('lists the installed bundles with their switches and leaves the installation\'s own to Settings', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-manager-list'))
     const panel = await openPluginsPanel()
 
@@ -641,7 +643,9 @@ describe('web e2e: plugin manager', () => {
     await closeSettings()
   })
 
-  it('prefers manifest icons for packages and reads exported icons for subpath plugins', async () => {
+  // Cadre Heihei 不交付官方实验团队（见 desktop/UPSTREAM.md 的 agent-team 配置行 /
+  // docs/dev/agent-team-removal-plan.md）；本用例断言该卡的图标，故 skip。
+  it.skip('prefers manifest icons for packages and reads exported icons for subpath plugins', async () => {
     const panel = await openPluginsPanel()
     onTestFinished(closeSettings)
     const fixtureIcon = `data:image/svg+xml;base64,${(await readFile(join(FIXTURE_PLUGINS, 'fixture-bundle/icon.svg'))).toString('base64')}`
@@ -766,7 +770,9 @@ describe('web e2e: plugin manager', () => {
     expect(tripwire.pageErrors).toEqual([])
   })
 
-  it('updates built-in names and descriptions when the UI language changes', async () => {
+  // Cadre Heihei 不交付官方实验团队（见 desktop/UPSTREAM.md 的 agent-team 配置行 /
+  // docs/dev/agent-team-removal-plan.md）；本用例读取该卡的中英文名称，故 skip。
+  it.skip('updates built-in names and descriptions when the UI language changes', async () => {
     onTestFinished(closeSettings)
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-manager-locale'))
     const panel = await openPluginsPanel()
@@ -800,7 +806,9 @@ describe('web e2e: plugin manager', () => {
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 
-  it('enables the Team tools and browser plugin with one bundle switch', async () => {
+  // Cadre Heihei 不交付官方实验团队（见 desktop/UPSTREAM.md 的 agent-team 配置行 /
+  // docs/dev/agent-team-removal-plan.md）；本用例启用该 bundle，故 skip。
+  it.skip('enables the Team tools and browser plugin with one bundle switch', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-manager-team'))
     const panel = await openPluginsPanel()
     const toggle = panel.getByRole('switch', { name: '启用 智能体团队', exact: true })

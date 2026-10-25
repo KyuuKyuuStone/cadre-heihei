@@ -128,6 +128,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | `apps/desktop/src/tray-icon.ts` | 按明暗解析托盘 ICO 路径 | 官方无明暗双图标 | 保留（桌面壳） |
 | `apps/desktop/tests/employees-db.spec.ts` | 员工表测试 | 产品 | 保留 |
 | `apps/web/tests/cadre-presets.e2e.ts` | 装配态验证 cadre-* preset（roster/read/select） | 产品 | 保留 |
+| `apps/web/tests/plugin-manager.e2e.ts`、`apps/web/tests/expected/plugin-manager/*.md` | skip 4 个断言官方 Agent Teams 卡存在的用例；3 份渲染快照删除该卡，刷新计数快照 11→10 | 产品不交付官方实验团队（见本文件 agent-team 配置行）；断言其存在已是错误基线 | 测试基线；**官方升级时需重放**；恢复交付则还原 skip 与快照 |
 | `cadre-collab/entry.ts` | 协作写路径实现（编译为 `lib/cadre-collab.cjs`） | 官方无账本 | 迁 Host 服务后移动 |
 | `scripts/build-cadre-collab.mjs` | 把 `cadre-collab/entry.ts` 打成 CJS 供 main require | 桌面壳加载方式 | 随迁移删除 |
 | `scripts/check-upstream-drift.mjs` | 本文件的自动发现脚本 | 过程工具 | 保留 |
