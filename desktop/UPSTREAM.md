@@ -87,16 +87,16 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K19 | `packages/client/ui-conversation/src/client/locales.ts` | 派活/汇报状态条所需文案与术语 | 官方文案层没有产品术语位 | 若干词条；可迁移为独立插件的 locale 覆盖 |
 | K20 | `packages/client/ui-tool/src/client/apply.ts` | 注册 `dispatch-row` 工具卡视图（读 tool result 的 presentationMeta） | 官方工具卡注册表在客户端包内，插件只能注册到既有视图集合 | 一条注册；可抽成客户端插件 |
 | K21 | `packages/client/ui-tool/src/client/tool/toolviews/dispatch-row.tsx` | 派活结果卡：成功/失败分列、`retryable` 决定重试按钮、用 `pendingId` 触发重试 | 跨会话任务卡官方无对应视图 | 新文件；数据全部来自 meta，可平移到独立包 |
-| K22 | `packages/client/ui-sidebar/src/client/SidebarRoot.tsx` | 项目/花名册侧栏接线与状态条挂载 | 官方侧栏组合点内部 | 接线 hunk；应随 K10 一起抽插件 |
+| K22 | `packages/client/ui-sidebar/src/client/SidebarRoot.tsx` | 项目/花名册侧栏接线与状态条挂载；新建会话按钮改为三选一 Menu，`.newSessionMenu` 让包裹层拉伸（修复按钮宽度塌陷到 26px） | 官方侧栏组合点内部 | 接线 hunk；应随 K10 一起抽插件 |
 | K23 | `packages/client/ui-sidebar/src/client/contract/slots.ts` | ~~新增项目行/会话标识 slot 类型（与 ui-workspace 契约镜像，避免包循环）~~ **2026-10-25 撤销**：镜像声明已移除，槽声明归位 ui-workspace（owner）；ui-sidebar 注册处改为局部类型化 + 注释说明包循环，见 K28 | 类型契约在官方包内声明 | 类型声明；抽插件时并入我们自己的 contract |
-| K24 | `packages/client/ui-workspace/src/client/contract/slots.ts`、`rows/Rows.tsx`、`rows/WorkspaceBrowser.tsx` | 新增 `sidebar.workspaces.project.row.action`（项目行＋/台账）与 `sidebar.session.row.badge`（角色胶囊）；项目行显示文件夹路径；已占用项目行 action 时隐藏原单按钮；按产品 rank 排序 | 官方项目行/会话行没有这些扩展点；产品要求入口在侧栏行上 | 两个 list slot + 一行排序；官方若提供行 action seat 可回退 |
+| K24 | `packages/client/ui-workspace/src/client/contract/slots.ts`、`rows/Rows.tsx`、`rows/WorkspaceBrowser.tsx` | 新增 `sidebar.workspaces.project.row.action`（项目行＋/台账）、`sidebar.workspaces.project.row.create`（项目头下方「新会话」整行，空白会话行占位时让位）与 `sidebar.session.row.badge`（角色胶囊）；项目行显示文件夹路径；已占用项目行 action 时隐藏原单按钮；按产品 rank 排序 | 官方项目行/会话行没有这些扩展点；产品要求入口在侧栏行上 | 三个 list slot + 一行排序；官方若提供行 action seat 可回退 |
 | K25 | `packages/client/ui-sidebar/src/client/cadre-session-rank.ts`（cordis 服务 `cadreSessionRank`）；`packages/client/ui-workspace/src/client/index.ts` 消费 | 产品级会话置顶 rank：主管恒置顶，其余按原派生顺序；跨包共享走 cordis 服务，避免跨插件值导入 | 官方排序无「角色」概念；bundle purity 禁止跨插件值导入 | 一个服务 + 一个稳定空 Map；抽插件后可移到独立包 |
 | K26 | `packages/client/ui-chat/src/client/chat/MessageItem.tsx`、`chat/CadreReportCard.tsx` | 主管会话里的员工汇报卡：解析 Host 汇报文本，折叠摘要 + 交付物 + 状态，卡上「通过/打回」，打回必填原因 | 官方 user 消息渲染不认识 cadre 汇报协议；验收必须回到会话 | 一个文本前缀分支 + 一张卡；协议若改为结构化消息可移除文本解析 |
 | K27 | `packages/client/*/src/client/locales*.ts`（ui-workspace、ui-conversation、ui-reference、ui-settings 等） | 用户可见「工作区」统一改为「项目部」（侧栏分组、菜单、空态、提示、权限文案） | 产品术语统一（DC-001 一层项目部） | 纯文案替换；抽插件后用 locale 覆盖更佳 |
 | K28 | `packages/client/ui-sidebar/src/client/contract/slots.ts` | 删除四个槽的镜像声明（两个官方槽 + 两个新增槽），槽声明统一归 ui-workspace；`hooks.projectState` 取代全局 `cadreSupervisor`，按 workspace id 判定主管；注册处局部类型化以避开包循环 | 镜像会被 slot 目录门禁判重复，且 owner 契约只能有一处 | 抽独立插件后本文件可清零 |
 | K29 | `packages/client/ui-tool/src/client/contract/slots.ts` | `tool.call.toolview` JSDoc 收紧一行（3 行合并为 2 行），回到 122 行报告预算内 | 我方 slot 目录门禁预算；官方新增 DispatchStatusRow 后为 123 行 | A（可合入上游） |
 | K30 | `scripts/slot-walk.ts` | `dedent()` 先归一化 CRLF 再切行，避免 Windows 检出（core.autocrlf）生成含裸 CR 的 catalog | 修过我们的坑（A）：Windows 上生成物非法、`--check` 永远红 | A（可合入上游） |
-| K31 | `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts` | 重新生成：补 `sidebar.workspaces.project.row.action` / `sidebar.session.row.badge`，并纳入 toolview 既有漂移 | 生成物，跟随声明变化 | 重跑 `pnpm run gen-client-catalog` |
+| K31 | `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts` | 重新生成：补 `sidebar.workspaces.project.row.action` / `sidebar.workspaces.project.row.create` / `sidebar.session.row.badge`，并纳入 toolview 既有漂移 | 生成物，跟随声明变化 | 重跑 `pnpm run gen-client-catalog` |
 
 **内核补丁结论：17 处，其中 3 处（K7/K8/K10）本可完全走官方扩展点、1 处（K12）已决定迁走、1 处（K9）应换实现方式。真正无法避免的只剩桌面壳 6 处（K1–K6）+ 构建 4 处（K14–K17）。**
 
