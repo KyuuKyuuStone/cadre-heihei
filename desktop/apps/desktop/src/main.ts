@@ -1438,6 +1438,7 @@ async function main(): Promise<void> {
       projectId: project.projectId,
       role: record.role === 'supervisor' ? 'supervisor' : 'worker',
       ...(typeof record.displayName === 'string' ? { displayName: record.displayName } : {}),
+      ...(typeof record.description === 'string' ? { description: record.description } : {}),
     }
     const saved = cadreEmployees.saveMember(input, new Date().toISOString())
     console.log(`cadre:saveMember session=${input.sessionId} project=${input.projectId} role=${input.role} ` +

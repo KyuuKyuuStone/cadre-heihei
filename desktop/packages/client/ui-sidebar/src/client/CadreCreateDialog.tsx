@@ -127,6 +127,8 @@ export interface CadreCreateInjected {
     role: 'supervisor' | 'worker'
     displayName: string
     description?: string
+    /** Short job title shown on the Session row (template name). */
+    position?: string
     workspaceId?: string
   }): Promise<{ ok: true; sessionId: string } | { ok: false; code: string; message: string }>
   refreshSupervisor: () => void
@@ -166,6 +168,7 @@ function CadreCreateForm({
   const [supervisor, setSupervisor] = useState<RosterRow | undefined>(undefined)
   const [name, setName] = useState('')
   const [duty, setDuty] = useState('')
+  const [position, setPosition] = useState('')
   const [templateGroup, setTemplateGroup] = useState<RoleGroup>('dev')
   const [templateId, setTemplateId] = useState('')
   const [saveAsCustom, setSaveAsCustom] = useState(false)
@@ -214,6 +217,7 @@ function CadreCreateForm({
   const applyTemplate = (template: RoleTemplate): void => {
     setTemplateId(template.id)
     setName(template.name)
+    setPosition(template.name)
     setDuty(template.duty)
   }
 
@@ -238,6 +242,7 @@ function CadreCreateForm({
         role: kind,
         displayName,
         ...(kind === 'worker' ? { description: duty.trim() } : {}),
+        ...(kind === 'worker' && position.trim() !== '' ? { position: position.trim() } : {}),
         ...(request.workspaceId === undefined ? {} : { workspaceId: request.workspaceId }),
       })
       if (!result.ok) {
@@ -361,6 +366,7 @@ function CadreCreateForm({
                     onClick={() => {
                       setTemplateId(role.id)
                       setName(role.name)
+                      setPosition(role.name)
                       setDuty(role.description)
                     }}
                   >

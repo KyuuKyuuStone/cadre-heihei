@@ -5,7 +5,7 @@
  * 台账 entry; Session rows get a role marker plus a compact role badge. Both
  * read the local roster, the ledger's authority for supervisor/worker.
  */
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   IconNewChatOutlineRegular,
@@ -59,6 +59,27 @@ export interface CadreRosterState {
   readonly error: string | null
 }
 
+/** The part of one official Session summary the row subtitle reads. */
+export interface CadreSessionSummary {
+  readonly running?: boolean
+  readonly updatedAt?: number
+}
+
+export interface CadreSessionsState {
+  readonly byId: Readonly<Record<string, CadreSessionSummary | undefined>>
+}
+
+/** One ledger task projected for the row subtitle. */
+export interface CadreTaskFact {
+  readonly assigneeSessionId: string
+  readonly title: string
+  readonly status: string
+  readonly updatedAt: string
+}
+
+/** Statuses that still occupy an employee (ordered for "current task" choice). */
+const ACTIVE_TASK_STATUS = new Set(['in_progress', 'accepted', 'rework', 'review', 'delivered', 'dispatched'])
+
 /** Face of the project-row action entries. */
 export interface CadreProjectActionsInjected {
   hooks: { projectState: HostObservable<CadreProjectState> }
@@ -77,7 +98,19 @@ export interface CadreNewSessionRowInjected {
 
 /** Face of the Session identity entries. */
 export interface CadreRosterBadgeInjected {
-  hooks: { roster: HostObservable<CadreRosterState> }
+  hooks: {
+    roster: HostObservable<CadreRosterState>
+    sessions: HostObservable<CadreSessionsState>
+  }
+}
+
+/** Face of the Session row's second line: identity + live activity. */
+export interface CadreSessionSubtitleInjected {
+  hooks: {
+    roster: HostObservable<CadreRosterState>
+    sessions: HostObservable<CadreSessionsState>
+    tasks: HostObservable<readonly CadreTaskFact[]>
+  }
 }
 
 /** Face of the row-menu retire action. */
@@ -100,6 +133,82 @@ function memberOf(members: readonly CadreRosterMember[], sessionId: string): Cad
   return members.find(member => member.sessionId === sessionId)
 }
 
+/** Grace between leaving the trigger/menu and actually closing it. */
+const HOVER_CLOSE_DELAY_MS = 360
+
+let menuClassSeq = 0
+
+/**
+ * Keep a portaled menu open while the pointer travels from its trigger into
+ * the list. The trigger wrapper and the portaled list share one close timer:
+ * entering either side cancels it, leaving both arms it after a short grace.
+ * Portaled lists are outside the trigger's DOM subtree, so the list is found
+ * by the unique class passed to `Menu.listClassName` and observed natively.
+ *
+ * @param open - whether the menu is currently open.
+ * @param close - owner close action, invoked after the grace elapses.
+ * @param listClass - unique class put on the portaled list.
+ * @returns pointer handlers for the trigger container.
+ */
+function useHoverMenuGuard(open: boolean, close: () => void, listClass: string): {
+  enter: () => void
+  leave: () => void
+} {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closeRef = useRef(close)
+  closeRef.current = close
+  const cancel = useCallback(() => {
+    if (timer.current === null) return
+    clearTimeout(timer.current)
+    timer.current = null
+  }, [])
+  const arm = useCallback(() => {
+    cancel()
+    timer.current = setTimeout(() => {
+      timer.current = null
+      closeRef.current()
+    }, HOVER_CLOSE_DELAY_MS)
+  }, [cancel])
+
+  useEffect(() => {
+    if (!open) return
+    let list: Element | null = null
+    let frame = 0
+    let disposed = false
+    const bind = (): void => {
+      if (disposed) return
+      list = document.querySelector(`.${listClass}`)
+      if (list === null) {
+        frame = window.requestAnimationFrame(bind)
+        return
+      }
+      list.addEventListener('pointerenter', cancel)
+      list.addEventListener('pointerleave', arm)
+    }
+    bind()
+    return () => {
+      disposed = true
+      if (frame !== 0) window.cancelAnimationFrame(frame)
+      cancel()
+      list?.removeEventListener('pointerenter', cancel)
+      list?.removeEventListener('pointerleave', arm)
+    }
+  }, [open, listClass, cancel, arm])
+
+  useEffect(() => cancel, [cancel])
+
+  return { enter: cancel, leave: arm }
+}
+
+/** A per-occurrence unhashed class so the guard can find its own portaled list. */
+function useMenuListClass(): string {
+  const [name] = useState(() => {
+    menuClassSeq += 1
+    return `cadre-hover-menu-${String(menuClassSeq)}`
+  })
+  return name
+}
+
 /**
  * Project row actions: ＋ (supervisor/employee/plain) and 台账.
  * The old single New Session button is replaced by the ＋ when this slot is
@@ -109,12 +218,21 @@ export function CadreProjectRowActions({
   workspaceId, label, cwd, useProjectState, startSession, requestCadreCreate, openLedger,
 }: CadreProjectRowOwner & InjectFace<CadreProjectActionsInjected>) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuClass = useMenuListClass()
+  const closeMenu = useCallback(() => { setMenuOpen(false) }, [])
+  const hover = useHoverMenuGuard(menuOpen, closeMenu, menuClass)
   const hasSupervisor = useProjectState(state => state.supervisors.has(workspaceId))
   return (
-    <span className={css.projectActions} onClick={event => { event.stopPropagation() }}>
+    <span
+      className={css.projectActions}
+      onClick={event => { event.stopPropagation() }}
+      onPointerEnter={hover.enter}
+      onPointerLeave={hover.leave}
+    >
       <Menu
         open={menuOpen}
-        onClose={() => { setMenuOpen(false) }}
+        onClose={closeMenu}
+        listClassName={menuClass}
         items={[
           {
             id: 'supervisor',
@@ -145,7 +263,6 @@ export function CadreProjectRowActions({
           </Tooltip>
         )}
         portal
-        closeOnPointerLeave
       />
       <Button
         variant="outline"
@@ -168,12 +285,21 @@ export function CadreNewSessionRow({
   workspaceId, useProjectState, startSession, requestCadreCreate, refreshSupervisor,
 }: CadreProjectRowOwner & InjectFace<CadreNewSessionRowInjected>) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuClass = useMenuListClass()
+  const closeMenu = useCallback(() => { setMenuOpen(false) }, [])
+  const hover = useHoverMenuGuard(menuOpen, closeMenu, menuClass)
   const hasSupervisor = useProjectState(state => state.supervisors.has(workspaceId))
   return (
+    <span
+      className={css.newSessionHover}
+      onPointerEnter={hover.enter}
+      onPointerLeave={hover.leave}
+    >
     <Menu
       className={css.newSessionRowMenu}
       open={menuOpen}
-      onClose={() => { setMenuOpen(false) }}
+      onClose={closeMenu}
+      listClassName={menuClass}
       items={[
         {
           id: 'supervisor',
@@ -209,6 +335,7 @@ export function CadreNewSessionRow({
       side="bottom"
       align="start"
     />
+    </span>
   )
 }
 
@@ -236,8 +363,59 @@ export function CadreSessionBadge({
   }
   const position = member.description?.trim()
   return (
-    <span className={css.workerBadge}>
+    <span className={css.workerBadge} title={position === undefined ? undefined : `岗位：${position}`}>
       {position === undefined || position === '' ? '员工' : `员工 · ${position}`}
+    </span>
+  )
+}
+
+/**
+ * Second line of a Session row: the job title in plain sight plus what the
+ * employee is doing now (running / idle / waiting for review) from the
+ * ledger's tasks. Ordinary Sessions say so; archived members say nothing.
+ */
+export function CadreSessionSubtitle({
+  sessionId, useRoster, useSessions, useTasks,
+}: CadreSessionRowOwner & InjectFace<CadreSessionSubtitleInjected>) {
+  const rosterStatus = useRoster(state => state.status)
+  const members = useRoster(state => state.members)
+  const running = useSessions(state => state.byId[sessionId]?.running === true)
+  const tasks = useTasks(state => state)
+  const member = memberOf(members, sessionId)
+
+  if (member === undefined || member.state === 'departed') {
+    // Before the roster answers, an unknown row must not claim to be ordinary.
+    return rosterStatus === 'ready' ? <span className={css.plainSubtitle}>普通会话</span> : null
+  }
+
+  const owned = tasks.filter(task => task.assigneeSessionId === sessionId && ACTIVE_TASK_STATUS.has(task.status))
+  const current = owned.find(task => task.status === 'in_progress') ?? owned[0]
+
+  if (member.role === 'supervisor') {
+    return (
+      <span className={css.sessionSubtitle}>
+        <span className={running ? css.statusDotRunning : css.statusDotIdle} aria-hidden="true" />
+        <span className={css.subtitleText}>{running ? '运行中 · 正在拆解' : '空闲'}</span>
+      </span>
+    )
+  }
+
+  const position = member.description?.trim()
+  const roleLabel = position === undefined || position === '' ? '员工' : position
+  const pending = owned.filter(task => task.status === 'delivered' || task.status === 'review').length
+  const activity = running
+    ? (current === undefined ? '运行中' : `运行中 · ${current.title}`)
+    : pending > 0
+      ? `空闲 · 待验收 ${String(pending)}`
+      : owned.length > 0
+        ? `空闲 · 待处理 ${String(owned.length)}`
+        : '空闲'
+  return (
+    <span className={css.sessionSubtitle}>
+      <span className={running ? css.statusDotRunning : css.statusDotIdle} aria-hidden="true" />
+      <span className={css.subtitleRole}>{roleLabel}</span>
+      <span className={css.subtitleDivider}>·</span>
+      <span className={css.subtitleText}>{activity}</span>
     </span>
   )
 }

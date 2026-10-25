@@ -156,6 +156,7 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
       projectId?: string
       role: 'worker' | 'supervisor'
       displayName?: string
+      description?: string
     }) => ipcRenderer.invoke(DESKTOP_IPC.cadreSaveMember, options) as Promise<unknown>,
     retireMember: (options: { sessionId: string; projectId?: string }) =>
       ipcRenderer.invoke(DESKTOP_IPC.cadreRetireMember, options) as Promise<unknown>,

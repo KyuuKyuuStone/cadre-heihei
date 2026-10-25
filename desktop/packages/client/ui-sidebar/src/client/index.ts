@@ -8,7 +8,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
+import { resolveSlotLabel, type HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -22,10 +22,11 @@ import { CadreCreateDialog, type CadreCreateInjected, type CadreCreateRequest } 
 import { CadreLedgerOverlay, type CadreLedgerInjected, type CadreLedgerRequest } from './CadreLedgerOverlay.tsx'
 import {
   CadreEditMemberMenuItem, CadreNewSessionRow, CadreProjectRowActions, CadreRetireMenuItem, CadreSessionBadge,
-  CadreSessionMarker,
+  CadreSessionMarker, CadreSessionSubtitle,
   type CadreEditInjected, type CadreNewSessionRowInjected, type CadreProjectActionsInjected,
   type CadreRetireInjected,
   type CadreRosterBadgeInjected, type CadreRosterMember, type CadreRosterState,
+  type CadreSessionSubtitleInjected, type CadreSessionsState, type CadreTaskFact,
 } from './CadreSidebar.tsx'
 import type { CadreSessionRankService } from './cadre-session-rank.ts'
 import { HeaderLeadingControls } from './HeaderLeadingControls.tsx'
@@ -72,11 +73,15 @@ interface CadreBridge {
     members?: readonly RosterRow[]
     rows?: readonly RosterRow[]
   } | undefined>
+  listTasks?: (query: { projectId: string }) => Promise<{
+    rows?: readonly CadreTaskFact[]
+  } | undefined>
   saveMember?: (query: {
     sessionId: string
     projectId?: string
     role: 'worker' | 'supervisor'
     displayName?: string
+    description?: string
   }) => Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
   retireMember?: (query: { sessionId: string; projectId?: string }) =>
   Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
@@ -206,6 +211,37 @@ export function apply(ctx: ClientContext): void {
   const rankService: CadreSessionRankService = { source: sessionRank }
   ctx.provide('cadreSessionRank', rankService)
 
+  // Ledger facts for the row subtitle: what each member is working on and how
+  // many tasks still wait for review. Reads are read-only and per project.
+  const tasks = createSnapshotStore<readonly CadreTaskFact[]>([])
+  const refreshTasks = (): void => {
+    const read = bridge()?.listTasks
+    if (read === undefined) {
+      tasks.set([])
+      return
+    }
+    const projects = projectItems().map(item => item.workspaceId)
+    if (projects.length === 0) {
+      tasks.set([])
+      return
+    }
+    void Promise.allSettled(projects.map(projectId => read({ projectId }))).then((results) => {
+      const rows: CadreTaskFact[] = []
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue
+        for (const row of result.value?.rows ?? []) {
+          rows.push({
+            assigneeSessionId: row.assigneeSessionId,
+            title: row.title,
+            status: row.status,
+            updatedAt: row.updatedAt,
+          })
+        }
+      }
+      tasks.set(rows)
+    })
+  }
+
   /** The project a Session belongs to; undefined for an ungrouped Session. */
   const projectOfSession = (sessionId: string): string | undefined =>
     projectItems().find(item => item.sessionIds.some(id => String(id) === sessionId))?.workspaceId
@@ -313,13 +349,25 @@ export function apply(ctx: ClientContext): void {
     })
   }
   refreshRoster()
+  refreshTasks()
 
   // A new/removed Workspace changes the roster's unit; a newer Session may
-  // change which project the shell's menu targets.
+  // change which project the shell's menu targets. Task facts follow Session
+  // activity (a dispatch/report bumps the Session), debounced so a streaming
+  // turn does not hammer the ledger on every token.
   ctx.effect(() => {
-    const disposeWorkspaces = ctx.workspaces.list.subscribe(refreshRoster)
-    const disposeSessions = ctx.sessions.list.subscribe(syncDefaultProject)
-    return () => { disposeWorkspaces(); disposeSessions() }
+    let taskTimer: ReturnType<typeof setTimeout> | undefined
+    const scheduleTasks = (): void => {
+      if (taskTimer !== undefined) clearTimeout(taskTimer)
+      taskTimer = setTimeout(() => { taskTimer = undefined; refreshTasks() }, 800)
+    }
+    const disposeWorkspaces = ctx.workspaces.list.subscribe(() => { refreshRoster(); refreshTasks() })
+    const disposeSessions = ctx.sessions.list.subscribe(() => { syncDefaultProject(); scheduleTasks() })
+    return () => {
+      disposeWorkspaces()
+      disposeSessions()
+      if (taskTimer !== undefined) clearTimeout(taskTimer)
+    }
   }, 'ui-sidebar: cadre project context')
 
   // Create/ledger requests are frame-wide overlays: both are opened from the
@@ -357,6 +405,7 @@ export function apply(ctx: ClientContext): void {
     role: 'supervisor' | 'worker'
     displayName: string
     description?: string
+    position?: string
     workspaceId?: string
   }): Promise<{ ok: true; sessionId: string } | { ok: false; code: string; message: string }> => {
     const target = bridge()
@@ -377,7 +426,11 @@ export function apply(ctx: ClientContext): void {
     }
     try {
       const saved = await target.saveMember({
-        sessionId, projectId, role: input.role, displayName: input.displayName,
+        sessionId,
+        projectId,
+        role: input.role,
+        displayName: input.displayName,
+        ...(input.position === undefined || input.position === '' ? {} : { description: input.position }),
       })
       if (saved?.ok !== true) {
         return {
@@ -418,7 +471,11 @@ export function apply(ctx: ClientContext): void {
     closeLedger: () => { ledgerRequest.set(null) },
   })
 
-  const rosterBadgeInjected = (): CadreRosterBadgeInjected => ({ hooks: { roster } })
+  const sessionsSource = ctx.sessions.list as unknown as HostObservable<CadreSessionsState>
+  const rosterBadgeInjected = (): CadreRosterBadgeInjected => ({ hooks: { roster, sessions: sessionsSource } })
+  const subtitleInjected = (): CadreSessionSubtitleInjected => ({
+    hooks: { roster, sessions: sessionsSource, tasks },
+  })
 
   const projectActionsInjected = (): CadreProjectActionsInjected => ({
     hooks: { projectState },
@@ -589,6 +646,12 @@ export function apply(ctx: ClientContext): void {
     order: 100,
     inject: rosterBadgeInjected,
   } as never, CadreSessionBadge as never))
+  ctx.slots.inject('sidebar.session.row.subtitle' as never, () => ctx.slots.register({
+    name: 'sidebar.session.row.subtitle',
+    id: 'cadre-session-subtitle',
+    order: 100,
+    inject: subtitleInjected,
+  } as never, CadreSessionSubtitle as never))
 
   // Employee management stays on the Session row menu.
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({

@@ -102,7 +102,9 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(declarations('.searchExpanded')?.get('height')).toBe('30px')
     expect(rowDeclarations('.projectRow')?.get('height')).toBeUndefined()
     expect(rowDeclarations('.projectRow')?.get('min-height')).toBe('34px')
-    expect(rowDeclarations('.sessionRow')?.get('height')).toBe('32px')
+    // Two text lines (title + identity/activity subtitle) per Session row.
+    expect(rowDeclarations('.sessionRow')?.get('height')).toBe('auto')
+    expect(rowDeclarations('.sessionRow')?.get('min-height')).toBe('56px')
     // One leading status cell for every session row, grouped or flat: the cell
     // hosts either the row's status dot or the leading seat, and it reserves its
     // own box, so the title's one shared margin below needs no per-view override.

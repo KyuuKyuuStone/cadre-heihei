@@ -54,6 +54,8 @@ export interface SaveMemberInput {
   readonly projectId: string
   readonly role: 'worker' | 'supervisor'
   readonly displayName?: string
+  /** Short job title shown on the Session row (template name, free text). */
+  readonly description?: string
 }
 
 export interface EmployeeFailure {
@@ -250,6 +252,13 @@ export class EmployeeStore {
     if (displayName !== undefined && CONTROL_CHARACTERS.test(displayName)) {
       return fail('INVALID_ARGUMENT', 'displayName 含非法控制字符', 'displayName')
     }
+    const description = input.description?.trim()
+    if (description !== undefined && description.length > MAX_DISPLAY_NAME) {
+      return fail('INVALID_ARGUMENT', `description 最多 ${MAX_DISPLAY_NAME} 字符`, 'description')
+    }
+    if (description !== undefined && CONTROL_CHARACTERS.test(description)) {
+      return fail('INVALID_ARGUMENT', 'description 含非法控制字符', 'description')
+    }
     try {
       const table = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='members'").get()
       if (table === undefined) return fail('STORAGE_ERROR', 'members 表不存在')
@@ -263,15 +272,23 @@ export class EmployeeStore {
         }
       }
       this.db.prepare(`
-        INSERT INTO members (project_id, session_id, role, display_name, state, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'available', ?, ?)
+        INSERT INTO members (project_id, session_id, role, display_name, description, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'available', ?, ?)
         ON CONFLICT(project_id, session_id) DO UPDATE SET
           role = excluded.role,
           display_name = COALESCE(excluded.display_name, members.display_name),
+          description = COALESCE(excluded.description, members.description),
           state = 'available',
           updated_at = excluded.updated_at
-      `).run(input.projectId, input.sessionId, input.role, displayName ?? null, now, now)
-      return { ok: true, member: { ...input, ...(displayName === undefined ? {} : { displayName }) } }
+      `).run(input.projectId, input.sessionId, input.role, displayName ?? null, description ?? null, now, now)
+      return {
+        ok: true,
+        member: {
+          ...input,
+          ...(displayName === undefined ? {} : { displayName }),
+          ...(description === undefined ? {} : { description }),
+        },
+      }
     } catch (error) {
       return fail('STORAGE_ERROR', error instanceof Error ? error.message : String(error))
     }

@@ -261,6 +261,7 @@ type SessionTreeProps = Pick<
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.badge'
+  | 'sidebar.session.row.subtitle'
   | 'sidebar.session.row.hover'
 > & {
   shortcuts: readonly import('@deepseek-ai/dsh-client-shortcuts/client').ShortcutCatalogEntry[]

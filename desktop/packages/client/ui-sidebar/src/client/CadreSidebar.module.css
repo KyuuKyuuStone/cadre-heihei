@@ -57,16 +57,16 @@
 /* Session role markers (16px leading cell) */
 .supervisorMarker {
   display: inline-block;
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
   border-radius: 2px;
   background: var(--dsw-alias-label-primary);
 }
 
 .workerMarker {
   display: inline-block;
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
   box-sizing: border-box;
   border-radius: 50%;
   border: 1.5px solid var(--dsw-alias-label-secondary);
@@ -79,9 +79,10 @@
   flex: none;
   margin-left: 6px;
   border-radius: 999px;
-  font-size: 10px;
-  line-height: 16px;
-  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  padding: 0 8px;
   white-space: nowrap;
 }
 
@@ -91,8 +92,65 @@
 }
 
 .workerBadge {
-  border: 1px solid var(--dsw-alias-border-l3);
+  border: 1px solid var(--dsw-alias-border-l4);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Row subtitle: job title in plain sight + what the member is doing now. */
+.sessionSubtitle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 15px;
   color: var(--dsw-alias-label-secondary);
+}
+
+.subtitleRole {
+  flex: none;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.subtitleDivider {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.subtitleText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plainSubtitle {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.statusDotRunning,
+.statusDotIdle {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.statusDotRunning {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.statusDotIdle {
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.newSessionHover {
+  display: flex;
+  width: 100%;
 }
 
 /* Retire menu + dialog */

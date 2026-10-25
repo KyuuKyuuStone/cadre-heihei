@@ -104,18 +104,52 @@
   box-sizing: border-box;
 }
 
+/* Project actions stay visible: a hover-revealed strip would vanish under the
+   pointer while it travels from the ＋ trigger into the portaled menu. */
 .projectRow .rowActions {
+  display: inline-flex;
   height: 20px;
 }
 
-/* Session cell (figma): pad 8, a 16px status slot, then a 4px title gap. */
+/* Session cell: pad 8, a 16px status slot, then a 4px title gap. Two text
+   lines (title + identity/activity subtitle) make the row 56px tall. */
 .sessionRow {
-  height: 32px;
+  min-height: 56px;
+  height: auto;
+  box-sizing: border-box;
+  padding-top: 4px;
+  padding-bottom: 4px;
   gap: 0;
 }
 
 .sessionRow .title {
   margin: 0 6px 0 4px;
+}
+
+.rowMain {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.rowTitleLine {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.rowTitleLine .title {
+  flex: 1;
+}
+
+.rowSubtitleLine {
+  display: flex;
+  align-items: center;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .slot {

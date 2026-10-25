@@ -154,6 +154,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'sidebar.session.row.badge': { kind: 'list'; scope: 'root'; owner: SessionRowScheduleOwnerProps }
     /**
+     * Second line under one Session row's title, before the row's time label.
+     * Mounted only for a non-blank Session row; the occupant reads the row's
+     * Session identity and decides its own visibility (an ordinary Session
+     * renders its own subtitle, a non-member renders nothing).
+     */
+    'sidebar.session.row.subtitle': { kind: 'list'; scope: 'root'; owner: SessionRowScheduleOwnerProps }
+    /**
      * Action strip at the end of one project (Workspace) row, after the
      * Workspace's "..." menu. Mounted only for a real Workspace row in the
      * grouped view; the ungrouped bucket and the flat list have no project row.
@@ -514,6 +521,7 @@ export type WorkspaceBrowserProps =
     | 'sidebar.workspaces.session.row.action'
     | 'sidebar.session.row.leading'
     | 'sidebar.session.row.badge'
+    | 'sidebar.session.row.subtitle'
     | 'sidebar.session.row.hover'
   >
   & PropsStore<WorkspaceViewStoreHandle>
