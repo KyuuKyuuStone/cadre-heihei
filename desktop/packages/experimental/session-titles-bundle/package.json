@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-session-titles-bundle",
   "description": "Refresh session titles as new human prompts arrive.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "icon": "./icon.svg",
   "publishConfig": {
     "access": "public"
