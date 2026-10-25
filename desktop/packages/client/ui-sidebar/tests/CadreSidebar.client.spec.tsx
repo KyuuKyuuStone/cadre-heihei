@@ -2,7 +2,7 @@
 import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { CadreProjectRowActions } from '../src/client/CadreSidebar.tsx'
+import { CadreNewSessionRow, CadreProjectRowActions } from '../src/client/CadreSidebar.tsx'
 import type { CadreProjectState } from '../src/client/contract/slots.ts'
 
 afterEach(cleanup)
@@ -33,6 +33,57 @@ function mount(overrides: {
   render(<CadreProjectRowActions {...props} />)
   return { startSession, requestCadreCreate, openLedger }
 }
+
+type RowProps = ComponentProps<typeof CadreNewSessionRow>
+
+function mountRow(supervisors: readonly string[] = []) {
+  const startSession = vi.fn()
+  const requestCadreCreate = vi.fn()
+  const refreshSupervisor = vi.fn()
+  const state = projectState(supervisors)
+  const props: RowProps = {
+    workspaceId: 'ws-1',
+    label: '项目部 A',
+    cwd: '/tmp/a',
+    useProjectState: ((selector: (value: CadreProjectState) => unknown) => selector(state)) as never,
+    startSession,
+    requestCadreCreate,
+    refreshSupervisor,
+  }
+  render(<CadreNewSessionRow {...props} />)
+  return { startSession, requestCadreCreate, refreshSupervisor }
+}
+
+describe('CadreNewSessionRow', () => {
+  it('renders a full-width New Session entry and opens the three-way menu', () => {
+    const b = mountRow()
+    fireEvent.click(screen.getByRole('button', { name: '新会话' }))
+    expect(b.refreshSupervisor).toHaveBeenCalledOnce()
+    expect(screen.getByRole('menuitem', { name: '主管' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '员工' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '普通会话' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '员工' }))
+    expect(b.requestCadreCreate).toHaveBeenCalledExactlyOnceWith('worker', 'ws-1')
+    expect(b.startSession).not.toHaveBeenCalled()
+  })
+
+  it('routes a plain choice to the official startSession for this project', () => {
+    const b = mountRow()
+    fireEvent.click(screen.getByRole('button', { name: '新会话' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '普通会话' }))
+    expect(b.startSession).toHaveBeenCalledExactlyOnceWith('ws-1')
+  })
+
+  it('greys the supervisor item when this project already has one', () => {
+    const b = mountRow(['ws-1'])
+    fireEvent.click(screen.getByRole('button', { name: '新会话' }))
+    const supervisor = screen.getByRole('menuitem', { name: '主管（已有）' })
+    expect(supervisor.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(supervisor)
+    expect(b.requestCadreCreate).not.toHaveBeenCalled()
+  })
+})
 
 describe('CadreProjectRowActions', () => {
   it('renders the ＋ and 台账 affordances on a project row', () => {

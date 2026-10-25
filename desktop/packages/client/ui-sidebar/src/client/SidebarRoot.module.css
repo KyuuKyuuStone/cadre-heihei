@@ -392,8 +392,15 @@
 }
 
 /* New Session: 38px bar, 12px radius (figma 133:7634 geometry, squared-off
-   corners); collapsed it renders as the rail's plain icon control. */
+   corners); collapsed it renders as the rail's plain icon control. The Menu
+   wrapper is a flex span, so both it and the bar must stretch the column. */
+.newSessionMenu {
+  display: flex;
+  width: 100%;
+}
+
 .newSession {
+  width: calc(100% - 4px);
   container-type: inline-size;
   position: relative;
   flex: none;

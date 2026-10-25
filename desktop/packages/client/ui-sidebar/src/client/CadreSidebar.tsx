@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import {
   Button,
+  IconNewChatOutlineRegular,
   IconPlusOutlineRegular,
   Input,
   Menu,
@@ -64,6 +65,14 @@ export interface CadreProjectActionsInjected {
   startSession: (workspaceId: string) => void
   requestCadreCreate: (kind: 'supervisor' | 'worker', workspaceId: string) => void
   openLedger: (request: { projectId: string; label: string; cwd?: string }) => void
+}
+
+/** Face of the full-width New Session row under a project header. */
+export interface CadreNewSessionRowInjected {
+  hooks: { projectState: HostObservable<CadreProjectState> }
+  startSession: (workspaceId: string) => void
+  requestCadreCreate: (kind: 'supervisor' | 'worker', workspaceId: string) => void
+  refreshSupervisor: () => void
 }
 
 /** Face of the Session identity entries. */
@@ -147,6 +156,59 @@ export function CadreProjectRowActions({
         台账
       </Button>
     </span>
+  )
+}
+
+/**
+ * Full-width New Session entry directly under a project header. It opens the
+ * same three-way menu as the project-row ＋, so the position the official
+ * blank-session row used to occupy always offers a create affordance.
+ */
+export function CadreNewSessionRow({
+  workspaceId, useProjectState, startSession, requestCadreCreate, refreshSupervisor,
+}: CadreProjectRowOwner & InjectFace<CadreNewSessionRowInjected>) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const hasSupervisor = useProjectState(state => state.supervisors.has(workspaceId))
+  return (
+    <Menu
+      className={css.newSessionRowMenu}
+      open={menuOpen}
+      onClose={() => { setMenuOpen(false) }}
+      items={[
+        {
+          id: 'supervisor',
+          label: hasSupervisor ? '主管（已有）' : '主管',
+          disabled: hasSupervisor,
+        },
+        { id: 'worker', label: '员工' },
+        { id: 'plain', label: '普通会话' },
+      ]}
+      onSelect={(id) => {
+        setMenuOpen(false)
+        if (id === 'plain') {
+          startSession(workspaceId)
+          return
+        }
+        if (id === 'supervisor' || id === 'worker') requestCadreCreate(id, workspaceId)
+      }}
+      anchor={(
+        <button
+          type="button"
+          className={css.newSessionRow}
+          data-cadre-new-session=""
+          onClick={() => {
+            if (!menuOpen) refreshSupervisor()
+            setMenuOpen(open => !open)
+          }}
+        >
+          <IconNewChatOutlineRegular size={14} />
+          <span>新会话</span>
+        </button>
+      )}
+      portal
+      side="bottom"
+      align="start"
+    />
   )
 }
 

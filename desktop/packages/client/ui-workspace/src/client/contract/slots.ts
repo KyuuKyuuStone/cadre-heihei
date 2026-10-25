@@ -164,6 +164,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'sidebar.workspaces.project.row.action': { kind: 'list'; scope: 'root'; owner: ProjectRowOwnerProps }
     /**
+     * Rows placed directly under one project (Workspace) header, before its
+     * Session list. The same owner share as the row action strip: a product
+     * that replaces the shipped New Session button can restore a full-width
+     * create entry here and open its own menu. No shipped entry occupies the
+     * seat, so an empty seat leaves the list unchanged.
+     */
+    'sidebar.workspaces.project.row.create': { kind: 'list'; scope: 'root'; owner: ProjectRowOwnerProps }
+    /**
      * The rows of one Session's "..." menu, in ascending `order`. ui-workspace
      * registers the shipped rows here — `pin` (100), `rename` (200), `fork`
      * (300), `archive` (400), and `session-id` (450) — so a plugin row is placed
@@ -501,6 +509,7 @@ export type WorkspaceBrowserProps =
   & PropsRenderSlots<
     | 'sidebar.workspaces.directoryFlow'
     | 'sidebar.workspaces.project.row.action'
+    | 'sidebar.workspaces.project.row.create'
     | 'sidebar.workspaces.session.menu.item'
     | 'sidebar.workspaces.session.row.action'
     | 'sidebar.session.row.leading'

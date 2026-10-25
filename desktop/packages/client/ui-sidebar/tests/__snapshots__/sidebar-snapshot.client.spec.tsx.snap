@@ -36,7 +36,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
       </button>
     </div>
     <span
-      class="root"
+      class="root newSessionMenu"
     >
       <button
         aria-label="New session"
@@ -178,7 +178,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
       </button>
     </div>
     <span
-      class="root"
+      class="root newSessionMenu"
     >
       <button
         aria-label="New session"
@@ -296,7 +296,7 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
       </button>
     </div>
     <span
-      class="root"
+      class="root newSessionMenu"
     >
       <button
         aria-label="New session"
@@ -438,7 +438,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
       </button>
     </div>
     <span
-      class="root"
+      class="root newSessionMenu"
     >
       <button
         aria-label="New session"
@@ -585,7 +585,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
       </button>
     </div>
     <span
-      class="root"
+      class="root newSessionMenu"
     >
       <button
         aria-label="新建会话"

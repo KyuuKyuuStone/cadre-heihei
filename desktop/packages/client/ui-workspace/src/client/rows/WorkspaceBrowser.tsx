@@ -256,6 +256,7 @@ type SessionTreeProps = Pick<
   | 'insertWorkspaceBefore' | 't' | 'usePanelInfo' | 'useSessionRank'
 > & PropsRenderSlots<
   | 'sidebar.workspaces.project.row.action'
+  | 'sidebar.workspaces.project.row.create'
   | 'sidebar.workspaces.session.menu.item'
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
@@ -592,6 +593,12 @@ function SessionTree({
               },
             }}
         />
+        {group.workspaceId !== undefined && !sessions.some(node => node.blank)
+          && renderSlot('sidebar.workspaces.project.row.create', {
+            workspaceId: group.workspaceId,
+            label: group.label,
+            ...(group.cwd === undefined ? {} : { cwd: group.cwd }),
+          })}
         {childRows.length > 0 && (
           <div role="group">
             {childRows}

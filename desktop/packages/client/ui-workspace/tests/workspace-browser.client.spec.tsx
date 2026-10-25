@@ -750,6 +750,44 @@ describe('WorkspaceBrowser', () => {
     expect(rendered).toHaveBeenCalledWith('sidebar.workspaces.session.row.action', owner)
   })
 
+  it('offers a create row directly under every real project header', () => {
+    const rendered = vi.fn()
+    const renderSlot: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object) => {
+      rendered(name, owner)
+      return null
+    }
+    mount({
+      useSessions: hook(sessionState([summary('alpha-s', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['alpha-s'])])),
+      renderSlot,
+    })
+    expect(rendered).toHaveBeenCalledWith('sidebar.workspaces.project.row.create', expect.objectContaining({
+      workspaceId: wid('alpha'),
+      label: 'alpha',
+    }))
+    // The ungrouped bucket has no project header, so it gets no create row.
+    expect(rendered).not.toHaveBeenCalledWith('sidebar.workspaces.project.row.create', expect.objectContaining({
+      workspaceId: undefined,
+    }))
+  })
+
+  it('yields the create row seat to an open blank Session', () => {
+    localStorage.clear()
+    createWorkspaceViewStore().create().actions.setGroupExpanded('alpha', true)
+    const rendered = vi.fn()
+    mount({
+      useSessions: hook(sessionState([summary('blank', 1, { blank: true })], { main: sid('blank') })),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['blank'])])),
+      renderSlot: (name: string, owner: object) => {
+        rendered(name, owner)
+        return null
+      },
+    })
+    // The blank Session row occupies the seat instead.
+    expect(screen.getAllByRole('treeitem').some(row => row.textContent?.includes('新会话'))).toBe(true)
+    expect(rendered).not.toHaveBeenCalledWith('sidebar.workspaces.project.row.create', expect.anything())
+  })
+
   it('shows five sessions by default and clears transient show-all when the Workspace collapses', () => {
     const items = Array.from({ length: 7 }, (_, index) => summary(`session-${index + 1}`, 7 - index))
     const b = mount({

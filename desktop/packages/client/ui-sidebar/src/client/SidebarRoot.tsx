@@ -263,6 +263,7 @@ export function SidebarRoot({
 
       {/* The label fades before the hover/focus shortcut, including on translucent backgrounds. */}
       <Menu
+        className={css.newSessionMenu}
         open={createMenuOpen}
         onClose={() => { setCreateMenuOpen(false) }}
         items={[

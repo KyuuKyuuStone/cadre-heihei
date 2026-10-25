@@ -21,9 +21,10 @@ import { CADRE_SKIN_TOKENS, CADRE_THEME_ENABLED, CADRE_THEME_SOURCE } from './ca
 import { CadreCreateDialog, type CadreCreateInjected, type CadreCreateRequest } from './CadreCreateDialog.tsx'
 import { CadreLedgerOverlay, type CadreLedgerInjected, type CadreLedgerRequest } from './CadreLedgerOverlay.tsx'
 import {
-  CadreEditMemberMenuItem, CadreProjectRowActions, CadreRetireMenuItem, CadreSessionBadge,
+  CadreEditMemberMenuItem, CadreNewSessionRow, CadreProjectRowActions, CadreRetireMenuItem, CadreSessionBadge,
   CadreSessionMarker,
-  type CadreEditInjected, type CadreProjectActionsInjected, type CadreRetireInjected,
+  type CadreEditInjected, type CadreNewSessionRowInjected, type CadreProjectActionsInjected,
+  type CadreRetireInjected,
   type CadreRosterBadgeInjected, type CadreRosterMember, type CadreRosterState,
 } from './CadreSidebar.tsx'
 import type { CadreSessionRankService } from './cadre-session-rank.ts'
@@ -428,6 +429,15 @@ export function apply(ctx: ClientContext): void {
     openLedger,
   })
 
+  const newSessionRowInjected = (): CadreNewSessionRowInjected => ({
+    hooks: { projectState },
+    startSession: (workspaceId) => {
+      workspaceNavigation.startSession(workspaceId as Parameters<WorkspaceNavigation['startSession']>[0])
+    },
+    requestCadreCreate: requestCreate,
+    refreshSupervisor: refreshRoster,
+  })
+
   const retireInjected = (): CadreRetireInjected => ({
     hooks: { roster },
     retire: async (sessionId) => {
@@ -556,6 +566,15 @@ export function apply(ctx: ClientContext): void {
     order: 100,
     inject: projectActionsInjected,
   } as never, CadreProjectRowActions as never))
+
+  // Full-width New Session row under each project header: the position the
+  // official blank-session row used to occupy, opening the same three-way menu.
+  ctx.slots.inject('sidebar.workspaces.project.row.create' as never, () => ctx.slots.register({
+    name: 'sidebar.workspaces.project.row.create',
+    id: 'cadre-new-session-row',
+    order: 100,
+    inject: newSessionRowInjected,
+  } as never, CadreNewSessionRow as never))
 
   // Session identity: marker in the leading cell + role badge beside the title.
   ctx.slots.inject('sidebar.session.row.leading' as never, () => ctx.slots.register({
