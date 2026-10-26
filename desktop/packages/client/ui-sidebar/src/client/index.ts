@@ -22,7 +22,7 @@ import { CadreCreateDialog, type CadreCreateInjected, type CadreCreateRequest } 
 import { CadreLedgerOverlay, type CadreLedgerInjected, type CadreLedgerRequest } from './CadreLedgerOverlay.tsx'
 import {
   CadreEditMemberMenuItem, CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
-  CadreSessionBadge, CadreSessionMarker, CadreSessionSubtitle,
+  CadreSessionBadge, CadreSessionSubtitle,
   type CadreEditInjected, type CadreProjectActionsInjected,
   type CadreRetireInjected, type CadreRetireRequest,
   type CadreRosterBadgeInjected, type CadreRosterMember, type CadreRosterState,
@@ -629,13 +629,8 @@ export function apply(ctx: ClientContext): void {
     inject: projectActionsInjected,
   } as never, CadreProjectRowActions as never))
 
-  // Session identity: marker in the leading cell + role badge beside the title.
-  ctx.slots.inject('sidebar.session.row.leading' as never, () => ctx.slots.register({
-    name: 'sidebar.session.row.leading',
-    id: 'cadre-session-marker',
-    order: 100,
-    inject: rosterBadgeInjected,
-  } as never, CadreSessionMarker as never))
+  // Session identity: role badge beside the title, which also tints the title.
+  // The 16px leading cell stays empty — the title's own color carries the role.
   ctx.slots.inject('sidebar.session.row.badge' as never, () => ctx.slots.register({
     name: 'sidebar.session.row.badge',
     id: 'cadre-session-badge',

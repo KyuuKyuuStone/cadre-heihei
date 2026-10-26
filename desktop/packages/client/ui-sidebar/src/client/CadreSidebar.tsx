@@ -9,6 +9,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   IconPlusOutlineRegular,
+  IconShieldOutlineRegular,
+  IconUserOutlineRegular,
   Input,
   Menu,
   Modal,
@@ -279,19 +281,11 @@ export function CadreProjectRowActions({
   )
 }
 
-/** Leading 16px cell: supervisor solid square, employee hollow circle. */
-export function CadreSessionMarker({
-  sessionId, useRoster,
-}: CadreSessionRowOwner & InjectFace<CadreRosterBadgeInjected>) {
-  const members = useRoster(state => state.members)
-  const member = memberOf(members, sessionId)
-  if (member === undefined || member.state === 'departed') return null
-  return member.role === 'supervisor'
-    ? <span className={css.supervisorMarker} aria-hidden="true" />
-    : <span className={css.workerMarker} aria-hidden="true" />
-}
-
-/** Badge beside the title: 主管 / 员工 · 岗位; ordinary Sessions stay bare. */
+/**
+ * Badge beside the title: 主管 (shield) / 员工 · 岗位 (person); ordinary
+ * Sessions stay bare. The unhashed `cadre-role-*` token lets this module's
+ * stylesheet tint the official row title, whose class ui-workspace owns.
+ */
 export function CadreSessionBadge({
   sessionId, useRoster,
 }: CadreSessionRowOwner & InjectFace<CadreRosterBadgeInjected>) {
@@ -299,11 +293,20 @@ export function CadreSessionBadge({
   const member = memberOf(members, sessionId)
   if (member === undefined || member.state === 'departed') return null
   if (member.role === 'supervisor') {
-    return <span className={css.supervisorBadge}>主管</span>
+    return (
+      <span className={`${css.supervisorBadge} cadre-role-supervisor`}>
+        <IconShieldOutlineRegular size={11} aria-hidden="true" />
+        主管
+      </span>
+    )
   }
   const position = member.description?.trim()
   return (
-    <span className={css.workerBadge} title={position === undefined ? undefined : `岗位：${position}`}>
+    <span
+      className={`${css.workerBadge} cadre-role-worker`}
+      title={position === undefined ? undefined : `岗位：${position}`}
+    >
+      <IconUserOutlineRegular size={11} aria-hidden="true" />
       {position === undefined || position === '' ? '员工' : `员工 · ${position}`}
     </span>
   )
@@ -340,8 +343,6 @@ export function CadreSessionSubtitle({
     )
   }
 
-  const position = member.description?.trim()
-  const roleLabel = position === undefined || position === '' ? '员工' : position
   const pending = owned.filter(task => task.status === 'delivered' || task.status === 'review').length
   const activity = running
     ? (current === undefined ? '运行中' : `运行中 · ${current.title}`)
@@ -353,8 +354,6 @@ export function CadreSessionSubtitle({
   return (
     <span className={css.sessionSubtitle}>
       <span className={running ? css.statusDotRunning : css.statusDotIdle} aria-hidden="true" />
-      <span className={css.subtitleRole}>{roleLabel}</span>
-      <span className={css.subtitleDivider}>·</span>
       <span className={css.subtitleText}>{activity}</span>
     </span>
   )

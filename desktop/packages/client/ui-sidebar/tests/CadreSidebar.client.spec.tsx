@@ -4,8 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import {
   CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
+  CadreSessionBadge, CadreSessionSubtitle,
   type CadreRosterState,
 } from '../src/client/CadreSidebar.tsx'
+import { CadreCreateDialog } from '../src/client/CadreCreateDialog.tsx'
 import type { CadreProjectState } from '../src/client/contract/slots.ts'
 
 afterEach(cleanup)
@@ -118,6 +120,62 @@ describe('CadreProjectRowActions', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看“项目部 A”台账' }))
     expect(openLedger).toHaveBeenCalledOnce()
     expect(outer).not.toHaveBeenCalled()
+  })
+})
+
+describe('supervisor create dialog', () => {
+  it('prefills the role name and uses it as the placeholder', () => {
+    render(<CadreCreateDialog {...({
+      useCreateRequest: (selector: (value: unknown) => unknown) => selector({
+        kind: 'supervisor', token: 1, workspaceId: 'ws-1', projectLabel: '项目部 A',
+      }),
+      closeCreate: vi.fn(),
+      createRosterEntry: vi.fn(),
+      refreshSupervisor: vi.fn(),
+    }) as never} />)
+    const input = screen.getByLabelText('名字') as HTMLInputElement
+    expect(input.value).toBe('主管')
+    expect(input.placeholder).toBe('主管')
+  })
+})
+
+describe('session identity', () => {
+  const roster = (member: CadreRosterState['members'][number]): CadreRosterState => ({
+    status: 'ready',
+    members: [member],
+  })
+
+  it('marks the supervisor badge so the row title can be tinted', () => {
+    const state = roster({ sessionId: 's1', role: 'supervisor' })
+    render(<CadreSessionBadge {...({
+      sessionId: 's1',
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+    }) as never} />)
+    expect(screen.getByText('主管').className.split(' ')).toContain('cadre-role-supervisor')
+  })
+
+  it('marks the employee badge with the worker role token and the position', () => {
+    const state = roster({ sessionId: 's1', role: 'worker', description: '前端' })
+    render(<CadreSessionBadge {...({
+      sessionId: 's1',
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+    }) as never} />)
+    const badge = screen.getByText('员工 · 前端')
+    expect(badge.className.split(' ')).toContain('cadre-role-worker')
+    expect(badge.getAttribute('title')).toBe('岗位：前端')
+  })
+
+  it('shows only live activity on the subtitle, not the repeated position', () => {
+    const state = roster({ sessionId: 's1', role: 'worker', description: '前端' })
+    render(<CadreSessionSubtitle {...({
+      sessionId: 's1',
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
+        selector({ byId: {} })) as never,
+      useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+    }) as never} />)
+    expect(screen.getByText('空闲')).toBeTruthy()
+    expect(screen.queryByText('前端')).toBeNull()
   })
 })
 

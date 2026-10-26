@@ -178,7 +178,8 @@ function CadreCreateForm({
   const bridge = (): CadreCreateBridge | undefined => (window as unknown as { cadre?: CadreCreateBridge }).cadre
   const kind = request.kind
   const [supervisor, setSupervisor] = useState<RosterRow | undefined>(undefined)
-  const [name, setName] = useState('')
+  // The supervisor is a singleton role: its default name is the role itself.
+  const [name, setName] = useState(kind === 'supervisor' ? '主管' : '')
   const [duty, setDuty] = useState('')
   const [position, setPosition] = useState('')
   const [templateGroup, setTemplateGroup] = useState<RoleGroup>('dev')
@@ -360,7 +361,7 @@ function CadreCreateForm({
             <Input
               id="cadre-supervisor-name"
               value={name}
-              placeholder="例如：调度员"
+              placeholder="主管"
               disabled={creating}
               onChange={event => { setName(event.target.value) }}
             />
