@@ -29,7 +29,6 @@ describe('cadre project registry', () => {
     const opened: CadreCollabOptions[] = []
     const registry = new CadreProjectRegistry({
       databasePath: '/tmp/cadre.sqlite',
-      role: 'supervisor',
       open: (options) => {
         opened.push(options)
         return fakeCollab(options.projectId)
@@ -45,11 +44,10 @@ describe('cadre project registry', () => {
     expect(opened.map(options => options.projectId)).toEqual(['workspace-a', 'workspace-b', 'workspace-a'])
     expect(opened[0]).toMatchObject({
       sessionId: 'session-a',
-      role: 'supervisor',
       databasePath: '/tmp/cadre.sqlite',
       busyTimeoutMs: 15_000,
     })
-    expect(opened[2]).toMatchObject({ sessionId: 'session-b', role: 'supervisor' })
+    expect(opened[2]).toMatchObject({ sessionId: 'session-b' })
     expect(registry.size).toBe(3)
 
     registry.close()
@@ -61,7 +59,6 @@ describe('cadre project registry', () => {
   it('keeps a project unopened when the write library is unavailable', () => {
     const registry = new CadreProjectRegistry({
       databasePath: '/tmp/cadre.sqlite',
-      role: 'supervisor',
       open: () => undefined,
     })
     expect(registry.forProject('workspace-a', 'session-a')).toBeUndefined()

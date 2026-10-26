@@ -146,6 +146,17 @@ if (!existsSync(collabOut)) {
   check('cadre-collab-build', true)
 }
 
+// 5c) host-collab 状态机桥接：report_task 走 transitionTx 才能记录 from_status；
+//     缺失时汇报 fail-closed（报错而非裸写状态），但打包后才发现等于不可用。
+const hostLedgerOut = join(APP_ROOT, '..', '..', 'packages', 'cadre', 'host-collab', 'lib', 'cadre-ledger.cjs')
+if (!existsSync(hostLedgerOut)) {
+  warn('cadre-host-ledger-build', 'host-collab/lib/cadre-ledger.cjs 缺失——运行 node desktop/scripts/build-cadre-collab.mjs 重建，否则 report_task 无法记录 from_status')
+} else if (statSync(hostLedgerOut).mtimeMs < newestSrcMtime) {
+  warn('cadre-host-ledger-build', 'host-collab/lib/cadre-ledger.cjs 比源码旧——运行 node desktop/scripts/build-cadre-collab.mjs 重建')
+} else {
+  check('cadre-host-ledger-build', true)
+}
+
 // 6) Stale-install cleanup macro must stay wired.
 // 6b) primary-runtime integrity — prepare-runtime 整树重建，中断即残缺（node.exe/python 缺失时 dev 无法启动）。
 const runtimeRoot = join(APP_ROOT, '.desktop-build', 'targets', 'win-x64', 'runtime', 'primary-runtime', 'dependencies')

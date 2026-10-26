@@ -11,14 +11,10 @@
 import { DispatchService } from '../../app/src/collab/dispatch/dispatch-service.ts'
 import { SqliteCollabStore } from '../../app/src/collab/dispatch/sqlite-dispatch.ts'
 
-export type CadreActorRole = 'supervisor' | 'assignee'
-
 export interface CadreCollabOptions {
   readonly databasePath: string
   readonly projectId: string
   readonly sessionId: string
-  /** Task-level actor kind; a roster `worker` maps to ledger `assignee`. */
-  readonly role: CadreActorRole
   readonly busyTimeoutMs?: number
 }
 
@@ -68,23 +64,29 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
     databasePath: options.databasePath,
     ...(options.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: options.busyTimeoutMs }),
   })
-  // A fresh shell database has no roster; without this the configured local
-  // identity is rejected as FORBIDDEN_ACTOR and the first write never lands.
-  // Seed only when the project roster is empty, never override existing rows.
-  const existing = store.listMembers(options.projectId as never)
-  if (existing.length === 0) {
-    store.addMember({
-      projectId: options.projectId as never,
-      sessionId: options.sessionId as never,
-      role: options.role === 'assignee' ? 'worker' : 'supervisor',
-      state: 'available',
-      displayName: options.sessionId,
-    })
-    console.log(`cadre-ledger roster seeded project=${options.projectId} session=${options.sessionId} role=${options.role}`)
-  }
   console.log(`cadre-ledger roster project=${options.projectId} size=${store.listMembers(options.projectId as never).length}`)
   const service = new DispatchService(store)
   const binding = { projectId: options.projectId, sessionId: options.sessionId }
+  /**
+   * Actor kind from the roster, never from the caller or the process.
+   *
+   * The write path is the only place that names an actor kind, so an
+   * environment variable (the old `CADRE_ROLE` fallback) or a renderer-supplied
+   * role cannot grant supervisor rights: a roster `worker` maps to the
+   * ledger's `assignee`, and the ledger still verifies that the session really
+   * is the task's assignee or the project's supervisor (`validation.ts` +
+   * `SqliteSupervisorResolver`). A session without a roster row gets no actor
+   * kind at all.
+   */
+  const actorRole = (): 'supervisor' | 'assignee' | undefined => {
+    // `sup-1` is the legacy placeholder row without a Session; it must never
+    // act, or any caller naming that id could borrow supervisor rights.
+    if (options.sessionId === 'sup-1') return undefined
+    const member = store.listMembers(options.projectId as never)
+      .find(row => row.sessionId === options.sessionId && row.state !== 'departed')
+    if (member === undefined) return undefined
+    return member.role === 'supervisor' ? 'supervisor' : 'assignee'
+  }
   return {
     databasePath: options.databasePath,
     dispatch(input) {
@@ -111,7 +113,21 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
         if (!current.ok) return current
         from = current.value.status
       }
-      const actor = { kind: 'session' as const, sessionId: options.sessionId, role: options.role }
+      const role = actorRole()
+      if (role === undefined) {
+        return {
+          ok: false,
+          error: {
+            code: 'FORBIDDEN_ACTOR',
+            message: '调用会话不在本项目花名册（或已离职），无法执行验收迁移',
+            retryable: false,
+            projectId: options.projectId,
+            actorSessionId: options.sessionId,
+            reasonCategory: 'not-member',
+          },
+        }
+      }
+      const actor = { kind: 'session' as const, sessionId: options.sessionId, role }
       // One-step accept: the panel's "通过验收" on a delivered task runs the
       // mandatory delivered→review→verified chain as two real ledger
       // transitions (two events). Each step still passes validation.ts and the

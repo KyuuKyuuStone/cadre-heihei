@@ -1,12 +1,9 @@
 /** Types for the prebuilt `lib/cadre-collab.cjs` write-path library. */
 
-export type CadreActorRole = 'supervisor' | 'assignee'
-
 export interface CadreCollabOptions {
   readonly databasePath: string
   readonly projectId: string
   readonly sessionId: string
-  readonly role: CadreActorRole
   readonly busyTimeoutMs?: number
 }
 

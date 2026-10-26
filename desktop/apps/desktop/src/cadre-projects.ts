@@ -9,7 +9,7 @@
  * together at shutdown; the ledger file itself stays shared (`cadre.sqlite`),
  * which is what keeps reads and writes on the same database.
  */
-import type { CadreActorRole, CadreCollab, CadreCollabOptions } from './cadre-collab-api.ts'
+import type { CadreCollab, CadreCollabOptions } from './cadre-collab-api.ts'
 import type { CadreMemberRow } from './cadre-ledger.ts'
 
 /** Opens the bundled write library for one project. */
@@ -17,8 +17,6 @@ export type CadreCollabOpener = (options: CadreCollabOptions) => CadreCollab | u
 
 export interface CadreProjectRegistryOptions {
   readonly databasePath: string
-  /** Task-level actor kind; the Session identity is supplied per request. */
-  readonly role: CadreActorRole
   readonly open: CadreCollabOpener
   /**
    * SQLite lock wait for every per-project connection.
@@ -55,7 +53,6 @@ export class CadreProjectRegistry {
       databasePath: this.#options.databasePath,
       projectId,
       sessionId,
-      role: this.#options.role,
       busyTimeoutMs: this.#options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS,
     })
     if (opened !== undefined) this.#stores.set(key, opened)

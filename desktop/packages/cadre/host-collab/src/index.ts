@@ -19,6 +19,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
 
 interface SessionController {
@@ -196,11 +197,51 @@ function ambiguityError(sessionId: string, projects: readonly string[]): Error {
   return new Error(`会话同时属于多个项目部（session=${sessionId} projects=${projects.join(',')}），无法确定归属`)
 }
 
+/**
+ * The `app/src/collab/**` state machine, bundled next to this plugin by
+ * `desktop/scripts/build-cadre-collab.mjs`.
+ *
+ * Every status change goes through it so `task_events.from_status` is recorded
+ * and the permission matrix (roster supervisor / task assignee) is enforced in
+ * one place. A missing bridge is a hard failure: falling back to a direct
+ * `UPDATE tasks` would silently write unauditable transitions.
+ */
+interface HostLedgerBridge {
+  advanceReportToDelivered(input: {
+    readonly databasePath: string
+    readonly projectId: string
+    readonly taskId: string
+    readonly actorSessionId: string
+    readonly idempotencyBase: string
+  }): { readonly ok: true } | { readonly ok: false; readonly code: string; readonly message: string }
+}
+
+const requireHostLedger = createRequire(import.meta.url)
+let hostLedgerBridge: HostLedgerBridge | undefined
+
+function loadHostLedgerBridge(): HostLedgerBridge {
+  if (hostLedgerBridge !== undefined) return hostLedgerBridge
+  let mod: Partial<HostLedgerBridge>
+  try {
+    mod = requireHostLedger('./cadre-ledger.cjs') as Partial<HostLedgerBridge>
+  } catch (error) {
+    throw new Error('协作状态机不可用：缺少 lib/cadre-ledger.cjs，请运行 node desktop/scripts/build-cadre-collab.mjs'
+      + `（${error instanceof Error ? error.message : String(error)}）`)
+  }
+  if (typeof mod.advanceReportToDelivered !== 'function') {
+    throw new Error('协作状态机不可用：cadre-ledger.cjs 未导出 advanceReportToDelivered')
+  }
+  hostLedgerBridge = mod as HostLedgerBridge
+  return hostLedgerBridge
+}
+
 /** Ledger writes the collaboration tools need; one SQLite handle for the Host process. */
 class Ledger {
   readonly db: DatabaseSync
+  private readonly path: string
 
   constructor(path: string) {
+    this.path = path
     this.db = new DatabaseSync(path)
     this.db.exec('PRAGMA busy_timeout = 5000')
     this.db.exec(DDL)
@@ -380,6 +421,10 @@ class Ledger {
       this.db.prepare(`UPDATE messages SET delivery_state = 'delivered', delivered_at = ? WHERE message_id = ?`).run(now, messageId)
       this.db.prepare(`UPDATE tasks SET latest_dispatch_message_id = ?, dispatched_at = ?, updated_at = ? WHERE task_id = ?`)
         .run(messageId, now, now, taskId)
+      // Creation event, not a transition: `beginDispatch` already inserted the
+      // task as `dispatched`, so there is no prior status. This matches
+      // `app/src/collab`'s `createTaskTx`, whose create event also carries a
+      // NULL `from_status`.
       this.db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
         actor_session_id, message_id, idempotency_key, at)
         VALUES (?, ?, ?, NULL, 'dispatched', ?, ?, ?, ?)`).run(
@@ -406,33 +451,44 @@ class Ledger {
     }
   }
 
-  /** Record one employee report and move the task to `delivered`. */
+  /**
+   * Record one employee report and move the task to `delivered`.
+   *
+   * The message row is written first (pending), then the status change runs
+   * through the shared state machine as real transitions, so every hop lands
+   * in `task_events` with its `from_status`. A failed transition deletes the
+   * pending message: a report that did not reach the ledger leaves no trace,
+   * and the employee sees the error instead of a silent "delivered".
+   */
   report(projectId: string, input: { taskId: string; summary: string; deliverables: readonly string[]; reporter: string }): string {
     const now = new Date().toISOString()
     const messageId = randomUUID()
     const sha = createHash('sha256').update(input.summary).digest('hex')
     const supervisor = this.supervisor(projectId)
-    this.db.exec('BEGIN IMMEDIATE')
+    this.db.prepare(`INSERT INTO messages (message_id, project_id, task_id, direction, channel,
+      from_session_id, to_session_id, body, body_bytes, body_sha256, preview, deliverables_json,
+      idempotency_key, delivery_state, received_at, delivered_at)
+      VALUES (?, ?, ?, 'report', 'session', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
+      messageId, projectId, input.taskId, input.reporter, supervisor ?? null, input.summary,
+      Buffer.byteLength(input.summary), sha, input.summary.slice(0, 120),
+      JSON.stringify(input.deliverables), `report:${input.taskId}`, now, now)
     try {
-      this.db.prepare(`INSERT INTO messages (message_id, project_id, task_id, direction, channel,
-        from_session_id, to_session_id, body, body_bytes, body_sha256, preview, deliverables_json,
-        idempotency_key, delivery_state, received_at, delivered_at)
-        VALUES (?, ?, ?, 'report', 'session', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
-        messageId, projectId, input.taskId, input.reporter, supervisor ?? null, input.summary,
-        Buffer.byteLength(input.summary), sha, input.summary.slice(0, 120),
-        JSON.stringify(input.deliverables), `report:${input.taskId}`, now, now)
-      this.db.prepare(`UPDATE tasks SET status = 'delivered', delivered_at = ?, latest_report_message_id = ?,
-        updated_at = ?, version = version + 1 WHERE task_id = ?`).run(now, messageId, now, input.taskId)
-      this.db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
-        actor_session_id, reason, message_id, idempotency_key, at)
-        VALUES (?, ?, ?, NULL, 'delivered', ?, NULL, ?, ?, ?)`).run(
-        randomUUID(), projectId, input.taskId, input.reporter, messageId, `report:${input.taskId}`, now)
-      this.db.exec('COMMIT')
+      const advanced = loadHostLedgerBridge().advanceReportToDelivered({
+        databasePath: this.path,
+        projectId,
+        taskId: input.taskId,
+        actorSessionId: input.reporter,
+        idempotencyBase: `report:${input.taskId}`,
+      })
+      if (!advanced.ok) throw new Error(`汇报状态迁移被拒（${advanced.code}）：${advanced.message}`)
+      // Metadata only: the status and timestamps belong to the state machine.
+      this.db.prepare(`UPDATE tasks SET latest_report_message_id = ?, updated_at = ? WHERE task_id = ?`)
+        .run(messageId, now, input.taskId)
+      return messageId
     } catch (error) {
-      this.db.exec('ROLLBACK')
+      this.db.prepare('DELETE FROM messages WHERE message_id = ?').run(messageId)
       throw error
     }
-    return messageId
   }
 
   /** Record one refused dispatch so a retry can replay the exact spec. */

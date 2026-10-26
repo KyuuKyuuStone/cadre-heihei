@@ -27,7 +27,6 @@ import { resolveDesktopPaths } from './paths.ts'
 import { CadreLedger, requireProjectId, resolveCadreLedgerPath } from './cadre-ledger.ts'
 import { CadreProjectRegistry, activeMember } from './cadre-projects.ts'
 import type {
-  CadreActorRole,
   CadreCollab,
   CadreCollabOptions,
   CadreDispatchInput,
@@ -618,21 +617,17 @@ async function main(): Promise<void> {
   // → Electron userData), so read and write can never target different files.
   const cadreLedgerPath = resolveCadreLedgerPath(app.getPath('userData'))
   // Write-path actor (milestone B③): the calling Session names itself in every
-  // IPC request; there is no shell-wide identity. CADRE_ROLE=worker maps a
-  // roster worker to the ledger's `assignee` actor kind.
-  const cadreEnvRole = process.env.CADRE_ROLE?.trim()
-  const cadreActorRole: CadreActorRole = cadreEnvRole === 'worker' || cadreEnvRole === 'assignee'
-    ? 'assignee'
-    : 'supervisor'
+  // IPC request; the actor kind is resolved from the project roster inside the
+  // write library (`cadre-collab/entry.ts`), never from an environment variable
+  // and never from a renderer-supplied role.
   // Migrate first, then attach the read-only connection; no project is bound.
   initCadreLedgerSchema(cadreLedgerPath)
   const cadreCollab = new CadreProjectRegistry({
     databasePath: cadreLedgerPath,
-    role: cadreActorRole,
     open: openCadreCollabFromDisk,
   })
   const cadreLedger = new CadreLedger(cadreLedgerPath)
-  console.log(`cadre-ledger project-scoped path=${cadreLedgerPath} actor=per-request/${cadreActorRole}`)
+  console.log(`cadre-ledger project-scoped path=${cadreLedgerPath} actor=roster-per-request`)
   // Milestone ④: provider catalogue shares the cadre SQLite file; migration is
   // additive and stores credential references only.
   let cadreProviders: ProviderStore | undefined
@@ -963,9 +958,12 @@ async function main(): Promise<void> {
    *
    * `unavailable` is distinct from `foreign`: a broken read must not be
    * reported as an authorization failure, and a foreign project must not be
-   * opened (opening seeds a roster and would silently enrol the caller).
+   * opened (a write store is only opened for a caller the roster knows).
    */
   const cadreMembership = (projectId: string, sessionId: string): 'member' | 'foreign' | 'unavailable' => {
+    // `sup-1` is the legacy roster placeholder without a Session; no IPC caller
+    // can be it, so naming it is a forged identity, not a membership.
+    if (sessionId === 'sup-1') return 'foreign'
     try {
       const members = cadreLedger.listMembers(projectId).rows
       return activeMember(members, sessionId) === undefined ? 'foreign' : 'member'
@@ -1015,7 +1013,7 @@ async function main(): Promise<void> {
       return { ok: false, code: 'LEDGER_UNAVAILABLE', message: '台账不可用，无法校验项目归属' }
     }
     if (membership === 'foreign') {
-      console.log(`cadre:dispatchTask project=${input.projectId} actor=${input.sessionId}/${cadreActorRole} ` +
+      console.log(`cadre:dispatchTask project=${input.projectId} actor=${input.sessionId} ` +
         `path=${cadreLedgerPath} ok=false code=CROSS_PROJECT_DENIED`)
       return { ok: false, code: 'CROSS_PROJECT_DENIED', message: '跨项目请求已拒绝' }
     }
@@ -1033,7 +1031,7 @@ async function main(): Promise<void> {
       const failure = asCadreFailure(result)
       const inputLog = `to=${input.to} idempotencyKey=${input.idempotencyKey ?? '(auto)'}`
       if (failure !== undefined) {
-        console.log(`cadre:dispatchTask project=${input.projectId} ${inputLog} actor=${input.sessionId}/${cadreActorRole} ` +
+        console.log(`cadre:dispatchTask project=${input.projectId} ${inputLog} actor=${input.sessionId} ` +
           `path=${cadreLedgerPath} ok=false code=${failure.code}`)
         return failure
       }
@@ -1042,7 +1040,7 @@ async function main(): Promise<void> {
       const snapshot = collab.listTasks()
       const taskId = (result as { taskId?: unknown }).taskId
       const ledgerUpdated = (result as { ledgerUpdated?: unknown }).ledgerUpdated
-      console.log(`cadre:dispatchTask project=${input.projectId} ${inputLog} actor=${input.sessionId}/${cadreActorRole} ` +
+      console.log(`cadre:dispatchTask project=${input.projectId} ${inputLog} actor=${input.sessionId} ` +
         `path=${cadreLedgerPath} ok=true task=${String(taskId)} ledgerUpdated=${String(ledgerUpdated)} ` +
         `rows=${snapshot.rows.length} readback=write-connection`)
       return { ...(result as Record<string, unknown>), tasks: snapshot.rows }
@@ -1065,7 +1063,7 @@ async function main(): Promise<void> {
       return { ok: false, code: 'LEDGER_UNAVAILABLE', message: '台账不可用，无法校验项目归属' }
     }
     if (membership === 'foreign') {
-      console.log(`cadre:transitionTask project=${input.projectId} actor=${input.sessionId}/${cadreActorRole} ` +
+      console.log(`cadre:transitionTask project=${input.projectId} actor=${input.sessionId} ` +
         `path=${cadreLedgerPath} ok=false code=CROSS_PROJECT_DENIED`)
       return { ok: false, code: 'CROSS_PROJECT_DENIED', message: '跨项目请求已拒绝' }
     }
@@ -1084,12 +1082,12 @@ async function main(): Promise<void> {
       const fields = `project=${input.projectId} task=${input.taskId} from=${input.from ?? '(current)'} to=${input.to} ` +
         `reason=${input.reason ?? '(none)'} idempotencyKey=${input.idempotencyKey ?? '(auto)'}`
       if (view.ok !== true) {
-        console.log(`cadre:transitionTask ${fields} actor=${input.sessionId}/${cadreActorRole} path=${cadreLedgerPath} ` +
+        console.log(`cadre:transitionTask ${fields} actor=${input.sessionId} path=${cadreLedgerPath} ` +
           `ok=false code=${String(view.code ?? 'INTERNAL_ERROR')}`)
         return view
       }
       const snapshot = collab.listTasks()
-      console.log(`cadre:transitionTask ${fields} actor=${input.sessionId}/${cadreActorRole} path=${cadreLedgerPath} ` +
+      console.log(`cadre:transitionTask ${fields} actor=${input.sessionId} path=${cadreLedgerPath} ` +
         `ok=true status=${String((view as { status?: unknown }).status)} ledgerUpdated=true ` +
         `rows=${snapshot.rows.length} readback=write-connection`)
       return { ...view, ledgerUpdated: true, tasks: snapshot.rows }
