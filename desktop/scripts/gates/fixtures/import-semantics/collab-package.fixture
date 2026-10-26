@@ -1,0 +1,4 @@
+// COLLAB-ISO 坏样本：协作状态机不得依赖产品包。
+import { Session } from '@deepseek-ai/dsh-session'
+
+export const probe = Session

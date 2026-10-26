@@ -1,0 +1,6 @@
+// 坏样本：故意失败的 vitest 用例，用于验证 smoke 门禁“注入必红”。
+import { expect, test } from 'vitest'
+
+test('gate fixture must fail', () => {
+  expect(1).toBe(2)
+})

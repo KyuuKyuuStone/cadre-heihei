@@ -1,0 +1,4 @@
+// RENDERER-NODE 坏样本：renderer 不得直接 import Electron。
+import { ipcRenderer } from 'electron'
+
+export const probe = ipcRenderer

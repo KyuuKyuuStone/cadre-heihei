@@ -7,7 +7,8 @@
 | file-size | `check-file-size.ts` | 源文件 >2500 行失败；基线条目只许下调；豁免须带 reason/decisionRef/expiresInVersion |
 | import-semantics | `check-import-semantics.ts` | L2/L3 node 内建模块 promise/回调套件混用；UI-ISO（`packages/client/ui-*/src`、`apps/desktop/src/client` 禁 `node:*`/`electron`）；COLLAB-ISO（`cadre-collab` 禁 electron、禁引用 `apps/**`/`packages/**`） |
 | tsc-baseline | `check-tsc-baseline.ts` | host/client 两侧 tsc 诊断签名棘轮，只许降；新增签名/计数超即失败 |
-| smoke | `smoke.ts` | vitest 冒烟子集，必须收集 >0 例且 skipped=0、fail=0 |
+| smoke | `smoke.ts` | 双 runner：`cadre-collab/actor.test.ts` 走 node:test，桌面壳/宿主桥接走 vitest；每个 runner 必须收集 >0 例且 skipped=0、fail=0 |
+| 判别力自证 | `two-state-evidence.ts` | 对每道门禁「注入坏样本必红 → 复原必绿」，两态输出落 `evidence/` |
 
 ## 命令
 
@@ -17,6 +18,7 @@ pnpm run gates:file-size
 pnpm run gates:imports
 pnpm run gates:tsc
 pnpm run gates:smoke
+pnpm run gates:evidence   # 判别力自证（约 40s）
 ```
 
 - `lint` 末尾接 file-size / import-semantics / tsc-baseline；`test` 末尾接 smoke。
