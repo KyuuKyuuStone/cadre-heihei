@@ -303,7 +303,7 @@ describe('DiscoverSection', () => {
     expect(openPackage).toHaveBeenCalledWith('dsh-b')
     fireEvent.click(git.getByRole('button', { name: en.backToList }))
     fireEvent.click(card('dsh-g').getByRole('button', { name: 'View dsh-g' }))
-    expect(screen.getAllByText('This version is not compatible with the running DSH 0.2.0; it requires DSH 0.1.0.')).toHaveLength(2)
+    expect(screen.getAllByText('This version is not compatible with the running Cadre 0.2.0; it requires Cadre 0.1.0.')).toHaveLength(2)
     fireEvent.click(screen.getByRole('button', { name: en.backToList }))
     fireEvent.click(card('dsh-h').getByRole('button', { name: 'View dsh-h' }))
     expect(screen.getAllByText(en.exempted)).toHaveLength(2)

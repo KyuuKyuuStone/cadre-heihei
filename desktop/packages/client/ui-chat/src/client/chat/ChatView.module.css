@@ -144,8 +144,10 @@
   flex-direction: column;
   align-items: flex-start;
   --dsh-chat-flow-gap: 12px;
-  --dsw-alias-label-shimmer: var(--dsw-alias-label-deep-diving-shimmer);
-  color: var(--dsw-alias-label-deep-diving);
+  /* Cadre's running state uses the product's business green, not the official
+     DeepSeek blue; the shimmer is a lighter tint of the same color. */
+  --dsw-alias-label-shimmer: color-mix(in srgb, var(--dsw-alias-state-business-primary) 60%, var(--dsw-alias-label-primary));
+  color: var(--dsw-alias-state-business-primary);
   font-size: calc(var(--dsh-content-font-size, 14px) - 2px);
   line-height: calc(22px + var(--dsh-content-font-delta, 0px));
 }
@@ -180,41 +182,43 @@
   font-variant-numeric: tabular-nums;
 }
 
-.runningIcon {
-  position: relative;
+/* Cadre seal: rounded-square outline with a centered dot. Both breathe on the
+   status color; the footprint matches the old 14px icon so rows do not move. */
+.runningCadre {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
+  box-sizing: border-box;
   width: calc(14px + var(--dsh-content-font-delta, 0px));
   height: calc(14px + var(--dsh-content-font-delta, 0px));
-  /* The fixed footprint contains the animation's layout and paint. */
-  contain: strict;
-  overflow: hidden;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  animation: cadre-running-seal 1.4s ease-in-out infinite;
 }
 
-.runningWhaleAnimated {
-  display: none;
-  position: absolute;
-  inset: 0;
+.runningCadreCore {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: cadre-running-core 1.4s ease-in-out infinite;
 }
 
-.runningWhaleStill {
-  display: initial;
+@keyframes cadre-running-seal {
+  0%, 100% { opacity: 0.55; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1); }
 }
 
-@supports (mask-mode: alpha) and (mask-image: url('')) {
-  @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
-    .runningWhaleAnimated {
-      display: block;
-      background: currentColor;
-      mask: url('./running-whale@2x.png') center / 100% 100% no-repeat;
-      mask-mode: alpha;
-      /* Keep animated-mask repaints on an icon-sized composited layer. */
-      will-change: transform;
-    }
+@keyframes cadre-running-core {
+  0%, 100% { opacity: 0.35; transform: scale(0.7); }
+  50% { opacity: 1; transform: scale(1); }
+}
 
-    .runningWhaleStill {
-      display: none;
-    }
+@media (prefers-reduced-motion: reduce) {
+  .runningCadre,
+  .runningCadreCore {
+    animation: none;
   }
 }
 

@@ -132,7 +132,7 @@ describe('supervisor create dialog', () => {
       closeCreate: vi.fn(),
       createRosterEntry: vi.fn(),
       refreshSupervisor: vi.fn(),
-    }) as never} />)
+    } as unknown as ComponentProps<typeof CadreCreateDialog>)} />)
     const input = screen.getByLabelText('名字') as HTMLInputElement
     expect(input.value).toBe('主管')
     expect(input.placeholder).toBe('主管')
@@ -143,6 +143,7 @@ describe('session identity', () => {
   const roster = (member: CadreRosterState['members'][number]): CadreRosterState => ({
     status: 'ready',
     members: [member],
+    error: null,
   })
 
   it('marks the supervisor badge so the row title can be tinted', () => {
@@ -150,7 +151,7 @@ describe('session identity', () => {
     render(<CadreSessionBadge {...({
       sessionId: 's1',
       useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
-    }) as never} />)
+    } as unknown as ComponentProps<typeof CadreSessionBadge>)} />)
     expect(screen.getByText('主管').className.split(' ')).toContain('cadre-role-supervisor')
   })
 
@@ -159,7 +160,7 @@ describe('session identity', () => {
     render(<CadreSessionBadge {...({
       sessionId: 's1',
       useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
-    }) as never} />)
+    } as unknown as ComponentProps<typeof CadreSessionBadge>)} />)
     const badge = screen.getByText('员工 · 前端')
     expect(badge.className.split(' ')).toContain('cadre-role-worker')
     expect(badge.getAttribute('title')).toBe('岗位：前端')
@@ -173,7 +174,7 @@ describe('session identity', () => {
       useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
         selector({ byId: {} })) as never,
       useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
-    }) as never} />)
+    } as unknown as ComponentProps<typeof CadreSessionSubtitle>)} />)
     expect(screen.getByText('空闲')).toBeTruthy()
     expect(screen.queryByText('前端')).toBeNull()
   })
