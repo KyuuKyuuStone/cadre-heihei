@@ -158,24 +158,6 @@ export function prepareDevelopmentProject(options: DevelopmentProjectOptions): s
   const hostLink = join(destinationModules, '@deepseek-ai', 'dsh-desktop-host')
   removeOwnedPath(hostLink)
   linkDirectory(options.hostDir, hostLink)
-  // Spike: expose the local Cadre client plugin to the disposable desktop profile.
-  const cadrePlugin = join(options.cliDir, '..', '..', 'packages', 'client', 'ui-cadre')
-  if (existsSync(cadrePlugin)) {
-    const cadreLink = join(destinationModules, '@deepseek-ai', 'dsh-client-ui-cadre')
-    removeOwnedPath(cadreLink)
-    linkDirectory(cadrePlugin, cadreLink)
-    const projectManifestPath = join(options.projectDir, 'package.json')
-    const projectManifest = JSON.parse(readFileSync(projectManifestPath, 'utf8'))
-    // Mirror `dsh plugin add`: the bundle must also be a profile dependency so
-    // the loader can resolve it from the profile's own node_modules.
-    projectManifest.dependencies = {
-      ...projectManifest.dependencies,
-      '@deepseek-ai/dsh-client-ui-cadre': `link:${realpathSync(cadrePlugin).replaceAll('\\', '/')}`,
-    }
-    projectManifest.dsh.profile.bundles.push('@deepseek-ai/dsh-client-ui-cadre')
-    writeFileSync(projectManifestPath, `${JSON.stringify(projectManifest, undefined, 2)}\n`)
-    names.push('@deepseek-ai/dsh-client-ui-cadre')
-  }
   const sharedPackages = [...new Set([...names, '@deepseek-ai/dsh', '@deepseek-ai/dsh-desktop-host'])].flatMap((name) => {
     const manifest = readManifest(join(destinationModules, name, 'package.json'))
     return typeof manifest.version === 'string' ? [{ name, version: manifest.version, path: `node_modules/${name}` }] : []
