@@ -9,7 +9,7 @@
  *    tail smoke. Sweep the repo so renames cannot strand us again.
  * 3. Icon assets: the installer shipped a stale whale because installer.ico was a
  *    different file from icon.ico, and nothing validated sizes/contents.
- * 4. NSIS wiring: installerIcon/installerHeader/installerSidebar must point at real
+ * 4. NSIS wiring: installerIcon/installerSidebar must point at real
  *    files, and header art only matters for assisted (oneClick=false) installers.
  * 5. Secret scan: reuse check-no-secrets.mjs over packaging inputs.
  * 6. Stale-install cleanup: the customInstall cleanup macro must stay wired.
@@ -108,11 +108,15 @@ for (const key of ['installerIcon', 'uninstallerIcon', 'installerSidebar', 'unin
   check(`nsis-${key}`, existsSync(resolved) || existsSync(path), existsSync(resolved) ? resolved.slice(APP_ROOT.length + 1) : `missing: ${resolved} / ${path}`)
 }
 const oneClick = /oneClick:\s*false/.test(configText)
-check('nsis-assisted-mode', oneClick, oneClick ? 'oneClick=false — header/sidebar art applies' : 'oneClick=true — header art ignored')
-const headerBmp = join(APP_ROOT, '.desktop-build', 'targets', 'win-x64', 'installer-ui', 'brand.bmp')
+check('nsis-assisted-mode', oneClick, oneClick ? 'oneClick=false — custom nsDialogs pages (self-drawn)' : 'oneClick=true')
+// NOTE: existence checks only — the installer is a fully self-drawn window
+// (installer/pages.nsh + window-frame.dll). electron-builder MUI art keys such
+// as installerHeader are never painted in this framework; brand.bmp is the real
+// art path (all three pages draw it). "file exists" does NOT guarantee on-screen.
+const brandBmp = join(APP_ROOT, '.desktop-build', 'targets', 'win-x64', 'installer-ui', 'brand.bmp')
 const sidebarBmp = join(APP_ROOT, '.desktop-build', 'targets', 'win-x64', 'installer-ui', 'uninstaller-sidebar.bmp')
-check('nsis-header-bmp', existsSync(headerBmp) ? true : false, existsSync(headerBmp) ? `${statSync(headerBmp).size}B (generated; 150x57-equivalent art)` : 'run scripts/prepare-windows-installer.ps1 first')
-check('nsis-sidebar-bmp', existsSync(sidebarBmp), existsSync(sidebarBmp) ? `${statSync(sidebarBmp).size}B (164x314-equivalent art)` : 'run scripts/prepare-windows-installer.ps1 first')
+check('nsis-brand-bmp', existsSync(brandBmp), existsSync(brandBmp) ? `${statSync(brandBmp).size}B (self-drawn pages paint brand; exists ≠ on-screen — confirm by real install)` : 'run scripts/prepare-windows-installer.ps1 first')
+check('nsis-sidebar-bmp', existsSync(sidebarBmp), existsSync(sidebarBmp) ? `${statSync(sidebarBmp).size}B (uninstaller wiring; exists ≠ on-screen)` : 'run scripts/prepare-windows-installer.ps1 first')
 
 // 5) Secret scan over packaging inputs.
 try {

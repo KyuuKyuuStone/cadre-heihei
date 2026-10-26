@@ -270,8 +270,10 @@ export function createElectronBuilderConfig(
       target: ['AppImage'],
     },
     nsis: {
-      // 安装器/卸载器头部图标与 exe 图标分开：NSIS 用 installer.ico 的 32/48/256 档。
-      installerHeader: join(buildPaths.root, 'installer-ui', 'nsis-header.bmp'),
+      // installerIcon/uninstallerIcon are NSIS compile-time icons (exe shell icon),
+      // separate from the app icon. No installerHeader here: the installer is a
+      // fully self-drawn window (installer/pages.nsh + window-frame.dll) — MUI
+      // header art is never painted; the three pages draw brand.bmp instead.
       installerIcon: fileURLToPath(new URL('../resources/installer.ico', import.meta.url)),
       uninstallerIcon: fileURLToPath(new URL('../resources/installer.ico', import.meta.url)),
       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
