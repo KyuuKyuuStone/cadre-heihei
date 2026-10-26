@@ -73,6 +73,7 @@ interface CadreBridge {
   listRoster?: (query: { projectId: string }) => Promise<{
     members?: readonly RosterRow[]
     rows?: readonly RosterRow[]
+    warning?: { readonly code?: string; readonly message?: string }
   } | undefined>
   listTasks?: (query: { projectId: string }) => Promise<{
     rows?: readonly CadreTaskFact[]
@@ -283,12 +284,13 @@ export function apply(ctx: ClientContext): void {
         status: 'error',
         members: roster.getSnapshot().members,
         error: '花名册通道未接入：window.cadre.listRoster 未注册',
+        notice: roster.getSnapshot().notice ?? null,
       })
       return
     }
     const projects = projectItems().map(item => item.workspaceId)
     if (projects.length === 0) {
-      roster.set({ status: 'ready', members: [], error: null })
+      roster.set({ status: 'ready', members: [], error: null, notice: null })
       projectState.set({ supervisors: new Set(), defaultProjectId: null })
       sessionRank.set(new Map())
       return
@@ -296,12 +298,14 @@ export function apply(ctx: ClientContext): void {
     void Promise.allSettled(projects.map(projectId => read({ projectId }).then(result => ({
       projectId,
       rows: (result?.members ?? result?.rows ?? []) as readonly RosterRow[],
+      warning: result?.warning?.message,
     })))).then((results) => {
       const previousSupervisors = projectState.getSnapshot().supervisors
       const members: CadreRosterMember[] = []
       const supervisors = new Set<string>()
       const failedProjects = new Set<string>()
       const failures: string[] = []
+      const warnings: string[] = []
       let succeeded = 0
       for (const [index, result] of results.entries()) {
         if (result.status === 'rejected') {
@@ -311,6 +315,7 @@ export function apply(ctx: ClientContext): void {
           continue
         }
         succeeded += 1
+        if (result.value.warning !== undefined) warnings.push(result.value.warning)
         for (const row of result.value.rows) {
           members.push({
             sessionId: row.sessionId,
@@ -329,6 +334,7 @@ export function apply(ctx: ClientContext): void {
           status: 'error',
           members: roster.getSnapshot().members,
           error: `ROSTER_READ_FAILED · ${failures[0] ?? '未知错误'}`,
+          notice: roster.getSnapshot().notice ?? null,
         })
         return
       }
@@ -346,6 +352,7 @@ export function apply(ctx: ClientContext): void {
         status: 'ready',
         members,
         error: failures.length === 0 ? null : `ROSTER_PARTIAL · ${failures[0] ?? '未知错误'}`,
+        notice: members.length > 0 ? null : warnings[0] ?? null,
       })
     })
   }

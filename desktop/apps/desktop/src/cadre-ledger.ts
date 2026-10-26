@@ -1,31 +1,51 @@
 /**
  * Read-only view of the cadre task ledger for the official desktop shell.
  *
- * The Electron main process opens `<userData>/cadre.sqlite` with
- * `readOnly: true` and never writes: the cadre backend remains the only
- * writer. `busy_timeout` lets a reader wait for WAL checkpoints instead of
- * failing immediately while the writer holds the database.
+ * The Electron main process opens `<DSH_HOME>/cadre.sqlite` (legacy installs:
+ * `<userData>/cadre.sqlite`) with `readOnly: true` and never writes: the cadre
+ * backend remains the only writer. `busy_timeout` lets a reader wait for WAL
+ * checkpoints instead of failing immediately while the writer holds the
+ * database.
  */
 
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+
+/**
+ * Resolve the Harness home exactly like `@deepseek-ai/dsh-home-paths`:
+ * `$DSH_HOME` (non-blank) wins, otherwise `~/.dsh`.
+ * @param env - process environment (injectable for tests).
+ * @returns normalized absolute home so the ledger lives beside sessions.
+ */
+export function resolveHarnessHome(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.DSH_HOME?.trim()
+  const selected = configured !== undefined && configured !== '' ? configured : join(homedir(), '.dsh')
+  const expanded = selected === '~'
+    ? homedir()
+    : selected.startsWith('~/') || selected.startsWith('~\\') ? join(homedir(), selected.slice(2)) : selected
+  return resolve(expanded)
+}
 
 /**
  * Single ledger-path resolver shared by the read-only and write connections.
  *
- * Priority: `CADRE_LEDGER_PATH` → `CADRE_USER_DATA/cadre.sqlite` → Electron
- * `userData/cadre.sqlite`. Honouring `CADRE_USER_DATA` keeps the desktop shell
- * aligned with the standalone cadre app's database location.
- * @param userData - Electron `app.getPath('userData')`.
+ * Priority: `CADRE_LEDGER_PATH` → `CADRE_USER_DATA/cadre.sqlite` → the shared
+ * Harness home (`$DSH_HOME` or `~/.dsh`) + `cadre.sqlite`. The home root
+ * survives app uninstall/reinstall and already owns session history, so the
+ * roster cannot disappear with Electron's userData directory.
+ * @param _userData - Electron `app.getPath('userData')`, retained for callers
+ * and for the legacy-path planner; the resolver itself does not use it.
  * @param env - process environment (injectable for tests).
  * @returns absolute ledger path used by both sides.
  */
-export function resolveCadreLedgerPath(userData: string, env: NodeJS.ProcessEnv = process.env): string {
+export function resolveCadreLedgerPath(_userData: string, env: NodeJS.ProcessEnv = process.env): string {
   const explicit = env.CADRE_LEDGER_PATH?.trim()
   if (explicit !== undefined && explicit !== '') return explicit
   const cadreUserData = env.CADRE_USER_DATA?.trim()
-  return join(cadreUserData !== undefined && cadreUserData !== '' ? cadreUserData : userData, 'cadre.sqlite')
+  if (cadreUserData !== undefined && cadreUserData !== '') return join(cadreUserData, 'cadre.sqlite')
+  return join(resolveHarnessHome(env), 'cadre.sqlite')
 }
 
 /** Latest employee report attached to a task (W3 report card). */
@@ -104,6 +124,8 @@ export interface CadreMemberRow {
 export interface CadreMemberList {
   readonly projectId: string
   readonly rows: readonly CadreMemberRow[]
+  /** Startup detected that a previously populated roster is now missing. */
+  readonly warning?: { readonly code: 'ROSTER_MISSING'; readonly message: string }
 }
 
 /** Task-list limit; the shell never asks for the whole ledger. */
@@ -281,6 +303,22 @@ export class CadreLedger {
       }
     })
     return { projectId: project, rows: projected, elapsedMs: Math.round((performance.now() - started) * 100) / 100 }
+  }
+
+  /**
+   * Count roster rows across every project, used only to detect a recreated
+   * (roster-less) ledger at startup.
+   * @returns row count, or 0 when the ledger is unavailable or has no table.
+   */
+  memberCount(): number {
+    const db = this.#db
+    if (db === undefined) return 0
+    try {
+      const row = db.prepare('SELECT COUNT(*) AS n FROM members').get() as { n?: number } | undefined
+      return Number(row?.n ?? 0)
+    } catch {
+      return 0
+    }
   }
 
   /**

@@ -24,7 +24,15 @@ import {
   type MenuItemConstructorOptions,
 } from 'electron'
 import { resolveDesktopPaths } from './paths.ts'
-import { CadreLedger, requireProjectId, resolveCadreLedgerPath } from './cadre-ledger.ts'
+import { CadreLedger, requireProjectId } from './cadre-ledger.ts'
+import {
+  migrateLegacyCadreLedger,
+  planCadreLedgerPaths,
+  readLedgerMarker,
+  markRosterSeen,
+  rosterMissing,
+  ROSTER_MISSING_MESSAGE,
+} from './cadre-ledger-migration.ts'
 import { CadreProjectRegistry, activeMember } from './cadre-projects.ts'
 import type {
   CadreCollab,
@@ -610,12 +618,24 @@ async function main(): Promise<void> {
   const applicationUrl = `${SCHEME}://app/`
   // Milestone B②: read-only cadre ledger. A project IS an official Workspace
   // (DC-001 R2/R3), so every request carries the Workspace id as `projectId`;
-  // the shell holds no default project. CADRE_LEDGER_PATH overrides the
-  // userData location because the standalone cadre app and this shell have
-  // distinct userData directories in development.
-  // One resolver feeds both connections (CADRE_LEDGER_PATH → CADRE_USER_DATA
-  // → Electron userData), so read and write can never target different files.
-  const cadreLedgerPath = resolveCadreLedgerPath(app.getPath('userData'))
+  // the shell holds no default project.
+  // Canonical data lives beside sessions in the Harness home so uninstall and
+  // reinstall cannot take the roster with them. The pre-0.8.7 userData copy is
+  // migrated once; an explicit CADRE_LEDGER_PATH/CADRE_USER_DATA keeps full
+  // control and skips migration.
+  const ledgerPlan = planCadreLedgerPaths(app.getPath('userData'))
+  const migration = ledgerPlan.explicit
+    ? {
+        status: 'skipped' as const,
+        activePath: ledgerPlan.targetPath,
+        targetPath: ledgerPlan.targetPath,
+        legacyPath: ledgerPlan.legacyPath,
+      }
+    : migrateLegacyCadreLedger({
+        targetPath: ledgerPlan.targetPath,
+        legacyPath: ledgerPlan.legacyPath,
+      })
+  const cadreLedgerPath = migration.activePath
   // Write-path actor (milestone B③): the calling Session names itself in every
   // IPC request; the actor kind is resolved from the project roster inside the
   // write library (`cadre-collab/entry.ts`), never from an environment variable
@@ -627,7 +647,24 @@ async function main(): Promise<void> {
     open: openCadreCollabFromDisk,
   })
   const cadreLedger = new CadreLedger(cadreLedgerPath)
-  console.log(`cadre-ledger project-scoped path=${cadreLedgerPath} actor=roster-per-request`)
+  const recordRosterSeen = (): void => {
+    if (!markRosterSeen(ledgerPlan.dshHome)) {
+      console.warn(`cadre-ledger roster marker write failed dshHome=${ledgerPlan.dshHome}`)
+    }
+  }
+  const marker = readLedgerMarker(ledgerPlan.dshHome)
+  const membersAtStartup = cadreLedger.memberCount()
+  if (membersAtStartup > 0) recordRosterSeen()
+  // A marker says this home once had a roster; zero rows now means the ledger
+  // was recreated (not that the project is simply new). Report it instead of
+  // letting every row silently fall back to "普通会话".
+  const ledgerHealth = {
+    rosterSeen: membersAtStartup > 0,
+    rosterNotice: rosterMissing(membersAtStartup, marker) ? ROSTER_MISSING_MESSAGE : null,
+  }
+  console.log(`cadre-ledger project-scoped path=${cadreLedgerPath} legacy=${ledgerPlan.legacyPath} ` +
+    `migration=${migration.status} members=${String(membersAtStartup)} ` +
+    `rosterNotice=${ledgerHealth.rosterNotice === null ? 'none' : 'missing'} actor=roster-per-request`)
   // Milestone ④: provider catalogue shares the cadre SQLite file; migration is
   // additive and stores credential references only.
   let cadreProviders: ProviderStore | undefined
@@ -991,9 +1028,19 @@ async function main(): Promise<void> {
     assertProductSender(event)
     const projectId = cadreRequestedProject('listRoster', options)
     const result = cadreLedger.listMembers(projectId)
+    if (result.rows.length > 0 && !ledgerHealth.rosterSeen) {
+      ledgerHealth.rosterSeen = true
+      ledgerHealth.rosterNotice = null
+      recordRosterSeen()
+    }
     console.log(`cadre:listRoster project=${projectId} path=${cadreLedgerPath} source=readonly ` +
       `rows=${result.rows.length}`)
-    return result
+    return ledgerHealth.rosterNotice === null
+      ? result
+      : {
+          ...result,
+          warning: { code: 'ROSTER_MISSING' as const, message: ledgerHealth.rosterNotice },
+        }
   })
 
   // Milestone B③: write path. All rules live in `cadre-collab/collab/**`;

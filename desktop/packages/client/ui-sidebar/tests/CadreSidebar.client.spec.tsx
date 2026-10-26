@@ -178,6 +178,24 @@ describe('session identity', () => {
     expect(screen.getByText('空闲')).toBeTruthy()
     expect(screen.queryByText('前端')).toBeNull()
   })
+
+  it('shows a lost-roster warning instead of claiming an ordinary session', () => {
+    const state: CadreRosterState = {
+      status: 'ready',
+      members: [],
+      error: null,
+      notice: '团队数据丢失或未找到：花名册为空。',
+    }
+    render(<CadreSessionSubtitle {...({
+      sessionId: 's1',
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
+        selector({ byId: {} })) as never,
+      useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+    } as unknown as ComponentProps<typeof CadreSessionSubtitle>)} />)
+    expect(screen.getByText('团队数据丢失').getAttribute('title')).toContain('花名册为空')
+    expect(screen.queryByText('普通会话')).toBeNull()
+  })
 })
 
 describe('member retirement', () => {

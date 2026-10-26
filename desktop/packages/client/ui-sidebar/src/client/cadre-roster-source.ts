@@ -47,6 +47,7 @@ export interface RosterBridge {
   listRoster?(query: { projectId: string }): Promise<{
     rows?: readonly RosterRow[]
     members?: readonly RosterRow[]
+    warning?: { readonly code?: string; readonly message?: string }
   } | undefined>
   listEmployees?(query?: { projectId?: string }): Promise<{
     ok?: boolean
@@ -63,7 +64,7 @@ export interface RosterTaskHint {
 }
 
 export type RosterLoad =
-  | { readonly ok: true; readonly members: readonly RosterMember[] }
+  | { readonly ok: true; readonly members: readonly RosterMember[]; readonly warning?: string }
   | { readonly ok: false; readonly reason: string }
 
 /** @param role - raw ledger role. @returns the view role, workers by default. */
@@ -129,9 +130,11 @@ export async function loadRoster(
     if (bridge.listRoster !== undefined) {
       const result = await bridge.listRoster({ projectId })
       const rows = result?.rows ?? result?.members ?? []
+      const warning = result?.warning?.message
       return {
         ok: true,
         members: rows.map(row => toMember(row, row.state, tasks)).sort(compare),
+        ...(warning === undefined ? {} : { warning }),
       }
     }
     if (bridge.listEmployees !== undefined) {

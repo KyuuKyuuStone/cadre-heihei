@@ -109,7 +109,11 @@ interface RosterRow {
 }
 
 interface CadreCreateBridge {
-  listRoster?(query: { projectId: string }): Promise<{ members?: readonly RosterRow[]; rows?: readonly RosterRow[] } | undefined>
+  listRoster?(query: { projectId: string }): Promise<{
+    members?: readonly RosterRow[]
+    rows?: readonly RosterRow[]
+    warning?: { readonly code?: string; readonly message?: string }
+  } | undefined>
   listProviders?(): Promise<{
     ok?: boolean
     providers?: readonly ProviderOption[]

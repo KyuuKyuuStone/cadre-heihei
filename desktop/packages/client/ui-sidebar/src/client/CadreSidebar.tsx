@@ -58,6 +58,8 @@ export interface CadreRosterState {
   readonly status: 'loading' | 'ready' | 'error'
   readonly members: readonly CadreRosterMember[]
   readonly error: string | null
+  /** Set when the ledger was recreated and a formerly populated roster is gone. */
+  readonly notice?: string | null
 }
 
 /** The part of one official Session summary the row subtitle reads. */
@@ -322,11 +324,18 @@ export function CadreSessionSubtitle({
 }: CadreSessionRowOwner & InjectFace<CadreSessionSubtitleInjected>) {
   const rosterStatus = useRoster(state => state.status)
   const members = useRoster(state => state.members)
+  const notice = useRoster(state => state.notice)
   const running = useSessions(state => state.byId[sessionId]?.running === true)
   const tasks = useTasks(state => state)
   const member = memberOf(members, sessionId)
 
   if (member === undefined || member.state === 'departed') {
+    // A recreated ledger must not masquerade as an ordinary session: say the
+    // roster is missing so the user can restore it instead of silently
+    // rebuilding the team.
+    if (notice !== undefined && notice !== null && notice !== '') {
+      return <span className={css.plainSubtitle} title={notice}>团队数据丢失</span>
+    }
     // Before the roster answers, an unknown row must not claim to be ordinary.
     return rosterStatus === 'ready' ? <span className={css.plainSubtitle}>普通会话</span> : null
   }

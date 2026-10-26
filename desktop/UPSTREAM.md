@@ -102,6 +102,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K31 | `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts` | 重新生成：补 `sidebar.workspaces.project.row.action` / `sidebar.workspaces.project.row.create` / `sidebar.session.row.badge`，并纳入 toolview 既有漂移 | 生成物，跟随声明变化 | 重跑 `pnpm run gen-client-catalog` |
 | K32 | `packages/bundle/base/cordis.patch.yml`、`packages/bundle/web-app/cordis.patch.yml`、`packages/bundle/headless/cordis.patch.yml`、`packages/client/ui-sidebar/src/client/CadreBrand.tsx` | 不交付 DeepSeek 账号登录 / 官方品牌展示 / 产品分析：三份 bundle patch 删除 6 行挂载；Cadre 印章与字标改由 `ui-sidebar` 注册 `sidebar.brand.mark/name` + `conversation.hero.brand.mark` | 无账户、纯本地产品，这些官方插件无用；品牌必须自持 | 删行 + 自注册；恢复只需还原 patch 并移除自注册。包仍在安装闭包内（B 阶段未做） |
 | K33 | `packages/client/ui-chat/src/client/chat/{RunningCadreMark.tsx,ChatView.module.css,RunningStatus.tsx,tsdown.config.ts,conversation-nodes/turn-error.ts}`、`packages/client/ui-sidebar/src/client/SidebarRoot.tsx`、`packages/client/ui-conversation/src/client/skeleton/{EmptyHero.tsx,HeroShell.module.css}` | 运行态鱼尾 APNG 改为 CSS 印章脉冲（14px，业务绿）；侧栏/空白页 brand slot fallback 改中性 Cadre 印章；失败兜底文案改 Cadre；`tsdown.config.ts` 删除 APNG 内联插件 | 官方运行标和 brand fallback 会露出官方鱼；品牌自持 | 三个组件 + 一段 CSS；官方若提供 brand fallback 配置面可回退 |
+| K34 | `apps/desktop/installer/uninstall.nsh` | `un.CleanData` **不再删除 Electron userData**（`%APPDATA%\${PRODUCT_FILENAME}` / `%APPDATA%\${APP_PACKAGE_NAME}`），只清 updater cache；`cadre.sqlite`（花名册/台账）和 `desktop/settings.json` 随重装保留 | 官方卸载语义会连团队数据一起删；0.8.6 实测重装后花名册归零、会话仍在（2026-10-26 发布阻断缺陷） | 删两段 `RemoveData` 调用；与官方「卸载清 userData」默认行为相反，升级上游时需重放 |
 | K34 | `packages/client/*/src/client/locales*.ts`、`packages/experimental/client-ui-voice-input/src/client/locales.ts`、`apps/desktop/src/locale.ts`、`scripts/verify-brand-copy.ts`、`package.json` | 用户可见 DSH/深度求索改 Cadre；模型/provider 名（DeepSeek 官方模型、DeepSeek 搜索、DeepSeek Flash）与 `$DSH_HOME` 等技术标识保留；新增 `verify-brand-copy` 门禁并挂入 hygiene | 品牌文案统一且防止回归 | 文案替换 + 一个扫描门禁；抽插件后用 locale 覆盖 |
 | K35 | `apps/desktop/src/welcome-backend.ts` | welcome 冷启动读取账号状态时，`account/getState` 404 视为未登录（`loggedIn:false`），不再让无账号产品启动失败；可选插件 404 不刷错误日志 | 账号插件已从 bundle 移除，欢迎页仍无条件调用账号 RPC；桌面壳因此打不开 | 一个容错分支；账号能力恢复时自动走真实状态 |
 
@@ -127,7 +128,10 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | `packages/client/ui-sidebar/src/client/cadre-skin.tokens.ts` | 昼流/夜流主题 token 覆盖 | 官方 `ctx.theme` 扩展点允许 | 保留；与官方 token 变更走 C/E 判断 |
 | `packages/client/ui-sidebar/src/client/CadreEmployee.module.css` | 员工对话框样式 | 产品 UI | 保留 |
 | `packages/client/ui-sidebar/tests/CadreEmployee.client.spec.tsx` | **已删除**（随 CadreEmployee 移除） | 产品 UI | 无需保留 |
-| `apps/desktop/src/cadre-ledger.ts` | 台账 SQLite 读取（userData/cadre.sqlite）；0.7.0 增 `due_at`、`task_events` 时间线与 member 岗位描述 | 官方无跨会话账本 | ADR-0023 §2.4：迁 Host 服务后本文件移动 |
+| `apps/desktop/src/cadre-ledger.ts` | 台账 SQLite 读取（0.8.7 起默认 `$DSH_HOME/cadre.sqlite`，旧 userData 路径仅作迁移源）；0.7.0 增 `due_at`、`task_events` 时间线与 member 岗位描述；0.8.7 增 `memberCount()` 供重建检测 | 官方无跨会话账本；库必须与 sessions 同域才能在重装后存活 | ADR-0023 §2.4：迁 Host 服务后本文件移动 |
+| `apps/desktop/src/cadre-ledger-migration.ts` | 旧 userData 库 → `$DSH_HOME` 的一次性安全迁移（`VACUUM INTO` 快照 + integrity/表校验 + hard-link 原子发布，旧库只读保留、新库优先）；`cadre-ledger-state.json` 花名册标记与丢失判定 | 卸载器不再碰 userData 之后仍需自动接管旧安装；标记用于区分「新项目空花名册」与「库被重建」 | 随台账迁 Host 后删除或改为 Host 启动迁移 |
+| `apps/desktop/tests/cadre-ledger-migration.spec.ts` | 迁移/不覆盖/失败保旧/WAL/路径覆盖/标记测试 | 发布阻断级数据安全回归 | 保留 |
+| `packages/client/ui-sidebar/tests/cadre-roster-source.spec.ts` | 花名册丢失 warning 透传测试 | 防止 UI 再静默显示「普通会话」 | 随侧栏插件迁移 |
 | `apps/desktop/src/cadre-collab-api.ts` | 台账写路径的类型契约 | 同上 | 同上 |
 | `apps/desktop/src/employees-db.ts` | 员工偏好表（模板/模型/备注）+ 台账 `members` 角色写入与离职（`saveMember` / `retireMember`，含每项目唯一在职主管校验） | 官方无员工偏好存储 | 同上；表保留，宿主迁移 |
 | `apps/desktop/src/providers-db.ts` | provider / session_providers 表 | **与官方三处真值重复** | ADR-0023 §2.5：先迁移后删除 |

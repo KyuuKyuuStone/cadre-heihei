@@ -197,5 +197,5 @@ function readChangelogSummary(version) {
 }
 function readme(version, bytes, changelog) {
   const date = new Date().toISOString().slice(0, 10)
-  return `cadre-heihei ${version}\r\n================\r\n\r\n- 版本: ${version}\r\n- 大小: ${bytes.toLocaleString()} B（${(bytes / 1048576).toFixed(1)} MiB）\r\n- 日期: ${date}\r\n\r\n## 变更\r\n\r\n${changelog}\r\n\r\n## 安装\r\n\r\n- 双击安装或 /S 静默（per-user）\r\n- 卸载保留 userData（%APPDATA%）\r\n- 未签名: 无代码签名证书，SmartScreen 首次运行可能告警\r\n- 无账户体系; 模型接入=设置页第三方 API Key（多厂商）\r\n- 自动更新/otel 遥测: 禁用\r\n`
+  return `cadre-heihei ${version}\r\n================\r\n\r\n- 版本: ${version}\r\n- 大小: ${bytes.toLocaleString()} B（${(bytes / 1048576).toFixed(1)} MiB）\r\n- 日期: ${date}\r\n\r\n## 变更\r\n\r\n${changelog}\r\n\r\n## 安装\r\n\r\n- 双击安装或 /S 静默（per-user）\r\n- 卸载保留团队数据：%APPDATA% 用户数据与 ~/.dsh（花名册/台账）均不删除，重装不丢\r\n- 未签名: 无代码签名证书，SmartScreen 首次运行可能告警\r\n- 无账户体系; 模型接入=设置页第三方 API Key（多厂商）\r\n- 自动更新/otel 遥测: 禁用\r\n`
 }

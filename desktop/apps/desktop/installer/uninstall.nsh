@@ -1,4 +1,6 @@
-; Electron user data and updater downloads leave with the application; the Harness home is never touched.
+; Product data survives uninstall: the roster/ledger lives in Electron user data
+; (legacy) or the Harness home, and losing it would also lose the team. Only
+; updater downloads leave with the application.
 !include FileFunc.nsh
 Var UnTarget
 Var UnHome
@@ -23,14 +25,9 @@ Function un.CleanData
   ; Only a DSH_HOME published as a Windows environment variable is visible here.
   ReadEnvStr $UnHome DSH_HOME
   ClearErrors
-  StrCpy $UnTarget "$APPDATA\${PRODUCT_FILENAME}"
-  Call un.RemoveData
-  !ifdef APP_PACKAGE_NAME
-    ; Electron derives user data from the package name; a scoped name nests it one directory deeper.
-    StrCpy $UnTarget "$APPDATA\${APP_PACKAGE_NAME}"
-    Call un.RemoveData
-    System::Call '$PLUGINSDIR\window-frame.dll::UninstallRemoveEmptyParents(w "$UnTarget", w "$APPDATA") ?c'
-  !endif
+  ; Deliberately keep Electron user data: it holds `cadre.sqlite` (roster,
+  ; ledger, employee preferences) and desktop settings. A reinstall must not
+  ; destroy the team; users can still clear it manually.
   StrCpy $UnTarget "$LOCALAPPDATA\${DSH_UPDATER_CACHE_NAME}"
   Call un.RemoveData
 FunctionEnd
