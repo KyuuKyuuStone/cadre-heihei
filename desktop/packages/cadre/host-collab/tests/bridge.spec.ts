@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { SqliteCollabStore } from '../../../../../app/src/collab/dispatch/sqlite-dispatch.ts'
+import { SqliteCollabStore } from '../../../../cadre-collab/collab/dispatch/sqlite-dispatch.ts'
 import { listTasks, transitionTask } from '../../../../cadre-collab/host-entry.ts'
 
 const PROJECT = 'p1'
@@ -28,9 +28,9 @@ interface Seeded {
 
 function seed(databasePath: string, options: { readonly due?: boolean } = {}): Seeded {
   const store = new SqliteCollabStore({ databasePath })
-  store.addMember({ projectId: PROJECT as never, sessionId: SUPERVISOR as never, role: 'supervisor', state: 'active', displayName: '主管' })
-  store.addMember({ projectId: PROJECT as never, sessionId: WORKER as never, role: 'worker', state: 'active', displayName: '小明' })
-  store.addMember({ projectId: PROJECT as never, sessionId: WORKER_2 as never, role: 'worker', state: 'active', displayName: '小红' })
+  store.addMember({ projectId: PROJECT as never, sessionId: SUPERVISOR as never, role: 'supervisor', state: 'available', displayName: '主管' })
+  store.addMember({ projectId: PROJECT as never, sessionId: WORKER as never, role: 'worker', state: 'available', displayName: '小明' })
+  store.addMember({ projectId: PROJECT as never, sessionId: WORKER_2 as never, role: 'worker', state: 'available', displayName: '小红' })
   if (options.due === true) store.ledger.core.db.exec('ALTER TABLE tasks ADD COLUMN due_at TEXT')
   return { store }
 }

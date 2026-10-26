@@ -2,8 +2,9 @@
  * Host-side bridge to the one state machine.
  *
  * The Host plugin (`@deepseek-ai/dsh-host-collab`) writes messages itself, but
- * it must not hand-roll status transitions: `app/src/collab/**` owns the
- * matrix, the reason rule, the actor permission check and the audit event
+ * it must not hand-roll status transitions: the desktop-owned snapshot in
+ * `cadre-collab/collab/**` owns the matrix, the reason rule, the actor
+ * permission check and the audit event
  * (including `from_status`). This entry bundles that code into a CJS file the
  * Host plugin requires, so an employee report becomes real ledger transitions
  * instead of a bare `UPDATE tasks SET status = 'delivered'`.
@@ -13,7 +14,7 @@
  * and the ledger re-validates each step through `validation.ts`.
  */
 
-import { SqliteCollabStore } from '../../app/src/collab/dispatch/sqlite-dispatch.ts'
+import { SqliteCollabStore } from './collab/dispatch/sqlite-dispatch.ts'
 
 export interface AdvanceReportInput {
   readonly databasePath: string
@@ -65,7 +66,7 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
     const membership = input.actorSessionId === 'sup-1'
       ? undefined
       : store.listMembers(input.projectId as never)
-        .find(row => row.sessionId === input.actorSessionId && row.state !== 'departed')
+        .find(row => row.sessionId === input.actorSessionId && (row.state as string) !== 'departed')
     if (membership === undefined) {
       return { ok: false, code: 'FORBIDDEN_ACTOR', message: '汇报会话不在本项目花名册（或已离职）' }
     }
@@ -88,7 +89,7 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
       }
     }
     const eventIds: string[] = []
-    let from = startedFrom
+    let from: string = startedFrom
     for (const to of chain) {
       const step = store.ledger.transition({
         projectId: input.projectId as never,
@@ -96,7 +97,7 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
         from: from as never,
         to: to as never,
         actor: { kind: 'session', sessionId: input.actorSessionId as never, role },
-        idempotencyKey: `${input.idempotencyBase}:${to}`,
+        idempotencyKey: `${input.idempotencyBase}:${to}` as never,
       })
       if (!step.ok) {
         return { ok: false, code: step.error.code, message: `${from} → ${to}：${step.error.message}` }

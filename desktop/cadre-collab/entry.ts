@@ -4,12 +4,13 @@
  * Bundled by `scripts/build-cadre-collab.mjs` into
  * `apps/desktop/lib/cadre-collab.cjs` and required from the desktop main
  * process. All state-machine, permission, idempotency and validation logic
- * comes from `app/src/collab/**`; this file only binds an actor identity and
- * forwards calls to `DispatchService` / `SqliteTaskLedger.transition`.
+ * comes from the desktop-owned snapshot in `cadre-collab/collab/**`; this file
+ * only binds an actor identity and forwards calls to `DispatchService` /
+ * `SqliteTaskLedger.transition`.
  */
 
-import { DispatchService } from '../../app/src/collab/dispatch/dispatch-service.ts'
-import { SqliteCollabStore } from '../../app/src/collab/dispatch/sqlite-dispatch.ts'
+import { DispatchService } from './collab/dispatch/dispatch-service.ts'
+import { SqliteCollabStore } from './collab/dispatch/sqlite-dispatch.ts'
 
 export interface CadreCollabOptions {
   readonly databasePath: string
@@ -66,7 +67,7 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
   })
   console.log(`cadre-ledger roster project=${options.projectId} size=${store.listMembers(options.projectId as never).length}`)
   const service = new DispatchService(store)
-  const binding = { projectId: options.projectId, sessionId: options.sessionId }
+  const binding = { projectId: options.projectId as never, sessionId: options.sessionId as never }
   /**
    * Actor kind from the roster, never from the caller or the process.
    *
@@ -83,7 +84,7 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
     // act, or any caller naming that id could borrow supervisor rights.
     if (options.sessionId === 'sup-1') return undefined
     const member = store.listMembers(options.projectId as never)
-      .find(row => row.sessionId === options.sessionId && row.state !== 'departed')
+      .find(row => row.sessionId === options.sessionId && (row.state as string) !== 'departed')
     if (member === undefined) return undefined
     return member.role === 'supervisor' ? 'supervisor' : 'assignee'
   }
@@ -94,14 +95,14 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
       // real "ghost employee" before the service can reject it. An unknown
       // target must fail as target-not-member on both tool and IPC paths.
       return service.dispatch(binding, {
-        projectId: options.projectId,
-        toSessionId: input.to,
+        projectId: options.projectId as never,
+        toSessionId: input.to as never,
         title: input.title,
         body: input.body,
-        idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
+        idempotencyKey: (input.idempotencyKey ?? crypto.randomUUID()) as never,
         ...(input.supersedesTaskId === undefined
           ? {}
-          : { supersedesTaskId: input.supersedesTaskId }),
+          : { supersedesTaskId: input.supersedesTaskId as never }),
       })
     },
     transition(input) {
@@ -109,7 +110,7 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
       // the same write connection so the ledger still validates it strictly.
       let from = input.from
       if (from === undefined) {
-        const current = store.ledger.getTask(options.projectId, input.taskId)
+        const current = store.ledger.getTask(options.projectId as never, input.taskId as never)
         if (!current.ok) return current
         from = current.value.status
       }
@@ -134,41 +135,41 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
       // SQLite trigger; non-delivered starts keep the old single-step path.
       if (input.to === 'verified' && from === 'delivered') {
         const review = store.ledger.transition({
-          projectId: options.projectId,
-          taskId: input.taskId,
+          projectId: options.projectId as never,
+          taskId: input.taskId as never,
           from: 'delivered',
           to: 'review',
-          actor,
-          idempotencyKey: `${input.idempotencyKey ?? crypto.randomUUID()}:review`,
+          actor: actor as never,
+          idempotencyKey: `${input.idempotencyKey ?? crypto.randomUUID()}:review` as never,
         })
         if (!review.ok) return review
         console.log(`cadre-ledger one-step review project=${options.projectId} task=${input.taskId}`)
         return store.ledger.transition({
-          projectId: options.projectId,
-          taskId: input.taskId,
+          projectId: options.projectId as never,
+          taskId: input.taskId as never,
           from: 'review',
           to: 'verified',
-          actor,
+          actor: actor as never,
           ...(input.reason === undefined ? {} : { reason: input.reason }),
-          idempotencyKey: `${input.idempotencyKey ?? crypto.randomUUID()}:verified`,
+          idempotencyKey: `${input.idempotencyKey ?? crypto.randomUUID()}:verified` as never,
         })
       }
       // `SqliteTaskLedger.transition` applies `validation.ts`: start-status
       // match, legal rule, reason requirement, and actor permission via the
       // project roster (`SqliteSupervisorResolver`).
       return store.ledger.transition({
-        projectId: options.projectId,
-        taskId: input.taskId,
-        from,
-        to: input.to,
-        actor,
+        projectId: options.projectId as never,
+        taskId: input.taskId as never,
+        from: from as never,
+        to: input.to as never,
+        actor: actor as never,
         ...(input.reason === undefined ? {} : { reason: input.reason }),
-        idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
+        idempotencyKey: (input.idempotencyKey ?? crypto.randomUUID()) as never,
       })
     },
     listTasks() {
       // Newest first, same projection as the read-only IPC channel.
-      const rows = [...store.ledger.listTasks(options.projectId)].reverse().map(task => ({
+      const rows = [...store.ledger.listTasks(options.projectId as never)].reverse().map(task => ({
         taskId: task.taskId,
         title: task.title,
         status: task.status,

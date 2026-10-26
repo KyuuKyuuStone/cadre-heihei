@@ -114,6 +114,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | 路径 | 改动摘要 | 保留理由 | 融合提示 |
 |---|---|---|---|
 | `packages/bundle/cadre-app/` | 员工模板 bundle：四个 preset（dev/novel/general/roleplay），`cordis.patch.yml` + no-op 入口 | 官方没有这些模板 | 机制稳定，升级基本不动；preset 字段若变走 §3.5 F |
+| `packages/cadre/host-collab/{src,tests}/` | Host 协作工具：`dispatch_task` / `retry_dispatch` / `report_task` / `list_employees` / `list_tasks` / `transition_task`，以及花名册角色掩码；写路径统一走 `cadre-ledger.cjs` | 官方无跨会话派活、汇报与验收台账 | 保留；随 ADR-0023 §2.4 Host 服务迁移 |
 | `packages/client/ui-sidebar/src/client/CadrePanel.tsx` | **已删除**（0.7.0 侧栏重设计）：花名册/台账面板页、项目面板入口、`main:cadre` 路由全部移除；能力迁到 CadreCreateDialog / CadreLedgerOverlay / CadreSidebar | 用户明确否掉管理面板，侧栏会话列表即主界面 | 无需保留 |
 | `packages/client/ui-sidebar/src/client/CadreCreateDialog.tsx`、`CadreLedgerOverlay.tsx`、`CadreSidebar.tsx` | 建人弹窗（680px 宽）、只读台账 overlay（六列 + 时间线）、项目行＋/台账、会话行角色标识 + 状态副标题、悬停菜单宽限与行菜单 | 侧栏即主界面；官方无项目/角色概念 | 官方 slot 扩展；可抽独立插件 |
 | `packages/client/ui-sidebar/src/client/CadreSidebar.module.css`、`CadreCreateDialog.module.css`、`CadreLedgerOverlay.module.css` | 上述组件的样式（只用主题 token） | 产品 UI | 随组件迁移 |
@@ -164,7 +165,8 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | `packages/client/ui-sidebar/tsconfig.json` | 增加对应 project references | 构建 | 随包拆分收缩 |
 | `packages/client/ui-brand-official/package.json` | 增加 ui-conversation 依赖（hero 品牌槽） | 品牌 | 包不再挂载；源码保留待清理（K32） |
 | `packages/client/ui-brand-official/tsconfig.json` | 增加 ui-conversation reference | 构建 | 包不再挂载；源码保留待清理（K32） |
-| `tsconfig.host.json` | references 增加 `packages/bundle/cadre-app` | 构建 | 保留 |
+| `tsconfig.host.json` | references 增加 `packages/bundle/cadre-app`；include 收编 `cadre-collab/**/*.ts` | 桌面侧协作写路径与状态机（`cadre-collab/collab/**` 快照）需随 Host 聚合一起类型检查 | 保留；**不再 include 主仓 `../app/src`** |
+| `cadre-collab/collab/` | 自持状态机快照（2026-10-26 从主仓 `app/src/collab/**` 复制，含 ledger / protocol / dispatch / tools / evidence，38 个 TS 文件） | 用户拍板 A：副本不再回头 import 主仓，desktop 独立编译与打包 | **双份需同步**：主仓状态机变更时人工对齐；后续以 desktop 为产品真源后删除主仓副本 |
 | `apps/web/tsconfig.json` | exclude 增加 `tests/cadre-presets.e2e.ts`（引用 scaffold，避免 TS6307） | 测试边界 | 官方改 exclude 列表时按 B 判断 |
 | `pnpm-lock.yaml` | 依赖图变化（新 workspace 包与依赖） | 构建 | 每次版本升级重生成 |
 | `apps/desktop/README.md` | 增加密钥门禁说明 | 文档 | 保留 |

@@ -209,6 +209,10 @@
     "apps/desktop-host/tests/**/*.ts",
     "benchmarks/**/*.ts",
     "packages/*/*/tests/**/*.ts",
+    // Desktop-owned collaboration state machine. The bridge entries and their
+    // `collab/**` snapshot live inside this repo copy, so the Host aggregate
+    // never reaches into the product backend at `../app/src`.
+    "cadre-collab/**/*.ts",
     "packages/experimental/cua-macos/native/generate-protocol.ts",
     "packages/experimental/claude-code-mods/examples/*/index.ts",
     "packages/experimental/inspector/scripts/**/*.ts",

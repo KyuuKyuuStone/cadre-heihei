@@ -35,7 +35,7 @@ export const DESKTOP_IPC = {
   cadreListTasks: 'cadre:listTasks',
   /** Read-only project roster (members with role/state). */
   cadreListRoster: 'cadre:listRoster',
-  /** Cadre write path; delegates to app/src/collab via lib/cadre-collab.cjs. */
+  /** Cadre write path; delegates to cadre-collab/collab via lib/cadre-collab.cjs. */
   cadreDispatchTask: 'cadre:dispatchTask',
   cadreTransitionTask: 'cadre:transitionTask',
   /** Milestone ④ local provider catalogue; values are never returned. */

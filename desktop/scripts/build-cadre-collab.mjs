@@ -1,8 +1,8 @@
 /**
  * Build the cadre collaboration write-path libraries.
  *
- * Both outputs bundle `app/src/collab/**` unchanged (single source of truth
- * for the state machine, permissions, idempotency and validation):
+ * Both outputs bundle the desktop-owned snapshot `cadre-collab/collab/**`
+ * (state machine, permissions, idempotency and validation):
  * - `apps/desktop/lib/cadre-collab.cjs` — required by the Electron main process;
  * - `packages/cadre/host-collab/lib/cadre-ledger.cjs` — required by the Host
  *   plugin so an employee report walks `transitionTx` (with `from_status`)

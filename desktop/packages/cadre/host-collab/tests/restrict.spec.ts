@@ -6,7 +6,12 @@ import type { Scope } from '@deepseek-ai/dsh-scope'
 // The scope tag is a module-level symbol. ToolRuntime's runtime copy resolves
 // dsh-scope from lib, while the tsconfig path alias maps the bare specifier in
 // this test to src; minting through the runtime copy keeps the tag identity.
-import { createScope } from '../../../core/scope/lib/index.js'
+// Keep a static ESM import (require() would load a second instance); the lib
+// build ships no root declaration, so suppress TS7016 and take the package's
+// source types for the call signature.
+// @ts-expect-error -- runtime-only ESM copy of a declaration-less lib build
+import { createScope as createScopeRuntime } from '../../../core/scope/lib/index.js'
+const createScope = createScopeRuntime as typeof import('@deepseek-ai/dsh-scope').createScope
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -176,7 +181,7 @@ describe('allow: [] against the real ToolRegistry', () => {
     const outcome = applyToolRestriction(real.scope.ctx.tools, ['bash', 'write'])
 
     expect(outcome.failClosed).toBe(false)
-    expect(outcome.deny.sort()).toEqual(['bash', 'write'])
+    expect([...outcome.deny].sort()).toEqual(['bash', 'write'])
     expect(real.ctx.tools.schemas(real.key)).toEqual([])
     expect(await runTool(real, 'bash')).toMatch(/unknown tool "bash"/u)
 

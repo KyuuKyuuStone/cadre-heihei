@@ -281,8 +281,8 @@ function ambiguityError(sessionId: string, projects: readonly string[]): Error {
 }
 
 /**
- * The `app/src/collab/**` state machine, bundled next to this plugin by
- * `desktop/scripts/build-cadre-collab.mjs`.
+ * The desktop-owned `cadre-collab/collab/**` state machine, bundled next to
+ * this plugin by `desktop/scripts/build-cadre-collab.mjs`.
  *
  * Every status change goes through it so `task_events.from_status` is recorded
  * and the permission matrix (roster supervisor / task assignee) is enforced in
@@ -555,8 +555,8 @@ class Ledger {
         .run(messageId, now, now, taskId)
       // Creation event, not a transition: `beginDispatch` already inserted the
       // task as `dispatched`, so there is no prior status. This matches
-      // `app/src/collab`'s `createTaskTx`, whose create event also carries a
-      // NULL `from_status`.
+      // `cadre-collab/collab`'s `createTaskTx`, whose create event also carries
+      // a NULL `from_status`.
       this.db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
         actor_session_id, message_id, idempotency_key, at)
         VALUES (?, ?, ?, NULL, 'dispatched', ?, ?, ?, ?)`).run(

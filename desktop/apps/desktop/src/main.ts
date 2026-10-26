@@ -103,7 +103,7 @@ let backendReady = false
 /** Error-level console output of the primary window, attached to crash reports. */
 const rendererConsole = new RendererConsoleTail()
 
-/** Cadre write-path library built from `app/src/collab/**` (milestone B③). */
+/** Cadre write-path library built from `cadre-collab/collab/**` (milestone B③). */
 const cadreRequire = createRequire(import.meta.url)
 const CADRE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/
 const CADRE_TITLE_MAX = 200
@@ -996,8 +996,8 @@ async function main(): Promise<void> {
     return result
   })
 
-  // Milestone B③: write path. All rules live in `app/src/collab/**`; these
-  // handlers validate the IPC boundary and delegate with the main identity.
+  // Milestone B③: write path. All rules live in `cadre-collab/collab/**`;
+  // these handlers validate the IPC boundary and delegate with the main identity.
   ipcMain.handle(DESKTOP_IPC.cadreDispatchTask, (event, options: unknown) => {
     assertProductSender(event)
     let input: CadreDispatchOptions
