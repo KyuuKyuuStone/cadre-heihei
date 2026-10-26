@@ -144,6 +144,82 @@ interface EmployeesValue {
   readonly employees: readonly { readonly sessionId: string; readonly name: string; readonly state: string }[]
 }
 
+/** One task row projected by the shared ledger bridge. */
+export interface HostTaskRow {
+  readonly taskId: string
+  readonly title: string
+  readonly status: string
+  readonly assigneeSessionId: string
+  readonly dispatcherSessionId: string
+  readonly attempt: number
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly dueAt?: string
+  readonly supersedesTaskId?: string
+  readonly supersededByTaskId?: string
+  readonly bodyPreview: string
+}
+
+interface TaskListArgs {
+  readonly scope?: 'open' | 'all'
+  readonly assignee?: string
+  readonly limit?: number
+}
+
+interface TaskListValue {
+  readonly projectId: string
+  readonly tasks: readonly {
+    readonly taskId: string
+    readonly title: string
+    readonly status: string
+    readonly assignee: { readonly sessionId: string; readonly name: string }
+    readonly dispatcherSessionId: string
+    readonly basedOn: {
+      readonly bodyPreview: string
+      readonly supersedesTaskId?: string
+      readonly supersededByTaskId?: string
+    }
+    readonly attempt: number
+    readonly createdAt: string
+    readonly updatedAt: string
+    readonly dueAt?: string
+  }[]
+  readonly total: number
+  readonly truncated: boolean
+  readonly empty: boolean
+  readonly reason?: 'no_tasks' | 'no_match'
+  readonly hint?: string
+}
+
+export interface TaskListPage {
+  readonly rows: readonly HostTaskRow[]
+  readonly total: number
+  readonly truncated: boolean
+  readonly empty: boolean
+  readonly reason?: 'no_tasks' | 'no_match'
+  readonly hint?: string
+}
+
+interface TransitionTaskArgs {
+  readonly taskId: string
+  readonly to: string
+  readonly reason?: string
+  readonly idempotencyKey?: string
+}
+
+interface TransitionTaskValue {
+  readonly taskId: string
+  readonly from: string
+  readonly status: string
+  readonly steps: readonly { readonly from: string; readonly to: string; readonly eventId: string }[]
+  readonly replayed: boolean
+}
+
+const TASK_LIST_OPEN_STATUSES = ['dispatched', 'accepted', 'in_progress', 'delivered', 'review', 'rework'] as const
+const TASK_LIST_MAX_LIMIT = 100
+const TASK_LIST_DEFAULT_LIMIT = 50
+const TRANSITION_TARGETS = ['review', 'verified', 'rework', 'failed', 'cancelled'] as const
+
 /** Stable Cordis plugin name. */
 export const name = 'cadre-collab'
 
@@ -221,6 +297,25 @@ interface HostLedgerBridge {
     readonly actorSessionId: string
     readonly idempotencyBase: string
   }): { readonly ok: true } | { readonly ok: false; readonly code: string; readonly message: string }
+  listTasks(input: {
+    readonly databasePath: string
+    readonly projectId: string
+  }): { readonly ok: true; readonly rows: readonly HostTaskRow[] } | { readonly ok: false; readonly code: string; readonly message: string }
+  transitionTask(input: {
+    readonly databasePath: string
+    readonly projectId: string
+    readonly taskId: string
+    readonly to: string
+    readonly actorSessionId: string
+    readonly idempotencyKey: string
+    readonly reason?: string
+  }): {
+    readonly ok: true
+    readonly from: string
+    readonly status: string
+    readonly steps: readonly { readonly from: string; readonly to: string; readonly eventId: string }[]
+    readonly replayed: boolean
+  } | { readonly ok: false; readonly code: string; readonly message: string }
 }
 
 const requireHostLedger = createRequire(import.meta.url)
@@ -230,13 +325,21 @@ function loadHostLedgerBridge(): HostLedgerBridge {
   if (hostLedgerBridge !== undefined) return hostLedgerBridge
   let mod: Partial<HostLedgerBridge>
   try {
-    mod = requireHostLedger('./cadre-ledger.cjs') as Partial<HostLedgerBridge>
+    // Bundled plugin: index.js and cadre-ledger.cjs share lib/. Source tests
+    // import src/index.ts, where the same file sits one directory up.
+    try {
+      mod = requireHostLedger('./cadre-ledger.cjs') as Partial<HostLedgerBridge>
+    } catch {
+      mod = requireHostLedger('../lib/cadre-ledger.cjs') as Partial<HostLedgerBridge>
+    }
   } catch (error) {
     throw new Error('协作状态机不可用：缺少 lib/cadre-ledger.cjs，请运行 node desktop/scripts/build-cadre-collab.mjs'
       + `（${error instanceof Error ? error.message : String(error)}）`)
   }
-  if (typeof mod.advanceReportToDelivered !== 'function') {
-    throw new Error('协作状态机不可用：cadre-ledger.cjs 未导出 advanceReportToDelivered')
+  for (const name of ['advanceReportToDelivered', 'listTasks', 'transitionTask'] as const) {
+    if (typeof mod[name] !== 'function') {
+      throw new Error(`协作状态机不可用：cadre-ledger.cjs 未导出 ${name}`)
+    }
   }
   hostLedgerBridge = mod as HostLedgerBridge
   return hostLedgerBridge
@@ -328,6 +431,28 @@ class Ledger {
       WHERE e.project_id = ? AND NOT EXISTS (SELECT 1 FROM members m WHERE m.project_id = e.project_id AND m.session_id = e.session_id)
       ORDER BY name`).all(projectId, projectId) as { session_id: string; name: string; state: string }[]
     return rows.map(row => ({ sessionId: row.session_id, name: row.name, state: row.state }))
+  }
+
+  /**
+   * Display names for every Session this project can name as an assignee.
+   *
+   * Members win over not-yet-enrolled employee templates; both fall back to the
+   * Session id, matching how dispatch resolves a target.
+   * @param projectId - project whose rows are read.
+   * @returns sessionId → display name.
+   */
+  displayNames(projectId: string): Map<string, string> {
+    const rows = this.db.prepare(`SELECT session_id, COALESCE(NULLIF(TRIM(display_name), ''), session_id) AS name
+      FROM members WHERE project_id = ?
+      UNION ALL
+      SELECT session_id, COALESCE(NULLIF(TRIM(display_name), ''), session_id) AS name
+      FROM employees WHERE project_id = ?`).all(projectId, projectId) as
+      { session_id: string; name: string }[]
+    const names = new Map<string, string>()
+    for (const row of rows) {
+      if (!names.has(row.session_id)) names.set(row.session_id, row.name)
+    }
+    return names
   }
 
   /**
@@ -563,7 +688,7 @@ const SUPERVISOR_DUTY = [
   '1. 只做任务拆解、按花名册派活（dispatch_task）、验收汇总；',
   '2. 有对应角色的员工时，不得代劳该员工的专业执行工作；',
   '3. 当任务需要某个角色但花名册中没有时：明确告诉用户缺少哪个角色、为什么需要它，并询问用户是否需要配置这个角色的员工；不得自己补位执行，不得假装已经派出去，也不要自行创建员工（选角色/模型需要用户决定）；dispatch_task 对不在册员工会返回 missing-employee；',
-  '4. 验收时对照任务的完成条件核实证据（交付物），不以口头说明代替；',
+  '4. 验收前先用 list_tasks 核对台账状态；验收/打回/搁置用 transition_task（to=verified/rework/failed/cancelled，后三者必须写 reason），并对照任务的完成条件核实证据（交付物），不以口头说明代替；',
   '5. 汇报用户时区分「已证实 / 未决 / 风险」三类，不把推测写成结论；',
   `6. 一次最多派 ${String(MAX_DISPATCH_ITEMS)} 条任务（多了要分批）；同一失败重试最多 ${String(MAX_RETRIES)} 次，超过必须换人或找用户裁决。`,
 ].join('\n')
@@ -714,6 +839,63 @@ export function applyToolRestriction(tools: AgentToolsLike, desired: readonly un
 }
 
 /**
+ * Apply visibility, scope and filters to one project's task rows.
+ *
+ * A supervisor sees the whole project; any other roster role sees only tasks
+ * assigned to itself. An empty page distinguishes "this project has no tasks"
+ * from "the filters matched nothing", so the model does not treat a lookup
+ * mistake as an empty project.
+ * @param rows - every task in the caller's project, newest first.
+ * @param names - sessionId → display name.
+ * @param query - caller identity and optional filters.
+ * @returns the page plus its empty reason and hint.
+ */
+export function pageTaskRows(
+  rows: readonly HostTaskRow[],
+  names: ReadonlyMap<string, string>,
+  query: { readonly role: string; readonly caller: string; readonly scope?: string; readonly assignee?: string; readonly limit?: number },
+): TaskListPage {
+  const scope = query.scope ?? 'open'
+  if (scope !== 'open' && scope !== 'all') throw new Error(`scope 只能是 open 或 all（收到 ${String(scope)}）`)
+  const limit = query.limit ?? TASK_LIST_DEFAULT_LIMIT
+  if (!Number.isInteger(limit) || limit < 1 || limit > TASK_LIST_MAX_LIMIT) {
+    throw new Error(`limit 必须是 1..${String(TASK_LIST_MAX_LIMIT)} 的整数（收到 ${String(limit)}）`)
+  }
+  const projectHasTasks = rows.length > 0
+  let visible = query.role === 'supervisor'
+    ? [...rows]
+    : rows.filter(row => row.assigneeSessionId === query.caller)
+  if (scope === 'open') {
+    visible = visible.filter(row => (TASK_LIST_OPEN_STATUSES as readonly string[]).includes(row.status))
+  }
+  const assignee = query.assignee?.trim().toLowerCase() ?? ''
+  if (assignee !== '') {
+    visible = visible.filter(row =>
+      row.assigneeSessionId.toLowerCase() === assignee
+      || (names.get(row.assigneeSessionId) ?? '').toLowerCase() === assignee)
+  }
+  const total = visible.length
+  const page = visible.slice(0, limit)
+  const supervisor = query.role === 'supervisor'
+  const hint = projectHasTasks
+    ? supervisor
+      ? '本项目有任务，但当前筛选或可见范围内没有匹配；去掉 scope/assignee 重查，或确认任务是否属于当前会话'
+      : '你名下没有匹配任务；员工只能看到派给自己的任务，去掉 scope 再查或向主管确认任务号与分派'
+    : supervisor
+      ? '本项目还没有任务；先用 list_employees 查在册员工，再 dispatch_task 派活'
+      : '本项目还没有任务；等主管派活后再用 list_tasks 查看自己的任务'
+  return {
+    rows: page,
+    total,
+    truncated: total > page.length,
+    empty: total === 0,
+    ...(total === 0
+      ? { reason: projectHasTasks ? 'no_match' as const : 'no_tasks' as const, hint }
+      : {}),
+  }
+}
+
+/**
  * Register the collaboration tools over the ledger and Session prompt channel.
  * @param ctx - Host plugin context; services are injected above.
  */
@@ -764,6 +946,115 @@ export function apply(ctx: HostContext): void {
     isConcurrencySafe: () => true,
     execute: async (_args: unknown, run: ToolRun) =>
       ({ employees: ledger.workers(ledger.projectOf(callerOf(run))) }),
+  })
+
+  ctx.tools.register({
+    name: 'list_tasks',
+    description: 'List this project\'s tasks with status, assignee, dispatch basis and update time. A supervisor sees every task; a worker sees only tasks assigned to itself. Call this before accepting work so the decision is based on the ledger, not on conversation memory.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        scope: {
+          type: 'string', enum: ['open', 'all'],
+          description: 'open (default): exclude verified/failed/cancelled; all: every task.',
+        },
+        assignee: { type: 'string', description: 'Optional assignee sessionId or display name.' },
+        limit: {
+          type: 'integer', minimum: 1, maximum: TASK_LIST_MAX_LIMIT,
+          description: `Page size (default ${String(TASK_LIST_DEFAULT_LIMIT)}).`,
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false,
+        required: ['projectId', 'tasks', 'total', 'truncated', 'empty'],
+        properties: {
+          projectId: { type: 'string' },
+          tasks: {
+            type: 'array',
+            items: {
+              type: 'object', additionalProperties: false,
+              required: ['taskId', 'title', 'status', 'assignee', 'dispatcherSessionId', 'basedOn',
+                'attempt', 'createdAt', 'updatedAt'],
+              properties: {
+                taskId: { type: 'string' },
+                title: { type: 'string' },
+                status: { type: 'string' },
+                assignee: {
+                  type: 'object', additionalProperties: false, required: ['sessionId', 'name'],
+                  properties: { sessionId: { type: 'string' }, name: { type: 'string' } },
+                },
+                dispatcherSessionId: { type: 'string' },
+                basedOn: {
+                  type: 'object', additionalProperties: false, required: ['bodyPreview'],
+                  properties: {
+                    bodyPreview: { type: 'string' },
+                    supersedesTaskId: { type: 'string' },
+                    supersededByTaskId: { type: 'string' },
+                  },
+                },
+                attempt: { type: 'integer' },
+                createdAt: { type: 'string' },
+                updatedAt: { type: 'string' },
+                dueAt: { type: 'string' },
+              },
+            },
+          },
+          total: { type: 'integer' },
+          truncated: { type: 'boolean' },
+          empty: { type: 'boolean' },
+          reason: { type: 'string', enum: ['no_tasks', 'no_match'] },
+          hint: { type: 'string' },
+        },
+      },
+      render: (_args: unknown, value: TaskListValue) => [text(value.empty
+        ? `没有任务（${String(value.reason)}）：${value.hint ?? ''}`
+        : value.tasks.map(row => `${row.taskId} [${row.status}] ${row.title} → ${row.assignee.name}`
+          + `（更新 ${row.updatedAt}${row.dueAt === undefined ? '' : `，截止 ${row.dueAt}`}）`).join('\n')
+          + (value.truncated ? `\n仅显示 ${String(value.tasks.length)}/${String(value.total)} 条` : ''))],
+    },
+    isConcurrencySafe: () => true,
+    execute: async (args: TaskListArgs, run: ToolRun): Promise<TaskListValue> => {
+      const caller = callerOf(run)
+      const member = ledger.member(caller)
+      if (member === undefined) throw new Error(`会话不在本项目花名册（session=${caller}）`)
+      if (args.assignee !== undefined && typeof args.assignee !== 'string') throw new Error('assignee 必须是字符串')
+      const listed = loadHostLedgerBridge().listTasks({ databasePath, projectId: member.projectId })
+      if (!listed.ok) throw new Error(`台账读取失败（${listed.code}）：${listed.message}`)
+      const names = ledger.displayNames(member.projectId)
+      const page = pageTaskRows(listed.rows, names, {
+        role: member.role,
+        caller,
+        ...(args.scope === undefined ? {} : { scope: args.scope }),
+        ...(args.assignee === undefined ? {} : { assignee: args.assignee }),
+        ...(args.limit === undefined ? {} : { limit: args.limit }),
+      })
+      return {
+        projectId: member.projectId,
+        tasks: page.rows.map(row => ({
+          taskId: row.taskId,
+          title: row.title,
+          status: row.status,
+          assignee: { sessionId: row.assigneeSessionId, name: names.get(row.assigneeSessionId) ?? row.assigneeSessionId },
+          dispatcherSessionId: row.dispatcherSessionId,
+          basedOn: {
+            bodyPreview: row.bodyPreview,
+            ...(row.supersedesTaskId === undefined ? {} : { supersedesTaskId: row.supersedesTaskId }),
+            ...(row.supersededByTaskId === undefined ? {} : { supersededByTaskId: row.supersededByTaskId }),
+          },
+          attempt: row.attempt,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          ...(row.dueAt === undefined ? {} : { dueAt: row.dueAt }),
+        })),
+        total: page.total,
+        truncated: page.truncated,
+        empty: page.empty,
+        ...(page.reason === undefined ? {} : { reason: page.reason }),
+        ...(page.hint === undefined ? {} : { hint: page.hint }),
+      }
+    },
   })
 
   /** Dispatch exactly one spec; shared by the initial and the retry path. */
@@ -1068,7 +1359,8 @@ export function apply(ctx: HostContext): void {
             '【员工汇报】', `任务号：${task.taskId}`, `标题：${task.title}`,
             `回报人：${reporter}`, '', args.summary, '',
             `交付物：${deliverables.length === 0 ? '（未提供）' : deliverables.join(', ')}`,
-            '任务已置 delivered，可用 transition_task 验收（verified / rework）。',
+            '任务已置 delivered，可用 list_tasks 查看状态、用 transition_task 验收'
+              + '（to=verified；打回用 to=rework 并附 reason）。',
           ].join('\n'))],
         }, run.signal)
         ledger.confirmReport(messageId)
@@ -1078,6 +1370,83 @@ export function apply(ctx: HostContext): void {
         ledger.failReport(messageId, error instanceof Error ? error.message : String(error))
         console.log(`cadre-collab: report delivery failed task=${task.taskId} reason=${error instanceof Error ? error.message : String(error)}`)
         return { taskId: task.taskId, status: 'delivered', supervisorNotified: false }
+      }
+    },
+  })
+
+  ctx.tools.register({
+    name: 'transition_task',
+    description: 'Change one task status as the project supervisor: to=verified accepts, rework returns it for another attempt, failed closes it as rejected, cancelled shelves it, review only starts the review. reason is required for rework/failed/cancelled. Delivered→verified/rework/failed records the mandatory review step first. Only a supervisor member may call this.',
+    parameters: {
+      type: 'object', additionalProperties: false, required: ['taskId', 'to'],
+      properties: {
+        taskId: { type: 'string', description: 'Task id from list_tasks or dispatch_task.' },
+        to: { type: 'string', enum: [...TRANSITION_TARGETS], description: 'Target status.' },
+        reason: {
+          type: 'string',
+          description: 'Why. Required (non-empty) for rework, failed and cancelled; recommended for verified.',
+        },
+        idempotencyKey: {
+          type: 'string',
+          description: 'Optional stable key for retries; reusing it never writes duplicate events.',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, required: ['taskId', 'from', 'status', 'steps', 'replayed'],
+        properties: {
+          taskId: { type: 'string' },
+          from: { type: 'string' },
+          status: { type: 'string' },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object', additionalProperties: false, required: ['from', 'to', 'eventId'],
+              properties: { from: { type: 'string' }, to: { type: 'string' }, eventId: { type: 'string' } },
+            },
+          },
+          replayed: { type: 'boolean' },
+        },
+      },
+      render: (_args: unknown, value: TransitionTaskValue) => [text(value.replayed
+        ? `任务 ${value.taskId} 已是 ${value.status}，未重复写入事件。`
+        : `任务 ${value.taskId}：${value.steps.map(step => `${step.from}→${step.to}`).join('，')}`)],
+    },
+    execute: async (args: TransitionTaskArgs, run: ToolRun): Promise<TransitionTaskValue> => {
+      const caller = callerOf(run)
+      const member = ledger.member(caller)
+      if (member === undefined) {
+        throw new Error(`FORBIDDEN_ACTOR: 调用会话不在本项目花名册（session=${caller}）`)
+      }
+      if (member.role !== 'supervisor') {
+        throw new Error(`FORBIDDEN_ACTOR: 员工不能改任务状态（transition_task 仅 supervisor 可用，caller=${caller} role=${member.role}）`)
+      }
+      if (typeof args.taskId !== 'string' || args.taskId.trim() === '') throw new Error('taskId 必填')
+      if (!(TRANSITION_TARGETS as readonly string[]).includes(args.to)) {
+        throw new Error(`INVALID_ARGUMENT: to 只能是 ${TRANSITION_TARGETS.join('/')}（收到 ${String(args.to)}）`)
+      }
+      if (args.reason !== undefined && typeof args.reason !== 'string') throw new Error('reason 必须是字符串')
+      if (args.idempotencyKey !== undefined && typeof args.idempotencyKey !== 'string') {
+        throw new Error('idempotencyKey 必须是字符串')
+      }
+      const idempotencyKey = args.idempotencyKey?.trim() || `transition:${randomUUID()}`
+      const outcome = loadHostLedgerBridge().transitionTask({
+        databasePath,
+        projectId: member.projectId,
+        taskId: args.taskId,
+        to: args.to,
+        actorSessionId: caller,
+        idempotencyKey,
+        ...(args.reason === undefined ? {} : { reason: args.reason }),
+      })
+      if (!outcome.ok) throw new Error(`${outcome.code}: ${outcome.message}`)
+      return {
+        taskId: args.taskId,
+        from: outcome.from,
+        status: outcome.status,
+        steps: outcome.steps,
+        replayed: outcome.replayed,
       }
     },
   })
@@ -1164,7 +1533,7 @@ export function apply(ctx: HostContext): void {
       previous?.lift()
       try {
         const desired = role === 'worker'
-          ? ['dispatch_task', 'list_employees']
+          ? ['dispatch_task', 'list_employees', 'transition_task']
           : ['report_task', 'bash', 'pwsh', 'write', 'edit', 'str_replace_editor']
         const outcome = applyToolRestriction(agent.ctx.tools, desired)
         restricted.set(agent.id, { role, lift: outcome.lift })
