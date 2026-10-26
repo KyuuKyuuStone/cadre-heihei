@@ -54,13 +54,6 @@
         serviceVersion: !!js process.env.DSH_CLIENT_VERSION
         endpoint: !!js process.env.DSH_PRODUCT_ANALYTICS_OTLP_URL
 
-    - id: product-analytics
-      name: '@deepseek-ai/dsh-client-product-analytics'
-      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
-      config:
-        enabled: true
-        appVersion: !!js process.env.DSH_CLIENT_VERSION
-
     # Host-owned opt-in sampled when a new Web session receives its preset
     # delegation tools. The Plugins page edits this settings namespace.
     - id: subagent-model-selection-settings
@@ -141,14 +134,6 @@
 
     # Configuration-surface reads and writes over Typert Remote. Each method
     # reports an actionable error when its settings-domain provider is absent.
-    - id: ui-settings-account
-      name: '@deepseek-ai/dsh-client-ui-settings-account'
-      # U-10：无账户产品，隐藏侧栏/设置账户入口。
-      disabled: true
-
-    - id: account-controller
-      name: '@deepseek-ai/dsh-api-account-controller'
-
     - id: settings-controller
       name: '@deepseek-ai/dsh-api-settings-controller'
 
@@ -333,10 +318,6 @@
 
     - id: ui-chat
       name: '@deepseek-ai/dsh-client-ui-chat'
-
-    # Official occupants for the generic sidebar and conversation brand slots.
-    - id: ui-brand-official
-      name: '@deepseek-ai/dsh-client-ui-brand-official'
 
     - id: ui-attachment
       name: '@deepseek-ai/dsh-client-ui-attachment'

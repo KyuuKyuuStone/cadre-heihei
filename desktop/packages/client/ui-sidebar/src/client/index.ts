@@ -18,6 +18,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { CadreProjectState, SidebarPanelMetadata, SidebarRootInjected } from './contract/slots.ts'
 import { CADRE_SKIN_TOKENS, CADRE_THEME_ENABLED, CADRE_THEME_SOURCE } from './cadre-skin.tokens.ts'
+import { CadreBrandMark, CadreBrandName, CadreHeroBrandMark } from './CadreBrand.tsx'
 import { CadreCreateDialog, type CadreCreateInjected, type CadreCreateRequest } from './CadreCreateDialog.tsx'
 import { CadreLedgerOverlay, type CadreLedgerInjected, type CadreLedgerRequest } from './CadreLedgerOverlay.tsx'
 import {
@@ -598,6 +599,17 @@ export function apply(ctx: ClientContext): void {
     },
     inject: injectProps,
   }, SidebarRoot))
+  // The product owns its brand: no official brand plugin is shipped, so the
+  // Cadre seal and wordmark fill the sidebar and blank-session hero here.
+  ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.register({
+    name: 'sidebar.brand.mark',
+  }, CadreBrandMark))
+  ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({
+    name: 'sidebar.brand.name',
+  }, CadreBrandName))
+  ctx.slots.inject('conversation.hero.brand.mark' as never, () => ctx.slots.register({
+    name: 'conversation.hero.brand.mark',
+  } as never, CadreHeroBrandMark as never))
   ctx.slots.inject('shell.leading', () => ctx.slots.register({
     name: 'shell.leading',
     locale: NS,

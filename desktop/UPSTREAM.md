@@ -75,12 +75,12 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K4 | `apps/desktop/src/project-manager.ts` | 桌面 profile 的 bundles 列表追加 `@deepseek-ai/dsh-bundle-cadre`；`applyRelease` 补齐**既有 profile** 缺失的 Desktop bundles（旧 profile 的 `package.json` 不会被 `initProfile` 重写，缺 bundle 会让所有 `cadre-*` preset 报 `agent-preset/not-found`）；并从旧 manifest 删除已下线的 `agent-team-profile` bundle 及其依赖 | profile 由桌面端生成，官方模板不含我们 bundle | 一个常量 `DESKTOP_BUNDLES` + 一个 `RETIRED_BUNDLES` |
 | K5 | `apps/desktop/src/tray.ts` | 托盘图标支持按系统明暗切换（`resolveIconPath` + `setDark`） | 托盘生命周期在 Electron 主进程 | 一个类内新增方法；可保持在桌面壳 |
 | K6 | `apps/desktop/src/locale.ts` | 产品名 `DeepSeek Harness` → `Cadre Heihei`（菜单/托盘/欢迎页） | 应用菜单与托盘文案由主进程提供 | 纯字符串替换，6 处 |
-| K7 | `packages/bundle/base/cordis.patch.yml` | 禁用 `llm-deepseek-account`（无账户产品） | **这是官方扩展点**（patch `disabled`），不是代码 patch | 1 行 + 注释 |
-| K8 | `packages/bundle/web-app/cordis.patch.yml` | 禁用 `ui-settings-account`（隐藏账户设置入口） | 同 K7，官方 patch 机制 | 1 行 + 注释；`account-controller` 仍由官方默认禁用 |
+| K7 | `packages/bundle/base/cordis.patch.yml` | 删除 `llm-deepseek-account` 与 `deepseek-account` 挂载行（无账户产品；2026-10-26 由 `disabled` 改为不挂载） | **这是官方扩展点**（patch 层），不是代码 patch | 删行；恢复只需还原 patch |
+| K8 | `packages/bundle/web-app/cordis.patch.yml` | 删除 `ui-settings-account` / `account-controller` / `product-analytics` / `ui-brand-official` 挂载行（无账户、纯本地、品牌自持） | 同 K7，官方 patch 机制 | 删行；恢复只需还原 patch |
 | K9 | `packages/client/ui-theme/src/theme-settings.ts` | 默认主题 `system` → `dark` | 官方没有「部署默认主题」配置面 | 1 行常量（**建议改为品牌/部署注入，见 §六**） |
 | K10 | `packages/client/ui-sidebar/src/client/index.ts` | 注册侧栏壳、项目行「＋」三选一/「台账」、会话角色标识（主管方标/员工圆标 + 岗位徽章 + 状态/当前任务副标题）与行列菜单、建人/台账 overlay、主题 token 覆盖。0.7.0 后**删除 CadrePanel 面板**（花名册/台账整页、`main:cadre` 路由、`sidebar.panellist:cadre` 入口全部移除）；建人改为 `shell.overlay` 弹窗，台账改为只读 overlay。EnginePort 客户端绑定经 `@deepseek-ai/dsh-cadre-engine/client`（内联进本包 bundle，见 K18） | 注册本身是官方 slot 扩展点；但**代码写进了官方包** | 应抽成独立客户端插件包（`slots.inject` 外部可用），本文件 hunk 可清零 |
 | K11 | `packages/client/ui-sidebar/src/client/SidebarRoot.module.css` | 侧栏玻璃层背景改为 `color-mix` 取主题 token | 官方没有对应视觉变体 | 4 条声明；可移入我们的主题样式 |
-| K12 | `packages/client/ui-brand-official/src/client/index.ts`、`packages/client/ui-brand-official/src/client/Brand.tsx` | 品牌占位改为 Cadre 印章（含 hero 槽位） | 官方明确要求另做品牌包，不应改包内 | **ADR-0023 §2.6 决定迁到独立品牌包，本项待删** |
+| K12 | `packages/client/ui-brand-official/src/client/index.ts`、`packages/client/ui-brand-official/src/client/Brand.tsx` | ~~品牌占位改为 Cadre 印章~~ **2026-10-26 已迁**：Cadre 印章/字标移到 `ui-sidebar` 自持（K32），`ui-brand-official` 不再挂载 | 官方品牌包对无账户产品无用；产品品牌不应寄生官方包 | 包内源码保留但不再加载；删除需另行清理源码 |
 | K13 | `packages/client/web/src/boot-page.ts` | 启动页字标改为 `Cadre Heihei` | 启动页在客户端 bundle 内、早于插件加载 | 1 行；品牌包无法覆盖启动页 |
 | K14 | `scripts/client-build-environment.ts` | `DSH_CLIENT_TITLE` 改为 `Cadre Heihei` | 构建期常量，插件读不到 | 1 行 |
 | K15 | `apps/desktop/scripts/electron-builder-config.mjs` | productName/artifactName/protocol 改名；files 白名单加 `lib/cadre-collab.cjs`；安装图标换 Cadre；Windows 多尺寸 ICO | 打包配置只能改这里 | 名称与资源映射；`cadre-collab.cjs` 随迁移可删 |
@@ -100,8 +100,9 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K29 | `packages/client/ui-tool/src/client/contract/slots.ts` | `tool.call.toolview` JSDoc 收紧一行（3 行合并为 2 行），回到 122 行报告预算内 | 我方 slot 目录门禁预算；官方新增 DispatchStatusRow 后为 123 行 | A（可合入上游） |
 | K30 | `scripts/slot-walk.ts` | `dedent()` 先归一化 CRLF 再切行，避免 Windows 检出（core.autocrlf）生成含裸 CR 的 catalog | 修过我们的坑（A）：Windows 上生成物非法、`--check` 永远红 | A（可合入上游） |
 | K31 | `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts` | 重新生成：补 `sidebar.workspaces.project.row.action` / `sidebar.workspaces.project.row.create` / `sidebar.session.row.badge`，并纳入 toolview 既有漂移 | 生成物，跟随声明变化 | 重跑 `pnpm run gen-client-catalog` |
+| K32 | `packages/bundle/base/cordis.patch.yml`、`packages/bundle/web-app/cordis.patch.yml`、`packages/bundle/headless/cordis.patch.yml`、`packages/client/ui-sidebar/src/client/CadreBrand.tsx` | 不交付 DeepSeek 账号登录 / 官方品牌展示 / 产品分析：三份 bundle patch 删除 6 行挂载；Cadre 印章与字标改由 `ui-sidebar` 注册 `sidebar.brand.mark/name` + `conversation.hero.brand.mark` | 无账户、纯本地产品，这些官方插件无用；品牌必须自持 | 删行 + 自注册；恢复只需还原 patch 并移除自注册。包仍在安装闭包内（B 阶段未做） |
 
-**内核补丁结论：17 处，其中 3 处（K7/K8/K10）本可完全走官方扩展点、1 处（K12）已决定迁走、1 处（K9）应换实现方式。真正无法避免的只剩桌面壳 6 处（K1–K6）+ 构建 4 处（K14–K17）。**
+**内核补丁结论：17 处，其中 3 处（K7/K8/K10）本可完全走官方扩展点、K12 已迁走、1 处（K9）应换实现方式。真正无法避免的只剩桌面壳 6 处（K1–K6）+ 构建 4 处（K14–K17）。**
 
 ---
 
@@ -135,10 +136,10 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | `cadre-collab/entry.ts` | 协作写路径实现（编译为 `lib/cadre-collab.cjs`） | 官方无账本 | 迁 Host 服务后移动 |
 | `scripts/build-cadre-collab.mjs` | 把 `cadre-collab/entry.ts` 打成 CJS 供 main require | 桌面壳加载方式 | 随迁移删除 |
 | `scripts/check-upstream-drift.mjs` | 本文件的自动发现脚本 | 过程工具 | 保留 |
-| `packages/client/ui-brand-official/src/client/Brand.module.css` | Cadre 印章样式 | 品牌 | 随 K12 迁到独立品牌包 |
-| `packages/client/ui-brand-official/src/client/seal-light.svg` | 浅色印章图 | 品牌 | 随 K12 迁走 |
-| `packages/client/ui-brand-official/src/client/seal-dark.svg` | 深色印章图 | 品牌 | 随 K12 迁走 |
-| `packages/client/ui-brand-official/src/client/assets.d.ts` | SVG 模块类型声明 | 构建 | 随 K12 迁走 |
+| `packages/client/ui-sidebar/src/client/CadreBrand.module.css` | Cadre 印章样式（迁自 ui-brand-official） | 品牌 | 自持（K32） |
+| `packages/client/ui-sidebar/src/client/CadreBrand.seal-light.svg` | 浅色印章图（迁自 ui-brand-official） | 品牌 | 自持（K32） |
+| `packages/client/ui-sidebar/src/client/CadreBrand.seal-dark.svg` | 深色印章图（迁自 ui-brand-official） | 品牌 | 自持（K32） |
+| `packages/client/ui-sidebar/src/client/CadreBrand.assets.d.ts` | SVG 模块类型声明 | 构建 | 自持（K32） |
 | `packages/client/ui-brand-official/src/css-modules.d.ts` | CSS Modules 类型声明 | 构建 | 随 K12 迁走 |
 | `apps/desktop/scripts/check-no-secrets.mjs` | 打包密钥泄漏门禁（afterPack 扫描） | 官方无 | 保留（安全，D 判据） |
 | `apps/desktop/scripts/preflight-package.mjs` | 打包前预检（可接漂移检查） | 官方无 | 保留 |
@@ -158,8 +159,8 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | `apps/cli/package.json` | 把 `@deepseek-ai/dsh-experimental-agent-team-profile` 从 `dependencies` 移到 `devDependencies`（另两个 agent-team 包上游已在 devDependencies） | 产品不交付官方实验团队「Agent Teams」；源码与官方测试保留 | **官方升级时需重放**；闭包断言见 `apps/desktop/scripts/prepare-package-set.ts`；评估见 `docs/dev/agent-team-removal-plan.md` |
 | `packages/client/ui-sidebar/package.json` | 新增 api-remotes / session-controller / connection / ui-theme 依赖；files 加 `lib/types/**/*.js` | 员工对话框与主题注入需要 | 抽独立插件包后可回滚部分 |
 | `packages/client/ui-sidebar/tsconfig.json` | 增加对应 project references | 构建 | 随包拆分收缩 |
-| `packages/client/ui-brand-official/package.json` | 增加 ui-conversation 依赖（hero 品牌槽） | 品牌 | 随 K12 迁走 |
-| `packages/client/ui-brand-official/tsconfig.json` | 增加 ui-conversation reference | 构建 | 随 K12 迁走 |
+| `packages/client/ui-brand-official/package.json` | 增加 ui-conversation 依赖（hero 品牌槽） | 品牌 | 包不再挂载；源码保留待清理（K32） |
+| `packages/client/ui-brand-official/tsconfig.json` | 增加 ui-conversation reference | 构建 | 包不再挂载；源码保留待清理（K32） |
 | `tsconfig.host.json` | references 增加 `packages/bundle/cadre-app` | 构建 | 保留 |
 | `apps/web/tsconfig.json` | exclude 增加 `tests/cadre-presets.e2e.ts`（引用 scaffold，避免 TS6307） | 测试边界 | 官方改 exclude 列表时按 B 判断 |
 | `pnpm-lock.yaml` | 依赖图变化（新 workspace 包与依赖） | 构建 | 每次版本升级重生成 |

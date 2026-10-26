@@ -38,6 +38,3 @@
 
 - id: authorization
   disabled: true
-
-- id: deepseek-account
-  disabled: true

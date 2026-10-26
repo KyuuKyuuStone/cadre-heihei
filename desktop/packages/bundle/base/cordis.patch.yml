@@ -117,11 +117,6 @@
     - id: authorization
       name: '@deepseek-ai/dsh-authorization'
 
-    - id: deepseek-account
-      name: '@deepseek-ai/dsh-deepseek-account-platform'
-      config:
-        desktopPlatform: !!js "ctx.get('profileContext')?.name === 'desktop' && ['darwin', 'win32'].includes(process.platform) ? process.platform : null"
-
     - id: credentials
       name: '@deepseek-ai/dsh-credentials-local'
 
@@ -524,8 +519,3 @@
     # choice.
     - id: llm-deepseek
       name: '@deepseek-ai/dsh-llm-deepseek-api-key'
-
-    - id: llm-deepseek-account
-      name: '@deepseek-ai/dsh-llm-deepseek-account'
-      # U-10：无账户产品，不注册账户模型 provider。
-      disabled: true
