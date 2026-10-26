@@ -2,8 +2,9 @@
 /**
  * Read-only drift check between the pinned upstream harness and this workspace.
  *
- * The upstream baseline is the commit recorded in `desktop/UPSTREAM.md`
- * (`vendor/deepseek-harness`, submodule). This script:
+ * The upstream baseline is the commit recorded in `desktop/UPSTREAM.md`.
+ * The old `vendor/deepseek-harness` submodule has been removed, so supply a
+ * checkout with `--upstream <dir>` (see Usage). This script:
  *   1. lists every file tracked by that commit,
  *   2. compares it byte-for-byte with the same path under `desktop/`,
  *   3. walks `desktop/` for files the pin does not have (added files),
@@ -25,7 +26,7 @@
  *   --fail-on-drift    exit 1 when unregistered changes exist
  */
 import { execFileSync } from 'node:child_process'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -170,6 +171,13 @@ function isRegistered(path, paths) {
 
 function main() {
   const options = parseArgs(process.argv.slice(2))
+  if (!existsSync(options.upstream)) {
+    console.error(
+      `upstream checkout not found: ${options.upstream}\n`
+      + 'The vendored submodule was removed; pass --upstream <dir> pointing at a deepseek-harness checkout.',
+    )
+    process.exit(2)
+  }
   const tracked = upstreamFiles(options.upstream)
   const modified = []
   const versionOnly = []
