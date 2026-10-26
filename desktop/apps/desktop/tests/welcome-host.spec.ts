@@ -106,6 +106,19 @@ describe('desktop welcome Web operations', () => {
     expect(JSON.parse(init!.body as string)).toMatchObject({ payload: { args: { event } } })
   })
 
+  it('boots without the account plugin by treating the missing account RPC as signed out', async () => {
+    const host = transport()
+    const routed = host.send.getMockImplementation()!
+    host.send.mockImplementation(async (input, init) => {
+      if (init?.method === 'POST' && (init.body as string).includes('account/getState')) {
+        return new Response(null, { status: 404 })
+      }
+      return routed(input, init)
+    })
+    const backend = await connectDesktopWelcome(url, host.send)
+    expect(await backend.read()).toMatchObject({ loggedIn: false, hasApiKey: false })
+  })
+
   it('refuses an unauthenticated Web launch', async () => {
     const send = vi.fn<Parameters<typeof connectDesktopWelcome>[1]>(async () => new Response(null, { status: 401 }))
     await expect(connectDesktopWelcome(url, send)).rejects.toThrow('Web authentication failed')

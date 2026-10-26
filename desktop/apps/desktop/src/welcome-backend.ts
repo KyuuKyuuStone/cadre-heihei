@@ -60,7 +60,15 @@ export async function connectDesktopWelcome(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'client-request', rpcId, method, payload: { args: request.args } }),
     })
-    if (!response.ok) throw new Error('desktop welcome: Web request failed')
+    if (!response.ok) {
+      // Account and analytics are optional plugins in Cadre Heihei; their
+      // absence is a 404 and the caller handles it as a disabled feature.
+      const optional = request.namespace === 'account' || request.namespace === 'productAnalytics'
+      if (!(optional && response.status === 404)) {
+        console.error(`desktop welcome: ${method} request failed (HTTP ${String(response.status)})`)
+      }
+      throw new Error('desktop welcome: Web request failed')
+    }
     const envelope: unknown = await response.json()
     if (!record(envelope) || envelope.type !== 'server-response' || envelope.rpcId !== rpcId
       || !record(envelope.result) || envelope.result.ok !== true) {
@@ -113,8 +121,14 @@ export async function connectDesktopWelcome(
       Object.assign(states, batch)
     }
     if (ref !== undefined && !record(states[ref])) throw new Error('desktop welcome: missing credential metadata')
+    // Cadre Heihei ships without the account plugin, so `account/getState` is
+    // not routed. The API-key route must still boot the workspace; an absent
+    // account backend is a signed-out account, not a startup failure.
+    const loggedIn = await account.state()
+      .then(state => state.status === 'credential-stored')
+      .catch(() => false)
     return {
-      loggedIn: (await account.state()).status === 'credential-stored',
+      loggedIn,
       hasApiKey: Object.values(states).some(value => record(value) && value.configured === true),
       writable: ref !== undefined && record(states[ref]) && states[ref].writable === true,
       localePreference: localePreference(namespaces),
