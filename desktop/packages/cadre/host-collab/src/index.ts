@@ -31,10 +31,17 @@ interface SessionController {
   }, signal: AbortSignal): Promise<{ readonly accepted: true }>
 }
 
+/** The agent-scoped tool registry surface used by role masks. */
+export interface AgentToolsLike {
+  restrict(filter: { deny?: readonly string[]; allow?: readonly string[] }): () => void
+  /** Authoritative per-agent visibility probe; undefined means the tool does not exist here. */
+  get?(name: string): unknown
+}
+
 interface AgentLike {
   readonly id: string
   readonly ctx: {
-    readonly tools: { restrict(filter: { deny: readonly string[]; allow?: readonly string[] }): () => void }
+    readonly tools: AgentToolsLike
     readonly systemPrompt?: {
       readonly section: (section: {
         readonly name: string
@@ -617,6 +624,95 @@ function text(value: string): { type: 'text'; text: string } {
   return { type: 'text', text: value }
 }
 
+/** Outcome of resolving one role mask against the agent's visible tools. */
+export interface ToolRestrictionOutcome {
+  readonly lift: () => void
+  readonly deny: readonly string[]
+  readonly absent: readonly string[]
+  readonly failClosed: boolean
+  readonly reason?: string
+}
+
+type ToolRestrictionPlan =
+  | { readonly kind: 'none'; readonly absent: readonly string[] }
+  | { readonly kind: 'deny'; readonly deny: readonly string[]; readonly absent: readonly string[] }
+  | { readonly kind: 'fail-closed'; readonly reason: string }
+
+/** The PTC presentation transport is reserved and cannot appear in a mask. */
+const RESERVED_TOOL_NAME = 'run_code'
+
+class FailClosedEnforcementError extends Error {}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function invalidDenyEntry(entry: unknown): boolean {
+  if (typeof entry !== 'string' || entry.trim() === '' || entry.trim() !== entry) return true
+  return entry === RESERVED_TOOL_NAME
+}
+
+/**
+ * Resolve a role mask without guessing from `restrict()` errors.
+ *
+ * A tool the agent cannot see is genuinely absent: it cannot be called, so
+ * leaving it out is safe. Every other uncertainty (no probe, a throwing probe,
+ * a malformed mask, `restrict()` rejecting a probed name) is fail-closed.
+ */
+function planToolRestriction(
+  desired: readonly unknown[],
+  probe: ((name: string) => unknown) | undefined,
+): ToolRestrictionPlan {
+  if (probe === undefined) return { kind: 'fail-closed', reason: 'probe-unavailable' }
+  if (!Array.isArray(desired) || desired.length === 0) return { kind: 'fail-closed', reason: 'empty-deny-list' }
+  const invalidIndex = desired.findIndex(invalidDenyEntry)
+  if (invalidIndex >= 0) return { kind: 'fail-closed', reason: `invalid-deny-entry:${JSON.stringify(desired[invalidIndex])}` }
+  const deny: string[] = []
+  const absent: string[] = []
+  try {
+    for (const name of desired as readonly string[]) {
+      if (probe(name) === undefined) absent.push(name)
+      else deny.push(name)
+    }
+  } catch (error) {
+    return { kind: 'fail-closed', reason: `probe-error: ${describeError(error)}` }
+  }
+  if (deny.length === 0) return { kind: 'none', absent }
+  return { kind: 'deny', deny, absent }
+}
+
+function failClosedRestriction(tools: AgentToolsLike, reason: string): ToolRestrictionOutcome {
+  try {
+    // `allow: []` masks every global tool; scoped registrations stay visible.
+    return { lift: tools.restrict({ allow: [] }), deny: [], absent: [], failClosed: true, reason }
+  } catch (error) {
+    throw new FailClosedEnforcementError(
+      `cadre-collab: fail-closed 无法禁用全局工具 reason=${reason} error=${describeError(error)}`,
+    )
+  }
+}
+
+/**
+ * Apply one role's deny list. Never calls `restrict({ deny: [] })`.
+ * @param tools - Agent-scoped registry; `get` is the authoritative known set.
+ * @param desired - Candidate tool names for the role mask.
+ * @returns the lift handle plus what was denied/absent, or a fail-closed marker.
+ */
+export function applyToolRestriction(tools: AgentToolsLike, desired: readonly unknown[]): ToolRestrictionOutcome {
+  const get = tools.get
+  const probe = typeof get === 'function' ? (name: string): unknown => get.call(tools, name) : undefined
+  const plan = planToolRestriction(desired, probe)
+  if (plan.kind === 'none') return { lift: () => {}, deny: [], absent: plan.absent, failClosed: false }
+  if (plan.kind === 'deny') {
+    try {
+      return { lift: tools.restrict({ deny: plan.deny }), deny: plan.deny, absent: plan.absent, failClosed: false }
+    } catch (error) {
+      return failClosedRestriction(tools, `restrict-error: ${describeError(error)}`)
+    }
+  }
+  return failClosedRestriction(tools, plan.reason)
+}
+
 /**
  * Register the collaboration tools over the ledger and Session prompt channel.
  * @param ctx - Host plugin context; services are injected above.
@@ -1070,31 +1166,27 @@ export function apply(ctx: HostContext): void {
         const desired = role === 'worker'
           ? ['dispatch_task', 'list_employees']
           : ['report_task', 'bash', 'pwsh', 'write', 'edit', 'str_replace_editor']
-        // `restrict` throws on names this profile never registered (bash is
-        // disabled on win32, run_code only exists under PTC). It names the known
-        // set in the error, so intersect once and retry instead of guessing.
-        let deny = desired
-        let lift: () => void
-        try {
-          lift = agent.ctx.tools.restrict({ deny })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          const known = (/known global tools: (.+)$/u.exec(message)?.[1] ?? '')
-            .split(',').map(token => token.trim().replace(/^"|"$/gu, '')).filter(token => token !== '')
-          deny = desired.filter(name => known.includes(name))
-          if (deny.length === 0) {
-            appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
-              `restrict parse-empty agent=${agent.id} error=${message.slice(0, 300)}
-`)
-          }
-          lift = agent.ctx.tools.restrict({ deny })
-        }
-        restricted.set(agent.id, { role, lift })
+        const outcome = applyToolRestriction(agent.ctx.tools, desired)
+        restricted.set(agent.id, { role, lift: outcome.lift })
         appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
-          `restrict agent=${agent.id} role=${role} deny=${deny.join(',')}
+          outcome.failClosed
+            ? `restrict fail-closed agent=${agent.id} role=${role} reason=${outcome.reason}
+`
+            : `restrict agent=${agent.id} role=${role} deny=${outcome.deny.join(',')} absent=${outcome.absent.join(',')}
 `)
+        if (outcome.failClosed) {
+          console.warn(`cadre-collab: 工具限制解析失败，已禁用全部全局工具（fail-closed）agent=${agent.id} role=${role} reason=${outcome.reason}`)
+        } else if (outcome.deny.length === 0) {
+          // Fail-open by construction (the tools really are absent), but leave a
+          // trace: a mask that resolves to nothing is otherwise indistinguishable
+          // from a role that was never restricted.
+          console.warn(`cadre-collab: 角色限制目标工具均不存在，已安全放行（fail-open）agent=${agent.id} role=${role} absent=${outcome.absent.join(',')}`)
+        }
       } catch (error) {
-        console.warn(`cadre-collab: tool restriction skipped agent=${agent.id} reason=${error instanceof Error ? error.message : String(error)}`)
+        // A fail-closed enforcement failure must abort the step, not fall back
+        // to an unrestricted agent; other errors keep the previous behaviour.
+        if (error instanceof FailClosedEnforcementError) throw error
+        console.warn(`cadre-collab: tool restriction skipped agent=${agent.id} reason=${describeError(error)}`)
       }
     }
     return next()
