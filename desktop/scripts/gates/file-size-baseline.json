@@ -1,0 +1,21 @@
+{
+  "comment": "desktop 文件行数基线（由 desktop/scripts/gates/check-file-size.ts --generate 生成）。扫描 apps/*/src、packages/*/*/src、cadre-collab；只许下调。",
+  "files": {
+    "packages/client/ui-trajectory/src/client/TrajectoryTable.tsx": {
+      "lines": 3538,
+      "kind": "upstream"
+    },
+    "packages/extensions/cordis-client-runner/src/client/slot-catalog.ts": {
+      "lines": 5034,
+      "kind": "upstream"
+    },
+    "packages/extensions/tool-cordis/src/api-catalog.ts": {
+      "lines": 8974,
+      "kind": "upstream"
+    },
+    "packages/typert/generator/src/analyzer.ts": {
+      "lines": 3468,
+      "kind": "upstream"
+    }
+  }
+}

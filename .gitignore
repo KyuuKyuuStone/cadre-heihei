@@ -38,6 +38,9 @@ desktop/vendor/**/src/**/*.js.map
 desktop/vendor/**/src/**/*.d.ts
 desktop/vendor/**/src/**/*.d.ts.map
 
+# 门禁运行产物（本地留存，不入库）
+desktop/scripts/gates/evidence/
+
 # Python
 __pycache__/
 *.pyc

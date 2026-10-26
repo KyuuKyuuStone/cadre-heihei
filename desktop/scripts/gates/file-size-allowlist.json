@@ -1,0 +1,4 @@
+{
+  "comment": "文件行数豁免（空）。条目须带 reason / decisionRef / expiresInVersion，过期即失败。",
+  "entries": []
+}
