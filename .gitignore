@@ -27,3 +27,29 @@ Thumbs.db
 # M4 打包产物（本地留存，不入库）
 app/resources/
 app/release/
+
+# desktop 下的编译产物（源码是 .ts，产物不入库）
+desktop/packages/**/src/**/*.js
+desktop/packages/**/src/**/*.js.map
+desktop/packages/**/src/**/*.d.ts
+desktop/packages/**/src/**/*.d.ts.map
+desktop/vendor/**/src/**/*.js
+desktop/vendor/**/src/**/*.js.map
+desktop/vendor/**/src/**/*.d.ts
+desktop/vendor/**/src/**/*.d.ts.map
+
+# Python
+__pycache__/
+*.pyc
+
+# 本地工作文件
+desktop/.spike-build/
+desktop/.spike-home/
+desktop/.claude/
+desktop/.agents/
+desktop/.handover/
+desktop/.rgignore
+
+# 构建产物
+.desktop-build/
+desktop/apps/desktop/.desktop-build/
