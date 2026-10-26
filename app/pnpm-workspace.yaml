@@ -1,4 +1,0 @@
-# app 是独立 pnpm workspace 根；不得 include vendor/。
-# 当前仅根包与后续 packages/* 子包，不纳入 vendor/deepseek-harness。
-packages:
-  - 'packages/*'

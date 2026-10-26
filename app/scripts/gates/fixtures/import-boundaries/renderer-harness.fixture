@@ -1,4 +1,0 @@
-// R3 坏样本：renderer 层 import harness 包。
-import { createClient } from '@deepseek-ai/dsh-sdk/client'
-
-export const gateFixtureClient = createClient

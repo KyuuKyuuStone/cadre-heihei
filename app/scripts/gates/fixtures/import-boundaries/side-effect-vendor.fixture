@@ -1,2 +1,0 @@
-// R3 坏样本：无 from 的副作用 import（vendor 源码路径）。
-import '../../../vendor/deepseek-harness/packages/sdk/client/src/api.ts'

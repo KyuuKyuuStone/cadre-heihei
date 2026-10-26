@@ -1,2 +1,0 @@
-// 坏样本：故意制造 TS2322，用于验证 tsc 棘轮门禁“注入必红”。
-export const gateFixture: string = 42

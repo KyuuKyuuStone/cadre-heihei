@@ -1,4 +1,0 @@
-{
-  "comment": "文件行数基线（从零生成，未沿用 cc-heihei 旧 baseline）。由 scripts/gates/check-file-size.ts --generate 生成；只许下调。",
-  "files": {}
-}

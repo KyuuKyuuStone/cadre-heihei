@@ -1,6 +1,0 @@
-// 坏样本：命名空间导入 node:fs 却用 promise 方法（L2 形态不符）。
-import * as fs from 'node:fs'
-
-export async function readProbe(): Promise<string> {
-  return await fs.readFile('probe.txt', 'utf8')
-}

@@ -1,4 +1,0 @@
-// RENDERER-NODE 坏样本：renderer 不得触碰 Node 内置模块。
-import { readFileSync } from 'node:fs'
-
-export const probe = readFileSync

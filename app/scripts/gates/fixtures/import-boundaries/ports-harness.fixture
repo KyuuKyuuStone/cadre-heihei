@@ -1,4 +1,0 @@
-// R2 坏样本：ports 层 harness 类型 import + 类型 re-export。
-import type { AgentId } from '@deepseek-ai/dsh-agent'
-
-export type { AgentId } from '@deepseek-ai/dsh-agent'

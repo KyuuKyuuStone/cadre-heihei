@@ -1,4 +1,0 @@
-// RENDERER-NODE 坏样本：protocol 只允许类型导入，值导入（运行时依赖）越界。
-import { CHANNELS } from '../collab/protocol/index.ts'
-
-export const probe = CHANNELS

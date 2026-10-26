@@ -1,5 +1,0 @@
-// RENDERER-NODE 允许样本：protocol 的类型导入 + shared 类型导入应放行。
-import type { ApiOk } from '../collab/protocol/index.ts'
-import type { SharedProbe } from '../shared/ipc.ts'
-
-export type Probe = ApiOk<SharedProbe>

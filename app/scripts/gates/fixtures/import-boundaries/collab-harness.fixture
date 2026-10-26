@@ -1,4 +1,0 @@
-// R3 坏样本：collab 层直接 import harness 源码路径。
-import { createClient } from '../../../vendor/deepseek-harness/packages/sdk/client/src/api.ts'
-
-export const gateFixtureClient = createClient

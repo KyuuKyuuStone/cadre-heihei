@@ -1,4 +1,0 @@
-// RENDERER-NODE 坏样本：renderer 不得 import 协作层实现（ledger/dispatch/roster/evidence/tools）。
-import { MemoryLedger } from '../collab/ledger/memory-ledger.ts'
-
-export const probe = MemoryLedger

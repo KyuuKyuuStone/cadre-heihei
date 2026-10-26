@@ -1,4 +1,0 @@
-// R2 坏样本：TS import x = require()。
-import engine = require('@deepseek-ai/dsh-agent')
-
-export { engine }
