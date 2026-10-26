@@ -116,7 +116,7 @@ export function createElectronBuilderConfig(
     },
     productName: 'Cadre Heihei',
     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
-    artifactName: `deepseek-harness-\${version}-\${os}-\${arch}${output.suffix}.\${ext}`,
+    artifactName: `cadre-heihei-\${version}-\${os}-\${arch}${output.suffix}.\${ext}`,
     directories: { output: output.directory },
     asar: true,
     electronDist: buildPaths.electron,
@@ -271,6 +271,7 @@ export function createElectronBuilderConfig(
     },
     nsis: {
       // 安装器/卸载器头部图标与 exe 图标分开：NSIS 用 installer.ico 的 32/48/256 档。
+      installerHeader: join(buildPaths.root, 'installer-ui', 'nsis-header.bmp'),
       installerIcon: fileURLToPath(new URL('../resources/installer.ico', import.meta.url)),
       uninstallerIcon: fileURLToPath(new URL('../resources/installer.ico', import.meta.url)),
       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
