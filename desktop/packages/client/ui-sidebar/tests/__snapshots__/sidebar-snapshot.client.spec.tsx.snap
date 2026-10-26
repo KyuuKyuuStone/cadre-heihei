@@ -124,14 +124,18 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
               data-slot="sidebar.brand.mark"
               style="display: contents;"
             >
-              <svg
-                aria-hidden="true"
-                data-content="965fe321"
-                fill="none"
-                height="17.6580310880829"
-                viewBox="0 0 23.16 17.04"
-                width="24"
-              />
+              <span
+                class="seal"
+                style="width: 24px; height: 24px;"
+              >
+                <img
+                  alt=""
+                  class="sealImage"
+                  height="24"
+                  src="data:image/svg+xml,%3c?xml%20version='1.0'%20encoding='UTF-8'?%3e%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='1024'%20height='1024'%20viewBox='0%200%201024%201024'%20fill='none'%3e%3ctitle%3eCadre%20Heihei%20·%20家印笑脸%20·%20标准%3c/title%3e%3crect%20x='56'%20y='56'%20width='912'%20height='912'%20rx='180'%20fill='%23F4F7FA'/%3e%3cpath%20d='M%20505%20770%20L%20272%20770%20Q%20260%20770%20260%20758%20L%20260%20244%20Q%20260%20232%20272%20232%20L%20748%20232%20Q%20760%20232%20760%20244%20L%20760%20696'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'%20stroke-linejoin='round'/%3e%3ccircle%20cx='392'%20cy='405'%20r='34'%20fill='%230E141B'/%3e%3cpath%20d='M%20558%20434%20Q%20619%20366%20680%20434'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'/%3e%3cpath%20d='M%20350%20545%20C%20400%20705%20620%20705%20672%20545'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'%20fill='none'/%3e%3crect%20x='690'%20y='720'%20width='68'%20height='68'%20rx='12'%20fill='%232B4C6F'/%3e%3c/svg%3e"
+                  width="24"
+                />
+              </span>
             </div>
           </span>
           <span
@@ -142,18 +146,9 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
               style="display: contents;"
             >
               <span
-                class="localBuildBrand"
+                class="name"
               >
-                <span
-                  class="localBuildTitle"
-                >
-                  DSH Local Build
-                </span>
-                <span
-                  class="buildVersion"
-                >
-                  1.2.3-rc.4-abc1234-dirty
-                </span>
+                Cadre Heihei
               </span>
             </div>
           </span>
@@ -268,14 +263,18 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
             data-slot="sidebar.brand.mark"
             style="display: contents;"
           >
-            <svg
-              aria-hidden="true"
-              data-content="965fe321"
-              fill="none"
-              height="17.6580310880829"
-              viewBox="0 0 23.16 17.04"
-              width="24"
-            />
+            <span
+              class="seal"
+              style="width: 24px; height: 24px;"
+            >
+              <img
+                alt=""
+                class="sealImage"
+                height="24"
+                src="data:image/svg+xml,%3c?xml%20version='1.0'%20encoding='UTF-8'?%3e%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='1024'%20height='1024'%20viewBox='0%200%201024%201024'%20fill='none'%3e%3ctitle%3eCadre%20Heihei%20·%20家印笑脸%20·%20标准%3c/title%3e%3crect%20x='56'%20y='56'%20width='912'%20height='912'%20rx='180'%20fill='%23F4F7FA'/%3e%3cpath%20d='M%20505%20770%20L%20272%20770%20Q%20260%20770%20260%20758%20L%20260%20244%20Q%20260%20232%20272%20232%20L%20748%20232%20Q%20760%20232%20760%20244%20L%20760%20696'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'%20stroke-linejoin='round'/%3e%3ccircle%20cx='392'%20cy='405'%20r='34'%20fill='%230E141B'/%3e%3cpath%20d='M%20558%20434%20Q%20619%20366%20680%20434'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'/%3e%3cpath%20d='M%20350%20545%20C%20400%20705%20620%20705%20672%20545'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'%20fill='none'/%3e%3crect%20x='690'%20y='720'%20width='68'%20height='68'%20rx='12'%20fill='%232B4C6F'/%3e%3c/svg%3e"
+                width="24"
+              />
+            </span>
           </div>
         </span>
         <svg
@@ -384,14 +383,18 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
               data-slot="sidebar.brand.mark"
               style="display: contents;"
             >
-              <svg
-                aria-hidden="true"
-                data-content="965fe321"
-                fill="none"
-                height="17.6580310880829"
-                viewBox="0 0 23.16 17.04"
-                width="24"
-              />
+              <span
+                class="seal"
+                style="width: 24px; height: 24px;"
+              >
+                <img
+                  alt=""
+                  class="sealImage"
+                  height="24"
+                  src="data:image/svg+xml,%3c?xml%20version='1.0'%20encoding='UTF-8'?%3e%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='1024'%20height='1024'%20viewBox='0%200%201024%201024'%20fill='none'%3e%3ctitle%3eCadre%20Heihei%20·%20家印笑脸%20·%20标准%3c/title%3e%3crect%20x='56'%20y='56'%20width='912'%20height='912'%20rx='180'%20fill='%23F4F7FA'/%3e%3cpath%20d='M%20505%20770%20L%20272%20770%20Q%20260%20770%20260%20758%20L%20260%20244%20Q%20260%20232%20272%20232%20L%20748%20232%20Q%20760%20232%20760%20244%20L%20760%20696'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'%20stroke-linejoin='round'/%3e%3ccircle%20cx='392'%20cy='405'%20r='34'%20fill='%230E141B'/%3e%3cpath%20d='M%20558%20434%20Q%20619%20366%20680%20434'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'/%3e%3cpath%20d='M%20350%20545%20C%20400%20705%20620%20705%20672%20545'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'%20fill='none'/%3e%3crect%20x='690'%20y='720'%20width='68'%20height='68'%20rx='12'%20fill='%232B4C6F'/%3e%3c/svg%3e"
+                  width="24"
+                />
+              </span>
             </div>
           </span>
           <span
@@ -402,18 +405,9 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
               style="display: contents;"
             >
               <span
-                class="localBuildBrand"
+                class="name"
               >
-                <span
-                  class="localBuildTitle"
-                >
-                  DSH Local Build
-                </span>
-                <span
-                  class="buildVersion"
-                >
-                  1.2.3-rc.4-abc1234-dirty
-                </span>
+                Cadre Heihei
               </span>
             </div>
           </span>
@@ -531,14 +525,18 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
               data-slot="sidebar.brand.mark"
               style="display: contents;"
             >
-              <svg
-                aria-hidden="true"
-                data-content="965fe321"
-                fill="none"
-                height="17.6580310880829"
-                viewBox="0 0 23.16 17.04"
-                width="24"
-              />
+              <span
+                class="seal"
+                style="width: 24px; height: 24px;"
+              >
+                <img
+                  alt=""
+                  class="sealImage"
+                  height="24"
+                  src="data:image/svg+xml,%3c?xml%20version='1.0'%20encoding='UTF-8'?%3e%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='1024'%20height='1024'%20viewBox='0%200%201024%201024'%20fill='none'%3e%3ctitle%3eCadre%20Heihei%20·%20家印笑脸%20·%20标准%3c/title%3e%3crect%20x='56'%20y='56'%20width='912'%20height='912'%20rx='180'%20fill='%23F4F7FA'/%3e%3cpath%20d='M%20505%20770%20L%20272%20770%20Q%20260%20770%20260%20758%20L%20260%20244%20Q%20260%20232%20272%20232%20L%20748%20232%20Q%20760%20232%20760%20244%20L%20760%20696'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'%20stroke-linejoin='round'/%3e%3ccircle%20cx='392'%20cy='405'%20r='34'%20fill='%230E141B'/%3e%3cpath%20d='M%20558%20434%20Q%20619%20366%20680%20434'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'/%3e%3cpath%20d='M%20350%20545%20C%20400%20705%20620%20705%20672%20545'%20stroke='%230E141B'%20stroke-width='44'%20stroke-linecap='round'%20fill='none'/%3e%3crect%20x='690'%20y='720'%20width='68'%20height='68'%20rx='12'%20fill='%232B4C6F'/%3e%3c/svg%3e"
+                  width="24"
+                />
+              </span>
             </div>
           </span>
           <span
@@ -549,18 +547,9 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
               style="display: contents;"
             >
               <span
-                class="localBuildBrand"
+                class="name"
               >
-                <span
-                  class="localBuildTitle"
-                >
-                  DSH 本地构建
-                </span>
-                <span
-                  class="buildVersion"
-                >
-                  1.2.3-rc.4-abc1234-dirty
-                </span>
+                Cadre Heihei
               </span>
             </div>
           </span>

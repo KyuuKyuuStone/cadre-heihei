@@ -329,11 +329,15 @@ export function conversationContextKey(kind: string, id: string): string {
   return `${kind.length}:${kind}${id}`
 }
 
-/** Open Settings through the sidebar account menu.
+/** The sidebar-foot Settings trigger (Cadre Heihei ships no account menu). */
+export function settingsTrigger(page: Page, locale: 'en' | 'zh'): Locator {
+  return page.getByRole('button', { name: locale === 'zh' ? '设置' : 'Settings', exact: true }).first()
+}
+
+/** Open Settings through the sidebar-foot trigger.
  * @param page - browser page with the mounted sidebar.
  * @param locale - current UI language.
  */
 export async function openSettings(page: Page, locale: 'en' | 'zh'): Promise<void> {
-  await page.getByRole('button', { name: locale === 'zh' ? '账号菜单' : 'Account menu', exact: true }).click()
-  await page.getByRole('menuitem', { name: locale === 'zh' ? '设置' : 'Settings', exact: true }).click()
+  await settingsTrigger(page, locale).click()
 }

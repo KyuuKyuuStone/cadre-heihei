@@ -81,7 +81,9 @@ function reply(response: ServerResponse, text: string): void {
   response.end()
 }
 
-it.skipIf(MODE === 'record')('reuses saved native Account Flash translations across reopen and reload, and cancels uncached requests without changing the main conversation', async () => {
+// Cadre Heihei 不交付账号登录插件（见 desktop/UPSTREAM.md 的 account 配置行）；本场景
+// 依赖 llm-deepseek-account 与 Account 服务，故 skip。
+it.skip('reuses saved native Account Flash translations across reopen and reload, and cancels uncached requests without changing the main conversation', async () => {
   const resources: { scaffold?: WebScaffold; browser?: Browser; restoreAuth?: () => void; sessionId?: SessionId } = {}
   const root = await mkdtemp(join(tmpdir(), 'dsh-cot-paid-browser-'))
   const calls: PaidCall[] = [], fixtureErrors: unknown[] = [], pendingRequests: Promise<void>[] = []

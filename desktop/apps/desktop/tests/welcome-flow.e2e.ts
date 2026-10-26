@@ -83,7 +83,9 @@ async function mockPlatform() {
 }
 
 describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
-  it('persists explicit API keys and browser account login independently across Host restarts', async () => {
+  // Cadre Heihei 不交付账号登录插件（见 desktop/UPSTREAM.md 的 account 配置行）；欢迎页
+  // 的账号登录链路已无 Host 服务，故 skip。
+  it.skip('persists explicit API keys and browser account login independently across Host restarts', async () => {
     vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3')
     const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-welcome-'))
     let host: DesktopHostProcess | undefined

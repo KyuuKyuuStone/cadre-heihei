@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[3]
 CLI = ROOT / 'apps' / 'cli' / 'lib' / 'bin.js'
 
 
+# Cadre Heihei 不交付账号登录插件（见 desktop/UPSTREAM.md 的 account 配置行）；
+# 本快照的 patch 依赖 llm-deepseek-account 行挂载，故 skip。
+@pytest.mark.skip(reason='Cadre Heihei ships no deepseek-account plugin')
 @pytest.mark.skipif(not CLI.exists(), reason='requires the built dsh profile runtime')
 def test_account_provider_signout_snapshot(tmp_path: Path) -> None:
     with DeepSeekHarness(

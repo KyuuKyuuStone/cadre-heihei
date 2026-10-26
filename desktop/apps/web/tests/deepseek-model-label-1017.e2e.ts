@@ -43,7 +43,9 @@ describe.skipIf(MODE === 'record')('web e2e: temporary DeepSeek release badge', 
     finally { await scaffold?.close() }
   })
 
-  it('shows the same badge in all placements while preserving the chosen provider and model id', async () => {
+  // Cadre Heihei 不交付账号登录插件（见 desktop/UPSTREAM.md 的 account 配置行）；本场景
+  // 依赖 llm-deepseek-account 行与账号模型菜单，故 skip。
+  it.skip('shows the same badge in all placements while preserving the chosen provider and model id', async () => {
     const trigger = page.getByRole('button', { name: /^选择模型/ })
     await trigger.getByText('1017', { exact: true }).waitFor()
     expect(await trigger.textContent()).toContain(`${NAME} 1017`)
@@ -69,7 +71,8 @@ describe.skipIf(MODE === 'record')('web e2e: temporary DeepSeek release badge', 
     }
   })
 
-  it('keeps the release badge inside a 390px model menu and uses both theme palettes', async () => {
+  // 同上：账号模型行已从运行时移除。
+  it.skip('keeps the release badge inside a 390px model menu and uses both theme palettes', async () => {
     try {
       await page.setViewportSize({ width: 390, height: 844 })
       const trigger = page.getByRole('button', { name: /^选择模型/ })

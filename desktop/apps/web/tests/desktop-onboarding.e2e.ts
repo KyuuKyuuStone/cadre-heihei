@@ -226,7 +226,9 @@ describe.skipIf(MODE === 'record')('web e2e: App-only desktop onboarding', () =>
     await page.setViewportSize({ width: 1280, height: 840 })
   }
 
-  it('keeps Web unchanged, resumes App progress, and returns to credit even when balance refresh fails', async () => {
+  // Cadre Heihei 不交付账号登录插件（见 desktop/UPSTREAM.md 的 account 配置行）；本文件
+  // 的 App onboarding 场景依赖 deepseek-account / account-controller 挂载，故 skip。
+  it.skip('keeps Web unchanged, resumes App progress, and returns to credit even when balance refresh fails', async () => {
     const web = await browser.newPage({ viewport: { width: 1280, height: 840 }, locale: ZH_BROWSER_LOCALE })
     try {
       await web.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
@@ -397,7 +399,8 @@ describe.skipIf(MODE === 'record')('web e2e: App-only desktop onboarding', () =>
     await page.close()
   })
 
-  it('keeps funded credit actions stable and rechecks on reload in English dark mode', async () => {
+  // 同上：账号插件已从运行时移除。
+  it.skip('keeps funded credit actions stable and rechecks on reload in English dark mode', async () => {
     bonusBalance = '12.50'
     await scaffold.ctx.settings.mutate('ui-theme', [{ op: 'set', path: ['preference'], value: 'dark' }])
     page = await desktopPage('en-US')
@@ -434,7 +437,8 @@ describe.skipIf(MODE === 'record')('web e2e: App-only desktop onboarding', () =>
     await page.close()
   })
 
-  it('leaves a bonus unacknowledged on onboarding exit and presents it only in the workspace', async () => {
+  // 同上：账号插件已从运行时移除。
+  it.skip('leaves a bonus unacknowledged on onboarding exit and presents it only in the workspace', async () => {
     bonusOffered = true
     walletBalance = '5.00'
     const observations: string[] = []
@@ -467,7 +471,8 @@ describe.skipIf(MODE === 'record')('web e2e: App-only desktop onboarding', () =>
     await page.close()
   })
 
-  it('applies API-key defaults without opening App onboarding or repeating after account login', async () => {
+  // 同上：账号插件已从运行时移除。
+  it.skip('applies API-key defaults without opening App onboarding or repeating after account login', async () => {
     await scaffold.ctx.credentials.deleteRecord(credentialKey('deepseek-account-platform', 'default'))
     await scaffold.ctx.credentials.set(credentialRef('DEEPSEEK_API_KEY'), 'fixture-api-key')
     await scaffold.ctx.settings.mutate(NS, Object.entries(INITIAL).map(([field, value]) => ({ op: 'set', path: [field], value })))

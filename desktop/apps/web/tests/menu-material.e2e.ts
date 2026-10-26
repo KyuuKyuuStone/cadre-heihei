@@ -17,7 +17,9 @@ async function material(menu: Locator) {
   })
 }
 
-it('shares menu transparency and blur across palettes and follows native menu bounds', async () => {
+// Cadre Heihei 不交付账号菜单（见 desktop/UPSTREAM.md 的 account 配置行）；本用例
+// 只测该菜单的材质与原生菜单边界，故 skip。
+it.skip('shares menu transparency and blur across palettes and follows native menu bounds', async () => {
   const scaffold = await launchWebScaffold({})
   onTestFinished(() => scaffold.close())
   await seedSession(scaffold, await readFile(seed, 'utf8'), 'menu-material-session')

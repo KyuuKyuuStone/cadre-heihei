@@ -474,8 +474,7 @@ describe('web e2e: macOS window drag coverage', () => {
   it('keeps a covering overlay out of the drag surface', async () => {
     const { page, tripwire } = await darwinPage()
     try {
-      await page.getByRole('button', { name: 'Account menu', exact: true }).click()
-      await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
+      await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
       const dialog = page.locator('[role="dialog"]').first()
       await dialog.waitFor({ timeout: 15_000 })
       await settled(page)

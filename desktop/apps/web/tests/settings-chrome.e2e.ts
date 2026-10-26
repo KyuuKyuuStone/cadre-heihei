@@ -75,15 +75,12 @@ describe('web e2e: settings modal and General preferences', () => {
       if (await dialog.isVisible()) await page.keyboard.press('Escape')
       await dialog.waitFor({ state: 'hidden' })
     })
-    const trigger = page.getByRole('button', { name: '账号菜单', exact: true })
-    expect(await trigger.getAttribute('aria-haspopup')).toBe('menu')
-    expect(await trigger.getAttribute('aria-expanded')).toBe('false')
+    // Cadre Heihei 不交付账号菜单（见 desktop/UPSTREAM.md 的 account 配置行）；
+    // Settings opens from the sidebar-foot trigger.
+    const trigger = page.getByRole('button', { name: '设置', exact: true }).first()
     await trigger.click()
-    expect(await trigger.getAttribute('aria-expanded')).toBe('true')
-    await page.getByRole('menuitem', { name: '设置', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '设置' })
     await dialog.waitFor({ timeout: 10_000 })
-    expect(await trigger.getAttribute('aria-expanded')).toBe('false')
     // General is active by default; Permission, Language and Appearance are functional.
     expect(await dialog.getByRole('button', { name: '通用设置' }).getAttribute('aria-current')).toBe('true')
     await dialog.getByRole('button', { name: '工作区内修改' }).waitFor({ timeout: 10_000 })
@@ -793,7 +790,7 @@ describe('web e2e: settings modal and General preferences', () => {
     await page.reload({ waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     acknowledgeReloadConnectionLoss(tripwire, warningStart)
-    const enTrigger = page.getByRole('button', { name: 'Account menu' })
+    const enTrigger = page.getByRole('button', { name: 'Settings', exact: true }).first()
     await enTrigger.waitFor({ timeout: 10_000 })
 
     // A Chinese browser on another port still receives the explicit English

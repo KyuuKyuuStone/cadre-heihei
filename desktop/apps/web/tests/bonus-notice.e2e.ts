@@ -273,7 +273,9 @@ describe.skipIf(MODE === 'record')('web e2e: bonus notice', () => {
     if (root !== undefined) await rm(root, { recursive: true, force: true })
   })
 
-  it('acknowledges a notice shown under settings, refreshes once per entry, and localizes the request', async () => {
+  // Cadre Heihei 不交付账号登录插件（见 desktop/UPSTREAM.md 的 account 配置行）；本场景
+  // 依赖 deepseek-account / account-controller 挂载，故 skip。
+  it.skip('acknowledges a notice shown under settings, refreshes once per entry, and localizes the request', async () => {
     const zhFirst = '已赠送您 5.00 元 DSH 体验赠金。'
     const zhLater = '已赠送您 8.00 元 DSH 体验赠金。'
     const enBonus = 'You received a CNY 9.00 DSH trial credit.'

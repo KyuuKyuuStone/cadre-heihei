@@ -14,7 +14,9 @@ const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/onboarding-native', impor
 const SIGNED_OUT_MENU_EXPECTED = join(SNAPSHOT_DIR, 'signed-out-menu.expected.md')
 const MODE = webSnapshotMode()
 
-describe.skipIf(MODE === 'record').each([false, true])('web e2e: native credential onboarding (desktop marker: %s)', (desktop) => {
+// Cadre Heihei 不交付账号登录插件（见 desktop/UPSTREAM.md 的 account 配置行）；本文件
+// 的原生凭据 onboarding 与账号菜单均已随挂载删除，故 skip。
+describe.skip.each([false, true])('web e2e: native credential onboarding (desktop marker: %s)', (desktop) => {
   let scaffold: WebScaffold
   let browser: Browser
   let page: Page

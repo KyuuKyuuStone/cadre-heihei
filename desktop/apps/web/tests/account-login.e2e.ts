@@ -118,7 +118,9 @@ describe.skipIf(MODE === 'record')('web e2e: DeepSeek account sign-in in a plain
     if (root !== undefined) await rm(root, { recursive: true, force: true })
   })
 
-  it('signs in through a themed tab and recovers both avatars on a later Settings entry', async () => {
+  // Cadre Heihei 不交付账号登录插件（见 desktop/UPSTREAM.md 的 account 配置行）；本场景
+  // 依赖 deepseek-account / ui-settings-account 两行挂载，故 skip。
+  it.skip('signs in through a themed tab and recovers both avatars on a later Settings entry', async () => {
     const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, locale: 'en-US', colorScheme: 'dark' })
     onTestFinished(() => context.close())
     const page = await context.newPage()
