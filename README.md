@@ -1,50 +1,111 @@
-# cadre-heihei
+# Cadre Heihei
 
-**cadre-heihei 是「主管/员工」AI 协作工作台的新项目。** 基于开源 MIT 内核 [`deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness)（评估结论：能当地基，推荐 fork）构建——主管编排拆解派活，员工无人值守执行并自动汇报。
+> **主管的主要任务就是理解用户，然后去派活完成。**
 
-**命名**：`cadre`＝骨干/干部，对应「主管—员工」的组织结构；`-heihei` 是家族后缀，延续前身项目。
+你跟一个「主管」说想法，它理解、拆解、派给员工去做，做完了报给你看。你只做决定，不做操作。
 
-**前身**：[cc-heihei](https://github.com/KyuuKyuuStone/claude-code-heihei)——已**冻结于 v1.7.9**（最后一个版本），代码按 MIT 开源。v1.7.9 Release 仍可下载使用。
+**如臂使指，一念百行。**
 
-**当前状态**：**已 GO（ADR-0017），进入实施准备；B1/B5 前提已满足（开发态/原型范围），打包态待验；S3 与 S5a 按 ADR-0015/0016 执行降级方案。** 2026-10-21 用户已裁定 12 条启动决策；其余 GO 前提未满足前不得进入对应阶段。
+> 基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT）构建 —— 感谢 DeepSeek 团队开源这套底座。
 
-## 文档入口（本 README 是唯一入口）
+[下载安装](#下载安装) · [快速开始](#快速开始) · [三个概念](#三个概念) · [基于 DeepSeek Harness 构建](#基于-deepseek-harness-构建) · [English](#english)
 
-| 位置 | 性质 | 用途 |
-|---|---|---|
-| [`docs/decisions/`](docs/decisions/README.md) | **现行决策**（可演进） | 12 条启动决策的 ADR、被否决项与理由、勘误区 |
-| [`docs/product/`](docs/product/README.md) | **现行产品文档**（可演进） | 方向总纲、产品模型、交互设计、设计规范、审查与测试规范 |
-| [`docs/pending-verification.md`](docs/pending-verification.md) | 现行清单 | 待核查项，分「阻塞 / 不阻塞」；含 `6aa34b7a` 的关闭结论 |
-| [`docs/archive/2026-10-23-旧文档/`](docs/archive/2026-10-23-旧文档/README.md) | **历史 · 已封存** | 交接包快照（`01`~`06` + `blessings`）、旧 spike、旧设计与评审记录（2026-10-23 只移动不删除） |
+---
 
-规则：
+## 它解决什么问题
 
-1. **历史查 `docs/archive/2026-10-23-旧文档/`，现行决定查 `docs/decisions/`，产品设计查 `docs/product/`。** 与 ADR 冲突时以 ADR 为准（勘误区见归档内的 `handover/README.md`）。
-2. 交接包原文**不得修改**；新结论写入 ADR 或产品文档。
-3. **架构判断在通过 spike 前一律标「假设，待 spike 验证」**，不得写成定论。
+一个人用 AI 做点东西——写小说、写软件、做运营——实际流程往往是：开一堆窗口，自己当调度，反复解释背景，拿到半成品再自己拼。AI 越能干，你越像一个项目经理，而不是创作者。
 
-## 现行硬约束（摘要，详见 ADR）
+Cadre Heihei 把这些杂事交出去：**你只负责说想要什么**，主管负责理解与拆解，员工负责专业执行，你直接看结果。
 
-- 完全开源可改；**零改内核优先**（ADR-0002）
-- 引擎可替换，接缝方向 MCP（ADR-0003，假设待验证）
-- token 效率从架构层考虑（`docs/archive/2026-10-23-旧文档/handover/05-新项目的起点约束.md`）
-- 自动化不加人工审批点；首版三屏、不做审批 UI（ADR-0007）
-- 视觉沿用骨架，WCAG AA / 警示 AAA，六主题从前身回填（ADR-0008）
-- UI 摘要化：截断标注 + 展开入口，用量只落日志（ADR-0009）
-- spike 阻断即停（ADR-0001）；Node ≥ 22.19 基线（ADR-0004，Electron 是否满足待实测）
-- spike 在独立工作区 `D:\xxw_p\cadre-spike-env` 执行，不做 VM/账户隔离（ADR-0013）
-- 每会话独立 `DeepSeekHarness` 实例，MCP 仍为工具接缝（ADR-0014，变更原单进程多会话）
-- 汇报漏 taskId 显式报错列候选（ADR-0006）
-- 门禁 DoD 含空仓重算 baseline + 坏样本（ADR-0011）
-- 交接包冻结只读 + 唯一入口 + 轻量 ADR（ADR-0012）
+- 想做一个网站 → 主管拆成前端、后端、测试，派下去
+- 想写一本小说 → 主管拆成设定、大纲、章节，派下去
+- 中途改主意 → 直接跟主管说，它重新安排
 
-## 事实基线
+没有表单，没有看板，没有必须填的配置向导。产品体验就是**和主管对话**。
 
-- 前身冻结版本：**v1.7.9**（tag `v1.7.9` @ `8ab1c24`，Release 三资产齐）
-- 新底座：`deepseek-harness`（MIT，无 CLA/DCO；评估克隆钉 `687f282e` = dsh-v0.2.1-rc.2，位于 `D:\xxw_p\cc-heihei-verify\harness-eval\deepseek-harness`）
-- 一线反馈素材：前身仓库 `IDE反馈/` 目录 7 份（7 个真实项目、30+ 岗位会话的实测反馈）
-- 前身最后一笔修复（commit `5eba92a`）已在 v1.7.9 发布
+## 三个概念
 
-## 建议阅读顺序
+- **项目部** —— 一个本地文件夹就是一个项目部，也是一条隔离边界。不同项目部之间互相看不见。
+- **主管** —— 唯一跟你对话的人（每个项目部一名）。它负责理解你的想法、拆任务、验收员工的产出。它不干执行的活。
+- **员工** —— 前端、后端、架构师、设计师、写作、资料整理……一个员工就是一个 AI 会话，只负责专业执行。
+- **普通会话** —— 你随手问两句的对话。不算员工，不进花名册，随时可删。
 
-`docs/product/DIRECTION.md` → `docs/decisions/README.md` → `docs/product/README.md` → `docs/pending-verification.md` → `docs/archive/2026-10-23-旧文档/handover/02-理念与铁律.md` → `docs/archive/2026-10-23-旧文档/handover/05-新项目的起点约束.md`。
+## 基于 DeepSeek Harness 构建
+
+Cadre Heihei 不是从零写的。它的底座是 **DeepSeek Harness**（[github.com/deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)，MIT 许可）——DeepSeek 团队开源的一套插件式 Agent 基础设施。我们在这套底座上做修改与扩展，把它从「一个通用 Agent 运行时」改造成了「一个由主管派活、员工干活的协作产品」。
+
+**我们重用的**
+
+- **会话引擎**：会话生命周期、上下文压缩、JSONL 与 SQLite 持久化
+- **插件体系**：Cordis 插件树、profile/bundle 组合、配置 patch 语义 —— 产品里几乎每项能力都是往这棵树上插一行
+- **UI 框架**：客户端 slot 机制、设置页扩展、Web 与桌面双端外壳
+- **模型与工具层**：provider 抽象、工具注册与权限流
+
+没有这些，这个项目不会有今天的样子。
+
+**我们添加的**
+
+- 主管 / 员工的角色模型：花名册、任务台账、跨会话派单与汇报
+- 派活与验收流程：只有主管能派活，员工只执行、不猜意图，两层汇报
+- 侧栏「协作」面板与项目部隔离
+- 品牌与安装器
+
+**我们对官方代码的每一处改动**，逐条登记在 [`desktop/UPSTREAM.md`](desktop/UPSTREAM.md) —— 位置、理由、是否计划合并回上游。这是我们该有的透明度。
+
+**许可证**：本项目采用 MIT，与上游一致。根目录 [`LICENSE`](LICENSE) 保留了 DeepSeek Harness 的原始版权声明（`Copyright (c) 2026 DeepSeek`）与本项目的声明；上游的 `LICENSE` 与 `THIRD_PARTY_NOTICES.md` 原样保留在 `desktop/` 下，未做改动。
+
+## 下载安装
+
+> 安装包**待发布**，将托管在 [GitHub Releases](https://github.com/KyuuKyuuStone/cadre-heihei/releases)（当前版本 0.8.7，2026-10-26，约 274 MiB）。
+
+- **系统**：Windows 10 / 11
+- **安装**：双击安装（当前为 per-user 安装）；启动时 Windows 可能弹出 SmartScreen 告警——安装包**未做代码签名**，点「更多信息 → 仍要运行」即可
+- **账户**：不需要注册或登录；模型接入方式是**在设置页填你自己的 API Key**（支持多家服务商）
+- **自动更新与遥测**：默认关闭
+- **数据位置**：`~/.dsh`
+  - `~/.dsh/cadre.sqlite` —— 花名册与任务台账
+  - 卸载不会删除数据，重装不丢团队与历史
+
+## 快速开始
+
+1. **装好并启动**，打开「设置」填入模型服务商的 API Key
+2. **建项目部** —— 选一个本地文件夹
+3. **建人** —— 先建一名「主管」，再按需建员工（前端、后端……可直接套用角色模板，名称和职责都能改）
+4. **跟主管说想法** —— 打开主管会话，把你想做的事说清楚。拆解、派活、催进度、验收，它自己会走
+
+想让某个员工换个做法？点进它的会话直接说。所有任务流向主管，员工之间不互相说话。
+
+## 截图
+
+> 截图待补（0.8.7 正式界面：主界面 / 侧栏团队 / 主管对话）
+
+## 技术栈与许可
+
+- **桌面端**：Electron
+- **内核**：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT 许可），插件化架构
+- **存储**：任务台账走本地 SQLite，会话持久化为 JSONL，全部留在本机
+- **许可证**：[MIT](LICENSE)，与原项目一致
+- **源码结构与贡献指南**：待补
+
+## 前身
+
+前身是 [cc-heihei](https://github.com/KyuuKyuuStone/claude-code-heihei)，已冻结于 v1.7.9。
+
+---
+
+## English
+
+**Cadre Heihei** is a single-user desktop app that gives you an AI *supervisor*.
+
+You describe what you want. The supervisor understands it, breaks it into tasks, dispatches them to AI *employees* (each a separate agent session with its own responsibility), reviews their work, and reports back to you. You never fill in a form, configure a workflow, or manage a board — the product *is* the conversation with the supervisor.
+
+- **Project** = a local folder = an isolation boundary
+- **Supervisor** = one per project; the only agent you talk to; understands, decomposes, dispatches, reviews
+- **Employee** = 前端 / 后端 / 设计师 / 写作 …; executes one thing at a time, does not guess your intent
+
+Current state: Windows preview, version 0.8.7, unsigned build.
+
+**Built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (MIT).** This project is not written from scratch — it is a modified and extended fork of DeepSeek Harness, with a collaboration layer (supervisor / employee roles, task ledger, dispatch and review) added on top. Every change we made to official code is recorded in [`desktop/UPSTREAM.md`](desktop/UPSTREAM.md). Licensed under MIT; [`LICENSE`](LICENSE) retains the original DeepSeek copyright notice.
+
+Predecessor: [cc-heihei](https://github.com/KyuuKyuuStone/claude-code-heihei), frozen at v1.7.9.

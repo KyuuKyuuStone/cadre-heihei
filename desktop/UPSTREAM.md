@@ -7,10 +7,10 @@
 
 ## 基线
 
-- **upstream pin**：`687f282e`（`vendor/deepseek-harness`，dsh `0.2.1-rc.2` 发布提交）
-- **当前产品版本**：0.5.1（`desktop/package.json`）
+- **upstream pin**：`687f282e`（dsh `0.2.1-rc.2` 发布提交）。原 `vendor/deepseek-harness` submodule 已于 2026-10-27 删除（`af45875b`），pin 号作为**对照基准**保留。
+- **当前产品版本**：0.8.7（`desktop/package.json`）
 - **复制方式**：`desktop/` 是 pin 的整仓副本（`apps/`、`packages/`、`vendor/`、`scripts/`、根配置），构建产物除外。
-- **官方更新来源**：`vendor/deepseek-harness`（git submodule，只读）。
+- **官方更新来源**：按 pin 号临时 clone 上游（`https://github.com/deepseek-ai/deepseek-harness`）到仓库外做比对，**不再以 submodule 形式入库**；`desktop/scripts/check-upstream-drift.mjs --upstream <dir>` 指向该 clone。
 - **冻结点补记**：`cadre-experimental-0.5.0` 打 tag 时整树源码大部分未跟踪，**冻结范围有漏洞**；
   已由两笔抢救 commit（源码层 3.3k+ 与资源类 213 项）补全，并以 `cadre-experimental-0.5.0-src`
   作为**真正的源码层冻结点**（残余仅工作环境类，git 保管范围外）。
@@ -169,8 +169,8 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | `packages/client/ui-sidebar/tsconfig.json` | 增加对应 project references | 构建 | 随包拆分收缩 |
 | `packages/client/ui-brand-official/package.json` | 增加 ui-conversation 依赖（hero 品牌槽） | 品牌 | 包不再挂载；源码保留待清理（K32） |
 | `packages/client/ui-brand-official/tsconfig.json` | 增加 ui-conversation reference | 构建 | 包不再挂载；源码保留待清理（K32） |
-| `tsconfig.host.json` | references 增加 `packages/bundle/cadre-app`；include 收编 `cadre-collab/**/*.ts` | 桌面侧协作写路径与状态机（`cadre-collab/collab/**` 快照）需随 Host 聚合一起类型检查 | 保留；**不再 include 主仓 `../app/src`** |
-| `cadre-collab/collab/` | 自持状态机快照（2026-10-26 从主仓 `app/src/collab/**` 复制，含 ledger / protocol / dispatch / tools / evidence，38 个 TS 文件） | 用户拍板 A：副本不再回头 import 主仓，desktop 独立编译与打包 | **双份需同步**：主仓状态机变更时人工对齐；后续以 desktop 为产品真源后删除主仓副本 |
+| `tsconfig.host.json` | references 增加 `packages/bundle/cadre-app`；include 收编 `cadre-collab/**/*.ts` | 桌面侧协作写路径与状态机（`cadre-collab/collab/**` 快照）需随 Host 聚合一起类型检查 | 保留；主仓 `app/src` 已于 2026-10-27 删除，不再有跨仓引用 |
+| `cadre-collab/collab/` | 自持状态机（2026-10-26 从旧 `app/src/collab/**` 复制，含 ledger / protocol / dispatch / tools / evidence，38 个 TS 文件；2026-10-27 起为唯一真源） | 用户拍板 A：副本不再回头 import 主仓，desktop 独立编译与打包 | **单源**：旧 `app/` 已删除，"双份需同步"义务解除 |
 | `apps/web/tsconfig.json` | exclude 增加 `tests/cadre-presets.e2e.ts`（引用 scaffold，避免 TS6307） | 测试边界 | 官方改 exclude 列表时按 B 判断 |
 | `pnpm-lock.yaml` | 依赖图变化（新 workspace 包与依赖） | 构建 | 每次版本升级重生成 |
 | `apps/desktop/README.md` | 增加密钥门禁说明 | 文档 | 保留 |
@@ -260,8 +260,8 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 
 ## 九、升级流程（选择性融合）
 
-1. 更新 `vendor/deepseek-harness` pin，跑官方 prepare 链产出新基线；
-2. 运行 `node desktop/scripts/check-upstream-drift.mjs`，得到新版差异清单；
+1. 在仓库外 clone 上游到目标 pin（`git clone https://github.com/deepseek-ai/deepseek-harness && git checkout <pin>`），跑官方 prepare 链产出新基线；更新本文件顶部 pin 号；
+2. 运行 `node desktop/scripts/check-upstream-drift.mjs --upstream <clone 目录>`，得到新版差异清单（缺 `--upstream` 时脚本优雅退出）；
 3. 对**每一处**变更按 ADR-0023 §3.5 判据决策：融合 / 保留 / 延后，并把判据与证据写回本表；
 4. 融合：删掉我们的实现，改用官方；保留：在本表更新「官方已有但冲突」的具体冲突点与复评条件；
 5. 跑回归清单（官方 UI 启动、协作面板、账本读写、员工模板可选、模型选择无账户、多会话、打包冒烟）；
