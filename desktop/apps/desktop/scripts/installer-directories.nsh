@@ -54,6 +54,13 @@ Var dshRecoveryStopped
     ${If} $0 >= 30
       ${ExitDo}
     ${EndIf}
+    ; A destination that exists under any name blocks the rename with error 5 even
+    ; when it is an empty shell left by an earlier failed run. RemoveDirectoryW only
+    ; succeeds on an empty directory, so non-empty targets and locked shells are
+    ; left untouched for the next retry to report.
+    ${If} "${DESTINATION}" != ""
+      System::Call 'kernel32::RemoveDirectoryW(w "${DESTINATION}")'
+    ${EndIf}
     IntOp $1 $0 * 250
     ${If} $1 > 3000
       StrCpy $1 3000
