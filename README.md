@@ -6,9 +6,9 @@
 
 <h1 align="center">Cadre Heihei</h1>
 
-<h3 align="center">把想法告诉主管，让 AI 团队把它做成。</h3>
+<h3 align="center">别的 AI 让你变成项目经理。我们让你继续当创作者。</h3>
 
-<p align="center">你只做决定。主管拆解、派活、验收；员工执行、交付、汇报。</p>
+<p align="center">主管理解你的想法，拆解、派活、验收；员工各自执行。你只看结论，随时改主意。</p>
 
 <p align="center">
   <img src="assets/readme/badge-mit.svg" height="20" alt="MIT License">

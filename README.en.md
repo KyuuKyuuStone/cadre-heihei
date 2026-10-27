@@ -6,9 +6,9 @@
 
 <h1 align="center">Cadre Heihei</h1>
 
-<h3 align="center">Tell your supervisor the idea. Let the AI team ship it.</h3>
+<h3 align="center">Stop being a project manager. Get back to creating.</h3>
 
-<p align="center">You make the decisions. The supervisor decomposes, dispatches, and reviews; employees execute, deliver, and report.</p>
+<p align="center">Your supervisor breaks the idea down, dispatches the work, and reviews what comes back. Employees execute. You get the conclusion — not the busywork — and can change your mind anytime.</p>
 
 <p align="center">
   <img src="assets/readme/badge-mit.svg" height="20" alt="MIT License">
