@@ -37,6 +37,23 @@ A single AI writes the code and declares it finished. No second pair of eyes. Wh
 
 Here an employee delivers, and the supervisor checks the work against the completion criteria, then reports verified items, open items, and risks separately. Both the verdict and the deliverables sit in the same project, so you can go back and look later.
 
+### One role, one model
+
+A single conversation runs everything through the same model — its strengths get diluted, its weaknesses amplified, and cost can't be tuned per task. Here every crew member is its own session and can run on a different model:
+
+- **Architect** — long context, planning
+- **Backend** — strong coding, tool use
+- **Designer** — aesthetics and frontend
+- **Docs / research** — cheap and fast
+
+Several models working inside the same project at the same time, each doing what it does best. To swap the model on one role, change it inside that employee's session — nothing else moves, not the other roles, not the workflow.
+
+Cost follows the work: strong models where it matters, cheap ones where it doesn't.
+
+<p align="center">
+  <img src="assets/readme/feature-models.png" width="820" alt="Per-role model configuration">
+</p>
+
 ### Context is isolated per role
 
 A single AI runs on one shared window. As the project grows, earlier agreements fall out of context, you fix one area and break another, and you end up pasting A's conclusion into B's chat.
