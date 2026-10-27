@@ -105,6 +105,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K34 | `apps/desktop/installer/uninstall.nsh` | `un.CleanData` **不再删除 Electron userData**（`%APPDATA%\${PRODUCT_FILENAME}` / `%APPDATA%\${APP_PACKAGE_NAME}`），只清 updater cache；`cadre.sqlite`（花名册/台账）和 `desktop/settings.json` 随重装保留 | 官方卸载语义会连团队数据一起删；0.8.6 实测重装后花名册归零、会话仍在（2026-10-26 发布阻断缺陷） | 删两段 `RemoveData` 调用；与官方「卸载清 userData」默认行为相反，升级上游时需重放 |
 | K34 | `packages/client/*/src/client/locales*.ts`、`packages/experimental/client-ui-voice-input/src/client/locales.ts`、`apps/desktop/src/locale.ts`、`scripts/verify-brand-copy.ts`、`package.json` | 用户可见 DSH/深度求索改 Cadre；模型/provider 名（DeepSeek 官方模型、DeepSeek 搜索、DeepSeek Flash）与 `$DSH_HOME` 等技术标识保留；新增 `verify-brand-copy` 门禁并挂入 hygiene | 品牌文案统一且防止回归 | 文案替换 + 一个扫描门禁；抽插件后用 locale 覆盖 |
 | K35 | `apps/desktop/src/welcome-backend.ts` | welcome 冷启动读取账号状态时，`account/getState` 404 视为未登录（`loggedIn:false`），不再让无账号产品启动失败；可选插件 404 不刷错误日志 | 账号插件已从 bundle 移除，欢迎页仍无条件调用账号 RPC；桌面壳因此打不开 | 一个容错分支；账号能力恢复时自动走真实状态 |
+| K36 | `apps/desktop/src/{main.ts,ipc.ts,preload-app.ts,settings.ts,github-update.ts}`、`packages/client/ui-sidebar/src/client/{index.ts,locales.ts,UpdateNotice.tsx,UpdateCheckRow.tsx}` | 轻量 GitHub Releases 检查：启动一次 + 每 24h，只发非阻塞侧栏提示并打开下载页；通用设置开关默认开；与官方 updater 独立 | 官方 updater 面向签名/自动安装，不满足“只提示 + 跳转”，且国内网络需静默失败 | 独立模块；官方若提供 release 检查扩展点可替换 |
 
 **内核补丁结论：17 处，其中 3 处（K7/K8/K10）本可完全走官方扩展点、K12 已迁走、1 处（K9）应换实现方式。真正无法避免的只剩桌面壳 6 处（K1–K6）+ 构建 4 处（K14–K17）。**
 

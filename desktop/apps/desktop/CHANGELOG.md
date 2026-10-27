@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.1（新增功能：检查更新）
+
+> 版本口径：这是一次**新功能发布**（SemVer 语义上属 minor），不是 bug 修复。0.x 阶段按 patch 位出包，便于用户尽快试用；下一个正式 minor 节点再恢复常规节奏。
+
+- **侧栏提示新版本**：启动检查一次 GitHub Releases，之后每 24 小时一次；有新版时侧栏底部显示「有新版本 x.y.z · 查看」，点击打开 GitHub Releases 页面。不自动下载、不自动安装、不弹阻塞对话框
+- **设置新增「检查更新」开关**（默认开启）：关闭后不再发起任何网络请求；偏好保存在 `userData/desktop/settings.json`
+- **容错**：网络失败、超时（5 秒）、被墙、403 限流、响应畸形全部静默忽略，不报错不打扰；下次定时重试
+- **升级后首次启动提示**：检测到版本变化且台账仍有花名册数据时，提示一次「团队数据还在，界面设置重置了」，避免用户误以为 0.9.0 的 userData 迁移丢了团队数据；只提示一次
+- **安全取值**：只读取 GitHub API 的 `tag_name` 做版本比较，跳转地址固定为 `https://github.com/KyuuKyuuStone/cadre-heihei/releases/latest`，**忽略接口返回的 `html_url`**，避免上游响应被篡改或意外指向任意下载页
+
 ## 0.9.0（破坏性变更：与官方版共存）
 
 - **应用包名改为 `cadre-heihei-desktop`**：此前与官方 DeepSeek Harness 同名，导致两应用共用 userData、互相抢单实例锁——运行我们的官方就打不开（反之亦然），且无任何提示。改名后 userData 迁到 `%APPDATA%\cadre-heihei-desktop`，与官方版可同机共存
