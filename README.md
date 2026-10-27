@@ -6,9 +6,9 @@
 
 <h1 align="center">Cadre Heihei</h1>
 
-<h3 align="center">别的 AI 让你变成项目经理。我们让你继续当创作者。</h3>
+<h3 align="center">单一 AI 自己写，自己说「完成了」。<br>Cadre Heihei 让写的人和验收的人分开。</h3>
 
-<p align="center">主管理解你的想法，拆解、派活、验收；员工各自执行。你只看结论，随时改主意。</p>
+<p align="center">你收到的，是带证据的结论。</p>
 
 <p align="center">
   <img src="assets/readme/badge-mit.svg" height="20" alt="MIT License">
@@ -20,97 +20,203 @@
 
 <p align="center">
   <a href="https://github.com/KyuuKyuuStone/cadre-heihei/releases"><img src="assets/readme/cta-download-zh.svg" width="184" height="48" alt="下载 Windows 版"></a>
-  &nbsp;&nbsp;
-  <a href="#从想法到成品">看看它如何工作 →</a>
 </p>
+
+Windows 桌面端的 AI 协作客户端。你把想法说给「主管」，它拆成任务，派给「员工」执行；员工回报，主管验收，再把结论给你。
 
 <p align="center">
-  <img src="assets/readme/00-hero.png" width="1200" alt="Cadre Heihei 主界面：主管把咖啡店需求拆成任务，派给设计师和后端，侧栏显示员工运行状态">
+  <img src="assets/readme/06-acceptance.png" width="880" alt="主管验收后的汇报：已证实、未决与风险分栏">
 </p>
-<p align="center"><sub>一次真实演示：一句需求，主管拆解、派活；谁在运行，侧栏一眼可见。</sub></p>
+<p align="center"><sub>主管把「已证实 / 未决 / 风险」分开报。每一句都能追到交付物。</sub></p>
 
-## 从想法到成品
+## 它和单一对话的区别
 
-下面是一次连续的实机演示：从空白启动，到一家咖啡店的开业网站交付验收。这不是你一个人对着 AI 反复试——这里是一个主管带着一支团队在干活。全程只和主管对话，没有填表、看板或流程配置。
+### 写的和验收的不是同一个
 
-### 01 打开就能开工
+单一 AI 写完自己说好了，没有第二双眼睛。它说「已完成」，你只能信。
+
+这里员工交付，主管对照完成条件逐条验收，把已验证、未决、风险分开报给你。验收结论和交付物挂在同一个项目部里，事后能翻。
+
+### 上下文按角色隔离
+
+单一 AI 的窗口是共享的。项目一大，早期定好的约定被挤出窗口，改东边崩西边，你还得把 A 的结论复制给 B。
+
+这里每个员工是独立会话。设计师只装设计相关内容，后端只装后端相关内容，各自窗口不被无关内容占满。
+
+### 并行，不是排队
+
+单一 AI 一次只能干一件事，等它改完前端才轮到后端。
+
+这里多个员工同时跑。你不用在几个窗口之间来回切。
+
+## 一次实机演示
+
+同一份需求，从建项目部到交付验收，一次连续运行。
 
 <p align="center">
-  <img src="assets/readme/01-first-launch.png" width="820" alt="首次启动的空态，页面提示添加项目部">
+  <img src="assets/readme/00-hero.png" width="1000" alt="Cadre Heihei 主界面：左侧项目部与团队，右侧主管会话">
 </p>
-<p align="center"><sub>首次启动是干净的空态；「添加项目部」是唯一入口。</sub></p>
 
-### 02 建项目部，配团队
+### 01 建项目部，就是一个文件夹
 
 <p align="center">
-  <img src="assets/readme/02-project-team.png" width="820" alt="项目部已绑定本地文件夹，主管与设计师、前端、后端已建好，右侧对话为空">
+  <img src="assets/readme/02-project-team.png" width="820" alt="项目部绑定本地文件夹，主管与设计师、前端、后端已就位">
 </p>
-<p align="center"><sub>一个本地文件夹就是一个项目部；先建主管，再按角色建员工。</sub></p>
 
-### 03 把想法说给主管
+选一个本地文件夹，得到独立的团队和任务台账。
+
+### 02 说想法
 
 <p align="center">
-  <img src="assets/readme/03-idea.png" width="820" alt="主管会话中输入咖啡店开业网站需求，尚未发送；侧栏显示团队成员">
+  <img src="assets/readme/03-idea.png" width="820" alt="主管会话中输入需求，尚未发送">
 </p>
-<p align="center"><sub>不需要需求文档。一句话说清要什么，随时可以改主意。</sub></p>
 
-### 04 主管拆解，分头开工
+一句话说清要什么，不用写需求文档。
+
+### 03 拆解派活
 
 <p align="center">
-  <img src="assets/readme/04-dispatch.png" width="820" alt="主管把需求拆成任务，标注截止时间并派给设计师和后端；侧栏显示员工运行中">
+  <img src="assets/readme/04-dispatch.png" width="820" alt="主管把需求拆成任务，按职责派给设计师和后端">
 </p>
-<p align="center"><sub>主管把目标拆成任务，标明截止时间，按职责派给对应员工。</sub></p>
 
-### 05 员工执行，带着交付物汇报
+主管拆成任务，标明截止时间，按职责分派。
+
+### 04 员工汇报
 
 <p align="center">
-  <img src="assets/readme/05-report.png" width="820" alt="后端员工的完整汇报卡，包含结果摘要与交付物清单；设计师仍在运行">
-</p>
-<p align="center"><sub>员工在独立会话里干活；汇报卡里有结果摘要、交付物清单和测试结论。</sub></p>
-
-### 06 主管验收，给你结论
-
-<p align="center">
-  <img src="assets/readme/06-acceptance.png" width="820" alt="主管完成验收后的最终汇报，区分已证实、未决与风险">
-</p>
-<p align="center"><sub>主管对照完成条件和交付物验收，把「已证实 / 未决 / 风险」分开报给你。</sub></p>
-
-## 主管替你管，你只看结论
-
-- **只做决定**：不排期、不拆任务、不催进度。想法变了，直接告诉主管。
-- **过程可追溯**：平时只看结论，不必天天盯；想查的时候，谁在做什么、做到哪一步，侧栏和汇报卡里随时能翻到。
-- **结论有人把关**：员工先向主管汇报，主管对照交付物验收，再把结论提炼给你——你不用读原始的执行日志。
-
-每个项目部只有一名主管，是你唯一的对话对象；员工之间不互相说话，所有任务都流向主管。
-
-## 说一句想法，剩下的交给主管。
-
-<p align="center">
-  <a href="https://github.com/KyuuKyuuStone/cadre-heihei/releases"><img src="assets/readme/cta-download-zh.svg" width="184" height="48" alt="下载 Windows 版"></a>
+  <img src="assets/readme/05-report.png" width="820" alt="员工汇报卡：结果摘要、交付物清单与测试结论">
 </p>
 
-- Windows 10 / 11 桌面端，安装包约 274 MB、未签名
-- 无需注册或登录；模型服务商的 API Key 在「设置」里填
-- 数据留在本机 `~/.dsh`；卸载不会删除，重装不丢团队与历史
+带着交付物回来，不是只回一句「做完了」。
 
-<details>
-<summary>安装步骤、技术栈与致谢</summary>
+## 什么时候别用它
 
-### 安装步骤
+改个脚本、写个正则、查个 API 怎么用——一个 AI 更快，别开这个。
 
-1. 从 [GitHub Releases](https://github.com/KyuuKyuuStone/cadre-heihei/releases) 下载 Windows 安装包。安装包未做代码签名，SmartScreen 可能提示；选择「更多信息 → 仍要运行」。
-2. 安装并启动，在「设置」里填入模型服务商的 API Key。
-3. 新建项目部（选一个本地文件夹），先建一名主管，再按需建员工；打开主管会话，说清你想做什么。
+项目会长到一周以上、跨前后端，或者出现「改一处另外两处会崩」——那才是它的活。
 
-### 技术栈
+## 安装
 
-- **平台**：Windows 桌面端（Electron）；上游的 Web 外壳不在本项目的维护范围内
-- **内核**：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT），插件化架构
-- **存储**：任务台账 SQLite（`~/.dsh/cadre.sqlite`），会话 JSONL，全部在本机
-- **上游改动**：逐条记录在 [`desktop/UPSTREAM.md`](desktop/UPSTREAM.md)
-- **许可**：本项目 MIT；[`LICENSE`](LICENSE) 保留上游 DeepSeek 的原始版权声明
-- **前身**：[cc-heihei](https://github.com/KyuuKyuuStone/claude-code-heihei)，冻结于 v1.7.9
+### 用安装包（普通用户）
 
-感谢 DeepSeek 团队开源 DeepSeek Harness——没有这套底座，这个项目不会是今天的样子。
+从 [GitHub Releases](https://github.com/KyuuKyuuStone/cadre-heihei/releases) 下载 Windows 安装包，约 274 MB。
 
-</details>
+安装包未做代码签名，SmartScreen 可能提示。选择「更多信息 → 仍要运行」。
+
+如果安装过程报 `Windows error: 5`，通常是安全软件正在扫描未签名的文件。先退出安全软件实时防护，或把 `%LOCALAPPDATA%\Programs` 加入白名单后重试。
+
+### 从源码构建（开发者）
+
+需要 Node.js 和 pnpm。在 `desktop/` 目录下操作：
+
+```bash
+pnpm install
+pnpm build          # 编译 lib
+pnpm dev:desktop    # 开发模式启动
+pnpm package:desktop:win:x64:unsigned  # 打 Windows 包
+```
+
+完整的发布流程见 `desktop/apps/desktop/scripts/release.mjs`；其余脚本以 `desktop/package.json` 的 `scripts` 为准。
+
+## 架构
+
+主管是唯一的入口。员工之间不互相通信，所有任务流向主管。
+
+```mermaid
+flowchart LR
+    You[你] -->|对话| Sup[主管]
+    Sup -->|派活| D[设计师]
+    Sup -->|派活| F[前端]
+    Sup -->|派活| B[后端]
+    D -->|汇报| Sup
+    F -->|汇报| Sup
+    B -->|汇报| Sup
+    Sup -->|结论| You
+    Sup -.->|读写台账| DB[(cadre.sqlite)]
+    D -.->|会话| FS[(~/.dsh/sessions)]
+    F -.->|会话| FS
+    B -.->|会话| FS
+```
+
+- **通信**：你只和主管说话。主管把任务派给员工，员工完成后向主管汇报，主管验收。
+- **上下文**：每个员工是独立会话，各自一份上下文，互不污染。
+- **台账**：花名册、任务状态、事件记录存在 SQLite 里，是任务状态的唯一真相。
+- **数据位置**：`~/.dsh/cadre.sqlite`（台账）；`~/.dsh/sessions/`（会话 JSONL）。全部在本机。
+
+## 目录结构
+
+```
+desktop/
+├── apps/           # 可运行程序：desktop（Electron 客户端）、desktop-host、cli、web
+├── packages/       # 功能包：cadre（engine / host-collab）、client、api、attachment 等
+├── cadre-collab/   # 协作层：协议、台账、派活与验收
+├── scripts/        # 构建、打包、安装器生成
+└── UPSTREAM.md     # 对上游 DeepSeek Harness 的改动逐条登记
+```
+
+`desktop/` 本身是一个 monorepo，同时包含上游代码和本项目的协作层。
+
+## 自定义与扩展
+
+### 加一个新的员工角色
+
+员工就是一段角色提示词加上一个独立会话。加一个角色只需要：
+
+1. 在项目部里新建员工，填名称与职责
+2. 主管派活时会按职责选择员工
+
+现有的软件类角色模板（前端、后端、测试、代码审查等）和通用模板都在仓库内，可以直接套用或改。
+
+更深入的扩展点（新的工具、新的事件类型、接别的模型服务商）见 `desktop/packages/cadre/`。
+
+## Roadmap
+
+**现在能做的**
+
+- 主管派活、催办、验收，结论带「已证实 / 未决 / 风险」分栏
+- 多员工并行，各自独立会话
+- 项目部隔离，一个文件夹一套团队
+- 台账记录任务状态与事件
+- 数据全在本地，重装不丢
+
+**下一步**
+
+待定。仓库当前的 issue 与标签是本项目路线的主要来源。
+
+**不做**
+
+- 不做账户体系，不做云端存储
+- 不维护 Web 端（上游的 web 外壳不在本项目维护范围）
+- 不做 Windows 以外的平台
+
+## 贡献
+
+- **提 issue**：bug、体验问题、想要的能力都可以提。附上复现步骤和版本号。
+- **提 PR**：先开 issue 说明你要做什么，避免白做。改完后确保 `pnpm run typecheck` 和 `pnpm run lint` 通过。
+- **改上游代码**：对 DeepSeek Harness 上游文件的改动要在 `desktop/UPSTREAM.md` 登记，写清位置、原因、是否计划合并回上游。
+- **代码规范**：见 `desktop/scripts/gates/` 下的门禁脚本（文件大小、import 边界、类型基线）。
+
+## FAQ
+
+**数据存在哪？**
+台账在 `~/.dsh/cadre.sqlite`，会话在 `~/.dsh/sessions/`。都在本机。
+
+**要联网吗？**
+要。模型推理走你配置的服务商 API。数据本身不上传。
+
+**支持哪些模型服务商？**
+在「设置」里填 API Key。具体支持列表以应用内的服务商选项为准。
+
+**卸载会删数据吗？**
+不会。台账和会话都在 `~/.dsh`，卸载不碰。
+
+**能用在自己的商业项目里吗？**
+可以。本项目 MIT。`LICENSE` 里保留了上游 DeepSeek 的原始版权声明。
+
+## 致谢与许可
+
+内核基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT）构建，感谢 DeepSeek 团队开源这套底座。上游的 LICENSE 与 THIRD_PARTY_NOTICES 原样保留在 `desktop/` 下。
+
+本项目 MIT，见 [`LICENSE`](LICENSE)。对上游的改动逐条记录在 [`desktop/UPSTREAM.md`](desktop/UPSTREAM.md)。
+
+前身项目：[cc-heihei](https://github.com/KyuuKyuuStone/claude-code-heihei)，冻结于 v1.7.9。

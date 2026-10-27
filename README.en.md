@@ -1,4 +1,4 @@
-<p align="right"><a href="README.md">简体中文</a> · <strong>English</strong></p>
+<p align="right"><strong>English</strong> · <a href="README.md">简体中文</a></p>
 
 <p align="center">
   <img src="assets/readme/seal.svg" width="96" height="96" alt="Cadre Heihei seal">
@@ -6,9 +6,9 @@
 
 <h1 align="center">Cadre Heihei</h1>
 
-<h3 align="center">Stop being a project manager. Get back to creating.</h3>
+<h3 align="center">One AI writes it. The same AI calls it done.<br>Cadre Heihei separates the builder from the reviewer.</h3>
 
-<p align="center">Your supervisor breaks the idea down, dispatches the work, and reviews what comes back. Employees execute. You get the conclusion — not the busywork — and can change your mind anytime.</p>
+<p align="center">What reaches you is a conclusion with evidence.</p>
 
 <p align="center">
   <img src="assets/readme/badge-mit.svg" height="20" alt="MIT License">
@@ -20,99 +20,203 @@
 
 <p align="center">
   <a href="https://github.com/KyuuKyuuStone/cadre-heihei/releases"><img src="assets/readme/cta-download-en.svg" width="200" height="48" alt="Download for Windows"></a>
-  &nbsp;&nbsp;
-  <a href="#from-idea-to-shipped">See how it works →</a>
 </p>
+
+A desktop AI collaboration client for Windows. You describe what you want to a supervisor agent; it splits the work, dispatches it to employee agents, collects their reports, reviews the results, and hands you the conclusion.
 
 <p align="center">
-  <img src="assets/readme/00-hero.png" width="1200" alt="Cadre Heihei main window: the supervisor decomposes a cafe website request and dispatches tasks to a designer and a backend engineer; the sidebar shows who is running">
+  <img src="assets/readme/06-acceptance.png" width="880" alt="Supervisor report split into verified, open, and risks">
 </p>
-<p align="center"><sub>A real run: one request, decomposed and dispatched; the sidebar shows who is running.</sub></p>
+<p align="center"><sub>The supervisor reports verified work, open items, and risks separately. Every line traces back to a deliverable.</sub></p>
 
-## From idea to shipped
+## How it differs from a single chat
 
-This is one continuous, real run — from an empty start to a delivered and reviewed cafe website. It is not you prompting an AI over and over; it is a supervisor running a team. Every step happens in the supervisor conversation; no forms, boards, or workflow setup.
+### The builder and the reviewer are not the same agent
 
-The app UI is currently Chinese-only; the screenshots show the Chinese interface as shipped.
+A single AI writes the code and declares it finished. No second pair of eyes. When it says "done", you can only take its word for it.
 
-### 01 Open and start
+Here an employee delivers, and the supervisor checks the work against the completion criteria, then reports verified items, open items, and risks separately. Both the verdict and the deliverables sit in the same project, so you can go back and look later.
+
+### Context is isolated per role
+
+A single AI runs on one shared window. As the project grows, earlier agreements fall out of context, you fix one area and break another, and you end up pasting A's conclusion into B's chat.
+
+Here every employee has its own session. The designer carries design context, the backend carries backend context. Neither window fills up with things it does not need.
+
+### Parallel, not queued
+
+A single AI does one thing at a time. The backend waits for the frontend to finish.
+
+Here multiple employees run at once. You stop switching between windows.
+
+## A real run
+
+One request, from creating a project to delivery and review, in a single continuous session.
 
 <p align="center">
-  <img src="assets/readme/01-first-launch.png" width="820" alt="First launch: an empty state with the add-project entry point">
+  <img src="assets/readme/00-hero.png" width="1000" alt="Cadre Heihei main window: projects and team on the left, supervisor conversation on the right">
 </p>
-<p align="center"><sub>A clean first launch; “Add project” is the only entry point.</sub></p>
 
-### 02 Create a project, build a team
+### 01 A project is just a folder
 
 <p align="center">
-  <img src="assets/readme/02-project-team.png" width="820" alt="A project bound to a local folder, with a supervisor, designer, frontend, and backend already created; the conversation is empty">
+  <img src="assets/readme/02-project-team.png" width="820" alt="A project bound to a local folder, with a supervisor, designer, frontend, and backend">
 </p>
-<p align="center"><sub>One local folder is one project. Create a supervisor first, then add employees by role.</sub></p>
 
-### 03 Tell the supervisor the idea
+Point at a local folder. You get a separate team and a separate task ledger.
+
+### 02 Say the idea
 
 <p align="center">
-  <img src="assets/readme/03-idea.png" width="820" alt="A cafe website request typed into the supervisor conversation but not yet sent; the team is visible in the sidebar">
+  <img src="assets/readme/03-idea.png" width="820" alt="A request typed into the supervisor conversation">
 </p>
-<p align="center"><sub>No requirements document. State the goal in one sentence; change your mind whenever.</sub></p>
 
-### 04 The supervisor decomposes and dispatches
+One sentence is enough. No spec document required.
+
+### 03 Break it down, dispatch it
 
 <p align="center">
-  <img src="assets/readme/04-dispatch.png" width="820" alt="The supervisor breaks the request into tasks with deadlines and assigns them to a designer and a backend engineer; employees are running in the sidebar">
+  <img src="assets/readme/04-dispatch.png" width="820" alt="The supervisor splits the request into tasks and assigns them by role">
 </p>
-<p align="center"><sub>The supervisor breaks the goal into tasks, sets deadlines, and assigns them by role.</sub></p>
 
-### 05 Employees execute and report with deliverables
+The supervisor splits the work, sets deadlines, and assigns by role.
+
+### 04 Employees report back
 
 <p align="center">
-  <img src="assets/readme/05-report.png" width="820" alt="A complete employee report card with a result summary and a deliverables list; the designer is still running">
-</p>
-<p align="center"><sub>Each employee works in a separate session. Report cards carry the result summary, deliverables, and test conclusions.</sub></p>
-
-### 06 The supervisor reviews and gives you the verdict
-
-<p align="center">
-  <img src="assets/readme/06-acceptance.png" width="820" alt="The supervisor's final report after review, separating verified facts, unresolved items, and risks">
-</p>
-<p align="center"><sub>The supervisor checks deliverables against completion criteria and reports back as verified / unresolved / risk.</sub></p>
-
-## Your supervisor runs the project. You get the verdict.
-
-- **You only decide** — no scheduling, task breakdown, or chasing status. If the idea changes, tell the supervisor.
-- **Traceable on demand** — you normally see only the conclusion, with no need to watch all day; when you want to check, the sidebar and report cards show who is doing what and where it stands.
-- **Vetted conclusions** — employees report to the supervisor first; the supervisor checks the deliverables, then distills the conclusion for you. No raw execution logs to read.
-
-Each project has exactly one supervisor — your only point of contact. Employees don't talk to each other; every task flows through the supervisor.
-
-## Say the idea. Leave the rest to your supervisor.
-
-<p align="center">
-  <a href="https://github.com/KyuuKyuuStone/cadre-heihei/releases"><img src="assets/readme/cta-download-en.svg" width="200" height="48" alt="Download for Windows"></a>
+  <img src="assets/readme/05-report.png" width="820" alt="An employee report card with a summary, deliverable list, and test results">
 </p>
 
-- Windows 10 / 11 desktop; installer is about 274 MB and unsigned
-- No account or sign-in; add your model provider's API key in Settings
-- Data stays on your machine in `~/.dsh`; uninstalling does not delete it, and reinstalling keeps your team and history
+They come back with deliverables, not with "done".
 
-<details>
-<summary>Install, tech stack, and acknowledgments</summary>
+## When not to use it
 
-### Install
+Fixing a script, writing a regex, looking up an API — a single AI gets there faster. Skip this.
 
-1. Download the Windows installer from [GitHub Releases](https://github.com/KyuuKyuuStone/cadre-heihei/releases). It is not code-signed; SmartScreen may warn — choose “More info → Run anyway”.
-2. Install and launch, then add your model provider's API key in Settings.
-3. Create a project (pick a local folder), create a supervisor, then add employees as needed. Open the supervisor conversation and say what you want.
+It earns its keep when a project runs past a week, spans frontend and backend, or reaches the point where changing one thing breaks two others.
 
-### Tech stack
+## Install
 
-- **Platform**: Windows desktop (Electron); the upstream web shell is outside this project's maintenance scope
-- **Engine**: [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (MIT), a plugin-based architecture
-- **Storage**: task ledger in SQLite (`~/.dsh/cadre.sqlite`), sessions as JSONL — all local
-- **Upstream changes**: every change we made is recorded in [`desktop/UPSTREAM.md`](desktop/UPSTREAM.md)
-- **License**: MIT for this project; [`LICENSE`](LICENSE) retains the original DeepSeek copyright notice
-- **Predecessor**: [cc-heihei](https://github.com/KyuuKyuuStone/claude-code-heihei), frozen at v1.7.9
+### From the installer (end users)
 
-Thanks to the DeepSeek team for open-sourcing DeepSeek Harness — this project would not exist without that foundation.
+Download the Windows installer from [GitHub Releases](https://github.com/KyuuKyuuStone/cadre-heihei/releases). It is about 274 MB.
 
-</details>
+The installer is not code-signed, so SmartScreen may warn you. Choose "More info → Run anyway".
+
+If the installer fails with `Windows error: 5`, your security software is usually scanning the unsigned files. Disable real-time protection temporarily, or whitelist `%LOCALAPPDATA%\Programs`, then retry.
+
+### From source (developers)
+
+You need Node.js and pnpm. Run these inside `desktop/`:
+
+```bash
+pnpm install
+pnpm build          # compile lib
+pnpm dev:desktop    # run in development mode
+pnpm package:desktop:win:x64:unsigned  # build the Windows package
+```
+
+The full release flow lives in `desktop/apps/desktop/scripts/release.mjs`. For everything else, `desktop/package.json`'s `scripts` section is the source of truth.
+
+## Architecture
+
+The supervisor is the only entry point. Employees never talk to each other; all work flows through the supervisor.
+
+```mermaid
+flowchart LR
+    You[You] -->|conversation| Sup[Supervisor]
+    Sup -->|dispatch| D[Designer]
+    Sup -->|dispatch| F[Frontend]
+    Sup -->|dispatch| B[Backend]
+    D -->|report| Sup
+    F -->|report| Sup
+    B -->|report| Sup
+    Sup -->|conclusion| You
+    Sup -.->|ledger| DB[(cadre.sqlite)]
+    D -.->|session| FS[(~/.dsh/sessions)]
+    F -.->|session| FS
+    B -.->|session| FS
+```
+
+- **Communication**: you talk to the supervisor only. It dispatches to employees, they report back, it reviews.
+- **Context**: each employee is a separate session with its own context window.
+- **Ledger**: roster, task state, and events live in SQLite. It is the source of truth for task status.
+- **Data location**: `~/.dsh/cadre.sqlite` (ledger), `~/.dsh/sessions/` (JSONL conversations). All local.
+
+## Repository layout
+
+```
+desktop/
+├── apps/           # runnable targets: desktop (Electron client), desktop-host, cli, web
+├── packages/       # feature packages: cadre (engine / host-collab), client, api, attachment, ...
+├── cadre-collab/   # collaboration layer: protocol, ledger, dispatch, review
+├── scripts/        # build, packaging, installer generation
+└── UPSTREAM.md     # per-change log of modifications to upstream DeepSeek Harness
+```
+
+`desktop/` is a monorepo that contains both the upstream code and this project's collaboration layer.
+
+## Customization and extension
+
+### Add an employee role
+
+An employee is a role prompt plus its own session. Adding one means:
+
+1. Create an employee in the project, give it a name and a responsibility
+2. The supervisor picks employees by responsibility when dispatching
+
+Role templates for software work (frontend, backend, testing, code review) and general-purpose templates ship with the repo. Use them as-is or edit them.
+
+Deeper extension points (new tools, new event types, connecting other model providers) live under `desktop/packages/cadre/`.
+
+## Roadmap
+
+**Works today**
+
+- Supervisor dispatch, follow-up, and review, with verified / open / risk breakdowns
+- Multiple employees in parallel, each with its own session
+- Project isolation: one folder, one team
+- Ledger tracking task state and events
+- Fully local data; reinstalling keeps everything
+
+**Next**
+
+Undecided. Current issues and labels are the primary source for direction.
+
+**Out of scope**
+
+- No accounts, no cloud storage
+- No web client (the upstream web shell is not maintained here)
+- No platforms other than Windows
+
+## Contributing
+
+- **Issues**: bugs, rough edges, and feature requests are all welcome. Include reproduction steps and the version number.
+- **Pull requests**: open an issue first so we can agree on scope. Make sure `pnpm run typecheck` and `pnpm run lint` pass.
+- **Changing upstream code**: log it in `desktop/UPSTREAM.md` — where, why, and whether you plan to send it upstream.
+- **Code standards**: see the gate scripts under `desktop/scripts/gates/` (file size, import boundaries, type baseline).
+
+## FAQ
+
+**Where is my data?**
+The ledger is at `~/.dsh/cadre.sqlite`; conversations are under `~/.dsh/sessions/`. Everything is local.
+
+**Does it need internet?**
+Yes, for model inference through your configured provider. Your data is not uploaded.
+
+**Which model providers are supported?**
+Add your API key in Settings. The provider list in the app is authoritative.
+
+**Does uninstalling delete my data?**
+No. The ledger and sessions live in `~/.dsh`, which the uninstaller does not touch.
+
+**Can I use it in a commercial project?**
+Yes. This project is MIT. `LICENSE` retains the original DeepSeek copyright notice.
+
+## Acknowledgements and license
+
+Built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (MIT). Thanks to the DeepSeek team for open-sourcing that foundation. The upstream LICENSE and THIRD_PARTY_NOTICES are preserved unchanged under `desktop/`.
+
+This project is MIT — see [`LICENSE`](LICENSE). Changes made to upstream code are logged in [`desktop/UPSTREAM.md`](desktop/UPSTREAM.md).
+
+Predecessor: [cc-heihei](https://github.com/KyuuKyuuStone/claude-code-heihei), frozen at v1.7.9.
