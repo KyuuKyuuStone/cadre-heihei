@@ -50,6 +50,8 @@ Several models working inside the same project at the same time, each doing what
 
 Cost follows the work: strong models where it matters, cheap ones where it doesn't.
 
+Each employee is also an open session. To fine-tune someone's work, open that session and say what you want — no detour through the supervisor. You can even interject while it is running. These direct exchanges stay out of the task ledger, so the supervisor will not know about them automatically; tell it if you want them reflected.
+
 ### Context is isolated per role
 
 A single AI runs on one shared window. As the project grows, earlier agreements fall out of context, you fix one area and break another, and you end up pasting A's conclusion into B's chat.
@@ -151,7 +153,7 @@ flowchart LR
     B -.->|session| FS
 ```
 
-- **Communication**: you talk to the supervisor only. It dispatches to employees, they report back, it reviews.
+- **Communication**: you talk to the supervisor by default. It dispatches, employees report back, it reviews. Each employee is also an open session you can step into and adjust directly when needed.
 - **Context**: each employee is a separate session with its own context window.
 - **Ledger**: roster, task state, and events live in SQLite. It is the source of truth for task status.
 - **Data location**: `~/.dsh/cadre.sqlite` (ledger), `~/.dsh/sessions/` (JSONL conversations). All local.
