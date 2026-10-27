@@ -162,7 +162,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 
 | 路径 | 改动摘要 | 保留理由 | 融合提示 |
 |---|---|---|---|
-| `apps/desktop/package.json` | 新增 `release:win` 脚本；依赖加 `@deepseek-ai/dsh-bundle-cadre` | 构建接线 | 官方新增脚本时按 B/F 判断 |
+| `apps/desktop/package.json` | `name` 改为 `cadre-heihei-desktop`（0.8.9+：与官方桌面同 name 导致运行时 `app.name`/userData/单实例锁共用 `%APPDATA%\@deepseek-ai\dsh-desktop`，两应用互抢 `requestSingleInstanceLock` 先后静默退出）；新增 `release:win` 脚本；依赖加 `@deepseek-ai/dsh-bundle-cadre` | 构建接线 + 产品独立 userData（锁隔离与品牌隔离） | 官方新增脚本时按 B/F 判断；官方若改 name 无影响，仅注意官方 userData 结构不进我们的迁移面 |
 | `apps/desktop-host/package.json` | 依赖加 `@deepseek-ai/dsh-bundle-cadre`（进核心包集闭包） | 官方闭包根只有 dsh/host，必须挂 | 官方若支持「随包 bundle 清单」可融合（B） |
 | `apps/cli/package.json` | 把 `@deepseek-ai/dsh-experimental-agent-team-profile` 从 `dependencies` 移到 `devDependencies`（另两个 agent-team 包上游已在 devDependencies） | 产品不交付官方实验团队「Agent Teams」；源码与官方测试保留 | **官方升级时需重放**；闭包断言见 `apps/desktop/scripts/prepare-package-set.ts`；评估见 `docs/dev/agent-team-removal-plan.md` |
 | `packages/client/ui-sidebar/package.json` | 新增 api-remotes / session-controller / connection / ui-theme 依赖；files 加 `lib/types/**/*.js` | 员工对话框与主题注入需要 | 抽独立插件包后可回滚部分 |

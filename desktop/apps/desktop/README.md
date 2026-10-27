@@ -206,7 +206,7 @@ The Web counterparts are `pnpm run dev:web` and `pnpm run start:web`, documented
 
 The [native/renderer keyboard tests](tests/keyboard.spec.ts) compile as part of the repository Client typecheck. Their Desktop imports are limited to Cordis-free input, persistence, IPC, browser-guest, and overlay modules.
 
-Dependency installation does not run the locked Electron package's separate binary installer. Before running the [Windows console-signal tests](tests/windows-cli-signals.spec.ts) directly, prepare the locked Electron binary with `pnpm --filter @deepseek-ai/dsh-desktop exec install-electron` from the repository root. For downloads through a proxy, enable `ELECTRON_GET_USE_PROXY=1` for that installer process. Windows coverage aggregates require successful provisioning before the instrumented unit inventory starts.
+Dependency installation does not run the locked Electron package's separate binary installer. Before running the [Windows console-signal tests](tests/windows-cli-signals.spec.ts) directly, prepare the locked Electron binary with `pnpm --filter cadre-heihei-desktop exec install-electron` from the repository root. For downloads through a proxy, enable `ELECTRON_GET_USE_PROXY=1` for that installer process. Windows coverage aggregates require successful provisioning before the instrumented unit inventory starts.
 
 ### Startup onboarding
 
@@ -285,7 +285,7 @@ Confirmed Host exit without successful task teardown displays localized recovery
 
 The [shell configuration decision](../../.agents/notes/implemented/architecture/2026-10-08-desktop-shell-configuration.md) defines Host-independent ownership and the criteria for evaluating existing settings for migration.
 
-The Electron main process reads `app.getPath('userData')/desktop/settings.json` once at startup, independently of Host and Cordis configuration. The default packaged paths are `%APPDATA%\@deepseek-ai\dsh-desktop\desktop\settings.json` on Windows and `~/Library/Application Support/@deepseek-ai/dsh-desktop/desktop/settings.json` on macOS. Development uses the `userData` path printed by its launcher. `DSH_HOME` does not relocate this file.
+The Electron main process reads `app.getPath('userData')/desktop/settings.json` once at startup, independently of Host and Cordis configuration. The default packaged paths are `%APPDATA%\cadre-heihei-desktop\desktop\settings.json` on Windows and `~/Library/Application Support/cadre-heihei-desktop/desktop/settings.json` on macOS. Development uses the `userData` path printed by its launcher. `DSH_HOME` does not relocate this file.
 
 On first launch, including after an upgrade, Desktop creates this document if it is absent:
 

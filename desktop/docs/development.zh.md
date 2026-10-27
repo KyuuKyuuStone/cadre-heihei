@@ -84,7 +84,7 @@ Host 与 Client 保持两个 aggregate program，是因为两侧在相同键下�
 pnpm run build:native-system
 tsc -b <tsconfig.host.json references>
 tsdown --env.DSH_BUILD_FACE host
-pnpm --filter @deepseek-ai/dsh-desktop run bundle
+pnpm --filter cadre-heihei-desktop run bundle
 tsc -b <tsconfig.client.json references>
 tsdown --env.DSH_BUILD_FACE client
 pnpm run build:web

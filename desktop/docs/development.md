@@ -80,7 +80,7 @@ Six packages split Host and Client tsconfigs: `api/remotes`, `api/gateway`, `api
 pnpm run build:native-system
 tsc -b <tsconfig.host.json references>
 tsdown --env.DSH_BUILD_FACE host
-pnpm --filter @deepseek-ai/dsh-desktop run bundle
+pnpm --filter cadre-heihei-desktop run bundle
 tsc -b <tsconfig.client.json references>
 tsdown --env.DSH_BUILD_FACE client
 pnpm run build:web

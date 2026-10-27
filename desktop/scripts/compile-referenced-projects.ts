@@ -181,7 +181,7 @@ export function libraryBuildSteps(root: string, faces: 'host' | 'all', mode: Com
   if (faces === 'host') return host
   return [
     ...host,
-    pnpmStep('desktop-bundle', 'Desktop bundle', ['--filter', '@deepseek-ai/dsh-desktop', 'run', 'bundle'], ['host-bundle']),
+    pnpmStep('desktop-bundle', 'Desktop bundle', ['--filter', 'cadre-heihei-desktop', 'run', 'bundle'], ['host-bundle']),
     compilerStep(root, 'client', mode, ['desktop-bundle']),
     pnpmStep('client-bundle', 'Client bundle', ['exec', 'tsdown', '--config-loader', 'native', '--env.DSH_BUILD_FACE', 'client'], ['client-src']),
   ]

@@ -596,7 +596,7 @@ describe('gate graph validation', () => {
       const install = gates.find(gate => gate.id === 'electron-install')
       expect(install).toMatchObject({
         command: process.execPath,
-        args: ['/private/pnpm.cjs', '--filter', '@deepseek-ai/dsh-desktop', 'exec', 'install-electron'],
+        args: ['/private/pnpm.cjs', '--filter', 'cadre-heihei-desktop', 'exec', 'install-electron'],
         env: { ELECTRON_GET_USE_PROXY: '1' },
       })
       expect(gates.find(gate => gate.id === 'built-bin-smoke')?.needs).toContain('electron-install')

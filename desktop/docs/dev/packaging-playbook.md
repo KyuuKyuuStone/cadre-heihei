@@ -39,12 +39,12 @@ pnpm -w run package:desktop:win:x64:unsigned # 单独构建（预检通过后）
 
 ## 桌面 main 必须走 `run build`，不能只跑 `tsc`
 
-`apps/desktop/lib/main.js` 由 `pnpm --filter @deepseek-ai/dsh-desktop run build`
+`apps/desktop/lib/main.js` 由 `pnpm --filter cadre-heihei-desktop run build`
 （= `tsc -b && tsdown bundle`）产出；`tsc -b` 只更新 `lib/types`，**不会**刷新
 `lib/main.js`。只跑 tsc 后启动 dev 或手测，实际跑的是旧 main（表现为新加的
 env 注入/IPC 不生效、旧行为残留）。已两次造成误判。
 
-- 改任何 `apps/desktop/src/*.ts` 后：`pnpm --filter @deepseek-ai/dsh-desktop run build`，再 `run start`。
+- 改任何 `apps/desktop/src/*.ts` 后：`pnpm --filter cadre-heihei-desktop run build`，再 `run start`。
 - 发布链已覆盖：`package-target.ts` 先 `run build:official`（含 tsc + tsdown 两个 face + desktop bundle），
   所以安装包不受此坑影响；此坑只影响 dev/手测。
 - Host 侧插件（`packages/...`）除了 `tsc -b tsconfig.host.json` 还须

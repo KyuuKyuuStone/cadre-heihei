@@ -101,5 +101,5 @@ host-collab 在 `agent/pre-step` 按台账角色应用并缓存（角色晚于 A
 
 **运行时复验受阻**：本轮重启时 dev 运行时工件缺失
 （`apps/desktop/.desktop-build/targets/win-x64/runtime/primary-runtime/dependencies/node/bin/node.exe` ENOENT），
-`run start` 直接失败。需先跑一次完整 `pnpm --filter @deepseek-ai/dsh-desktop run dev`
+`run start` 直接失败。需先跑一次完整 `pnpm --filter cadre-heihei-desktop run dev`
 重建运行时后再验证 D2/D3；代码层 `tsc -b tsconfig.host.json` 与 host tsdown 均通过。
