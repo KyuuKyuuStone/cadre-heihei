@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0（破坏性变更：与官方版共存）
+
+- **应用包名改为 `cadre-heihei-desktop`**：此前与官方 DeepSeek Harness 同名，导致两应用共用 userData、互相抢单实例锁——运行我们的官方就打不开（反之亦然），且无任何提示。改名后 userData 迁到 `%APPDATA%\cadre-heihei-desktop`，与官方版可同机共存
+- **桌面偏好重置**（破坏性）：`desktop/settings.json` 与 `keybindings.json` 留在旧目录不迁移，主题/快捷键需重新设置
+- **登录凭据需重新输入**（破坏性）：官方 userData 里的登录态不再共享，首次启动需在应用内重新登录
+- **团队数据不受影响**：花名册/台账/sessions 在 `~/.dsh`，与 userData 无关，升级零迁移
+- `dsh://` 协议注册仍与官方共用（后装者覆盖），下版处理
+
 ## 0.8.7（重装丢团队数据修复）
 
 - **卸载不再删除用户数据**：保留 `%APPDATA%` userData（含 `cadre.sqlite`、`desktop/settings.json`），重装不丢花名册/台账
