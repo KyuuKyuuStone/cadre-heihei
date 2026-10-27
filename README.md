@@ -39,7 +39,7 @@ Cadre Heihei 不是从零写的。它的底座是 **DeepSeek Harness**（[github
 
 - **会话引擎**：会话生命周期、上下文压缩、JSONL 与 SQLite 持久化
 - **插件体系**：Cordis 插件树、profile/bundle 组合、配置 patch 语义 —— 产品里几乎每项能力都是往这棵树上插一行
-- **UI 框架**：客户端 slot 机制、设置页扩展、Web 与桌面双端外壳
+- **UI 框架**：客户端 slot 机制与设置页扩展（桌面端复用上游的 Web 客户端组件来构建界面）
 - **模型与工具层**：provider 抽象、工具注册与权限流
 
 没有这些，这个项目不会有今天的样子。
@@ -82,6 +82,7 @@ Cadre Heihei 不是从零写的。它的底座是 **DeepSeek Harness**（[github
 
 ## 技术栈与许可
 
+- **平台**：**Windows 桌面客户端**（Windows 10 / 11）。上游代码包含 Web 端外壳，桌面端复用了它的客户端组件，但 **Web 端不在本项目的维护与支持范围内**。
 - **桌面端**：Electron
 - **内核**：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT 许可），插件化架构
 - **存储**：任务台账走本地 SQLite，会话持久化为 JSONL，全部留在本机
