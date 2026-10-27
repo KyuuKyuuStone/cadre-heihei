@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-tool-worktree",
   "description": "Model tool that creates and enters a new Git worktree",
-  "version": "0.8.9",
+  "version": "0.8.10",
   "publishConfig": {
     "access": "public"
   },
