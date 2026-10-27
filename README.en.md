@@ -31,7 +31,7 @@
 
 ## From idea to shipped
 
-This is one continuous, real run — from an empty start to a delivered and reviewed cafe website. Every step happens in the supervisor conversation; no forms, boards, or workflow setup.
+This is one continuous, real run — from an empty start to a delivered and reviewed cafe website. It is not you prompting an AI over and over; it is a supervisor running a team. Every step happens in the supervisor conversation; no forms, boards, or workflow setup.
 
 The app UI is currently Chinese-only; the screenshots show the Chinese interface as shipped.
 
@@ -77,15 +77,15 @@ The app UI is currently Chinese-only; the screenshots show the Chinese interface
 </p>
 <p align="center"><sub>The supervisor checks deliverables against completion criteria and reports back as verified / unresolved / risk.</sub></p>
 
-## You create; you don't have to be the project manager
+## Your supervisor runs the project. You get the verdict.
 
-- **Only decide** — no scheduling, task breakdown, or chasing status. If the idea changes, tell the supervisor.
-- **See the work** — who is doing what and where it stands, in the sidebar and in employee report cards.
-- **Check the delivery** — files, test results, and review notes live in the same project, not in a verbal summary.
+- **You only decide** — no scheduling, task breakdown, or chasing status. If the idea changes, tell the supervisor.
+- **Traceable on demand** — you normally see only the conclusion, with no need to watch all day; when you want to check, the sidebar and report cards show who is doing what and where it stands.
+- **Vetted conclusions** — employees report to the supervisor first; the supervisor checks the deliverables, then distills the conclusion for you. No raw execution logs to read.
 
 Each project has exactly one supervisor — your only point of contact. Employees don't talk to each other; every task flows through the supervisor.
 
-## Ready to hand the idea to a team?
+## Say the idea. Leave the rest to your supervisor.
 
 <p align="center">
   <a href="https://github.com/KyuuKyuuStone/cadre-heihei/releases"><img src="assets/readme/cta-download-en.svg" width="200" height="48" alt="Download for Windows"></a>
