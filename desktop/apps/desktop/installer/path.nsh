@@ -126,6 +126,10 @@ Function InstallerPreflight
     StrCpy $INSTDIR $InstallerPath
     ReadRegStr $0 HKCU "${INSTALL_REGISTRY_KEY}" "InstallLocation"
     ${If} $0 != $INSTDIR
+        ; Installations from the previous application id register under the legacy key.
+        ReadRegStr $0 HKCU "${DSH_LEGACY_INSTALL_REGISTRY_KEY}" "InstallLocation"
+    ${EndIf}
+    ${If} $0 != $INSTDIR
     ${OrIfNot} ${FileExists} "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
         FindFirst $0 $1 "$INSTDIR\*.*"
         ${DoWhile} $1 != ""

@@ -161,7 +161,7 @@ pnpm run package:desktop:mac:x64:unsigned
 
 Add `--check` to validate local configuration and tools without building, or `--dir` to stop at the unpacked application. The DMG is `apps/desktop/.desktop-build/targets/<target>/unsigned-artifacts/deepseek-harness-<version>-mac-<arch>-unsigned.dmg`. After all checks pass, the command prints `DMG:` followed by its absolute path. Open it and copy the application to a local test directory.
 
-These commands ignore `.env.macos` and inherited release settings, use `com.deepseek.harness` as the app ID, and omit automatic-update and mandatory-update configuration. Build tools, standard network proxies, and `DSH_DESKTOP_NPM_REGISTRY` remain available from the shell. They skip Developer ID signing, Apple notarization, temporary signing keychains, and notarization proxy changes. Electron receives a local ad-hoc signature without certificates so the modified executable can run; the DMG is unsigned. Both preparation and the assembled application still run runtime integrity and smoke checks. Local builds omit update feeds, ZIPs, and release completion records, and the upload commands cannot publish them. macOS may require approval in System Settings → Privacy & Security to open an unnotarized application.
+These commands ignore `.env.macos` and inherited release settings, use `com.cadre.heihei` as the app ID, and omit automatic-update and mandatory-update configuration. Build tools, standard network proxies, and `DSH_DESKTOP_NPM_REGISTRY` remain available from the shell. They skip Developer ID signing, Apple notarization, temporary signing keychains, and notarization proxy changes. Electron receives a local ad-hoc signature without certificates so the modified executable can run; the DMG is unsigned. Both preparation and the assembled application still run runtime integrity and smoke checks. Local builds omit update feeds, ZIPs, and release completion records, and the upload commands cannot publish them. macOS may require approval in System Settings → Privacy & Security to open an unnotarized application.
 
 <a id="macos-release-signing"></a>
 
@@ -273,6 +273,8 @@ An unpacked artifact contains Electron, the materialized dsh production tree, pn
 ## Installation and release verification
 
 Keep the generated installer, its version and packaging records together. Review signatures and runtime checks before installation, then follow the [installed-update qualification procedure](../tests/installed-update/README.md) for installed launch and upgrade evidence. The [Desktop test record](../tests/README.md) owns verification limits; a successful workflow alone does not establish production preset, new-workstation or installed-upgrade acceptance.
+
+When an installation fails, the error window offers copyable details, and the full report plus the 7-Zip or directory-operations log are saved under `%LOCALAPPDATA%\@deepseek-aidsh-desktop-updater\installer-logs\` as `extract-failure-*.log` and `directory-failure-*.log`. A `Windows error: 5` on a `promote`, `backup` or `remove-empty` line usually means security software still holds handles on freshly extracted files; exit real-time protection or allowlist `%LOCALAPPDATA%\Programs` and retry. Directory operations keep retrying for roughly seventy seconds before reporting, and transient locks release inside that window.
 
 ## Dev Note
 

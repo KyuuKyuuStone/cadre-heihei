@@ -1,5 +1,10 @@
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
+; 0.8.7 and earlier built with the com.deepseek.harness application id, whose GUID-derived
+; keys are read for upgrade recognition and retired by customInstall once this installer
+; owns the directory they point at; another product's registration is never touched.
+!define DSH_LEGACY_INSTALL_REGISTRY_KEY "Software\7808434f-469e-5eba-848e-edf64d3b94ce"
+!define DSH_LEGACY_UNINSTALL_REGISTRY_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\7808434f-469e-5eba-848e-edf64d3b94ce"
 !define INSTALLER_SOURCE_DIR "${__FILEDIR__}\..\installer"
 !define /ifndef INSTALLER_BUILD_DIR "${__FILEDIR__}\..\.desktop-build\targets\win-x64\installer-ui"
 
@@ -247,6 +252,15 @@ ManifestDPIAware true
   !insertmacro dshFinishDirectories
   ; Standard uninstall-entry metadata read by inventory tools; the upstream template records it only under its private key.
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" InstallLocation "$INSTDIR"
+  ; Retire the legacy application id's keys only when they point at this installation;
+  ; the same legacy id once belonged to another product, whose registration must survive.
+  Push $0
+  ReadRegStr $0 HKCU "${DSH_LEGACY_INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ${If} $0 == "$INSTDIR"
+    DeleteRegKey HKCU "${DSH_LEGACY_INSTALL_REGISTRY_KEY}"
+    DeleteRegKey HKCU "${DSH_LEGACY_UNINSTALL_REGISTRY_KEY}"
+  ${EndIf}
+  Pop $0
   ${If} $0 == 1
     SetErrors
   ${Else}

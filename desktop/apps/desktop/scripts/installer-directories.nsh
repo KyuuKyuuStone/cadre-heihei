@@ -48,11 +48,16 @@ Var dshRecoveryStopped
     ${AndIf} ${RESULT} != 33
       ${ExitDo}
     ${EndIf}
+    ; Antivirus scanners hold handles on freshly extracted files far longer than
+    ; an instant lock, so the window tops out around seventy seconds.
     IntOp $0 $0 + 1
-    ${If} $0 >= 10
+    ${If} $0 >= 30
       ${ExitDo}
     ${EndIf}
     IntOp $1 $0 * 250
+    ${If} $1 > 3000
+      StrCpy $1 3000
+    ${EndIf}
     Sleep $1
   ${Loop}
   Pop $2
