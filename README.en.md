@@ -50,10 +50,6 @@ Several models working inside the same project at the same time, each doing what
 
 Cost follows the work: strong models where it matters, cheap ones where it doesn't.
 
-<p align="center">
-  <img src="assets/readme/feature-models.png" width="820" alt="Per-role model configuration">
-</p>
-
 ### Context is isolated per role
 
 A single AI runs on one shared window. As the project grows, earlier agreements fall out of context, you fix one area and break another, and you end up pasting A's conclusion into B's chat.
