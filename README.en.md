@@ -1,12 +1,14 @@
 <p align="right"><a href="README.md">简体中文</a> · <strong>English</strong></p>
 
 <p align="center">
-  <img src="assets/readme/seal.svg" width="112" height="112" alt="Cadre Heihei seal">
+  <img src="assets/readme/seal.svg" width="96" height="96" alt="Cadre Heihei seal">
 </p>
 
 <h1 align="center">Cadre Heihei</h1>
 
-<p align="center">Tell your supervisor what you want. It breaks the work down, dispatches employees, and reviews what comes back — you only make decisions.</p>
+<h3 align="center">Tell your supervisor the idea. Let the AI team ship it.</h3>
+
+<p align="center">You make the decisions. The supervisor decomposes, dispatches, and reviews; employees execute, deliver, and report.</p>
 
 <p align="center">
   <img src="assets/readme/badge-mit.svg" height="20" alt="MIT License">
@@ -17,82 +19,92 @@
 </p>
 
 <p align="center">
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#screenshots">Screenshots</a> ·
-  <a href="#install">Install</a> ·
-  <a href="#quick-start">Quick start</a>
+  <a href="https://github.com/KyuuKyuuStone/cadre-heihei/releases"><img src="assets/readme/cta-download-en.svg" width="200" height="48" alt="Download for Windows"></a>
+  &nbsp;&nbsp;
+  <a href="#from-idea-to-shipped">See how it works →</a>
 </p>
-
----
 
 <p align="center">
-  <img src="assets/readme/01-main-window.png" alt="Cadre Heihei main window: projects and team on the left, supervisor conversation on the right" width="1200">
+  <img src="assets/readme/00-hero.png" width="1200" alt="Cadre Heihei main window: the supervisor decomposes a cafe website request and dispatches tasks to a designer and a backend engineer; the sidebar shows who is running">
 </p>
-<p align="center"><sub>Main window: projects and team on the left; the supervisor decomposing a request, dispatching work, and receiving an employee report on the right.</sub></p>
+<p align="center"><sub>A real run: one request, decomposed and dispatched; the sidebar shows who is running.</sub></p>
 
-## How it works
+## From idea to shipped
 
-You don't write a requirements document, and you don't configure a workflow. Everything happens in one conversation.
-
-| Step | Who | What happens |
-|:---|:---|:---|
-| 1 | You | Say what you want; change your mind whenever |
-| 2 | Supervisor | Understands the goal, breaks it into executable tasks, and dispatches by role |
-| 3 | Employee → Supervisor | The employee executes and delivers; the supervisor verifies against the deliverable and reports back to you |
-
-Each project has exactly one supervisor — your only point of contact. Employees don't talk to each other; every task flows through the supervisor.
-
-## Features
-
-<table>
-<tr>
-<td width="50%" valign="top"><strong>The conversation is the control surface</strong><br>No forms, boards, or setup wizards. State the goal, change your mind, or ask for status — all in the same conversation.</td>
-<td width="50%" valign="top"><strong>A project is an isolation boundary</strong><br>One local folder is one project. People, tasks, and context in different projects are invisible to each other.</td>
-</tr>
-<tr>
-<td valign="top"><strong>Role-based employees</strong><br>The supervisor dispatches but does not do the work; employees execute without guessing intent. Each employee is a separate session and handles one thing at a time.</td>
-<td valign="top"><strong>Task ledger and two-layer reporting</strong><br>The roster, task states, and handoffs live in local SQLite. Employees report to the supervisor; the supervisor verifies, then reports to you as verified / unresolved / risk.</td>
-</tr>
-</table>
-
-## Screenshots
+This is one continuous, real run — from an empty start to a delivered and reviewed cafe website. Every step happens in the supervisor conversation; no forms, boards, or workflow setup.
 
 The app UI is currently Chinese-only; the screenshots show the Chinese interface as shipped.
 
-<p align="center">
-  <img src="assets/readme/02-supervisor-conversation.png" alt="Supervisor conversation: request, dispatch, and employee report card" width="900">
-</p>
-<p align="center"><sub>The supervisor conversation: one request → decomposition and dispatch → employee report card. A real run, not a mock.</sub></p>
+### 01 Open and start
 
 <p align="center">
-  <img src="assets/readme/03-team-sidebar.png" alt="Team sidebar: pinned supervisor and three employees with roles and status" width="360">
+  <img src="assets/readme/01-first-launch.png" width="820" alt="First launch: an empty state with the add-project entry point">
 </p>
-<p align="center"><sub>The team sidebar: the supervisor is pinned; each employee shows their role, status, and current task.</sub></p>
+<p align="center"><sub>A clean first launch; “Add project” is the only entry point.</sub></p>
 
-## Install
-
-**Download**: [GitHub Releases v0.8.7](https://github.com/KyuuKyuuStone/cadre-heihei/releases/tag/v0.8.7) — Windows installer (about 274 MB, unsigned)
+### 02 Create a project, build a team
 
 <p align="center">
-  <img src="assets/readme/04-installer.png" alt="Windows installer: seal, wordmark, and primary button" width="600">
+  <img src="assets/readme/02-project-team.png" width="820" alt="A project bound to a local folder, with a supervisor, designer, frontend, and backend already created; the conversation is empty">
 </p>
-<p align="center"><sub>The Windows installer: install-location page with the seal, wordmark, and primary action in one view.</sub></p>
+<p align="center"><sub>One local folder is one project. Create a supervisor first, then add employees by role.</sub></p>
 
-- **OS**: Windows 10 / 11 only (desktop)
-- **Signing**: the installer is not code-signed; SmartScreen may warn — choose "More info → Run anyway"
-- **Account**: none. Add your own model provider API key in Settings
-- **Data**: stays on your machine in `~/.dsh`; uninstalling does not delete it, and reinstalling keeps your team and history
-- **Auto-update and telemetry**: off by default
+### 03 Tell the supervisor the idea
 
-## Quick start
+<p align="center">
+  <img src="assets/readme/03-idea.png" width="820" alt="A cafe website request typed into the supervisor conversation but not yet sent; the team is visible in the sidebar">
+</p>
+<p align="center"><sub>No requirements document. State the goal in one sentence; change your mind whenever.</sub></p>
 
-1. Install and launch the app; add your model provider API key in Settings.
-2. Create a project (pick a local folder), create a supervisor, then add employees as needed (role templates are available).
-3. Open the supervisor conversation and say what you want. Decomposition, dispatch, follow-up, and review are handled for you.
+### 04 The supervisor decomposes and dispatches
+
+<p align="center">
+  <img src="assets/readme/04-dispatch.png" width="820" alt="The supervisor breaks the request into tasks with deadlines and assigns them to a designer and a backend engineer; employees are running in the sidebar">
+</p>
+<p align="center"><sub>The supervisor breaks the goal into tasks, sets deadlines, and assigns them by role.</sub></p>
+
+### 05 Employees execute and report with deliverables
+
+<p align="center">
+  <img src="assets/readme/05-report.png" width="820" alt="A complete employee report card with a result summary and a deliverables list; the designer is still running">
+</p>
+<p align="center"><sub>Each employee works in a separate session. Report cards carry the result summary, deliverables, and test conclusions.</sub></p>
+
+### 06 The supervisor reviews and gives you the verdict
+
+<p align="center">
+  <img src="assets/readme/06-acceptance.png" width="820" alt="The supervisor's final report after review, separating verified facts, unresolved items, and risks">
+</p>
+<p align="center"><sub>The supervisor checks deliverables against completion criteria and reports back as verified / unresolved / risk.</sub></p>
+
+## You create; you don't have to be the project manager
+
+- **Only decide** — no scheduling, task breakdown, or chasing status. If the idea changes, tell the supervisor.
+- **See the work** — who is doing what and where it stands, in the sidebar and in employee report cards.
+- **Check the delivery** — files, test results, and review notes live in the same project, not in a verbal summary.
+
+Each project has exactly one supervisor — your only point of contact. Employees don't talk to each other; every task flows through the supervisor.
+
+## Ready to hand the idea to a team?
+
+<p align="center">
+  <a href="https://github.com/KyuuKyuuStone/cadre-heihei/releases"><img src="assets/readme/cta-download-en.svg" width="200" height="48" alt="Download for Windows"></a>
+</p>
+
+- Windows 10 / 11 desktop; installer is about 274 MB and unsigned
+- No account or sign-in; add your model provider's API key in Settings
+- Data stays on your machine in `~/.dsh`; uninstalling does not delete it, and reinstalling keeps your team and history
 
 <details>
-<summary>Tech stack, acknowledgments, and license</summary>
+<summary>Install, tech stack, and acknowledgments</summary>
+
+### Install
+
+1. Download the Windows installer from [GitHub Releases](https://github.com/KyuuKyuuStone/cadre-heihei/releases). It is not code-signed; SmartScreen may warn — choose “More info → Run anyway”.
+2. Install and launch, then add your model provider's API key in Settings.
+3. Create a project (pick a local folder), create a supervisor, then add employees as needed. Open the supervisor conversation and say what you want.
+
+### Tech stack
 
 - **Platform**: Windows desktop (Electron); the upstream web shell is outside this project's maintenance scope
 - **Engine**: [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (MIT), a plugin-based architecture

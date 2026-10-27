@@ -1,12 +1,14 @@
 <p align="right"><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
 
 <p align="center">
-  <img src="assets/readme/seal.svg" width="112" height="112" alt="Cadre Heihei 印章">
+  <img src="assets/readme/seal.svg" width="96" height="96" alt="Cadre Heihei 印章">
 </p>
 
 <h1 align="center">Cadre Heihei</h1>
 
-<p align="center">如臂使指，一念百行——你跟主管说想法，它拆解、派活、验收，你只做决定。</p>
+<h3 align="center">把想法告诉主管，让 AI 团队把它做成。</h3>
+
+<p align="center">你只做决定。主管拆解、派活、验收；员工执行、交付、汇报。</p>
 
 <p align="center">
   <img src="assets/readme/badge-mit.svg" height="20" alt="MIT License">
@@ -17,80 +19,90 @@
 </p>
 
 <p align="center">
-  <a href="#它怎么工作">工作方式</a> ·
-  <a href="#特色功能">特色功能</a> ·
-  <a href="#截图">截图</a> ·
-  <a href="#下载安装">下载安装</a> ·
-  <a href="#快速开始">快速开始</a>
+  <a href="https://github.com/KyuuKyuuStone/cadre-heihei/releases"><img src="assets/readme/cta-download-zh.svg" width="184" height="48" alt="下载 Windows 版"></a>
+  &nbsp;&nbsp;
+  <a href="#从想法到成品">看看它如何工作 →</a>
 </p>
-
----
 
 <p align="center">
-  <img src="assets/readme/01-main-window.png" alt="Cadre Heihei 主界面：项目部、主管与员工，右侧是主管会话" width="1200">
+  <img src="assets/readme/00-hero.png" width="1200" alt="Cadre Heihei 主界面：主管把咖啡店需求拆成任务，派给设计师和后端，侧栏显示员工运行状态">
 </p>
-<p align="center"><sub>主界面：左侧是项目部与团队；右侧是主管在拆解需求、派活，并接收员工汇报。</sub></p>
+<p align="center"><sub>一次真实演示：一句需求，主管拆解、派活；谁在运行，侧栏一眼可见。</sub></p>
 
-## 它怎么工作
+## 从想法到成品
 
-你不需要写需求文档，也不需要配置流程。整件事只发生在一条对话里。
+下面是一次连续的实机演示：从空白启动，到一家咖啡店的开业网站交付验收。全程只和主管对话，没有填表、看板或流程配置。
 
-| 步骤 | 谁 | 发生什么 |
-|:---|:---|:---|
-| 1 | 你 | 说出想要什么，随时改主意 |
-| 2 | 主管 | 理解目标，拆成可执行任务，按员工职责派活 |
-| 3 | 员工 → 主管 | 员工执行并交付；主管对照交付物验收，再向你汇报 |
-
-每个项目部只有一名主管，是你唯一的对话对象。员工之间不互相说话，所有任务流向主管。
-
-## 特色功能
-
-<table>
-<tr>
-<td width="50%" valign="top"><strong>对话即调度</strong><br>没有表单、看板或配置向导。说想法、改主意、催进度，都在同一条对话里完成。</td>
-<td width="50%" valign="top"><strong>项目部即隔离边界</strong><br>一个本地文件夹就是一个项目部。不同项目部的人员、任务与上下文互相看不见。</td>
-</tr>
-<tr>
-<td valign="top"><strong>角色化员工</strong><br>主管只调度不代劳；员工只执行不猜意图。一个员工就是一个独立会话，同一时间只压一件事。</td>
-<td valign="top"><strong>台账与两层汇报</strong><br>花名册、任务状态与交接都落在本地 SQLite。员工先向主管汇报，主管验收后再把「已证实 / 未决 / 风险」报给你。</td>
-</tr>
-</table>
-
-## 截图
+### 01 打开就能开工
 
 <p align="center">
-  <img src="assets/readme/02-supervisor-conversation.png" alt="主管对话：需求、拆解派活与员工汇报卡" width="900">
+  <img src="assets/readme/01-first-launch.png" width="820" alt="首次启动的空态，页面提示添加项目部">
 </p>
-<p align="center"><sub>主管对话：一句需求 → 拆解派活 → 员工汇报卡。图中是真实运行记录。</sub></p>
+<p align="center"><sub>首次启动是干净的空态；「添加项目部」是唯一入口。</sub></p>
+
+### 02 建项目部，配团队
 
 <p align="center">
-  <img src="assets/readme/03-team-sidebar.png" alt="侧栏团队：主管置顶，前端、设计师、后端各显示岗位与状态" width="360">
+  <img src="assets/readme/02-project-team.png" width="820" alt="项目部已绑定本地文件夹，主管与设计师、前端、后端已建好，右侧对话为空">
 </p>
-<p align="center"><sub>侧栏团队：主管置顶；每名员工显示岗位、状态与当前任务。</sub></p>
+<p align="center"><sub>一个本地文件夹就是一个项目部；先建主管，再按角色建员工。</sub></p>
 
-## 下载安装
-
-**下载**：[GitHub Releases v0.8.7](https://github.com/KyuuKyuuStone/cadre-heihei/releases/tag/v0.8.7) —— Windows 安装包（约 274 MB，未签名）
+### 03 把想法说给主管
 
 <p align="center">
-  <img src="assets/readme/04-installer.png" alt="Windows 安装器：印章、字标与安装按钮" width="600">
+  <img src="assets/readme/03-idea.png" width="820" alt="主管会话中输入咖啡店开业网站需求，尚未发送；侧栏显示团队成员">
 </p>
-<p align="center"><sub>Windows 安装器：安装位置页，印章、字标与主按钮同屏。</sub></p>
+<p align="center"><sub>不需要需求文档。一句话说清要什么，随时可以改主意。</sub></p>
 
-- **系统**：Windows 10 / 11（仅桌面端）
-- **签名**：安装包未做代码签名，SmartScreen 可能提示；选择「更多信息 → 仍要运行」
-- **账户**：无需注册或登录。模型接入在「设置」里填你自己的 API Key
-- **数据**：全部留在本机 `~/.dsh`；卸载不会删除数据，重装不丢团队与历史
-- **自动更新与遥测**：默认关闭
+### 04 主管拆解，分头开工
 
-## 快速开始
+<p align="center">
+  <img src="assets/readme/04-dispatch.png" width="820" alt="主管把需求拆成任务，标注截止时间并派给设计师和后端；侧栏显示员工运行中">
+</p>
+<p align="center"><sub>主管把目标拆成任务，标明截止时间，按职责派给对应员工。</sub></p>
 
-1. 安装并启动，在「设置」里填入模型服务商的 API Key。
-2. 新建项目部（选一个本地文件夹），先建一名主管，再按需建员工（可直接套用角色模板）。
-3. 打开主管会话，说清你想做什么。拆解、派活、催进度、验收，它自己会走。
+### 05 员工执行，带着交付物汇报
+
+<p align="center">
+  <img src="assets/readme/05-report.png" width="820" alt="后端员工的完整汇报卡，包含结果摘要与交付物清单；设计师仍在运行">
+</p>
+<p align="center"><sub>员工在独立会话里干活；汇报卡里有结果摘要、交付物清单和测试结论。</sub></p>
+
+### 06 主管验收，给你结论
+
+<p align="center">
+  <img src="assets/readme/06-acceptance.png" width="820" alt="主管完成验收后的最终汇报，区分已证实、未决与风险">
+</p>
+<p align="center"><sub>主管对照完成条件和交付物验收，把「已证实 / 未决 / 风险」分开报给你。</sub></p>
+
+## 你负责创作，不必兼任项目经理
+
+- **只做决定**：不排期、不拆任务、不催进度。想法变了，直接告诉主管。
+- **过程可见**：谁在做什么、做到哪一步，侧栏状态和员工汇报卡里都有。
+- **交付可查**：文件、测试结果和验收结论都留在同一个项目里，不靠口头汇报。
+
+每个项目部只有一名主管，是你唯一的对话对象；员工之间不互相说话，所有任务都流向主管。
+
+## 准备把想法交给团队？
+
+<p align="center">
+  <a href="https://github.com/KyuuKyuuStone/cadre-heihei/releases"><img src="assets/readme/cta-download-zh.svg" width="184" height="48" alt="下载 Windows 版"></a>
+</p>
+
+- Windows 10 / 11 桌面端，安装包约 274 MB、未签名
+- 无需注册或登录；模型服务商的 API Key 在「设置」里填
+- 数据留在本机 `~/.dsh`；卸载不会删除，重装不丢团队与历史
 
 <details>
-<summary>技术栈、致谢与许可</summary>
+<summary>安装步骤、技术栈与致谢</summary>
+
+### 安装步骤
+
+1. 从 [GitHub Releases](https://github.com/KyuuKyuuStone/cadre-heihei/releases) 下载 Windows 安装包。安装包未做代码签名，SmartScreen 可能提示；选择「更多信息 → 仍要运行」。
+2. 安装并启动，在「设置」里填入模型服务商的 API Key。
+3. 新建项目部（选一个本地文件夹），先建一名主管，再按需建员工；打开主管会话，说清你想做什么。
+
+### 技术栈
 
 - **平台**：Windows 桌面端（Electron）；上游的 Web 外壳不在本项目的维护范围内
 - **内核**：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT），插件化架构

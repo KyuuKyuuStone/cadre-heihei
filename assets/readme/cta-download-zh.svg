@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="184" height="48" viewBox="0 0 184 48" role="img" aria-label="下载 Windows 版">
+  <title>下载 Windows 版</title>
+  <rect x="0.5" y="0.5" width="183" height="47" rx="10" fill="#0E141B" stroke="#33414F"/>
+  <rect x="1.5" y="1.5" width="181" height="1" rx="0.5" fill="#FFFFFF" fill-opacity="0.08"/>
+  <g fill="none" stroke="#F6F7F9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 17v9"/>
+    <path d="M20 22.5 24 26.5 28 22.5"/>
+    <path d="M18 31.5h12"/>
+  </g>
+  <text x="43" y="30" font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif" font-size="15" font-weight="600" fill="#F6F7F9">下载 Windows 版</text>
+</svg>

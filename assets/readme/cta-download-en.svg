@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="48" viewBox="0 0 200 48" role="img" aria-label="Download for Windows">
+  <title>Download for Windows</title>
+  <rect x="0.5" y="0.5" width="199" height="47" rx="10" fill="#0E141B" stroke="#33414F"/>
+  <rect x="1.5" y="1.5" width="197" height="1" rx="0.5" fill="#FFFFFF" fill-opacity="0.08"/>
+  <g fill="none" stroke="#F6F7F9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 17v9"/>
+    <path d="M20 22.5 24 26.5 28 22.5"/>
+    <path d="M18 31.5h12"/>
+  </g>
+  <text x="43" y="30" font-family="Segoe UI, -apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600" letter-spacing="0.1" fill="#F6F7F9">Download for Windows</text>
+</svg>
