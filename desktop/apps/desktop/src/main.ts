@@ -84,6 +84,7 @@ import { desktopClientMetadata, desktopClientVersion } from './client-metadata.t
 import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
 import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
 import { readDesktopSettings } from './settings.ts'
+import { CADRE_RELEASES_URL, GitHubUpdateService } from './github-update.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
@@ -665,6 +666,20 @@ async function main(): Promise<void> {
   console.log(`cadre-ledger project-scoped path=${cadreLedgerPath} legacy=${ledgerPlan.legacyPath} ` +
     `migration=${migration.status} members=${String(membersAtStartup)} ` +
     `rosterNotice=${ledgerHealth.rosterNotice === null ? 'none' : 'missing'} actor=roster-per-request`)
+  // GitHub Releases availability is intentionally separate from the updater:
+  // it only publishes a non-blocking notice and opens the public download page.
+  const githubUpdates = new GitHubUpdateService({
+    userData: app.getPath('userData'),
+    currentVersion: app.getVersion(),
+    hasTeamData: () => membersAtStartup > 0 || ledgerHealth.rosterSeen,
+    publish: (notice) => {
+      if (mainWindow !== undefined && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(DESKTOP_IPC.cadreUpdateNotice, notice)
+      }
+    },
+  })
+  githubUpdates.start()
+  app.on('will-quit', () => { githubUpdates.stop() })
   // Milestone ④: provider catalogue shares the cadre SQLite file; migration is
   // additive and stores credential references only.
   let cadreProviders: ProviderStore | undefined
@@ -1582,6 +1597,31 @@ async function main(): Promise<void> {
     const employees = cadreEmployees.list(project.projectId)
     console.log(`cadre:listEmployees project=${project.projectId} count=${employees.length}`)
     return { ok: true, employees }
+  })
+
+  ipcMain.handle(DESKTOP_IPC.cadreUpdateGetNotice, (event) => {
+    assertProductSender(event)
+    return githubUpdates.notice
+  })
+  ipcMain.handle(DESKTOP_IPC.cadreUpdateDismiss, (event, kind: unknown) => {
+    assertProductSender(event)
+    if (kind !== 'available' && kind !== 'upgraded') throw new Error('Invalid update notice kind')
+    githubUpdates.dismiss(kind)
+    return githubUpdates.notice
+  })
+  ipcMain.handle(DESKTOP_IPC.cadreUpdateOpen, async (event) => {
+    assertProductSender(event)
+    await shell.openExternal(CADRE_RELEASES_URL)
+  })
+  ipcMain.handle(DESKTOP_IPC.cadreUpdateGetEnabled, (event) => {
+    assertProductSender(event)
+    return githubUpdates.enabled
+  })
+  ipcMain.handle(DESKTOP_IPC.cadreUpdateSetEnabled, async (event, enabled: unknown) => {
+    assertProductSender(event)
+    if (typeof enabled !== 'boolean') throw new Error('Update check preference must be true or false')
+    await githubUpdates.setEnabled(enabled)
+    return githubUpdates.enabled
   })
 
   ipcMain.handle(DESKTOP_IPC.boot, async (event) => {

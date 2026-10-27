@@ -31,6 +31,20 @@ type InvokeEvent = { sender?: unknown; senderFrame: { url: string } }
 type InvokeHandler = (event: InvokeEvent, ...args: unknown[]) => unknown
 
 vi.mock('../src/web-document.ts', () => ({ authenticateWebHost: async () => 'test-cookie', serveWebDocument: vi.fn(), forwardWebRequest: vi.fn() }))
+// Startup tests exercise the shell, not the public release feed; the service
+// still exposes the same surface so the new IPC handlers stay wired.
+vi.mock('../src/github-update.ts', () => ({
+  CADRE_RELEASES_URL: 'https://github.com/KyuuKyuuStone/cadre-heihei/releases/latest',
+  GitHubUpdateService: class {
+    enabled = true
+    notice = null
+    start(): void {}
+    stop(): void {}
+    async setEnabled(enabled: boolean): Promise<void> { this.enabled = enabled }
+    dismiss(): void {}
+    async check(): Promise<void> {}
+  },
+}))
 // Report persistence has its own unit tests; here it resolves within microtasks so the fatal
 // dialog never outlives the test that triggered it.
 vi.mock('../src/crash-report.ts', async importOriginal => ({
@@ -1195,6 +1209,23 @@ describe('desktop main startup', () => {
     window.webContents.emit('will-navigate', internal, 'dsh-app://app/session/task-1')
     expect(internal.preventDefault).not.toHaveBeenCalled()
     expect(harness.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('serves the GitHub release notice over product IPC and opens only the fixed releases page', async () => {
+    await readyForUpdate()
+    harness.openExternal.mockClear()
+
+    expect(invoke(DESKTOP_IPC.cadreUpdateGetNotice, 'app')).toBeNull()
+    expect(invoke(DESKTOP_IPC.cadreUpdateGetEnabled, 'app')).toBe(true)
+
+    await expect(invoke(DESKTOP_IPC.cadreUpdateSetEnabled, 'app', false)).resolves.toBe(false)
+    expect(invoke(DESKTOP_IPC.cadreUpdateGetEnabled, 'app')).toBe(false)
+    await expect(invoke(DESKTOP_IPC.cadreUpdateSetEnabled, 'app', true)).resolves.toBe(true)
+
+    await expect(invoke(DESKTOP_IPC.cadreUpdateOpen, 'app')).resolves.toBeUndefined()
+    expect(harness.openExternal).toHaveBeenCalledExactlyOnceWith(
+      'https://github.com/KyuuKyuuStone/cadre-heihei/releases/latest',
+    )
   })
 
   async function readyForUpdate() {

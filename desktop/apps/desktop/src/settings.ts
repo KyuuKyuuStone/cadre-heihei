@@ -9,7 +9,19 @@ import { join } from 'node:path'
 export interface DesktopSettings {
   readonly updates: {
     readonly allowTestAuthPopupWindow: boolean
+    /** Whether the GitHub Releases availability check may make network requests. */
+    readonly checkForUpdates: boolean
+    /** Last app version that completed startup; drives the one-time upgrade notice. */
+    readonly lastSeenVersion?: string
   }
+}
+
+const DEFAULTS: DesktopSettings = {
+  updates: { allowTestAuthPopupWindow: false, checkForUpdates: true },
+}
+
+function settingsPath(userData: string): string {
+  return join(userData, 'desktop', 'settings.json')
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -23,14 +35,13 @@ function record(value: unknown): value is Record<string, unknown> {
  */
 export function readDesktopSettings(userData: string): DesktopSettings {
   const directory = join(userData, 'desktop')
-  const path = join(directory, 'settings.json')
-  const defaults: DesktopSettings = { updates: { allowTestAuthPopupWindow: false } }
+  const path = settingsPath(userData)
   try {
     let raw: string
     try { raw = readFileSync(path, 'utf8') } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       mkdirSync(directory, { recursive: true, mode: 0o700 })
-      try { writeFileSync(path, `${JSON.stringify(defaults, null, 2)}\n`, { flag: 'wx', mode: 0o600 }) } catch (error) {
+      try { writeFileSync(path, `${JSON.stringify(DEFAULTS, null, 2)}\n`, { flag: 'wx', mode: 0o600 }) } catch (error) {
         // An existing document belongs to the user, including one created during initialization.
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       }
@@ -44,7 +55,21 @@ export function readDesktopSettings(userData: string): DesktopSettings {
     if (allow !== undefined && typeof allow !== 'boolean') {
       throw new Error('updates.allowTestAuthPopupWindow must be true or false')
     }
-    return { updates: { allowTestAuthPopupWindow: allow ?? false } }
+    const checkForUpdates = value.updates?.checkForUpdates
+    if (checkForUpdates !== undefined && typeof checkForUpdates !== 'boolean') {
+      throw new Error('updates.checkForUpdates must be true or false')
+    }
+    const lastSeenVersion = value.updates?.lastSeenVersion
+    if (lastSeenVersion !== undefined && typeof lastSeenVersion !== 'string') {
+      throw new Error('updates.lastSeenVersion must be text')
+    }
+    return {
+      updates: {
+        allowTestAuthPopupWindow: allow ?? false,
+        checkForUpdates: checkForUpdates ?? true,
+        ...(lastSeenVersion === undefined ? {} : { lastSeenVersion }),
+      },
+    }
   } catch (error) {
     try {
       console.warn(`desktop settings: ${path}: using defaults because settings could not be loaded`, error)
@@ -52,6 +77,33 @@ export function readDesktopSettings(userData: string): DesktopSettings {
       // Diagnostic output is best effort; its failure must not make optional settings fatal.
       // TODO: Persist settings diagnostics when console output is unavailable, without blocking startup.
     }
-    return defaults
+    return DEFAULTS
   }
+}
+
+/**
+ * Merge one updates patch into the existing shell settings document.
+ * Unknown top-level keys survive; an unreadable document is replaced only when
+ * the caller explicitly changes a setting.
+ * @param userData - Electron's userData directory.
+ * @param patch - Update preferences to persist; omitted fields keep their value.
+ * @returns The document as re-read after the write.
+ */
+export function writeDesktopSettings(
+  userData: string,
+  patch: Partial<DesktopSettings['updates']>,
+): DesktopSettings {
+  const path = settingsPath(userData)
+  let value: Record<string, unknown> = {}
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+    if (record(parsed)) value = parsed
+  } catch (_error) {
+    // Missing or invalid documents start from the defaults below.
+  }
+  const current = record(value.updates) ? value.updates : {}
+  const updates = { ...current, ...patch }
+  mkdirSync(join(userData, 'desktop'), { recursive: true, mode: 0o700 })
+  writeFileSync(path, `${JSON.stringify({ ...value, updates }, null, 2)}\n`, { mode: 0o600 })
+  return readDesktopSettings(userData)
 }

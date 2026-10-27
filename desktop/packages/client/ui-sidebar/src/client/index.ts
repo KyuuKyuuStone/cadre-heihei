@@ -32,6 +32,8 @@ import {
 import type { CadreSessionRankService } from './cadre-session-rank.ts'
 import { HeaderLeadingControls } from './HeaderLeadingControls.tsx'
 import { SidebarRoot } from './SidebarRoot.tsx'
+import { UpdateCheckRow } from './UpdateCheckRow.tsx'
+import { UpdateNotice } from './UpdateNotice.tsx'
 import { en, zh, type SidebarKey } from './locales.ts'
 
 export type {
@@ -662,6 +664,24 @@ export function apply(ctx: ClientContext): void {
     order: 100,
     inject: subtitleInjected,
   } as never, CadreSessionSubtitle as never))
+
+  // Non-blocking GitHub release notice in the sidebar foot. The desktop bridge
+  // owns the network and the preference; this component only renders.
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action',
+    id: 'cadre-update-notice',
+    order: 100,
+    locale: NS,
+  }, UpdateNotice))
+
+  // General settings: one switch, default on. The row hides itself when the
+  // desktop bridge is absent (for example in a plain web shell).
+  ctx.slots.inject('settings.general.item' as never, () => ctx.slots.register({
+    name: 'settings.general.item',
+    id: 'cadre-update-check',
+    order: 95,
+    locale: NS,
+  } as never, UpdateCheckRow as never))
 
   // Employee management stays on the Session row menu.
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({

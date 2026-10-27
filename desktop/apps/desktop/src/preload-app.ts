@@ -2,7 +2,9 @@
 
 import type { DesktopShortcutInput, ShortcutConfigSnapshot, ShortcutSaveResult } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { DESKTOP_IPC, SCHEME, type DshDesktopProductApi, type DesktopUpdatePresentation } from './ipc.ts'
+import {
+  DESKTOP_IPC, SCHEME, type CadreUpdateNotice, type DshDesktopProductApi, type DesktopUpdatePresentation,
+} from './ipc.ts'
 import { PLATFORM_IPC } from './platform-ipc.ts'
 import { markDocumentPlatform, syncWindowFullscreen } from './preload-platform.ts'
 import { syncNativeTheme } from './preload-theme.ts'
@@ -167,6 +169,18 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
     }) => ipcRenderer.invoke(DESKTOP_IPC.cadreSaveMember, options) as Promise<unknown>,
     retireMember: (options: { sessionId: string; projectId?: string }) =>
       ipcRenderer.invoke(DESKTOP_IPC.cadreRetireMember, options) as Promise<unknown>,
+    getUpdateNotice: () => ipcRenderer.invoke(DESKTOP_IPC.cadreUpdateGetNotice) as Promise<CadreUpdateNotice | null>,
+    dismissUpdateNotice: (kind: CadreUpdateNotice['kind']) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreUpdateDismiss, kind) as Promise<CadreUpdateNotice | null>,
+    openReleasePage: () => ipcRenderer.invoke(DESKTOP_IPC.cadreUpdateOpen) as Promise<void>,
+    getUpdateCheckEnabled: () => ipcRenderer.invoke(DESKTOP_IPC.cadreUpdateGetEnabled) as Promise<boolean>,
+    setUpdateCheckEnabled: (enabled: boolean) =>
+      ipcRenderer.invoke(DESKTOP_IPC.cadreUpdateSetEnabled, enabled) as Promise<boolean>,
+    subscribeUpdateNotice: (listener: (notice: CadreUpdateNotice | null) => void) => {
+      const handle = (_event: Electron.IpcRendererEvent, notice: CadreUpdateNotice | null): void => { listener(notice) }
+      ipcRenderer.on(DESKTOP_IPC.cadreUpdateNotice, handle)
+      return () => { ipcRenderer.off(DESKTOP_IPC.cadreUpdateNotice, handle) }
+    },
   })
   contextBridge.exposeInMainWorld('dshPlatform', {
     open: (page: 'usage' | 'top-up', bounds: { x: number; y: number; width: number; height: number }) => ipcRenderer.invoke(PLATFORM_IPC.open, page, bounds),

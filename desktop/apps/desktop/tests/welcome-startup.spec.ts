@@ -104,7 +104,19 @@ vi.mock('electron', () => ({
 vi.mock('../src/tray.ts', () => ({ DesktopTray: class { relabel() {} dispose() {} } }))
 
 vi.mock('../src/paths.ts', () => ({ resolveDesktopPaths: () => ({ profile: '/profile' }) }))
-vi.mock('../src/settings.ts', () => ({ readDesktopSettings: () => ({ updates: { allowTestAuthPopupWindow: false } }) }))
+vi.mock('../src/settings.ts', () => ({ readDesktopSettings: () => ({ updates: { allowTestAuthPopupWindow: false, checkForUpdates: true } }) }))
+vi.mock('../src/github-update.ts', () => ({
+  CADRE_RELEASES_URL: 'https://github.com/KyuuKyuuStone/cadre-heihei/releases/latest',
+  GitHubUpdateService: class {
+    enabled = true
+    notice = null
+    start(): void {}
+    stop(): void {}
+    async setEnabled(enabled: boolean): Promise<void> { this.enabled = enabled }
+    dismiss(): void {}
+    async check(): Promise<void> {}
+  },
+}))
 vi.mock('../src/login-shell-environment.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../src/login-shell-environment.ts')>(),
   readDesktopLoginShellEnvironment: async (base: NodeJS.ProcessEnv) => ({ environment: base, failures: [] }),

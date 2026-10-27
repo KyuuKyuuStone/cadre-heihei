@@ -56,7 +56,19 @@ export const DESKTOP_IPC = {
   cadreSaveMember: 'cadre:saveMember',
   /** W8 departure: mark a member departed, keep all history. */
   cadreRetireMember: 'cadre:retireMember',
+  /** GitHub Releases availability notice; independent of the updater. */
+  cadreUpdateNotice: 'cadre:updateNotice',
+  cadreUpdateGetNotice: 'cadre:updateGetNotice',
+  cadreUpdateDismiss: 'cadre:updateDismiss',
+  cadreUpdateOpen: 'cadre:updateOpen',
+  cadreUpdateGetEnabled: 'cadre:updateGetEnabled',
+  cadreUpdateSetEnabled: 'cadre:updateSetEnabled',
 } as const
+
+/** One non-blocking update notice; the renderer never controls the URL or installation. */
+export type CadreUpdateNotice =
+  | { readonly kind: 'available'; readonly version: string; readonly url: string }
+  | { readonly kind: 'upgraded'; readonly version: string; readonly fromVersion?: string }
 
 /** Desktop release update state rendered by desktop-owned UI. */
 export type DesktopUpdatePreparationFailureKind = 'stop-failed' | 'tasks-changed' | 'tasks-unavailable'

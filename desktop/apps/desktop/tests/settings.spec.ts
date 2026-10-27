@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vitest'
-import { readDesktopSettings } from '../src/settings.ts'
+import { readDesktopSettings, writeDesktopSettings } from '../src/settings.ts'
 
 vi.mock('node:fs', async importOriginal => ({ ...await importOriginal<typeof import('node:fs')>() }))
 
@@ -22,8 +22,10 @@ it('creates a discoverable default file on first launch without touching other p
   const { userData, path } = fixture()
   rmSync(join(userData, 'desktop'), { recursive: true })
   writeFileSync(join(userData, 'keybindings.json'), 'existing shortcuts\n')
-  expect(readDesktopSettings(userData)).toEqual({ updates: { allowTestAuthPopupWindow: false } })
-  expect(readFileSync(path, 'utf8')).toBe('{\n  "updates": {\n    "allowTestAuthPopupWindow": false\n  }\n}\n')
+  expect(readDesktopSettings(userData)).toEqual({
+    updates: { allowTestAuthPopupWindow: false, checkForUpdates: true },
+  })
+  expect(readFileSync(path, 'utf8')).toBe('{\n  "updates": {\n    "allowTestAuthPopupWindow": false,\n    "checkForUpdates": true\n  }\n}\n')
   expect(readFileSync(join(userData, 'keybindings.json'), 'utf8')).toBe('existing shortcuts\n')
 })
 
@@ -50,7 +52,9 @@ it('loads explicit opt-in and opt-out on the next read without changing an earli
 
 it.each(['', '{', 'null', '[]', '{"updates":null}', '{"updates":[]}',
   '{"updates":{"allowTestAuthPopupWindow":"false"}}', '{"updates":{"allowTestAuthPopupWindow":1}}',
-  '{"updates":{"allowTestAuthPopupWindow":null}}'])('reports invalid settings with their path and preserves the original: %s', (raw) => {
+  '{"updates":{"allowTestAuthPopupWindow":null}}',
+  '{"updates":{"checkForUpdates":"false"}}', '{"updates":{"checkForUpdates":1}}',
+  '{"updates":{"lastSeenVersion":1}}'])('reports invalid settings with their path and preserves the original: %s', (raw) => {
   const { userData, path } = fixture()
   writeFileSync(path, raw)
   expect(readDesktopSettings(userData).updates.allowTestAuthPopupWindow).toBe(false)
@@ -80,4 +84,36 @@ it('continues with defaults even when warning output fails', () => {
   vi.mocked(console.warn).mockImplementation(() => { throw new Error('output unavailable') })
   expect(readDesktopSettings(userData).updates.allowTestAuthPopupWindow).toBe(false)
   expect(readFileSync(path, 'utf8')).toBe('{')
+})
+
+it('writes one update preference without dropping unknown keys or other updates', () => {
+  const { userData, path } = fixture()
+  writeFileSync(path, JSON.stringify({
+    custom: 'preserve',
+    updates: { allowTestAuthPopupWindow: true, lastSeenVersion: '0.9.0' },
+  }, null, 2))
+  expect(writeDesktopSettings(userData, { checkForUpdates: false })).toEqual({
+    updates: {
+      allowTestAuthPopupWindow: true,
+      checkForUpdates: false,
+      lastSeenVersion: '0.9.0',
+    },
+  })
+  expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
+    custom: 'preserve',
+    updates: {
+      allowTestAuthPopupWindow: true,
+      checkForUpdates: false,
+      lastSeenVersion: '0.9.0',
+    },
+  })
+})
+
+it('replaces an invalid document only when the caller explicitly writes', () => {
+  const { userData, path } = fixture()
+  writeFileSync(path, '{')
+  expect(writeDesktopSettings(userData, { checkForUpdates: false }).updates.checkForUpdates).toBe(false)
+  expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
+    updates: { checkForUpdates: false },
+  })
 })
