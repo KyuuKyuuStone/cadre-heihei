@@ -135,6 +135,75 @@ interface CadreCreateBridge {
   }) => Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
 }
 
+/**
+ * Provider → model → reasoning-effort picker shared by both create forms.
+ *
+ * Supervisor creation is a singleton, but the model choice is the same shape
+ * as an employee's; keeping one picker avoids the two forms drifting apart.
+ * @returns the three radio groups, or a hint when no provider is configured.
+ */
+function ProviderModelPicker({
+  providers, providerId, modelId, effortId, onProvider, onModel, onEffort,
+}: {
+  readonly providers: readonly ProviderOption[]
+  readonly providerId: string
+  readonly modelId: string
+  readonly effortId: string
+  readonly onProvider: (providerId: string, defaultModel: string) => void
+  readonly onModel: (modelId: string) => void
+  readonly onEffort: (effortId: string) => void
+}) {
+  const selectedProvider = providers.find(provider => provider.providerId === providerId)
+  const models = selectedProvider?.models ?? []
+  const efforts = selectedProvider?.models?.find(model => model.id === modelId)?.reasoning?.efforts ?? []
+  return (
+    <>
+      <span className={css.sectionTitle}>服务商与模型（可选）</span>
+      {providers.length === 0
+        ? <span className={css.hint}>未配置服务商，将使用官方默认模型。</span>
+        : (
+          <div className={css.grid} role="radiogroup" aria-label="服务商">
+            {providers.map(provider => (
+              <Button
+                key={provider.providerId}
+                variant={providerId === provider.providerId ? 'primary' : 'outline'}
+                onClick={() => { onProvider(provider.providerId, provider.defaultModel) }}
+              >
+                {provider.name}
+              </Button>
+            ))}
+          </div>
+        )}
+      {models.length > 0 && (
+        <div className={css.grid} role="radiogroup" aria-label="模型">
+          {models.map(model => (
+            <Button
+              key={model.id}
+              variant={modelId === model.id ? 'primary' : 'outline'}
+              onClick={() => { onModel(model.id) }}
+            >
+              {model.id}
+            </Button>
+          ))}
+        </div>
+      )}
+      {efforts.length > 0 && (
+        <div className={css.grid} role="radiogroup" aria-label="思考强度">
+          {efforts.map(effort => (
+            <Button
+              key={effort.id}
+              variant={effortId === effort.id ? 'primary' : 'outline'}
+              onClick={() => { onEffort(effort.id) }}
+            >
+              {effort.name ?? effort.id}
+            </Button>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 /** Injected create seam: the plugin owns Session + roster writes and navigation. */
 export interface CadreCreateInjected {
   hooks: { createRequest: HostObservable<CadreCreateRequest | null> }
@@ -200,6 +269,31 @@ function CadreCreateForm({
   useEffect(() => {
     let cancelled = false
     const list = bridge()
+    const read = list?.listProviders
+    if (read === undefined) {
+      // Model choice is optional for both roles; only the employee form has
+      // always required the catalogue, so keep that error and leave the
+      // supervisor form usable without it.
+      if (kind === 'worker') setError('服务商通道未接入：window.cadre.listProviders 未注册')
+    } else {
+      void read().then((result) => {
+        if (cancelled) return
+        if (result?.ok === false) {
+          setProviders([])
+          if (kind === 'worker') setError(`读取官方模型目录失败：${result.message ?? result.code ?? '未知错误'}`)
+          return
+        }
+        const usable = (result?.providers ?? []).filter(provider => provider.enabled !== false)
+        setProviders(usable)
+        const first = usable[0]
+        if (first !== undefined) {
+          setProviderId(first.providerId)
+          setModelId(first.defaultModel)
+        }
+      }).catch((reason: unknown) => {
+        if (!cancelled && kind === 'worker') setError(`读取服务商失败：${errorMessage(reason)}`)
+      })
+    }
     if (kind === 'supervisor') {
       const projectId = request.workspaceId
       const roster = list?.listRoster
@@ -209,30 +303,7 @@ function CadreCreateForm({
         const members = result?.members ?? result?.rows ?? []
         setSupervisor(members.find(member => member.role === 'supervisor' && member.state !== 'departed'))
       }).catch(() => { /* the create call remains the authority */ })
-      return () => { cancelled = true }
     }
-    const read = list?.listProviders
-    if (read === undefined) {
-      setError('服务商通道未接入：window.cadre.listProviders 未注册')
-      return () => { cancelled = true }
-    }
-    void read().then((result) => {
-      if (cancelled) return
-      if (result?.ok === false) {
-        setProviders([])
-        setError(`读取官方模型目录失败：${result.message ?? result.code ?? '未知错误'}`)
-        return
-      }
-      const usable = (result?.providers ?? []).filter(provider => provider.enabled !== false)
-      setProviders(usable)
-      const first = usable[0]
-      if (first !== undefined) {
-        setProviderId(first.providerId)
-        setModelId(first.defaultModel)
-      }
-    }).catch((reason: unknown) => {
-      if (!cancelled) setError(`读取服务商失败：${errorMessage(reason)}`)
-    })
     return () => { cancelled = true }
   }, [kind])
 
@@ -272,7 +343,9 @@ function CadreCreateForm({
         return
       }
       let warning: string | undefined
-      if (kind === 'worker' && providerId !== '' && modelId !== '') {
+      // Both roles may pick a model; an empty pick means "official default",
+      // which is why create still succeeds without binding anything.
+      if (providerId !== '' && modelId !== '') {
         const bind = bridge()?.bindSession
         if (bind !== undefined) {
           const bound = await bind({
@@ -284,7 +357,8 @@ function CadreCreateForm({
           if (bound?.ok === false) {
             // The Session and roster row exist; report the model step honestly
             // instead of claiming a complete create.
-            warning = `员工已创建，但模型未绑定（${bound.code ?? 'ERROR'} · ${bound.message ?? '未知错误'}）`
+            const roleLabel = kind === 'supervisor' ? '主管' : '员工'
+            warning = `${roleLabel}已创建，但模型未绑定（${bound.code ?? 'ERROR'} · ${bound.message ?? '未知错误'}）`
           }
         }
       }
@@ -322,10 +396,6 @@ function CadreCreateForm({
       setCreating(false)
     }
   }
-
-  const selectedProvider = providers.find(provider => provider.providerId === providerId)
-  const models = selectedProvider?.models ?? []
-  const efforts = selectedProvider?.models?.find(model => model.id === modelId)?.reasoning?.efforts ?? []
 
   const projectName = request.projectLabel ?? request.workspaceId ?? '未选择项目部'
   return (
@@ -377,6 +447,23 @@ function CadreCreateForm({
                 本项目部已有主管（{supervisor.displayName ?? supervisor.sessionId}），请先让其离职。
               </p>
             )}
+            <div className={css.divider} />
+            <ProviderModelPicker
+              providers={providers}
+              providerId={providerId}
+              modelId={modelId}
+              effortId={effortId}
+              onProvider={(nextProviderId, defaultModel) => {
+                setProviderId(nextProviderId)
+                setModelId(defaultModel)
+                setEffortId('')
+              }}
+              onModel={(nextModelId) => { setModelId(nextModelId); setEffortId('') }}
+              onEffort={setEffortId}
+            />
+            <span className={css.hint}>
+              不选则用官方默认模型；选了会写入主管会话模型选择。
+            </span>
             {error !== null && <p role="alert" className={css.error}>{error}</p>}
           </div>
         )
@@ -455,52 +542,19 @@ function CadreCreateForm({
             />
 
             <div className={css.divider} />
-            <span className={css.sectionTitle}>服务商与模型（可选）</span>
-            {providers.length === 0
-              ? <span className={css.hint}>未配置服务商，将使用官方默认模型。</span>
-              : (
-                <div className={css.grid} role="radiogroup" aria-label="服务商">
-                  {providers.map(provider => (
-                    <Button
-                      key={provider.providerId}
-                      variant={providerId === provider.providerId ? 'primary' : 'outline'}
-                      onClick={() => {
-                        setProviderId(provider.providerId)
-                        setModelId(provider.defaultModel)
-                        setEffortId('')
-                      }}
-                    >
-                      {provider.name}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            {models.length > 0 && (
-              <div className={css.grid} role="radiogroup" aria-label="模型">
-                {models.map(model => (
-                  <Button
-                    key={model.id}
-                    variant={modelId === model.id ? 'primary' : 'outline'}
-                    onClick={() => { setModelId(model.id); setEffortId('') }}
-                  >
-                    {model.id}
-                  </Button>
-                ))}
-              </div>
-            )}
-            {efforts.length > 0 && (
-              <div className={css.grid} role="radiogroup" aria-label="思考强度">
-                {efforts.map(effort => (
-                  <Button
-                    key={effort.id}
-                    variant={effortId === effort.id ? 'primary' : 'outline'}
-                    onClick={() => { setEffortId(effort.id) }}
-                  >
-                    {effort.name ?? effort.id}
-                  </Button>
-                ))}
-              </div>
-            )}
+            <ProviderModelPicker
+              providers={providers}
+              providerId={providerId}
+              modelId={modelId}
+              effortId={effortId}
+              onProvider={(nextProviderId, defaultModel) => {
+                setProviderId(nextProviderId)
+                setModelId(defaultModel)
+                setEffortId('')
+              }}
+              onModel={(nextModelId) => { setModelId(nextModelId); setEffortId('') }}
+              onEffort={setEffortId}
+            />
             <span className={css.hint}>
               权限默认完全权限。思考强度按官方模型目录选择，未选则用模型默认；写入官方会话模型选择。
             </span>
