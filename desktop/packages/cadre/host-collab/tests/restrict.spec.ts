@@ -10,7 +10,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { applyToolRestriction, type AgentToolsLike } from '../src/index.ts'
+import { applyToolRestriction, SUPERVISOR_TOOL_DENY, WORKER_TOOL_DENY, type AgentToolsLike } from '../src/index.ts'
 
 interface RestrictCall {
   readonly deny?: readonly string[]
@@ -166,6 +166,45 @@ async function runTool(real: RealRegistry, name: string): Promise<string> {
   const first = result.content[0]
   return first?.type === 'text' ? first.text : JSON.stringify(result.content)
 }
+
+describe('role masks against the real ToolRegistry', () => {
+  const tools = [
+    'ask_user_question', 'resolve_employee_question', 'dispatch_task', 'list_employees', 'transition_task',
+    'report_task', 'bash', 'pwsh', 'write', 'edit', 'str_replace_editor',
+  ]
+
+  it('worker keeps the question tool and loses dispatch/transition/list_employees', async () => {
+    const real = await mountRealRegistry(tools)
+    const outcome = applyToolRestriction(real.scope.ctx.tools, WORKER_TOOL_DENY)
+    expect(outcome.failClosed).toBe(false)
+    const visible = real.ctx.tools.schemas(real.key).map(tool => tool.name)
+    expect(visible).toContain('ask_user_question')
+    expect(visible).toContain('report_task')
+    expect(visible).not.toContain('dispatch_task')
+    expect(visible).not.toContain('list_employees')
+    expect(visible).not.toContain('transition_task')
+    outcome.lift()
+    expect(real.ctx.tools.schemas(real.key).map(tool => tool.name).sort()).toEqual([...tools].sort())
+    await real.ctx.fiber.dispose()
+  })
+
+  it('supervisor keeps question/decision tools and loses write/report_task', async () => {
+    const real = await mountRealRegistry(tools)
+    const outcome = applyToolRestriction(real.scope.ctx.tools, SUPERVISOR_TOOL_DENY)
+    expect(outcome.failClosed).toBe(false)
+    const visible = real.ctx.tools.schemas(real.key).map(tool => tool.name)
+    expect(visible).toContain('ask_user_question')
+    expect(visible).toContain('resolve_employee_question')
+    expect(visible).not.toContain('write')
+    expect(visible).not.toContain('report_task')
+    expect(visible).not.toContain('bash')
+    expect(visible).not.toContain('pwsh')
+    expect(visible).not.toContain('edit')
+    expect(visible).not.toContain('str_replace_editor')
+    outcome.lift()
+    await real.ctx.fiber.dispose()
+  })
+})
 
 describe('allow: [] against the real ToolRegistry', () => {
   it('masks every global tool, blocks execution, and lifts back', async () => {

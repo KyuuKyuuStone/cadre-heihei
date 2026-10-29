@@ -246,6 +246,12 @@ export const name = 'cadre-collab'
 /** Host services the tools use. */
 export const inject = ['tools', 'sessionController']
 
+/** Tools hidden from an employee Session. `ask_user_question` must stay visible (DF-011 routing). */
+export const WORKER_TOOL_DENY = ['dispatch_task', 'list_employees', 'transition_task'] as const
+
+/** Tools hidden from a supervisor Session. Question/decision tools stay visible (DF-011). */
+export const SUPERVISOR_TOOL_DENY = ['report_task', 'bash', 'pwsh', 'write', 'edit', 'str_replace_editor'] as const
+
 /** Deployment-varying question routing limits. */
 export interface Config {
   /** Milliseconds before a pending employee question is escalated (default 30 min). */
@@ -1773,9 +1779,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     if (previous?.role !== role) {
       previous?.lift()
       try {
-        const desired = role === 'worker'
-          ? ['dispatch_task', 'list_employees', 'transition_task', 'ask_user_question']
-          : ['report_task', 'bash', 'pwsh', 'write', 'edit', 'str_replace_editor', 'ask_user_question', 'resolve_employee_question']
+        const desired = role === 'worker' ? WORKER_TOOL_DENY : SUPERVISOR_TOOL_DENY
         const outcome = applyToolRestriction(agent.ctx.tools, desired)
         restricted.set(agent.id, { role, lift: outcome.lift })
         appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
