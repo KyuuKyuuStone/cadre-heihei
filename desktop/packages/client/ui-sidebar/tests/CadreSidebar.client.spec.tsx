@@ -8,7 +8,19 @@ import {
   type CadreRosterState,
 } from '../src/client/CadreSidebar.tsx'
 import { CadreCreateDialog } from '../src/client/CadreCreateDialog.tsx'
+import type { CadreStallState } from '../src/client/cadre-stall.ts'
+import { zh, type SidebarKey } from '../src/client/locales.ts'
 import type { CadreProjectState } from '../src/client/contract/slots.ts'
+
+const EMPTY_STALL: CadreStallState = { byProject: new Map(), bySession: new Map() }
+const emptyStallHook = ((selector: (value: CadreStallState) => unknown) => selector(EMPTY_STALL)) as never
+const t = ((key: SidebarKey, params?: Record<string, unknown>) => {
+  let text: string = zh[key]
+  for (const [name, value] of Object.entries(params ?? {})) {
+    text = text.split(`{${name}}`).join(String(value))
+  }
+  return text
+}) as never
 
 afterEach(cleanup)
 
@@ -224,6 +236,8 @@ describe('session identity', () => {
       useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
         selector({ byId: {} })) as never,
       useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+      useStall: emptyStallHook,
+      t,
     })} />)
     expect(screen.getByText('历史归属')).toBeTruthy()
     expect(screen.queryByText('普通会话')).toBeNull()
@@ -237,6 +251,8 @@ describe('session identity', () => {
       useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
         selector({ byId: {} })) as never,
       useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+      useStall: emptyStallHook,
+      t,
     })} />)
     expect(screen.getByText('普通会话')).toBeTruthy()
     expect(screen.queryByText('历史归属')).toBeNull()
@@ -250,9 +266,36 @@ describe('session identity', () => {
       useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
         selector({ byId: {} })) as never,
       useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+      useStall: emptyStallHook,
+      t,
     })} />)
     expect(screen.getByText('空闲')).toBeTruthy()
     expect(screen.queryByText('前端')).toBeNull()
+  })
+
+  it('appends the host stall state and last activity without changing the base status', () => {
+    const state = roster({ sessionId: 's1', role: 'worker', description: '前端' })
+    const stall: CadreStallState = {
+      byProject: new Map(),
+      bySession: new Map([['s1', {
+        worstState: 'stalled',
+        stalledCount: 1,
+        possiblyStalledCount: 0,
+        lastActivityAt: Date.now() - 5 * 60_000,
+        episodeIds: ['task-1:episode'],
+      }]]),
+    }
+    const useStall = ((selector: (value: CadreStallState) => unknown) => selector(stall)) as never
+    render(<CadreSessionSubtitle {...({
+      sessionId: 's1',
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
+        selector({ byId: {} })) as never,
+      useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+      useStall,
+      t,
+    })} />)
+    expect(screen.getByText(/空闲 · 已停摆 · 5 分钟前/)).toBeTruthy()
   })
 
   it('shows a lost-roster warning instead of claiming an ordinary session', () => {
@@ -268,6 +311,8 @@ describe('session identity', () => {
       useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
         selector({ byId: {} })) as never,
       useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+      useStall: emptyStallHook,
+      t,
     })} />)
     expect(screen.getByText('团队数据丢失').getAttribute('title')).toContain('花名册为空')
     expect(screen.queryByText('普通会话')).toBeNull()

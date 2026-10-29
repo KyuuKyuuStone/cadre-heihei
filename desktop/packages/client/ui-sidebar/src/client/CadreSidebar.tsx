@@ -16,8 +16,9 @@ import {
   Modal,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { HostObservable, InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreProjectState } from './contract/slots.ts'
+import { type CadreStallState, stallStateText } from './cadre-stall.ts'
 import css from './CadreSidebar.module.css'
 
 /*
@@ -117,6 +118,7 @@ export interface CadreSessionSubtitleInjected {
     roster: HostObservable<CadreRosterState>
     sessions: HostObservable<CadreSessionsState>
     tasks: HostObservable<readonly CadreTaskFact[]>
+    stall: HostObservable<CadreStallState>
   }
 }
 
@@ -403,14 +405,15 @@ export function CadreSessionBadge({
  * ledger's tasks. Ordinary Sessions say so; archived members say nothing.
  */
 export function CadreSessionSubtitle({
-  sessionId, useRoster, useSessions, useTasks,
-}: CadreSessionRowOwner & InjectFace<CadreSessionSubtitleInjected>) {
+  sessionId, t, useRoster, useSessions, useTasks, useStall,
+}: CadreSessionRowOwner & InjectFace<CadreSessionSubtitleInjected> & PropsLocale<'sidebar'>) {
   const rosterStatus = useRoster(state => state.status)
   const members = useRoster(state => state.members)
   const notice = useRoster(state => state.notice)
   const running = useSessions(state => state.byId[sessionId]?.running === true)
   const tasks = useTasks(state => state)
   const member = memberOf(members, sessionId)
+  const stall = useStall(state => state.bySession.get(sessionId))
 
   if (member === undefined) {
     // A recreated ledger must not masquerade as an ordinary session: say the
@@ -446,10 +449,16 @@ export function CadreSessionSubtitle({
       : owned.length > 0
         ? `空闲 · 待处理 ${String(owned.length)}`
         : '空闲'
+  const stallText = stall === undefined ? '' : ` · ${stallStateText(stall.worstState, stall.lastActivityAt, t)}`
+  const dotClass = stall?.worstState === 'stalled'
+    ? css.statusDotStalled
+    : stall?.worstState === 'possibly_stalled'
+      ? css.statusDotMaybeStalled
+      : running ? css.statusDotRunning : css.statusDotIdle
   return (
     <span className={css.sessionSubtitle}>
-      <span className={running ? css.statusDotRunning : css.statusDotIdle} aria-hidden="true" />
-      <span className={css.subtitleText}>{activity}</span>
+      <span className={dotClass} aria-hidden="true" />
+      <span className={css.subtitleText}>{activity}{stallText}</span>
     </span>
   )
 }

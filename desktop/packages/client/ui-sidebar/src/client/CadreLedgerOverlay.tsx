@@ -5,9 +5,10 @@
  * conversation so closing it returns to the same Session. Six columns plus a
  * per-row event timeline; no dispatch, transition, or message actions.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Input, Modal, Pill, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { HostObservable, InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { type CadreStallState, type CadreStallTaskView, stallStateText } from './cadre-stall.ts'
 import css from './CadreLedgerOverlay.module.css'
 
 
@@ -20,8 +21,12 @@ export interface CadreLedgerRequest {
 }
 
 export interface CadreLedgerInjected {
-  hooks: { request: HostObservable<CadreLedgerRequest | null> }
+  hooks: {
+    request: HostObservable<CadreLedgerRequest | null>
+    stall: HostObservable<CadreStallState>
+  }
   closeLedger: () => void
+  retryStall: () => void
 }
 
 interface LedgerReport {
@@ -177,18 +182,40 @@ function matches(row: LedgerRow, query: string): boolean {
  * The overlay body; separate from the host so every request remounts fresh
  * state (search, filter, expansion) without a reset effect.
  */
-export function CadreLedgerOverlay({ useRequest, closeLedger }: PropsRuntime<'shell.overlay'> & InjectFace<CadreLedgerInjected>) {
+export function CadreLedgerOverlay({
+  useRequest, useStall, closeLedger, retryStall, t,
+}: PropsRuntime<'shell.overlay'> & InjectFace<CadreLedgerInjected> & PropsLocale<'sidebar'>) {
   const request = useRequest(value => value)
   if (request === null) return null
-  return <LedgerBody key={`${request.projectId}:${String(request.token)}`} request={request} closeLedger={closeLedger} />
+  return (
+    <LedgerBody
+      key={`${request.projectId}:${String(request.token)}`}
+      request={request}
+      closeLedger={closeLedger}
+      useStall={useStall}
+      retryStall={retryStall}
+      t={t}
+    />
+  )
 }
 
-function LedgerBody({ request, closeLedger }: { readonly request: CadreLedgerRequest; readonly closeLedger: () => void }) {
+function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
+  readonly request: CadreLedgerRequest
+  readonly closeLedger: () => void
+  readonly useStall: InjectFace<CadreLedgerInjected>['useStall']
+  readonly retryStall: () => void
+  readonly t: PropsLocale<'sidebar'>['t']
+}) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const now = useLedgerNow()
+  const stallProject = useStall(state => state.byProject.get(request.projectId))
+  const stallTasks = useMemo(
+    () => new Map<string, CadreStallTaskView>((stallProject?.tasks ?? []).map(task => [task.taskId, task])),
+    [stallProject],
+  )
 
   const reload = useCallback(() => {
     setLoad({ kind: 'loading' })
@@ -249,6 +276,18 @@ function LedgerBody({ request, closeLedger }: { readonly request: CadreLedgerReq
         <Button variant="outline" size="sm" onClick={reload}>刷新</Button>
       </div>
 
+      {stallProject?.status === 'error' && (
+        <div className={css.stallError} role="alert">
+          <span>{t('stall.card.viewError', {
+            message: stallProject.error ?? t('stall.readFailed'),
+          })}</span>
+          <Button variant="outline" size="sm" onClick={retryStall}>{t('stall.retry')}</Button>
+        </div>
+      )}
+      {stallProject?.stale === true && (
+        <p className={css.hint} role="status">{t('stall.card.ledgerStale')}</p>
+      )}
+
       <div className={css.filters} role="radiogroup" aria-label="台账筛选">
         {FILTERS.map(item => (
           <Button
@@ -288,6 +327,17 @@ function LedgerBody({ request, closeLedger }: { readonly request: CadreLedgerReq
           {visible.map(row => {
             const open = expanded === row.taskId
             const overdue = isCadreTaskOverdue(row.dueAt, now)
+            const stallTask = stallTasks.get(row.taskId)
+            const stallText = stallTask !== undefined
+              ? stallStateText(stallTask.stallState, stallTask.lastActivityAt, t)
+              : stallProject?.status === 'ready' ? t('stall.activityUnknown') : null
+            const stallClass = stallTask?.stallState === 'stalled'
+              ? css.stallStalled
+              : stallTask?.stallState === 'possibly_stalled'
+                ? css.stallPossiblyStalled
+                : stallTask?.stallState === 'recovered'
+                  ? css.stallRecovered
+                  : css.stallNormal
             return (
               <div key={row.taskId} className={css.rowGroup} role="rowgroup">
                 <button
@@ -295,12 +345,14 @@ function LedgerBody({ request, closeLedger }: { readonly request: CadreLedgerReq
                   role="row"
                   className={overdue ? `${css.row} ${css.overdueRow}` : css.row}
                   data-overdue={overdue ? 'true' : undefined}
+                  data-stall-state={stallTask?.stallState}
                   aria-expanded={open}
                   onClick={() => { setExpanded(open ? null : row.taskId) }}
                 >
                   <span role="cell" className={css.taskCell}>
                     <span className={css.taskTitle}>{row.title}</span>
                     <span className={css.taskMeta}>派发 {timeText(row.updatedAt)} · {row.taskId}</span>
+                    {stallText !== null && <span className={`${css.taskStall} ${stallClass}`}>{stallText}</span>}
                   </span>
                   <span role="cell">{row.assigneeName ?? row.assigneeSessionId}（{positionText(row)}）</span>
                   <span role="cell"><Pill>{STATUS_LABELS[row.status] ?? row.status}</Pill></span>

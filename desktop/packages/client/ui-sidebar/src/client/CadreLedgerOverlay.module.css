@@ -115,6 +115,39 @@
   font-size: 10px;
 }
 
+.taskStall {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stallNormal {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.stallPossiblyStalled {
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.stallStalled {
+  color: var(--dsw-alias-state-warn-label);
+  font-weight: 600;
+}
+
+.stallRecovered {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.stallError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+}
+
 .chevron {
   color: var(--dsw-alias-label-tertiary);
   text-align: right;

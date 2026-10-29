@@ -21,6 +21,7 @@ import { CADRE_SKIN_TOKENS, CADRE_THEME_ENABLED, CADRE_THEME_SOURCE } from './ca
 import { CadreBrandMark, CadreBrandName, CadreHeroBrandMark } from './CadreBrand.tsx'
 import { CadreCreateDialog, type CadreCreateInjected, type CadreCreateRequest } from './CadreCreateDialog.tsx'
 import { CadreLedgerOverlay, type CadreLedgerInjected, type CadreLedgerRequest } from './CadreLedgerOverlay.tsx'
+import { CadreStallCard, type CadreStallCardInjected } from './CadreStallCard.tsx'
 import {
   CadreEditMemberMenuItem, CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
@@ -30,6 +31,11 @@ import {
   type CadreRetireTaskDisposition, type CadreRosterBadgeInjected, type CadreRosterMember, type CadreRosterState,
   type CadreSessionSubtitleInjected, type CadreSessionsState, type CadreTaskFact,
 } from './CadreSidebar.tsx'
+import {
+  CADRE_STALL_DEFAULTS, actCadreStall, fetchCadreStallView, summarizeStalls,
+  type CadreStallAction, type CadreStallActionBase, type CadreStallActionResult,
+  type CadreStallProjectState, type CadreStallState, type CadreStallSummary,
+} from './cadre-stall.ts'
 import type { CadreSessionRankService } from './cadre-session-rank.ts'
 import { HeaderLeadingControls } from './HeaderLeadingControls.tsx'
 import { SidebarRoot } from './SidebarRoot.tsx'
@@ -258,6 +264,75 @@ export function apply(ctx: ClientContext): void {
   const projectOfSession = (sessionId: string): string | undefined =>
     projectItems().find(item => item.sessionIds.some(id => String(id) === sessionId))?.workspaceId
 
+  // The snapshot route authorizes one active supervisor Session per project;
+  // the roster read below supplies that Session id without a second identity.
+  let supervisorByProject = new Map<string, string>()
+  const stall = createSnapshotStore<CadreStallState>({ byProject: new Map(), bySession: new Map() })
+  const emptyStallProject = (
+    status: CadreStallProjectState['status'],
+    error: string | null = null,
+  ): CadreStallProjectState => ({
+    status,
+    tasks: [],
+    thresholds: CADRE_STALL_DEFAULTS,
+    stale: false,
+    error,
+  })
+
+  /**
+   * Refresh the host-governance view per Workspace. A project without an
+   * active supervisor has no readable snapshot and therefore no stall UI.
+   */
+  const refreshStalls = (): void => {
+    const projects = projectItems().map(item => item.workspaceId)
+    if (projects.length === 0) {
+      stall.set({ byProject: new Map(), bySession: new Map() })
+      return
+    }
+    const previous = stall.getSnapshot()
+    const pending = new Map<string, CadreStallProjectState>(projects.map(projectId => [
+      projectId,
+      previous.byProject.get(projectId) ?? emptyStallProject('unavailable'),
+    ]))
+    stall.set({ byProject: pending, bySession: previous.bySession })
+    const reads = projects.map((projectId) => {
+      const actorSessionId = supervisorByProject.get(projectId)
+      return actorSessionId === undefined
+        ? Promise.resolve({ projectId, response: undefined })
+        : fetchCadreStallView({ projectId, actorSessionId }).then(response => ({ projectId, response }))
+    })
+    void Promise.allSettled(reads).then((results) => {
+      const byProject = new Map<string, CadreStallProjectState>()
+      const bySession = new Map<string, CadreStallSummary>()
+      for (const [index, result] of results.entries()) {
+        const projectId = projects[index]
+        if (projectId === undefined) continue
+        if (result.status === 'rejected') {
+          byProject.set(projectId, emptyStallProject('error', reasonOf(result.reason)))
+          continue
+        }
+        if (result.value.response === undefined) {
+          byProject.set(projectId, emptyStallProject('unavailable'))
+          continue
+        }
+        const response = result.value.response
+        const thresholds = { ...CADRE_STALL_DEFAULTS, ...(response.thresholds ?? {}) }
+        const tasks = response.tasks ?? []
+        byProject.set(projectId, {
+          status: 'ready',
+          tasks,
+          thresholds,
+          stale: response.stale === true || tasks.some(task => task.stale),
+          error: null,
+        })
+        for (const [sessionId, summary] of summarizeStalls(tasks)) {
+          bySession.set(sessionId, summary)
+        }
+      }
+      stall.set({ byProject, bySession })
+    })
+  }
+
   /**
    * The project the shell's New Session menu acts on. It mirrors the official
    * `startSession()` fallback: the Workspace of the most recently updated
@@ -296,6 +371,7 @@ export function apply(ctx: ClientContext): void {
     const read = target?.listRoster
     const channelError = '花名册通道未接入：window.cadre.listRoster 未注册'
     if (read === undefined) {
+      supervisorByProject = new Map()
       const failedProjects = new Map<string, CadreProjectRosterState>(
         projects.map(projectId => [projectId, { status: 'error', memberCount: 0, error: channelError }]),
       )
@@ -306,12 +382,15 @@ export function apply(ctx: ClientContext): void {
         notice: roster.getSnapshot().notice ?? null,
         projects: failedProjects,
       })
+      refreshStalls()
       return
     }
     if (projects.length === 0) {
+      supervisorByProject = new Map()
       roster.set({ status: 'ready', members: [], error: null, notice: null, projects: new Map() })
       projectState.set({ supervisors: new Set(), defaultProjectId: null })
       sessionRank.set(new Map())
+      refreshStalls()
       return
     }
     const readProject = (projectId: string): Promise<{
@@ -325,6 +404,8 @@ export function apply(ctx: ClientContext): void {
     }))
     void Promise.allSettled(projects.map(readProject)).then((results) => {
       const previousSupervisors = projectState.getSnapshot().supervisors
+      const previousSupervisorByProject = supervisorByProject
+      const nextSupervisorByProject = new Map<string, string>()
       const members: CadreRosterMember[] = []
       const supervisors = new Set<string>()
       const failedProjects = new Set<string>()
@@ -364,9 +445,15 @@ export function apply(ctx: ClientContext): void {
           })
           if (row.role === 'supervisor' && row.state !== 'departed') {
             supervisors.add(projectId)
+            nextSupervisorByProject.set(projectId, row.sessionId)
           }
         }
       }
+      for (const projectId of failedProjects) {
+        const previous = previousSupervisorByProject.get(projectId)
+        if (previous !== undefined) nextSupervisorByProject.set(projectId, previous)
+      }
+      supervisorByProject = nextSupervisorByProject
       if (succeeded === 0) {
         roster.set({
           status: 'error',
@@ -375,6 +462,7 @@ export function apply(ctx: ClientContext): void {
           notice: roster.getSnapshot().notice ?? null,
           projects: projectStates,
         })
+        refreshStalls()
         return
       }
       // A failed read must not silently re-enable "supervisor" for a project
@@ -387,6 +475,7 @@ export function apply(ctx: ClientContext): void {
         .map(member => member.sessionId)
       sessionRank.set(new Map(supervisorIds.map(id => [id, 0])))
       projectState.set({ supervisors, defaultProjectId: resolveDefaultProject() })
+      refreshStalls()
       roster.set({
         status: 'ready',
         members,
@@ -398,6 +487,7 @@ export function apply(ctx: ClientContext): void {
   }
   refreshRoster()
   refreshTasks()
+  refreshStalls()
 
   // A new/removed Workspace changes the roster's unit; a newer Session may
   // change which project the shell's menu targets. Task facts follow Session
@@ -409,7 +499,7 @@ export function apply(ctx: ClientContext): void {
       if (taskTimer !== undefined) clearTimeout(taskTimer)
       taskTimer = setTimeout(() => { taskTimer = undefined; refreshTasks() }, 800)
     }
-    const disposeWorkspaces = ctx.workspaces.list.subscribe(() => { refreshRoster(); refreshTasks() })
+    const disposeWorkspaces = ctx.workspaces.list.subscribe(() => { refreshRoster(); refreshTasks(); refreshStalls() })
     const disposeSessions = ctx.sessions.list.subscribe(() => { syncDefaultProject(); scheduleTasks() })
     return () => {
       disposeWorkspaces()
@@ -417,6 +507,14 @@ export function apply(ctx: ClientContext): void {
       if (taskTimer !== undefined) clearTimeout(taskTimer)
     }
   }, 'ui-sidebar: cadre project context')
+
+  // Poll the host-governance view. The host owns threshold/state transitions;
+  // this timer only refreshes the view and never advances a level locally.
+  ctx.effect(() => {
+    if (typeof window === 'undefined') return () => {}
+    const timer = window.setInterval(refreshStalls, CADRE_STALL_DEFAULTS.scanIntervalMs)
+    return () => { window.clearInterval(timer) }
+  }, 'ui-sidebar: stall view poll')
 
   // Create/ledger requests are frame-wide overlays: both are opened from the
   // sidebar and never replace the conversation underneath.
@@ -524,15 +622,53 @@ export function apply(ctx: ClientContext): void {
   })
 
   const ledgerInjected = (): CadreLedgerInjected => ({
-    hooks: { request: ledgerRequest },
+    hooks: { request: ledgerRequest, stall },
     closeLedger: () => { ledgerRequest.set(null) },
+    retryStall: refreshStalls,
   })
 
   const sessionsSource = ctx.sessions.list as unknown as HostObservable<CadreSessionsState>
   const rosterBadgeInjected = (): CadreRosterBadgeInjected => ({ hooks: { roster, sessions: sessionsSource } })
   const subtitleInjected = (): CadreSessionSubtitleInjected => ({
-    hooks: { roster, sessions: sessionsSource, tasks },
+    hooks: { roster, sessions: sessionsSource, tasks, stall },
   })
+
+  const runStallAction = async (
+    action: CadreStallAction,
+    projectId: string,
+    sessionId: string,
+    input: CadreStallActionBase,
+  ): Promise<CadreStallActionResult> => {
+    const result = await actCadreStall({
+      action,
+      projectId,
+      actorSessionId: sessionId,
+      ...input,
+    })
+    refreshStalls()
+    return result
+  }
+
+  const stallCardInjected = (sessionId: string): CadreStallCardInjected => {
+    const projectId = projectOfSession(sessionId)
+    return {
+      hooks: { stall, roster },
+      ...(projectId === undefined ? {} : { projectId }),
+      nudge: async input => projectId === undefined
+        ? { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
+        : runStallAction('nudge', projectId, sessionId, input),
+      reassign: async input => projectId === undefined
+        ? { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
+        : runStallAction('reassign', projectId, sessionId, input),
+      cancel: async input => projectId === undefined
+        ? { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
+        : runStallAction('cancel', projectId, sessionId, input),
+      escalate: async input => projectId === undefined
+        ? { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
+        : runStallAction('escalate', projectId, sessionId, input),
+      refresh: refreshStalls,
+    }
+  }
 
   const projectActionsInjected = (): CadreProjectActionsInjected => ({
     hooks: { projectState, roster },
@@ -708,8 +844,19 @@ export function apply(ctx: ClientContext): void {
     name: 'sidebar.session.row.subtitle',
     id: 'cadre-session-subtitle',
     order: 100,
+    locale: NS,
     inject: subtitleInjected,
   } as never, CadreSessionSubtitle as never))
+
+  // Supervisor-only stall cards sit above the composer through the official
+  // input dock; the component itself checks the active Session's roster role.
+  ctx.slots.inject('conversation.input.dock' as never, () => ctx.slots.register({
+    name: 'conversation.input.dock',
+    id: 'cadre-stall-card',
+    order: 20,
+    locale: NS,
+    inject: (sessionId: string) => stallCardInjected(sessionId),
+  } as never, CadreStallCard as never))
 
   // Non-blocking GitHub release notice in the sidebar foot. The desktop bridge
   // owns the network and the preference; this component only renders.

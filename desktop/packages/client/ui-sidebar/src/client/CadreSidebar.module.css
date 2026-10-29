@@ -123,7 +123,9 @@
 }
 
 .statusDotRunning,
-.statusDotIdle {
+.statusDotIdle,
+.statusDotStalled,
+.statusDotMaybeStalled {
   flex: none;
   width: 6px;
   height: 6px;
@@ -136,6 +138,15 @@
 
 .statusDotIdle {
   background: var(--dsw-alias-label-tertiary);
+}
+
+.statusDotStalled {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.statusDotMaybeStalled {
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  background: transparent;
 }
 
 /* Retire menu + dialog */
