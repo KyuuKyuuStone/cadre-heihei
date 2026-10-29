@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.0（员工请示路由与停摆治理）
+
+- **员工会请示了**（DF-011）：员工遇到拿不准的事向主管提问，问题先经 host-collab 路由（每员工待答上限、30 分钟无答复自动升级，均可配置），主管答复后原路回流员工会话；不再靠员工自己抄送
+- **任务停摆治理**（DF-014）：host-governance 停摆检测按最后活动判 normal/possibly_stalled/stalled/waiting_question，goal 自动续跑；主管侧可催办、重派（reassign：open 任务原状态改派在册员工，逐事件留幂等键）、取消、升级——前端停摆卡按 episodeId 原位更新，stale 时禁用动作
+- **汇报幂等键修复**：rework 后再次汇报不再重放上一轮 delivered 的幂等键（键按起始状态收窄），二次汇报不再被静默吞掉
+- **会话压缩不再滚雪球**：compaction 新增绝对阈值 `thresholdTokens`（Cadre 默认 150k），有效阈值取窗口比例/预留/绝对值的最小值；摘要强制输出 Status、Commands and Exit Codes、Failing Tests、Contract Decisions、Unverified、Evidence 并保留 file:line/exit code/失败用例/spill 引用——压缩后证据仍可寻址
+- **打包缺件门禁**：打包链强制重建两个 cadre CJS 并在 asar 组装后校验在档，干净检出不再可能打出台账不可用的包（0.9.3 P0 的流程性根治）
+
+### 已知限制
+
+- **无 pixel 级 Electron 验收**：停摆 UI 的实机截图验收未做（打包内建 smoke 已过，视觉对照留待装机验收）
+- **前端决策卡未接**：升级（escalate）动作仅路由上报，前端决策卡未实现
+- **compaction 摘要未经真实 LLM 审计**：结构化摘要字段以确定性模板产出，尚未用真实模型会话审计其质量
+
 ## 0.9.3（员工管理闭环：职责可见、返工通知、离职处置）
 
 - **主管能看到员工的职责与模型**（DF-002）：`list_employees` 返回角色明细（sessionId、姓名、状态、职责描述、模板、偏好模型），派活前先看清谁在做什么、用什么模型

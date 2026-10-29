@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh",
   "description": "dsh CLI: profile launch, plugin management, and configuration inspection",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "publishConfig": {
     "access": "public"
   },
