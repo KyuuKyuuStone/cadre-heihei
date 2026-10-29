@@ -696,6 +696,18 @@ class Ledger {
         idempotencyBase: `report:${input.taskId}`,
       })
       if (!advanced.ok) throw new Error(`汇报状态迁移被拒（${advanced.code}）：${advanced.message}`)
+      const actual = (() => {
+        const reader = new DatabaseSync(this.path, { readOnly: true })
+        try {
+          return reader.prepare('SELECT status FROM tasks WHERE project_id = ? AND task_id = ?')
+            .get(projectId, input.taskId) as { status?: unknown } | undefined
+        } finally {
+          reader.close()
+        }
+      })()
+      if (String(actual?.status) !== 'delivered') {
+        throw new Error(`汇报未完成：任务状态仍为 ${String(actual?.status ?? 'unknown')}，未到 delivered`)
+      }
       // Metadata only: the status and timestamps belong to the state machine.
       this.db.prepare(`UPDATE tasks SET latest_report_message_id = ?, updated_at = ? WHERE task_id = ?`)
         .run(messageId, now, input.taskId)
@@ -1477,13 +1489,14 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       if (task.assignee !== reporter) throw new Error(`只能回报派给自己的任务（该任务属于 ${task.assignee}）`)
       const deliverables = args.deliverables ?? []
       const messageId = ledger.report(projectId, { taskId: task.taskId, summary: args.summary, deliverables, reporter })
+      const finalStatus = ledger.task(projectId, task.taskId)?.status ?? 'unknown'
       const supervisor = ledger.supervisor(projectId)
       if (supervisor === undefined || supervisor === reporter) {
         appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
           `report supervisor=absent project=${projectId} task=${task.taskId} reporter=${reporter}
 `)
         console.log(`cadre-collab: report ok task=${task.taskId} reporter=${reporter} supervisor=absent (no active supervisor session)`)
-        return { taskId: task.taskId, status: 'delivered', supervisorNotified: false }
+        return { taskId: task.taskId, status: finalStatus, supervisorNotified: false }
       }
       try {
         await controller.prompt({
@@ -1498,11 +1511,11 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         }, run.signal)
         ledger.confirmReport(messageId)
         console.log(`cadre-collab: report ok task=${task.taskId} reporter=${reporter} supervisor=${supervisor}`)
-        return { taskId: task.taskId, status: 'delivered', supervisorNotified: true }
+        return { taskId: task.taskId, status: finalStatus, supervisorNotified: true }
       } catch (error) {
         ledger.failReport(messageId, error instanceof Error ? error.message : String(error))
         console.log(`cadre-collab: report delivery failed task=${task.taskId} reason=${error instanceof Error ? error.message : String(error)}`)
-        return { taskId: task.taskId, status: 'delivered', supervisorNotified: false }
+        return { taskId: task.taskId, status: finalStatus, supervisorNotified: false }
       }
     },
   })

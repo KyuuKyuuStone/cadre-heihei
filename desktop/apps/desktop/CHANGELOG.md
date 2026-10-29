@@ -4,7 +4,7 @@
 
 - **员工会请示了**（DF-011）：员工遇到拿不准的事向主管提问，问题先经 host-collab 路由（每员工待答上限、30 分钟无答复自动升级，均可配置），主管答复后原路回流员工会话；不再靠员工自己抄送
 - **任务停摆治理**（DF-014）：host-governance 停摆检测按最后活动判 normal/possibly_stalled/stalled/waiting_question，goal 自动续跑；主管侧可催办、重派（reassign：open 任务原状态改派在册员工，逐事件留幂等键）、取消、升级——前端停摆卡按 episodeId 原位更新，stale 时禁用动作
-- **汇报幂等键修复**：rework 后再次汇报不再重放上一轮 delivered 的幂等键（键按起始状态收窄），二次汇报不再被静默吞掉
+- **汇报幂等键修复**：rework 后再次汇报不再重放上一轮 delivered 的幂等键（键按起始状态收窄），二次汇报不再被静默吞掉；rework 二次汇报按周期键落库，跨周期键不冲突
 - **会话压缩不再滚雪球**：compaction 新增绝对阈值 `thresholdTokens`（Cadre 默认 150k），有效阈值取窗口比例/预留/绝对值的最小值；摘要强制输出 Status、Commands and Exit Codes、Failing Tests、Contract Decisions、Unverified、Evidence 并保留 file:line/exit code/失败用例/spill 引用——压缩后证据仍可寻址
 - **打包缺件门禁**：打包链强制重建两个 cadre CJS 并在 asar 组装后校验在档，干净检出不再可能打出台账不可用的包（0.9.3 P0 的流程性根治）
 

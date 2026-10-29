@@ -185,6 +185,67 @@ test('rework 后再次汇报不复用上一轮幂等键', () => {
   }
 })
 
+test('rework 后二次汇报真的落库，不是 replay', () => {
+  const setup = fixture()
+  try {
+    insertTask(setup.db, { taskId: 'task-m1', status: 'in_progress', seq: 1 })
+    const base = 'report:task-m1'
+    const first = advanceReportToDelivered({
+      databasePath: setup.db, projectId: PROJECT, taskId: 'task-m1',
+      actorSessionId: WORKER, idempotencyBase: base,
+    })
+    assert.equal(first.ok, true)
+
+    const rework = (): void => {
+      const collab = openCadreCollab({ databasePath: setup.db, projectId: PROJECT, sessionId: SUPERVISOR })
+      try {
+        assert.equal((collab.transition({ taskId: 'task-m1', to: 'review' }) as { ok?: boolean }).ok, true)
+        assert.equal((collab.transition({ taskId: 'task-m1', to: 'rework', reason: '返修' }) as { ok?: boolean }).ok, true)
+      } finally {
+        collab.close()
+      }
+    }
+
+    rework()
+    const afterFirstRework = events(setup.db, 'task-m1').length
+    assert.equal(advanceReportToDelivered({
+      databasePath: setup.db, projectId: PROJECT, taskId: 'task-m1',
+      actorSessionId: WORKER, idempotencyBase: base,
+    }).ok, true)
+
+    // A second rework round must not collide with the first round's keys.
+    rework()
+    const beforeSecond = events(setup.db, 'task-m1').length
+    const second = advanceReportToDelivered({
+      databasePath: setup.db, projectId: PROJECT, taskId: 'task-m1',
+      actorSessionId: WORKER, idempotencyBase: base,
+    })
+    assert.equal(second.ok, true)
+    if (!second.ok) return
+    assert.equal(second.replayed, false)
+    assert.equal(events(setup.db, 'task-m1').length, beforeSecond + 2)
+    const reader = new DatabaseSync(setup.db, { readOnly: true })
+    try {
+      const status = reader.prepare('SELECT status FROM tasks WHERE task_id = ?').get('task-m1') as { status: string }
+      assert.equal(status.status, 'delivered')
+    } finally {
+      reader.close()
+    }
+    assert.ok(events(setup.db, 'task-m1').length > afterFirstRework)
+
+    // A real duplicate of the completed report still replays without new rows.
+    const retry = advanceReportToDelivered({
+      databasePath: setup.db, projectId: PROJECT, taskId: 'task-m1',
+      actorSessionId: WORKER, idempotencyBase: base,
+    })
+    assert.equal(retry.ok, true)
+    if (retry.ok) assert.equal(retry.replayed, true)
+    assert.equal(events(setup.db, 'task-m1').length, beforeSecond + 2)
+  } finally {
+    setup.close()
+  }
+})
+
 test('汇报人只能是自己：他人身份代替汇报被状态机拒绝', () => {
   const setup = fixture()
   try {

@@ -88,6 +88,17 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
         message: `任务当前状态为 ${startedFrom}，不能汇报为 delivered`,
       }
     }
+    // Each rework round is a new reporting cycle. The latest rework event is a
+    // stable cycle id: retries of the same round reuse it (replay), while a
+    // later rework records a new event and therefore new keys.
+    const cycleId = ((): string => {
+      if (startedFrom !== 'rework') return startedFrom
+      const row = store.ledger.core.db.prepare(`SELECT event_id FROM task_events
+        WHERE project_id = ? AND task_id = ? AND to_status = 'rework'
+        ORDER BY at DESC, rowid DESC LIMIT 1`).get(input.projectId, input.taskId) as
+        { event_id?: unknown } | undefined
+      return typeof row?.event_id === 'string' && row.event_id !== '' ? row.event_id : startedFrom
+    })()
     const eventIds: string[] = []
     let from: string = startedFrom
     for (const to of chain) {
@@ -97,9 +108,9 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
         from: from as never,
         to: to as never,
         actor: { kind: 'session', sessionId: input.actorSessionId as never, role },
-        // Scope keys to the starting status: reports after `rework` must not
+        // Scope keys to the reporting cycle: reports after `rework` must not
         // replay keys recorded by the earlier delivery cycle.
-        idempotencyKey: `${input.idempotencyBase}:${startedFrom}:${to}` as never,
+        idempotencyKey: `${input.idempotencyBase}:${cycleId}:${to}` as never,
       })
       if (!step.ok) {
         return { ok: false, code: step.error.code, message: `${from} → ${to}：${step.error.message}` }

@@ -201,4 +201,56 @@ describe('DF-011 real Cordis composition (worker ask -> supervisor -> resolve)',
       await ctx.fiber.dispose()
     }
   }, 15_000)
+
+  it('reports delivered through every rework round and returns the real status', async () => {
+    const mounted = await mount(30 * 60_000)
+    const { ctx } = mounted
+    try {
+      const worker = stubAgent(WORKER)
+      const supervisor = stubAgent(SUP)
+      ctx.agents.enter(worker, undefined)
+      ctx.agents.enter(supervisor, undefined)
+      const report = async (): Promise<{ status: string }> => {
+        const result = await ctx.tools.execute({
+          signal: new AbortController().signal,
+          callId: ToolCallId(`report-${String(Date.now())}-${String(Math.random())}`),
+          name: 'report_task',
+          arguments: { taskId: 't1', summary: '完成', deliverables: ['C:/tmp/out.md'] },
+          agent: worker,
+        })
+        const text = result.content[0]
+        if (text?.type !== 'text') throw new Error('report result is not text')
+        const status = /任务状态\s+([a-z_]+)/u.exec(text.text)?.[1]
+        if (status === undefined) throw new Error(`report result lacks status: ${text.text}`)
+        return { status }
+      }
+      const rework = async (): Promise<void> => {
+        await ctx.tools.execute({
+          signal: new AbortController().signal,
+          callId: ToolCallId(`rework-${String(Date.now())}-${String(Math.random())}`),
+          name: 'transition_task',
+          arguments: { taskId: 't1', to: 'rework', reason: '返修' },
+          agent: supervisor,
+        })
+      }
+
+      const first = await report()
+      expect(first.status).toBe('delivered')
+      await rework()
+      const second = await report()
+      expect(second.status).toBe('delivered')
+      await rework()
+      const third = await report()
+      expect(third.status).toBe('delivered')
+
+      const reader = new DatabaseSync(process.env.CADRE_LEDGER_PATH ?? '', { readOnly: true })
+      try {
+        expect(reader.prepare('SELECT status FROM tasks WHERE task_id = ?').get('t1')).toEqual({ status: 'delivered' })
+      } finally {
+        reader.close()
+      }
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  }, 15_000)
 })
