@@ -25,6 +25,7 @@ const DEFAULT_RETAIN_RATIO = 0.16
 /** Fields shared by top-level defaults and exact-target overrides. */
 const POLICY_CONFIG_KEYS = [
   'thresholdRatio',
+  'thresholdTokens',
   'headroomTokens',
   'retainRatio',
   'retainTokens',
@@ -76,6 +77,8 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
   const maxTokens = config.maxTokens ?? headroomTokens
   assertPositiveInteger('BasicCompactionConfig.maxTokens (explicit or from headroomTokens)', maxTokens)
   const thresholdRatio = config.thresholdRatio ?? DEFAULT_THRESHOLD_RATIO
+  const thresholdTokensCap = config.thresholdTokens
+  if (thresholdTokensCap !== undefined) assertPositiveInteger('BasicCompactionConfig.thresholdTokens', thresholdTokensCap)
   const retention = resolveRetention(config, { retainRatio: DEFAULT_RETAIN_RATIO })
   validateRatioRetention(thresholdRatio, retention, 'BasicCompactionConfig')
   const modelPolicies = resolveModelPolicies(config.modelPolicies)
@@ -97,6 +100,7 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
 
   return deepFreeze({
     thresholdRatio,
+    ...(thresholdTokensCap === undefined ? {} : { thresholdTokensCap }),
     headroomTokens,
     ...retention,
     summarizationProvider: config.summarizationProvider ?? '',
@@ -128,6 +132,9 @@ export function resolveTargetPolicy(
   return deepFreeze({
     target: { provider: target.provider, model: target.model },
     thresholdRatio: override?.thresholdRatio ?? config.thresholdRatio,
+    ...((override?.thresholdTokens ?? config.thresholdTokensCap) === undefined
+      ? {}
+      : { thresholdTokensCap: override?.thresholdTokens ?? config.thresholdTokensCap }),
     headroomTokens: override?.headroomTokens ?? config.headroomTokens,
     ...resolveRetention(override ?? {}, inheritedRetention),
     summarizationProvider: override?.summarizationProvider ?? config.summarizationProvider,
@@ -191,9 +198,15 @@ export function resolveCompactSpec(
   const thresholdTokens = Math.floor(Math.min(
     contextWindow * policy.thresholdRatio,
     pressureBudgetTokens,
+    policy.thresholdTokensCap ?? Number.POSITIVE_INFINITY,
   ))
+  // With an absolute cap, retention scales to the cap rather than the full
+  // window so the default ratio cannot exceed the smaller pressure budget.
+  const retainBudgetTokens = policy.thresholdTokensCap === undefined
+    ? messageBudgetTokens
+    : Math.min(messageBudgetTokens, thresholdTokens)
   const retainTokens = policy.retainTokens === undefined
-    ? Math.floor(messageBudgetTokens * policy.retainRatio)
+    ? Math.floor(retainBudgetTokens * policy.retainRatio)
     : policy.retainTokens
   if (retainTokens >= thresholdTokens) {
     throw new TargetPressureConfigError(
@@ -286,6 +299,8 @@ function validatePolicy(
   const compactionRetries = config.compactionRetries
   const maxOverflowRetries = config.maxOverflowRetries
   if (thresholdRatio !== undefined) assertRatio(`${name}.thresholdRatio`, thresholdRatio)
+  const thresholdTokens = config.thresholdTokens
+  if (thresholdTokens !== undefined) assertPositiveInteger(`${name}.thresholdTokens`, thresholdTokens)
   if (headroomTokens !== undefined) assertNonNegativeInteger(`${name}.headroomTokens`, headroomTokens)
   if (retainRatio !== undefined) assertRatio(`${name}.retainRatio`, retainRatio)
   if (retainTokens !== undefined) assertNonNegativeInteger(`${name}.retainTokens`, retainTokens)

@@ -325,6 +325,14 @@ describe('compact configuration and defaults', () => {
     expect(Object.isFrozen(resolved)).toBe(true)
   })
 
+  it('caps pressure at an absolute thresholdTokens', () => {
+    const resolved = resolveConfig({ thresholdTokens: 150_000 })
+    const policy = resolveTargetPolicy(resolved, { provider: MODEL, model: MODEL })
+    const spec = resolveCompactSpec(policy, 1_000_000, 32_000)
+    expect(spec.thresholdTokens).toBe(150_000)
+    expect(spec.thresholdRatio).toBe(0.8)
+  })
+
   it('defaults summary generation to headroom and preserves explicit caps', () => {
     const target = { provider: MODEL, model: MODEL }
     expect(resolveConfig({ headroomTokens: 16_384 }).maxTokens).toBe(16_384)
@@ -1494,6 +1502,15 @@ describe('default one-shot summarizer', () => {
     expect(lastText).toContain('Write concise English engineering prose.')
     expect(lastText).toContain('numeric values, function signatures, and syntax fragments.')
     expect(lastText).toContain('## Primary Request and Intent')
+    for (const section of [
+      '## Status',
+      '## Commands and Exit Codes',
+      '## Failing Tests',
+      '## Contract Decisions',
+      '## Unverified',
+      '## Evidence',
+    ]) expect(lastText).toContain(section)
+    expect(lastText).toContain('Never drop evidence')
   })
 
   it('applies the routed model policy without changing the replayed prefix', async () => {
