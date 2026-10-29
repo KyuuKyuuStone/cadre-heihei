@@ -686,6 +686,8 @@ class Ledger {
       VALUES (?, ?, ?, 'report', 'session', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`).run(
       messageId, projectId, input.taskId, input.reporter, supervisor ?? null, input.summary,
       Buffer.byteLength(input.summary), sha, input.summary.slice(0, 120),
+      // Traceability only: messages.idempotency_key has no uniqueness and is
+      // not consulted by report replay (the transition ledger owns that).
       JSON.stringify(input.deliverables), `report:${input.taskId}`, now, now)
     try {
       const advanced = loadHostLedgerBridge().advanceReportToDelivered({

@@ -223,6 +223,7 @@ test('rework 后二次汇报真的落库，不是 replay', () => {
     assert.equal(second.ok, true)
     if (!second.ok) return
     assert.equal(second.replayed, false)
+    assert.equal(second.eventIds.length, 2)
     assert.equal(events(setup.db, 'task-m1').length, beforeSecond + 2)
     const reader = new DatabaseSync(setup.db, { readOnly: true })
     try {
@@ -241,6 +242,81 @@ test('rework 后二次汇报真的落库，不是 replay', () => {
     assert.equal(retry.ok, true)
     if (retry.ok) assert.equal(retry.replayed, true)
     assert.equal(events(setup.db, 'task-m1').length, beforeSecond + 2)
+  } finally {
+    setup.close()
+  }
+})
+
+test('rework 轮步1成功后步2失败，重试仍用本轮 cycleId 落库', () => {
+  const setup = fixture()
+  try {
+    insertTask(setup.db, { taskId: 'task-mid', status: 'in_progress', seq: 1 })
+    const base = 'report:task-mid'
+    assert.equal(advanceReportToDelivered({
+      databasePath: setup.db, projectId: PROJECT, taskId: 'task-mid',
+      actorSessionId: WORKER, idempotencyBase: base,
+    }).ok, true)
+    const collab = openCadreCollab({ databasePath: setup.db, projectId: PROJECT, sessionId: SUPERVISOR })
+    try {
+      assert.equal((collab.transition({ taskId: 'task-mid', to: 'review' }) as { ok?: boolean }).ok, true)
+      assert.equal((collab.transition({ taskId: 'task-mid', to: 'rework', reason: '返修' }) as { ok?: boolean }).ok, true)
+    } finally {
+      collab.close()
+    }
+
+    const raw = new DatabaseSync(setup.db)
+    let reworkEventId = ''
+    try {
+      const row = raw.prepare(`SELECT event_id FROM task_events WHERE task_id = ?
+        AND to_status = 'rework' ORDER BY at DESC, rowid DESC LIMIT 1`).get('task-mid') as { event_id: string }
+      reworkEventId = row.event_id
+      raw.exec(`CREATE TRIGGER fail_delivered BEFORE INSERT ON task_events
+        WHEN NEW.to_status = 'delivered'
+        BEGIN SELECT RAISE(ABORT, 'simulated step2 failure'); END`)
+    } finally {
+      raw.close()
+    }
+
+    let failed: ReturnType<typeof advanceReportToDelivered> | undefined
+    try {
+      failed = advanceReportToDelivered({
+        databasePath: setup.db, projectId: PROJECT, taskId: 'task-mid',
+        actorSessionId: WORKER, idempotencyBase: base,
+      })
+    } catch {
+      failed = undefined
+    }
+    assert.equal(failed === undefined || failed.ok === false, true)
+    const cleanup = new DatabaseSync(setup.db)
+    try {
+      cleanup.exec('DROP TRIGGER fail_delivered')
+    } finally {
+      cleanup.close()
+    }
+    const afterFailure = new DatabaseSync(setup.db, { readOnly: true })
+    try {
+      assert.equal((afterFailure.prepare('SELECT status FROM tasks WHERE task_id = ?').get('task-mid') as { status: string }).status, 'in_progress')
+    } finally {
+      afterFailure.close()
+    }
+
+    const retry = advanceReportToDelivered({
+      databasePath: setup.db, projectId: PROJECT, taskId: 'task-mid',
+      actorSessionId: WORKER, idempotencyBase: base,
+    })
+    assert.equal(retry.ok, true)
+    if (!retry.ok) return
+    assert.equal(retry.replayed, false)
+    assert.equal(retry.eventIds.length, 1) // step 1 replayed; step 2 wrote after the failure
+    const reader = new DatabaseSync(setup.db, { readOnly: true })
+    try {
+      assert.equal((reader.prepare('SELECT status FROM tasks WHERE task_id = ?').get('task-mid') as { status: string }).status, 'delivered')
+      const keys = reader.prepare(`SELECT idempotency_key FROM task_events
+        WHERE task_id = ? AND to_status = 'in_progress' AND idempotency_key LIKE ?`).all('task-mid', `%${reworkEventId}%`)
+      assert.equal(keys.length, 1)
+    } finally {
+      reader.close()
+    }
   } finally {
     setup.close()
   }

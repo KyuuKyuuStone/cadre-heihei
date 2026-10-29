@@ -89,10 +89,11 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
       }
     }
     // Each rework round is a new reporting cycle. The latest rework event is a
-    // stable cycle id: retries of the same round reuse it (replay), while a
-    // later rework records a new event and therefore new keys.
+    // stable cycle id: retries of the same round (including a retry after step 1
+    // already committed) reuse it, while a later rework records a new event and
+    // therefore new keys. First-ever reports have no rework event and fall back
+    // to the starting status.
     const cycleId = ((): string => {
-      if (startedFrom !== 'rework') return startedFrom
       const row = store.ledger.core.db.prepare(`SELECT event_id FROM task_events
         WHERE project_id = ? AND task_id = ? AND to_status = 'rework'
         ORDER BY at DESC, rowid DESC LIMIT 1`).get(input.projectId, input.taskId) as
