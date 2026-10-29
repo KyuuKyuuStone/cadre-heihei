@@ -20,6 +20,13 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { scanDir } from './check-no-secrets.mjs'
+import {
+  CADRE_OUTPUTS,
+  computeCadreSourceHashes,
+  fileBytes,
+  hashFile,
+  readCadreStamp,
+} from '../../../scripts/cadre-build-stamp.mjs'
 
 const APP_ROOT = join(import.meta.dirname, '..')
 const failures = []
@@ -126,39 +133,43 @@ try {
   check('no-secrets', false, String(error).slice(0, 120))
 }
 
-// 5b) cadre-collab 构建产物：gitignore 的 esbuild 产物，漏建/陈旧 = 主进程缺 initCadreStore
-//     （首次启动不建 schema、写请求全被 LEDGER_UNAVAILABLE 拒）。dev 由 prestart 自动重建。
-const collabOut = join(APP_ROOT, 'lib', 'cadre-collab.cjs')
-const collabSrc = join(APP_ROOT, '..', '..', 'cadre-collab')
-const newestSrcMtime = (() => {
-  let newest = 0
-  const walk = (dir) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) walk(full)
-      else newest = Math.max(newest, statSync(full).mtimeMs)
+// 5b) cadre-collab 构建产物：gitignore 的 esbuild 产物。stamp 的源码哈希或产物哈希
+//     任一不符都硬失败——源码改了没重建 = 主进程与 Host 插件跑旧状态机。
+//     mtime 在 git checkout 后不可靠，因此只认 build-cadre-collab.mjs 写的 stamp。
+const DESKTOP_ROOT = join(APP_ROOT, '..', '..')
+const rebuildHint = 'node desktop/scripts/build-cadre-collab.mjs'
+const cadreStampRead = readCadreStamp(DESKTOP_ROOT)
+if ('problem' in cadreStampRead) {
+  check('cadre-collab-build', false, `${cadreStampRead.problem}；运行 ${rebuildHint}`)
+  check('cadre-host-ledger-build', false, `${cadreStampRead.problem}；运行 ${rebuildHint}`)
+} else {
+  const cadreStamp = cadreStampRead.stamp
+  const current = computeCadreSourceHashes(DESKTOP_ROOT)
+  const changed = [...new Set([
+    ...Object.keys(current.sources).filter(file => cadreStamp.sources[file] !== current.sources[file]),
+    ...Object.keys(cadreStamp.sources).filter(file => !(file in current.sources)),
+  ])]
+  const fresh = changed.length === 0 && cadreStamp.sourceHash === current.sourceHash
+  const outputProblem = (relativePath) => {
+    const absolute = join(DESKTOP_ROOT, ...relativePath.split('/'))
+    const recorded = cadreStamp.outputs.find(output => output.path === relativePath)
+    if (!existsSync(absolute)) return `产物缺失 ${relativePath}`
+    if (recorded === undefined) return `stamp 未记录 ${relativePath}`
+    if (recorded.sha256 !== hashFile(absolute) || recorded.bytes !== fileBytes(absolute)) {
+      return `产物与 stamp 不符 ${relativePath}`
     }
+    return undefined
   }
-  walk(collabSrc)
-  return newest
-})()
-if (!existsSync(collabOut)) {
-  warn('cadre-collab-build', 'lib/cadre-collab.cjs 缺失——dev 由 pnpm prestart 自动重建；打包走 release:win 自动构建。手动：node desktop/scripts/build-cadre-collab.mjs')
-} else if (statSync(collabOut).mtimeMs < newestSrcMtime) {
-  warn('cadre-collab-build', `lib/cadre-collab.cjs 比源码旧（源码有更新未构建）——运行 node desktop/scripts/build-cadre-collab.mjs 重建，否则 initCadreStore 用的是旧状态机`)
-} else {
-  check('cadre-collab-build', true)
-}
-
-// 5c) host-collab 状态机桥接：report_task 走 transitionTx 才能记录 from_status；
-//     缺失时汇报 fail-closed（报错而非裸写状态），但打包后才发现等于不可用。
-const hostLedgerOut = join(APP_ROOT, '..', '..', 'packages', 'cadre', 'host-collab', 'lib', 'cadre-ledger.cjs')
-if (!existsSync(hostLedgerOut)) {
-  warn('cadre-host-ledger-build', 'host-collab/lib/cadre-ledger.cjs 缺失——运行 node desktop/scripts/build-cadre-collab.mjs 重建，否则 report_task 无法记录 from_status')
-} else if (statSync(hostLedgerOut).mtimeMs < newestSrcMtime) {
-  warn('cadre-host-ledger-build', 'host-collab/lib/cadre-ledger.cjs 比源码旧——运行 node desktop/scripts/build-cadre-collab.mjs 重建')
-} else {
-  check('cadre-host-ledger-build', true)
+  const sourceProblem = fresh
+    ? undefined
+    : `源码已改未重建（${changed.slice(0, 5).join(', ') || '聚合哈希不符'}）`
+  const mainProblem = outputProblem(CADRE_OUTPUTS[0])
+  const mainOk = sourceProblem === undefined && mainProblem === undefined
+  check('cadre-collab-build', mainOk,
+    mainOk ? `sources=${current.count} hash=${cadreStamp.sourceHash.slice(0, 12)}` : `${sourceProblem ?? mainProblem}；运行 ${rebuildHint}`)
+  const hostProblem = outputProblem(CADRE_OUTPUTS[1])
+  check('cadre-host-ledger-build', hostProblem === undefined,
+    hostProblem ?? CADRE_OUTPUTS[1])
 }
 
 // 6) Stale-install cleanup macro must stay wired.

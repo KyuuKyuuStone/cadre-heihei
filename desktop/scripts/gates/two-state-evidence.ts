@@ -12,7 +12,7 @@
  * 退出码：0=全部门禁两态均符合预期；1=任一态不符合。
  */
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -23,8 +23,8 @@ mkdirSync(EVIDENCE_DIR, { recursive: true })
 type GateCase = {
   name: string
   gate: string
-  fixture: string
-  target: string
+  fixture?: string
+  target?: string
   description: string
   /** 红态输出必须指名的注入文件 */
   expectRedIncludes?: string
@@ -32,6 +32,11 @@ type GateCase = {
   env?: Record<string, string>
   /** 允许样本：注入后门禁必须保持绿（不产生红态）。 */
   expectGreenOnly?: boolean
+  /**
+   * 就地改写一个已存在的源文件再复原，用于「产物过期」这类没有独立坏样本文件的门禁。
+   * 红态必须因为该文件出现在输出里而失败。
+   */
+  mutation?: { file: string; suffix: string }
 }
 
 const CASES: GateCase[] = [
@@ -83,6 +88,15 @@ const CASES: GateCase[] = [
     description: '协作状态机 import 产品包',
     expectRedIncludes: '__gate_fixture_collab_package.ts',
   },
+  {
+    // The two CJS bundles are runtime inputs, so the gate has no separate
+    // fixture: the break sample is a real source edit that was never rebuilt.
+    name: 'cadre-build',
+    gate: 'scripts/gates/check-cadre-build.ts',
+    mutation: { file: 'cadre-collab/entry.ts', suffix: '\n// __gate_fixture_stale_build__\n' },
+    description: '改源码不重建 → 产物 stamp 过期',
+    expectRedIncludes: 'cadre-collab/entry.ts',
+  },
 ]
 
 function run(gate: string, extraEnv: Record<string, string> = {}) {
@@ -132,59 +146,83 @@ const summary: Array<{
 let failed = 0
 
 for (const c of CASES) {
-  const fixturePath = join(APP_ROOT, c.fixture)
-  const targetPath = join(APP_ROOT, c.target)
-  if (!existsSync(fixturePath)) {
-    console.error(`[evidence] FAIL ${c.name}: fixture 不存在 ${fixturePath}`)
-    failed++
-    continue
-  }
-  if (existsSync(targetPath)) {
-    console.error(`[evidence] FAIL ${c.name}: 注入目标已存在，拒绝覆盖 ${targetPath}`)
-    failed++
-    continue
-  }
+  let red!: ReturnType<typeof run>
+  let green!: ReturnType<typeof run>
 
-  // 允许样本：只验证「注入后门禁保持绿」，不制造红态。
-  if (c.expectGreenOnly) {
-    let allow!: ReturnType<typeof run>
+  if (c.mutation !== undefined) {
+    // 产物门禁的坏样本就是「源码变了但没重建」：就地追加一个字节再复原。
+    const sourcePath = join(APP_ROOT, c.mutation.file)
+    if (!existsSync(sourcePath)) {
+      console.error(`[evidence] FAIL ${c.name}: 取样源文件不存在 ${sourcePath}`)
+      failed++
+      continue
+    }
+    const original = readFileSync(sourcePath)
+    try {
+      writeFileSync(sourcePath, Buffer.concat([original, Buffer.from(c.mutation.suffix, 'utf8')]))
+      red = run(c.gate, c.env)
+    } finally {
+      writeFileSync(sourcePath, original)
+    }
+    green = run(c.gate, c.env)
+  } else {
+    if (c.fixture === undefined || c.target === undefined) {
+      console.error(`[evidence] FAIL ${c.name}: 缺少 fixture/target 或 mutation`)
+      failed++
+      continue
+    }
+    const fixturePath = join(APP_ROOT, c.fixture)
+    const targetPath = join(APP_ROOT, c.target)
+    if (!existsSync(fixturePath)) {
+      console.error(`[evidence] FAIL ${c.name}: fixture 不存在 ${fixturePath}`)
+      failed++
+      continue
+    }
+    if (existsSync(targetPath)) {
+      console.error(`[evidence] FAIL ${c.name}: 注入目标已存在，拒绝覆盖 ${targetPath}`)
+      failed++
+      continue
+    }
+
+    // 允许样本：只验证「注入后门禁保持绿」，不制造红态。
+    if (c.expectGreenOnly) {
+      let allow!: ReturnType<typeof run>
+      try {
+        copyFileSync(fixturePath, targetPath)
+        allow = run(c.gate, c.env)
+      } finally {
+        rmSync(targetPath, { force: true })
+      }
+      const greenExpected = allow.exitCode === 0
+      if (!greenExpected) failed++
+      const allowPath = join(EVIDENCE_DIR, `${c.name}-allow.txt`)
+      writeFileSync(allowPath, format(c.name, 'allow', c.gate, allow), 'utf8')
+      console.log(`[evidence] ${c.name}: allow exit=${allow.exitCode} ${greenExpected ? 'OK' : 'UNEXPECTED'} (${c.description})`)
+      summary.push({
+        name: c.name,
+        description: c.description,
+        kind: 'allow',
+        redExit: -1,
+        greenExit: allow.exitCode,
+        redExpected: true,
+        greenExpected,
+        redNamedFile: true,
+        redElapsedMs: 0,
+        greenElapsedMs: allow.elapsedMs,
+        redEvidence: '',
+        greenEvidence: allowPath,
+      })
+      continue
+    }
+
     try {
       copyFileSync(fixturePath, targetPath)
-      allow = run(c.gate, c.env)
+      red = run(c.gate, c.env)
+      rmSync(targetPath, { force: true })
+      green = run(c.gate)
     } finally {
       rmSync(targetPath, { force: true })
     }
-    const greenExpected = allow.exitCode === 0
-    if (!greenExpected) failed++
-    const allowPath = join(EVIDENCE_DIR, `${c.name}-allow.txt`)
-    writeFileSync(allowPath, format(c.name, 'allow', c.gate, allow), 'utf8')
-    console.log(`[evidence] ${c.name}: allow exit=${allow.exitCode} ${greenExpected ? 'OK' : 'UNEXPECTED'} (${c.description})`)
-    summary.push({
-      name: c.name,
-      description: c.description,
-      kind: 'allow',
-      redExit: -1,
-      greenExit: allow.exitCode,
-      redExpected: true,
-      greenExpected,
-      redNamedFile: true,
-      redElapsedMs: 0,
-      greenElapsedMs: allow.elapsedMs,
-      redEvidence: '',
-      greenEvidence: allowPath,
-    })
-    continue
-  }
-
-  let red!: ReturnType<typeof run>
-  let green!: ReturnType<typeof run>
-  try {
-    copyFileSync(fixturePath, targetPath)
-    red = run(c.gate, c.env)
-    rmSync(targetPath, { force: true })
-    green = run(c.gate)
-  } finally {
-    rmSync(targetPath, { force: true })
   }
 
   const redOutput = `${red.stdout}\n${red.stderr}`

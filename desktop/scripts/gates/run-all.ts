@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * run-all.ts —— 顺序执行 desktop 的四门禁并落盘原始输出（从 app/scripts/gates 迁移）。
- * 退出码：0=四门禁全过；1=任一失败。
+ * run-all.ts —— 顺序执行 desktop 的五门禁并落盘原始输出（从 app/scripts/gates 迁移）。
+ * 退出码：0=五门禁全过；1=任一失败。
  */
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -13,6 +13,9 @@ const EVIDENCE_DIR = join(APP_ROOT, 'scripts/gates/evidence')
 mkdirSync(EVIDENCE_DIR, { recursive: true })
 
 const GATES = [
+  // First: the two CJS bundles are runtime inputs for every other cadre path,
+  // and a stale one is invisible to the source-level gates below.
+  { name: 'cadre-build', file: 'scripts/gates/check-cadre-build.ts' },
   { name: 'file-size', file: 'scripts/gates/check-file-size.ts' },
   { name: 'import-semantics', file: 'scripts/gates/check-import-semantics.ts' },
   { name: 'tsc-baseline', file: 'scripts/gates/check-tsc-baseline.ts' },

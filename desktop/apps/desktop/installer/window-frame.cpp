@@ -1,13 +1,21 @@
 // Keeps the DWM frame and shadow while the NSIS page owns the entire client area.
 #define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #define UNICODE
+// Windows SDK 10.0.19041's GDI+ headers call the raw min/max macros from
+// windows.h (C3861 without them), while those same headers warn C4458 under
+// /W4 /WX. Keep the macros for the SDK includes, silence only that SDK warning,
+// then drop the macros so <algorithm> and std::min/std::max stay usable.
+#pragma warning(push)
+#pragma warning(disable: 4458)
 #include <windows.h>
 #include <tlhelp32.h>
 #include <objidl.h>
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <gdiplus.h>
+#pragma warning(pop)
+#undef min
+#undef max
 #include <new>
 #include <algorithm>
 #include "progress.h"
