@@ -49,6 +49,8 @@ export interface WatchTask {
   readonly dispatcherSessionId: string
   readonly version: number
   readonly updatedAt: string
+  /** Dispatch or latest rework epoch ms; questions before it are historical. */
+  readonly windowStartAt: number
 }
 
 /** Roster row used for permissions and display. */

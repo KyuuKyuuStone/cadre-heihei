@@ -11,10 +11,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
+import { activityFrom, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
-  type ActivityKind,
-  type SessionActivity,
   type StallAction,
   type StallActionRequest,
   type StallTaskView,
@@ -42,14 +41,8 @@ interface SessionController {
   }, signal: AbortSignal): Promise<unknown>
 }
 
-interface SessionEventLike {
-  readonly type: string
-  readonly time: number
-  readonly data?: unknown
-}
-
 interface SessionLike {
-  snapshotEvents(): readonly SessionEventLike[]
+  snapshotEvents(): readonly ActivityEvent[]
 }
 
 interface SessionsLike {
@@ -58,7 +51,7 @@ interface SessionsLike {
 }
 
 interface SessionQueryLike {
-  readSession(id: string): Promise<{ readonly events: readonly SessionEventLike[] }>
+  readSession(id: string): Promise<{ readonly events: readonly ActivityEvent[] }>
 }
 
 interface GoalViewLike {
@@ -143,7 +136,11 @@ class LedgerReader {
 
   tasks(projectId: string): WatchTask[] {
     const rows = this.#db.prepare(`SELECT task_id, project_id, title, status, assignee_session_id,
-      dispatcher_session_id, version, updated_at FROM tasks
+      dispatcher_session_id, version, updated_at, created_at,
+      COALESCE((SELECT MAX(event.at) FROM task_events event
+        WHERE event.task_id = tasks.task_id AND event.to_status IN ('dispatched','rework')), tasks.created_at)
+        AS window_start
+      FROM tasks
       WHERE project_id = ? AND status NOT IN ('verified','failed','cancelled')`).all(projectId) as Record<string, unknown>[]
     return rows.map(row => ({
       taskId: String(row.task_id),
@@ -154,6 +151,10 @@ class LedgerReader {
       dispatcherSessionId: String(row.dispatcher_session_id),
       version: Number(row.version ?? 0),
       updatedAt: String(row.updated_at),
+      windowStartAt: (() => {
+        const parsed = Date.parse(String(row.window_start ?? row.updated_at))
+        return Number.isNaN(parsed) ? Date.parse(String(row.updated_at)) : parsed
+      })(),
     }))
   }
 
@@ -183,41 +184,6 @@ class LedgerReader {
   }
 
   get path(): string { return this.#path }
-}
-
-function lastEvent(events: readonly SessionEventLike[]): SessionEventLike | undefined {
-  return events.at(-1)
-}
-
-function kindOf(event: SessionEventLike | undefined): ActivityKind | undefined {
-  if (event === undefined) return undefined
-  if (event.type === 'assistant/message' || event.type === 'assistant/attempt') return 'assistant'
-  if (event.type === 'tool/call' || event.type === 'tool/result') return 'tool'
-  if (event.type === 'user/message') return 'report'
-  return undefined
-}
-
-/** Whether an unanswered `ask_user_question` call owns the turn (DF-011). */
-function waitingQuestion(events: readonly SessionEventLike[]): boolean {
-  const results = new Set<string>()
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    const data = event?.data as { callId?: unknown; name?: unknown } | undefined
-    const callId = typeof data?.callId === 'string' ? data.callId : undefined
-    if (event?.type === 'tool/result' && callId !== undefined) { results.add(callId); continue }
-    if (event?.type === 'tool/call' && data?.name === 'ask_user_question' && callId !== undefined) {
-      return !results.has(callId)
-    }
-  }
-  return false
-}
-
-function activityFrom(events: readonly SessionEventLike[]): SessionActivity {
-  const event = lastEvent(events)
-  return {
-    ...(event === undefined ? {} : { lastActivityAt: event.time, kind: kindOf(event) ?? 'assistant' }),
-    waitingQuestion: waitingQuestion(events),
-  }
 }
 
 function safeLog(path: string, message: string): void {
@@ -254,11 +220,11 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     listTasks: projectId => ledger.tasks(projectId),
     lastTaskEventAt: taskId => ledger.lastTaskEventAt(taskId),
     members: projectId => ledger.members(projectId),
-    sessionActivity: async (sessionId) => {
+    sessionActivity: async (sessionId, windowStartAt) => {
       const live = ctx.sessions.get(sessionId)
-      if (live !== undefined) return activityFrom(live.snapshotEvents())
+      if (live !== undefined) return activityFrom(live.snapshotEvents(), windowStartAt)
       if (ctx.sessionQuery === undefined) throw new Error('sessionQuery unavailable for a cold Session')
-      return activityFrom((await ctx.sessionQuery.readSession(sessionId)).events)
+      return activityFrom((await ctx.sessionQuery.readSession(sessionId)).events, windowStartAt)
     },
     prompt: async (sessionId, text) => {
       await ctx.sessionController.prompt({

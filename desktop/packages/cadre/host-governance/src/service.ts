@@ -29,7 +29,7 @@ export interface StallPorts {
   /** Non-terminal tasks: the four stallable statuses plus delivered/review. */
   listTasks(projectId: string): readonly WatchTask[]
   lastTaskEventAt(taskId: string): number | undefined
-  sessionActivity(sessionId: string): Promise<SessionActivity>
+  sessionActivity(sessionId: string, windowStartAt: number): Promise<SessionActivity>
   members(projectId: string): readonly WatchMember[]
   prompt(sessionId: string, text: string): Promise<void>
   cancelTask(input: { projectId: string; taskId: string; actorSessionId: string; reason: string }): Promise<PortResult>
@@ -222,7 +222,7 @@ export class StallService {
         const stallable = (STALLABLE_STATUSES as readonly string[]).includes(task.status)
         let activity: SessionActivity = { waitingQuestion: false }
         try {
-          activity = await this.#ports.sessionActivity(task.assigneeSessionId)
+          activity = await this.#ports.sessionActivity(task.assigneeSessionId, task.windowStartAt)
         } catch (error) {
           episode.stale = true
           this.#ports.log(`stall activity unavailable task=${task.taskId} reason=${error instanceof Error ? error.message : String(error)}`)

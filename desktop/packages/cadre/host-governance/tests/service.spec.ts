@@ -32,7 +32,8 @@ function task(overrides: Partial<WatchTask> = {}): WatchTask {
   return {
     taskId: 't1', projectId: PROJECT, title: '修复登录', status: 'in_progress',
     assigneeSessionId: WORKER, dispatcherSessionId: SUP, version: 3,
-    updatedAt: new Date(Date.now() - 15 * MIN).toISOString(), ...overrides,
+    updatedAt: new Date(Date.now() - 15 * MIN).toISOString(),
+    windowStartAt: Date.now() - 15 * MIN, ...overrides,
   }
 }
 
