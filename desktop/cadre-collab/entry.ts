@@ -183,3 +183,117 @@ export function openCadreCollab(options: CadreCollabOptions): CadreCollab {
     },
   }
 }
+
+/** One open task handed back to the supervisor when its assignee departs. */
+export interface CadreReturnOpenTasksInput {
+  readonly databasePath: string
+  readonly projectId: string
+  /** Departing member whose tasks are released. */
+  readonly fromSessionId: string
+  /** Active supervisor receiving the tasks; resolved from the roster. */
+  readonly actorSessionId: string
+  readonly taskIds: readonly string[]
+  readonly reason?: string
+}
+
+/** Result of {@link returnOpenTasksToSupervisor}. */
+export type CadreReturnOpenTasksResult =
+  | { readonly ok: true; readonly returned: number; readonly replayed: number }
+  | { readonly ok: false; readonly code: string; readonly message: string; readonly taskId?: string }
+
+/** Statuses a departed assignee's task may be released from. */
+const RETIRABLE_STATUSES = [
+  'dispatched',
+  'accepted',
+  'in_progress',
+  'delivered',
+  'review',
+  'rework',
+] as const
+
+class ReturnTaskError extends Error {
+  readonly code: string
+  readonly taskId: string | undefined
+
+  constructor(code: string, message: string, taskId?: string) {
+    super(message)
+    this.code = code
+    this.taskId = taskId
+  }
+}
+
+/**
+ * Hand a departing assignee's open tasks back to an active supervisor (DF-006
+ * `taskDisposition: 'return'`).
+ *
+ * The status does not change, so this is not a state-machine transition: the
+ * row keeps its status and the reassignment is recorded as a `task_events` row
+ * with `from_status = to_status` and reason `assignee-retired`. The event's
+ * `idempotency_key` (`retire-return:<taskId>`) makes a retry a no-op. The actor
+ * is re-validated against the roster; the caller cannot self-assign tasks to a
+ * session that is about to depart.
+ * @param input - database path, project, departing/acting sessions and task ids.
+ * @returns how many tasks moved, or a fail-closed error naming the task.
+ */
+export function returnOpenTasksToSupervisor(input: CadreReturnOpenTasksInput): CadreReturnOpenTasksResult {
+  const store = new SqliteCollabStore({ databasePath: input.databasePath })
+  try {
+    const members = store.listMembers(input.projectId as never)
+    const actor = members.find(member => member.sessionId === input.actorSessionId && (member.state as string) !== 'departed')
+    if (actor === undefined || actor.role !== 'supervisor') {
+      return { ok: false, code: 'FORBIDDEN_ACTOR', message: '退回任务必须由本项目在册 supervisor 执行' }
+    }
+    if (input.actorSessionId === input.fromSessionId) {
+      return { ok: false, code: 'INVALID_ARGUMENT', message: '不能把任务退回到即将离职的会话' }
+    }
+    const db = store.ledger.core.db
+    let returned = 0
+    let replayed = 0
+    try {
+      store.ledger.withTransaction(() => {
+        const now = new Date().toISOString()
+        for (const taskId of input.taskIds) {
+          const row = db.prepare(
+            'SELECT status, assignee_session_id FROM tasks WHERE project_id = ? AND task_id = ?',
+          ).get(input.projectId, taskId) as { status?: unknown; assignee_session_id?: unknown } | undefined
+          if (row === undefined) throw new ReturnTaskError('TASK_NOT_FOUND', `任务不存在：${taskId}`, taskId)
+          const idempotencyKey = `retire-return:${taskId}`
+          const seen = db.prepare(
+            'SELECT 1 AS x FROM task_events WHERE project_id = ? AND idempotency_key = ?',
+          ).get(input.projectId, idempotencyKey)
+          if (seen !== undefined) {
+            replayed += 1
+            continue
+          }
+          const status = String(row.status)
+          if (!(RETIRABLE_STATUSES as readonly string[]).includes(status)) {
+            throw new ReturnTaskError('INVALID_TRANSITION', `任务 ${taskId} 的状态 ${status} 不能退回`, taskId)
+          }
+          if (String(row.assignee_session_id) !== input.fromSessionId) {
+            throw new ReturnTaskError('INVALID_TRANSITION', `任务 ${taskId} 不属于 ${input.fromSessionId}`, taskId)
+          }
+          db.prepare(`UPDATE tasks
+            SET assignee_session_id = ?, updated_at = ?, version = version + 1
+            WHERE project_id = ? AND task_id = ?`).run(input.actorSessionId, now, input.projectId, taskId)
+          db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
+            actor_session_id, reason, idempotency_key, at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+            crypto.randomUUID(), input.projectId, taskId, status, status,
+            input.actorSessionId, input.reason ?? 'assignee-retired', idempotencyKey, now,
+          )
+          returned += 1
+        }
+      })
+    } catch (error) {
+      if (error instanceof ReturnTaskError) {
+        return { ok: false, code: error.code, message: error.message, ...(error.taskId === undefined ? {} : { taskId: error.taskId }) }
+      }
+      throw error
+    }
+    return { ok: true, returned, replayed }
+  } catch (error) {
+    return { ok: false, code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) }
+  } finally {
+    store.close()
+  }
+}

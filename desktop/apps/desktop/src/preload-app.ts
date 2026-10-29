@@ -167,7 +167,14 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
       displayName?: string
       description?: string
     }) => ipcRenderer.invoke(DESKTOP_IPC.cadreSaveMember, options) as Promise<unknown>,
-    retireMember: (options: { sessionId: string; projectId?: string }) =>
+    retireMember: (options: {
+      sessionId: string
+      projectId?: string
+      /** DF-006: `cancel` | `return`; `transfer` is not implemented in 0.9.3. */
+      taskDisposition?: 'cancel' | 'return' | 'transfer'
+      actorSessionId?: string
+      transferTo?: string
+    }) =>
       ipcRenderer.invoke(DESKTOP_IPC.cadreRetireMember, options) as Promise<unknown>,
     getUpdateNotice: () => ipcRenderer.invoke(DESKTOP_IPC.cadreUpdateGetNotice) as Promise<CadreUpdateNotice | null>,
     dismissUpdateNotice: (kind: CadreUpdateNotice['kind']) =>

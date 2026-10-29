@@ -39,3 +39,18 @@ export interface CadreCollab {
   listTasks(): { projectId: string; rows: readonly CadreTaskRow[] }
   close(): void
 }
+
+/** Input of the DF-006 `return` disposition (reassign without a status change). */
+export interface CadreReturnOpenTasksInput {
+  readonly databasePath: string
+  readonly projectId: string
+  readonly fromSessionId: string
+  readonly actorSessionId: string
+  readonly taskIds: readonly string[]
+  readonly reason?: string
+}
+
+/** Result of the DF-006 `return` disposition. */
+export type CadreReturnOpenTasksResult =
+  | { readonly ok: true; readonly returned: number; readonly replayed: number }
+  | { readonly ok: false; readonly code: string; readonly message: string; readonly taskId?: string }

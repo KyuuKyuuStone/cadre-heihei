@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,6 +14,7 @@ const AT = '2026-10-20T00:00:00.000Z'
 
 interface RegisteredTool {
   readonly name: string
+  output?: { render(args: unknown, value: unknown): readonly unknown[] }
   execute(args: unknown, run: unknown): Promise<unknown>
 }
 
@@ -22,6 +23,7 @@ type StepHandler = (payload: unknown, next: () => unknown) => unknown
 interface Mounted {
   readonly tools: Map<string, RegisteredTool>
   readonly handlers: Map<string, StepHandler>
+  readonly prompts: unknown[]
 }
 
 const roots: string[] = []
@@ -38,24 +40,33 @@ function freshDatabase(): string {
   return join(root, 'cadre.sqlite')
 }
 
-function mount(databasePath: string): Mounted {
+function mount(
+  databasePath: string,
+  options: { prompt?: (request: unknown) => Promise<void> } = {},
+): Mounted {
   const registered = new Map<string, RegisteredTool>()
   const handlers = new Map<string, StepHandler>()
   const effects: (() => void)[] = []
+  const prompts: unknown[] = []
   const previous = process.env.CADRE_LEDGER_PATH
   process.env.CADRE_LEDGER_PATH = databasePath
   apply({
     tools: { register: (definition: RegisteredTool) => { registered.set(definition.name, definition) } },
     effect: (setup: () => () => void) => { effects.push(setup()); return () => {} },
     on: (event: string, handler: StepHandler) => { handlers.set(event, handler); return () => {} },
-    sessionController: {} as never,
+    sessionController: {
+      prompt: options.prompt ?? ((request: unknown) => {
+        prompts.push(request)
+        return Promise.resolve()
+      }),
+    },
   } as never)
   closes.push(() => {
     for (const dispose of effects) dispose()
     if (previous === undefined) delete process.env.CADRE_LEDGER_PATH
     else process.env.CADRE_LEDGER_PATH = previous
   })
-  return { tools: registered, handlers }
+  return { tools: registered, handlers, prompts }
 }
 
 function seedRoster(databasePath: string): void {
@@ -316,5 +327,132 @@ describe.skipIf(!bridgeBuilt)('tools over the built bridge', () => {
     expect(retried.steps.map(step => `${step.from}→${step.to}`)).toEqual(['review→verified'])
     expect(countEvents(databasePath, 't1', 'review')).toBe(1)
     expect(countEvents(databasePath, 't1', 'verified')).toBe(1)
+  })
+})
+
+function seedEmployee(databasePath: string, input: {
+  readonly sessionId: string
+  readonly displayName: string
+  readonly templateId?: string
+  readonly personaNote?: string
+  readonly provider?: string
+  readonly model?: string
+}): void {
+  const db = new DatabaseSync(databasePath)
+  try {
+    db.prepare(`INSERT INTO employees (session_id, project_id, display_name, template_id, persona_note,
+      preferred_provider_id, preferred_model, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      input.sessionId, PROJECT, input.displayName, input.templateId ?? null, input.personaNote ?? null,
+      input.provider ?? null, input.model ?? null, AT, AT,
+    )
+  } finally {
+    db.close()
+  }
+}
+
+describe('list_employees role detail (DF-002)', () => {
+  it('returns description, template and preferred model', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+    seedEmployee(databasePath, {
+      sessionId: WORKER,
+      displayName: '小明',
+      templateId: 'cadre-roleplay',
+      personaNote: '后端工程师，负责台账与状态机',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+    })
+    const tool = tools.get('list_employees')
+    expect(tool).toBeDefined()
+    const value = await tool!.execute({}, run(SUPERVISOR)) as {
+      employees: { sessionId: string; description?: string; templateId?: string; preferredProviderId?: string; preferredModel?: string }[]
+    }
+    const row = value.employees.find(employee => employee.sessionId === WORKER)
+    expect(row).toMatchObject({
+      description: '后端工程师，负责台账与状态机',
+      templateId: 'cadre-roleplay',
+      preferredProviderId: 'deepseek',
+      preferredModel: 'deepseek-chat',
+    })
+    const rendered = tool!.output?.render({}, value) as { type: string; text: string }[]
+    expect(rendered[0]?.text).toContain('后端工程师，负责台账与状态机')
+    expect(rendered[0]?.text).toContain('cadre-roleplay')
+    expect(rendered[0]?.text).toContain('deepseek/deepseek-chat')
+  })
+
+  it('keeps a roster-only worker visible and omits absent detail', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+    const value = await tools.get('list_employees')!.execute({}, run(SUPERVISOR)) as {
+      employees: { sessionId: string; description?: string; templateId?: string }[]
+    }
+    const row = value.employees.find(employee => employee.sessionId === WORKER)
+    expect(row).toEqual({ sessionId: WORKER, name: '小明', state: 'active' })
+  })
+})
+
+describe('rework notification (DF-005)', () => {
+  it('queues the reason to the assignee once and reports delivery', async () => {
+    const databasePath = freshDatabase()
+    const { tools, prompts } = mount(databasePath)
+    seedRoster(databasePath)
+    seedTask(databasePath, { taskId: 't1', seq: 1, assignee: WORKER })
+    const tool = tools.get('transition_task')
+    expect(tool).toBeDefined()
+    const input = { taskId: 't1', to: 'rework', reason: '缺少证据：没有附测试输出', idempotencyKey: 'rework-t1' }
+
+    const first = await tool!.execute(input, run(SUPERVISOR)) as { status: string; replayed: boolean; assigneeNotified?: boolean }
+    expect(first).toMatchObject({ status: 'rework', replayed: false, assigneeNotified: true })
+    expect(prompts).toHaveLength(1)
+    const prompt = prompts[0] as { sessionId: string; content: { type: string; text: string }[] }
+    expect(prompt.sessionId).toBe(WORKER)
+    expect(prompt.content[0]?.text).toContain('缺少证据：没有附测试输出')
+    expect(prompt.content[0]?.text).toContain('report_task')
+
+    const replay = await tool!.execute(input, run(SUPERVISOR)) as { replayed: boolean; assigneeNotified?: boolean }
+    expect(replay.replayed).toBe(true)
+    expect(replay.assigneeNotified).toBeUndefined()
+    expect(prompts).toHaveLength(1)
+  })
+
+  it('keeps the transition when delivery fails and reports the failure', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath, { prompt: () => Promise.reject(new Error('session offline')) })
+    seedRoster(databasePath)
+    seedTask(databasePath, { taskId: 't1', seq: 1, assignee: WORKER })
+    const tool = tools.get('transition_task')!
+
+    const result = await tool.execute(
+      { taskId: 't1', to: 'rework', reason: '再改一版', idempotencyKey: 'rework-fail' },
+      run(SUPERVISOR),
+    ) as { status: string; assigneeNotified?: boolean; notifyError?: string }
+
+    expect(result.status).toBe('rework')
+    expect(result.assigneeNotified).toBe(false)
+    expect(result.notifyError).toContain('session offline')
+    expect(countEvents(databasePath, 't1', 'rework')).toBe(1)
+  })
+
+  it('keeps the transition when the diagnostic log cannot be written', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath, { prompt: () => Promise.reject(new Error('session offline')) })
+    seedRoster(databasePath)
+    seedTask(databasePath, { taskId: 't1', seq: 1, assignee: WORKER })
+    // Force appendFileSync to fail: the plugin log path is a directory.
+    const logPath = `${databasePath}.plugin.log`
+    rmSync(logPath, { force: true })
+    mkdirSync(logPath)
+
+    const result = await tools.get('transition_task')!.execute(
+      { taskId: 't1', to: 'rework', reason: '再改一版', idempotencyKey: 'rework-log-fail' },
+      run(SUPERVISOR),
+    ) as { status: string; assigneeNotified?: boolean; notifyError?: string }
+
+    expect(result).toMatchObject({ status: 'rework', assigneeNotified: false })
+    expect(result.notifyError).toContain('session offline')
+    expect(countEvents(databasePath, 't1', 'rework')).toBe(1)
   })
 })

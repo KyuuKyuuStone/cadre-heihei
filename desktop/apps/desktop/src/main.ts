@@ -38,8 +38,11 @@ import type {
   CadreCollab,
   CadreCollabOptions,
   CadreDispatchInput,
+  CadreReturnOpenTasksInput,
+  CadreReturnOpenTasksResult,
   CadreTransitionInput,
 } from './cadre-collab-api.ts'
+import { parseRetireMemberOptions, retireMemberWithDisposition } from './cadre-retire.ts'
 import { ProviderStore, type SaveProviderInput } from './providers-db.ts'
 import { EmployeeStore, type SaveMemberInput, type UpsertEmployeeInput } from './employees-db.ts'
 import { credentialValue, maskCredential } from './provider-credentials.ts'
@@ -122,6 +125,8 @@ const CADRE_REASON_MAX = 2_000
 interface CadreCollabModule {
   openCadreCollab?: (input: CadreCollabOptions) => CadreCollab
   initCadreStore?: (databasePath: string) => void
+  /** DF-006 `return`: reassign open tasks to the acting supervisor. */
+  returnOpenTasksToSupervisor?: (input: CadreReturnOpenTasksInput) => CadreReturnOpenTasksResult
 }
 
 /** Loaded once: null means "not attempted yet", undefined means "unavailable". */
@@ -1112,7 +1117,7 @@ async function main(): Promise<void> {
     }
   })
 
-  ipcMain.handle(DESKTOP_IPC.cadreTransitionTask, (event, options: unknown) => {
+  ipcMain.handle(DESKTOP_IPC.cadreTransitionTask, async (event, options: unknown) => {
     assertProductSender(event)
     let input: CadreTransitionOptions
     try {
@@ -1149,10 +1154,51 @@ async function main(): Promise<void> {
         return view
       }
       const snapshot = collab.listTasks()
+      // DF-005: a rework must reach the assignee Session, not only the ledger.
+      // Only a fresh transition notifies (a replay already delivered once); a
+      // failed notice is reported without rolling the status back.
+      let assigneeNotified: boolean | undefined
+      let notifyError: string | undefined
+      const replayed = (view as { replayed?: unknown }).replayed === true
+      if (input.to === 'rework' && !replayed) {
+        const row = snapshot.rows.find(task => task.taskId === input.taskId)
+        if (row === undefined) {
+          notifyError = 'TASK_ROW_MISSING'
+        } else if (hostUrl === undefined || hostCookie === undefined) {
+          notifyError = 'HOST_UNAVAILABLE'
+        } else {
+          const reason = input.reason?.trim()
+          try {
+            await promptSession(hostUrl, hostCookie, {
+              sessionId: row.assigneeSessionId,
+              text: [
+                '【任务打回】', `任务号：${row.taskId}`, `标题：${row.title}`, '',
+                `打回原因：${reason === undefined || reason === '' ? '（主管未填写）' : reason}`, '',
+                '任务状态已置 rework。请按原因修改后重新调用 report_task 回报。',
+              ].join('\n'),
+            })
+            assigneeNotified = true
+          } catch (error) {
+            notifyError = error instanceof Error ? error.message : String(error)
+          }
+        }
+        if (assigneeNotified !== true) {
+          assigneeNotified = false
+          console.log(`cadre:transitionTask rework notify failed task=${input.taskId} ` +
+            `assignee=${row?.assigneeSessionId ?? '(unknown)'} reason=${notifyError ?? 'unknown'}`)
+        }
+      }
       console.log(`cadre:transitionTask ${fields} actor=${input.sessionId} path=${cadreLedgerPath} ` +
         `ok=true status=${String((view as { status?: unknown }).status)} ledgerUpdated=true ` +
-        `rows=${snapshot.rows.length} readback=write-connection`)
-      return { ...view, ledgerUpdated: true, tasks: snapshot.rows }
+        `rows=${snapshot.rows.length} readback=write-connection` +
+        (input.to === 'rework' ? ` assigneeNotified=${String(assigneeNotified ?? false)}` : ''))
+      return {
+        ...view,
+        ledgerUpdated: true,
+        tasks: snapshot.rows,
+        ...(assigneeNotified === undefined ? {} : { assigneeNotified }),
+        ...(notifyError === undefined ? {} : { notifyError }),
+      }
     } catch (error) {
       console.log(`cadre:transitionTask failed reason=${error instanceof Error ? error.message : String(error)}`)
       return { ok: false, code: 'INTERNAL_ERROR', message: '验收执行失败' }
@@ -1572,18 +1618,37 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.cadreRetireMember, (event, options: unknown) => {
     assertProductSender(event)
     if (cadreEmployees === undefined) return employeeStoreMissing
-    if (typeof options !== 'object' || options === null) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
-    }
-    const { sessionId, projectId } = options as { sessionId?: unknown; projectId?: unknown }
-    if (typeof sessionId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
-    }
-    const project = employeeProjectRequired(projectId)
+    const employees = cadreEmployees
+    const parsed = parseRetireMemberOptions(options)
+    if (parsed.ok === false) return parsed
+    const project = employeeProjectRequired(parsed.value.projectId)
     if (project.ok === false) return project
-    const retired = cadreEmployees.retireMember(sessionId, project.projectId, new Date().toISOString())
-    console.log(`cadre:retireMember session=${sessionId} project=${project.projectId} ok=${String(retired.ok)}`)
-    return retired
+    const request = { ...parsed.value, projectId: project.projectId }
+    try {
+      // DF-006: open tasks must be refused or disposed of before the roster row
+      // leaves. The actor comes from the roster (`returnTasks` re-validates too).
+      const result = retireMemberWithDisposition({
+        listMembers: projectId => cadreLedger.listMembers(projectId).rows,
+        listTasks: projectId => cadreLedger.listTasks(projectId).rows,
+        openCollab: (projectId, actorSessionId) => cadreCollab.forProject(projectId, actorSessionId),
+        returnTasks: (input) => {
+          const mod = loadCadreCollabModule()
+          if (mod?.returnOpenTasksToSupervisor === undefined) {
+            return { ok: false, code: 'COLLAB_UNAVAILABLE', message: '协作写路径不可用，无法退回未结任务' }
+          }
+          return mod.returnOpenTasksToSupervisor({ databasePath: cadreLedgerPath, ...input })
+        },
+        retire: (sessionId, projectId) => employees.retireMember(sessionId, projectId, new Date().toISOString()),
+      }, request)
+      console.log(`cadre:retireMember session=${request.sessionId} project=${request.projectId} ` +
+        `ok=${String(result.ok)} disposition=${request.taskDisposition ?? '(none)'}` +
+        (result.ok ? '' : ` code=${result.code}${result.code === 'OPEN_TASKS' ? ` open=${String(result.tasks?.length ?? 0)}` : ''}`))
+      return result
+    } catch (error) {
+      console.log(`cadre:retireMember session=${request.sessionId} project=${request.projectId} ` +
+        `error=${error instanceof Error ? error.message : String(error)}`)
+      return { ok: false, code: 'INTERNAL_ERROR', message: '离职处置失败' }
+    }
   })
 
   ipcMain.handle(DESKTOP_IPC.cadreListEmployees, (event, options: unknown) => {

@@ -26,6 +26,7 @@ const VITEST_BIN = join(APP_ROOT, 'node_modules', 'vitest', 'vitest.mjs')
 const VITEST_TARGETS = [
   'apps/desktop/tests/cadre-projects.spec.ts',
   'apps/desktop/tests/cadre-ledger-migration.spec.ts',
+  'apps/desktop/tests/cadre-retire.spec.ts',
   'packages/cadre/host-collab/tests',
 ]
 

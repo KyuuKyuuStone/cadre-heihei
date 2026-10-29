@@ -140,8 +140,19 @@ interface ReportValue {
   readonly supervisorNotified: boolean
 }
 
+/** One roster row as `list_employees` reports it (DF-002 adds role detail + model). */
+interface EmployeeRow {
+  readonly sessionId: string
+  readonly name: string
+  readonly state: string
+  readonly description?: string
+  readonly templateId?: string
+  readonly preferredProviderId?: string
+  readonly preferredModel?: string
+}
+
 interface EmployeesValue {
-  readonly employees: readonly { readonly sessionId: string; readonly name: string; readonly state: string }[]
+  readonly employees: readonly EmployeeRow[]
 }
 
 /** One task row projected by the shared ledger bridge. */
@@ -213,6 +224,10 @@ interface TransitionTaskValue {
   readonly status: string
   readonly steps: readonly { readonly from: string; readonly to: string; readonly eventId: string }[]
   readonly replayed: boolean
+  /** DF-005: only set for a fresh `rework` transition. */
+  readonly assigneeNotified?: boolean
+  /** DF-005: why the assignee prompt failed; the transition still stands. */
+  readonly notifyError?: string
 }
 
 const TASK_LIST_OPEN_STATUSES = ['dispatched', 'accepted', 'in_progress', 'delivered', 'review', 'rework'] as const
@@ -423,14 +438,47 @@ class Ledger {
     throw new Error(`本项目没有找到员工：${employee}（先用 list_employees 查名单）`)
   }
 
-  workers(projectId: string): { sessionId: string; name: string; state: string }[] {
-    const rows = this.db.prepare(`SELECT session_id, COALESCE(display_name, session_id) AS name, state FROM members
-      WHERE project_id = ? AND role = 'worker' AND state != 'departed'
+  /**
+   * Active workers of one project with their role detail (DF-002).
+   *
+   * `members` is the roster authority; the employee row only supplies the
+   * template, model preference and persona note, so a member without an
+   * employee row still appears. A departed member is excluded.
+   * @param projectId - project whose workers are read.
+   * @returns worker rows, ordered by display name.
+   */
+  workers(projectId: string): EmployeeRow[] {
+    const rows = this.db.prepare(`SELECT m.session_id,
+        COALESCE(NULLIF(TRIM(m.display_name), ''), m.session_id) AS name, m.state,
+        COALESCE(NULLIF(TRIM(m.description), ''), NULLIF(TRIM(e.persona_note), '')) AS description,
+        e.template_id, e.preferred_provider_id, e.preferred_model
+      FROM members m
+      LEFT JOIN employees e ON e.project_id = m.project_id AND e.session_id = m.session_id
+      WHERE m.project_id = ? AND m.role = 'worker' AND m.state != 'departed'
       UNION ALL
-      SELECT e.session_id, COALESCE(e.display_name, e.session_id), 'available' FROM employees e
-      WHERE e.project_id = ? AND NOT EXISTS (SELECT 1 FROM members m WHERE m.project_id = e.project_id AND m.session_id = e.session_id)
-      ORDER BY name`).all(projectId, projectId) as { session_id: string; name: string; state: string }[]
-    return rows.map(row => ({ sessionId: row.session_id, name: row.name, state: row.state }))
+      SELECT e.session_id, COALESCE(NULLIF(TRIM(e.display_name), ''), e.session_id), 'available',
+        NULLIF(TRIM(e.persona_note), ''), e.template_id, e.preferred_provider_id, e.preferred_model
+      FROM employees e
+      WHERE e.project_id = ? AND NOT EXISTS (
+        SELECT 1 FROM members m WHERE m.project_id = e.project_id AND m.session_id = e.session_id)
+      ORDER BY name`).all(projectId, projectId) as {
+        session_id: string; name: string; state: string
+        description?: string | null; template_id?: string | null
+        preferred_provider_id?: string | null; preferred_model?: string | null
+      }[]
+    return rows.map((row) => ({
+      sessionId: row.session_id,
+      name: row.name,
+      state: row.state,
+      ...(row.description == null || row.description.trim() === '' ? {} : { description: row.description }),
+      ...(row.template_id == null || row.template_id.trim() === '' ? {} : { templateId: row.template_id }),
+      ...(row.preferred_provider_id == null || row.preferred_provider_id.trim() === ''
+        ? {}
+        : { preferredProviderId: row.preferred_provider_id }),
+      ...(row.preferred_model == null || row.preferred_model.trim() === ''
+        ? {}
+        : { preferredModel: row.preferred_model }),
+    }))
   }
 
   /**
@@ -772,6 +820,22 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/**
+ * Best-effort diagnostic append.
+ *
+ * Logging runs inside failure handlers; a read-only or removed log target must
+ * not turn an already-committed transition into a tool failure.
+ * @param message - line to append (a newline is added).
+ */
+function appendDiagnostic(message: string): void {
+  try {
+    appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+      `${message}\n`)
+  } catch {
+    // Diagnostics are optional; the caller still reports the real failure.
+  }
+}
+
 function invalidDenyEntry(entry: unknown): boolean {
   if (typeof entry !== 'string' || entry.trim() === '' || entry.trim() !== entry) return true
   return entry === RESERVED_TOOL_NAME
@@ -920,7 +984,7 @@ export function apply(ctx: HostContext): void {
 
   ctx.tools.register({
     name: 'list_employees',
-    description: 'List the active employees of this project (sessionId, name, state).',
+    description: 'List the active employees of this project with their role detail: sessionId, name, state, description, templateId and preferred model (DF-002).',
     parameters: { type: 'object', additionalProperties: false, properties: {} },
     output: {
       schema: {
@@ -934,6 +998,10 @@ export function apply(ctx: HostContext): void {
                 sessionId: { type: 'string' },
                 name: { type: 'string' },
                 state: { type: 'string' },
+                description: { type: 'string' },
+                templateId: { type: 'string' },
+                preferredProviderId: { type: 'string' },
+                preferredModel: { type: 'string' },
               },
             },
           },
@@ -941,7 +1009,16 @@ export function apply(ctx: HostContext): void {
       },
       render: (_args: unknown, value: EmployeesValue) => [text(value.employees.length === 0
         ? '本项目还没有员工。'
-        : value.employees.map(row => `${row.name}（${row.sessionId}） · ${row.state}`).join('\n'))],
+        : value.employees.map((row) => {
+          const detail = [
+            row.description,
+            row.templateId === undefined ? undefined : `模板 ${row.templateId}`,
+            row.preferredModel === undefined
+              ? undefined
+              : `${row.preferredProviderId ?? '默认服务商'}/${row.preferredModel}`,
+          ].filter((part): part is string => part !== undefined)
+          return `${row.name}（${row.sessionId}） · ${row.state}${detail.length === 0 ? '' : ` · ${detail.join(' · ')}`}`
+        }).join('\n'))],
     },
     isConcurrencySafe: () => true,
     execute: async (_args: unknown, run: ToolRun) =>
@@ -1407,11 +1484,16 @@ export function apply(ctx: HostContext): void {
             },
           },
           replayed: { type: 'boolean' },
+          assigneeNotified: { type: 'boolean' },
+          notifyError: { type: 'string' },
         },
       },
       render: (_args: unknown, value: TransitionTaskValue) => [text(value.replayed
         ? `任务 ${value.taskId} 已是 ${value.status}，未重复写入事件。`
-        : `任务 ${value.taskId}：${value.steps.map(step => `${step.from}→${step.to}`).join('，')}`)],
+        : `任务 ${value.taskId}：${value.steps.map(step => `${step.from}→${step.to}`).join('，')}`
+          + (value.assigneeNotified === undefined
+            ? ''
+            : value.assigneeNotified ? '；已通知员工' : `；通知员工失败：${value.notifyError ?? '未知原因'}`))],
     },
     execute: async (args: TransitionTaskArgs, run: ToolRun): Promise<TransitionTaskValue> => {
       const caller = callerOf(run)
@@ -1441,12 +1523,45 @@ export function apply(ctx: HostContext): void {
         ...(args.reason === undefined ? {} : { reason: args.reason }),
       })
       if (!outcome.ok) throw new Error(`${outcome.code}: ${outcome.message}`)
+      // DF-005: a rework must reach the assignee, not only the ledger. The
+      // notice is sent only for a fresh transition: a replay (same
+      // idempotencyKey, task already rework) must not page the employee twice.
+      // A delivery failure never rolls the status back — the reason is already
+      // in task_events; the tool reports the failed notice instead.
+      let assigneeNotified: boolean | undefined
+      let notifyError: string | undefined
+      if (args.to === 'rework' && !outcome.replayed) {
+        const task = ledger.task(member.projectId, args.taskId)
+        if (task !== undefined) {
+          const noticeReason = args.reason?.trim()
+          try {
+            await controller.prompt({
+              requestId: requestId(),
+              sessionId: task.assignee,
+              mode: 'queue',
+              content: [text([
+                '【任务打回】', `任务号：${task.taskId}`, `标题：${task.title}`, '',
+                `打回原因：${noticeReason === undefined || noticeReason === '' ? '（主管未填写）' : noticeReason}`, '',
+                '任务状态已置 rework。请按原因修改后重新调用 report_task 回报。',
+              ].join('\n'))],
+            }, run.signal)
+            assigneeNotified = true
+          } catch (error) {
+            assigneeNotified = false
+            notifyError = error instanceof Error ? error.message : String(error)
+            appendDiagnostic(`rework-notify-failed task=${task.taskId} assignee=${task.assignee} reason=${notifyError}`)
+            console.log(`cadre-collab: rework notify failed task=${task.taskId} assignee=${task.assignee} reason=${notifyError}`)
+          }
+        }
+      }
       return {
         taskId: args.taskId,
         from: outcome.from,
         status: outcome.status,
         steps: outcome.steps,
         replayed: outcome.replayed,
+        ...(assigneeNotified === undefined ? {} : { assigneeNotified }),
+        ...(notifyError === undefined ? {} : { notifyError }),
       }
     },
   })
