@@ -67,8 +67,16 @@ function harness(options: {
       ? members
       : members.filter(member => member.role !== 'supervisor'),
     prompt: async (sessionId, text) => { prompts.push({ sessionId, text }) },
-    cancelTask: async () => { actions.push('cancel'); return { ok: true } },
-    reassignTask: async (input) => { actions.push(`reassign:${input.toSessionId}`); return { ok: true } },
+    cancelTask: async (input) => {
+      actions.push('cancel')
+      tasks = tasks.map(task => task.taskId === input.taskId ? { ...task, version: task.version + 1 } : task)
+      return { ok: true }
+    },
+    reassignTask: async (input) => {
+      actions.push(`reassign:${input.toSessionId}`)
+      tasks = tasks.map(task => task.taskId === input.taskId ? { ...task, version: task.version + 1 } : task)
+      return { ok: true }
+    },
     escalate: async () => { escalations.push('escalate'); return { ok: true } },
     goal: () => goal,
     createGoal: (_projectId, objective, maxGoalRounds) => {
@@ -362,6 +370,34 @@ describe('supervisor actions', () => {
 })
 
 describe('stall view contract', () => {
+  it('exposes the task row version, not an episode-local counter', async () => {
+    const h = harness()
+    await h.service.scan()
+    await h.service.scan()
+    const view = h.service.views()[0]
+    expect(view?.version).toBe(3)
+    expect(view?.version).toBe(h.tasks[0]?.version)
+    // State transitions (normal → stalled) must not advance the CAS version.
+    expect(view?.stallState).toBe('stalled')
+    expect(view?.version).toBe(3)
+  })
+
+  it('accepts the current task version, rejects a stale one, and bumps the row on cancel', async () => {
+    const h = await stalled()
+    const view = h.service.views()[0]
+    if (view === undefined) throw new Error('no view')
+    expect(await h.service.act(request(h, { expectedVersion: view.version - 1, idempotencyKey: 'stale' })))
+      .toMatchObject({ ok: false, code: 'VERSION_CONFLICT' })
+    const nudged = await h.service.act(request(h, { expectedVersion: view.version, idempotencyKey: 'nudge-v' }))
+    expect(nudged).toMatchObject({ ok: true, action: 'nudge', version: view.version })
+    expect(h.tasks[0]?.version).toBe(view.version)
+
+    const cancelled = await h.service.act(request(h, {
+      action: 'cancel', expectedVersion: view.version, reason: '停摆取消', idempotencyKey: 'cancel-v',
+    }))
+    expect(cancelled).toMatchObject({ ok: true, action: 'cancel', version: view.version + 1 })
+    expect(h.tasks[0]?.version).toBe(view.version + 1)
+  })
   it('exposes front-end fields with a real activity timestamp', async () => {
     const h = await stalled()
     const view = h.service.views()[0]

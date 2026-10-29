@@ -64,7 +64,6 @@ interface Episode {
   lastNudgedAt: number | undefined
   escalated: boolean
   notifiedState: StallState | 'waiting_question' | undefined
-  version: number
   /** First normal sample after activity; the episode only recovers once this window completes. */
   recoveringSince: number | undefined
 }
@@ -125,7 +124,7 @@ function viewOf(episode: Episode, member: WatchMember | undefined, now: number):
     lastNudgedAt: episode.lastNudgedAt ?? null,
     suggestedAction: actionable ? (episode.nudgeCount === 0 ? 'nudge' : 'escalate') : null,
     capabilities: { nudge: actionable, reassign: actionable, cancel: actionable, escalate: actionable },
-    version: episode.version,
+    version: episode.task.version,
     stale: episode.stale || episode.lastActivityAt === undefined,
     updatedAt: episode.task.updatedAt,
   }
@@ -167,9 +166,8 @@ export class StallService {
     const key = this.key(task.projectId, task.taskId)
     const existing = this.#episodes.get(key)
     if (existing !== undefined) {
-      // External status/version writes must be visible to the next action's CAS.
+      // External status/version writes must be visible to the next view read.
       existing.task = task
-      existing.version = Math.max(existing.version, task.version)
       return existing
     }
     const created: Episode = {
@@ -186,7 +184,6 @@ export class StallService {
       lastNudgedAt: undefined,
       escalated: false,
       notifiedState: undefined,
-      version: task.version,
       recoveringSince: undefined,
     }
     this.#episodes.set(key, created)
@@ -261,7 +258,6 @@ export class StallService {
         const notifyState = async (next: 'possibly_stalled' | 'stalled'): Promise<void> => {
           episode.state = next
           episode.stateSince = now
-          episode.version += 1
           episode.notifiedState = next
           await this.notify(projectId, viewOf(episode, member, now), next)
         }
@@ -272,7 +268,6 @@ export class StallService {
           if (episode.state !== 'waiting_question') {
             episode.state = 'waiting_question'
             episode.stateSince = now
-            episode.version += 1
           }
         } else if (last === undefined) {
           // No activity source: keep the previous state (never silently call it normal)
@@ -300,7 +295,6 @@ export class StallService {
                 episode.escalated = false
                 episode.notifiedState = undefined
                 episode.recoveringSince = undefined
-                episode.version += 1
               }
               // Before the window completes the previous warning stays visible.
             }
@@ -327,7 +321,6 @@ export class StallService {
           })
           if (escalated.ok) {
             episode.escalated = true
-            episode.version += 1
           } else {
             this.#ports.log(`stall escalate failed project=${projectId} task=${task.taskId} code=${escalated.code}`)
           }
@@ -420,8 +413,13 @@ export class StallService {
     if (request.episodeId !== episode.episodeId) {
       return { ok: false, code: 'STALL_ALREADY_RECOVERED', message: '该停摆周期已结束，请刷新后重试' }
     }
-    if (request.expectedVersion !== episode.version) {
-      return { ok: false, code: 'VERSION_CONFLICT', message: `期望版本 ${String(request.expectedVersion)}，当前 ${String(episode.version)}` }
+    // The CAS version is the task row's optimistic-lock column, read fresh at
+    // action time; episode state changes never advance it.
+    const fresh = this.#ports.listTasks(request.projectId).find(task => task.taskId === request.taskId)
+    if (fresh !== undefined) episode.task = fresh
+    const currentVersion = fresh?.version ?? episode.task.version
+    if (request.expectedVersion !== currentVersion) {
+      return { ok: false, code: 'VERSION_CONFLICT', message: `期望版本 ${String(request.expectedVersion)}，当前 ${String(currentVersion)}` }
     }
     if (episode.state !== 'stalled') {
       return { ok: false, code: 'STALL_NOT_ACTIONABLE', message: `当前状态 ${episode.state} 不可执行 ${request.action}` }
@@ -440,8 +438,7 @@ export class StallService {
       }
       episode.nudgeCount += 1
       episode.lastNudgedAt = now
-      episode.version += 1
-      return { ok: true, action: 'nudge', version: episode.version, replayed: false }
+      return { ok: true, action: 'nudge', version: currentVersion, replayed: false }
     }
 
     if (request.action === 'cancel') {
@@ -451,8 +448,7 @@ export class StallService {
         projectId: request.projectId, taskId: request.taskId, actorSessionId: request.actorSessionId, reason,
       })
       if (!outcome.ok) return outcome
-      episode.version += 1
-      const version = episode.version
+      const version = currentVersion + 1
       this.#episodes.delete(key)
       return { ok: true, action: 'cancel', version, replayed: false }
     }
@@ -469,8 +465,7 @@ export class StallService {
         toSessionId: target.sessionId, reason,
       })
       if (!outcome.ok) return outcome
-      episode.version += 1
-      const version = episode.version
+      const version = currentVersion + 1
       this.#episodes.delete(key)
       return { ok: true, action: 'reassign', version, replayed: false }
     }
@@ -480,7 +475,6 @@ export class StallService {
     })
     if (!outcome.ok) return outcome
     episode.escalated = true
-    episode.version += 1
-    return { ok: true, action: 'escalate', version: episode.version, replayed: false }
+    return { ok: true, action: 'escalate', version: currentVersion, replayed: false }
   }
 }
