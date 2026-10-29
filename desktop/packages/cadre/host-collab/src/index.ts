@@ -21,6 +21,7 @@ import { appendFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
+import { QuestionRouter, type RoutedRequest, type RoutedAnswer, type ResolveRequest } from './questions.ts'
 
 interface SessionController {
   prompt(request: {
@@ -53,10 +54,14 @@ interface AgentLike {
   }
 }
 
+interface HostEventPayload extends Partial<RoutedRequest> {
+  readonly agent?: AgentLike
+}
+
 interface HostContext {
   readonly tools: { register(definition: unknown): void; get?(name: string): unknown }
   effect(setup: () => () => void): void
-  on(event: string, handler: (payload: { readonly agent: AgentLike }, next: () => unknown) => unknown): () => void
+  on(event: string, handler: (payload: HostEventPayload, next: () => Promise<unknown>) => unknown, options?: { readonly prepend?: boolean }): () => void
   readonly sessionController: SessionController
   /** Optional web-server scope injection (the desktop Host mounts it). */
   inject?(dependencies: readonly string[], callback: (scope: unknown) => void): void
@@ -240,6 +245,14 @@ export const name = 'cadre-collab'
 
 /** Host services the tools use. */
 export const inject = ['tools', 'sessionController']
+
+/** Deployment-varying question routing limits. */
+export interface Config {
+  /** Milliseconds before a pending employee question is escalated (default 30 min). */
+  questionTimeoutMs?: number
+  /** Maximum unanswered questions one worker may hold (default 20). */
+  questionMaxPendingPerWorker?: number
+}
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS members (
@@ -557,6 +570,28 @@ class Ledger {
       taskId: row.task_id, title: row.title, status: row.status, assignee: row.assignee_session_id,
       ...(row.due_at == null ? {} : { dueAt: row.due_at }),
     }
+  }
+
+  /** Latest non-terminal task assigned to one worker, with its dispatcher. */
+  openTask(projectId: string, workerSessionId: string): { taskId: string; title: string; dispatcherSessionId?: string } | undefined {
+    const row = this.db.prepare(`SELECT task_id, title, dispatcher_session_id FROM tasks
+      WHERE project_id = ? AND assignee_session_id = ?
+        AND status NOT IN ('verified','failed','cancelled')
+      ORDER BY updated_at DESC LIMIT 1`).get(projectId, workerSessionId) as
+      { task_id: string; title: string; dispatcher_session_id?: string | null } | undefined
+    if (row === undefined) return undefined
+    return {
+      taskId: row.task_id,
+      title: row.title,
+      ...(row.dispatcher_session_id == null ? {} : { dispatcherSessionId: row.dispatcher_session_id }),
+    }
+  }
+
+  /** Display name for one roster member, falling back to the session id. */
+  name(projectId: string, sessionId: string): string {
+    const row = this.db.prepare(`SELECT COALESCE(NULLIF(TRIM(display_name), ''), session_id) AS name
+      FROM members WHERE project_id = ? AND session_id = ?`).get(projectId, sessionId) as { name?: unknown } | undefined
+    return typeof row?.name === 'string' ? row.name : sessionId
   }
 
   /** Insert the task intent plus the pending dispatch message in one transaction. */
@@ -963,7 +998,7 @@ export function pageTaskRows(
  * Register the collaboration tools over the ledger and Session prompt channel.
  * @param ctx - Host plugin context; services are injected above.
  */
-export function apply(ctx: HostContext): void {
+export function apply(ctx: HostContext, config: Config = {}): void {
   appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
     `apply tools=${String((ctx.tools as { register?: unknown }).register !== undefined)} pid=${process.pid} at=${new Date().toISOString()}
 `)
@@ -974,7 +1009,28 @@ export function apply(ctx: HostContext): void {
   }
   const ledger = new Ledger(databasePath)
   const controller = ctx.sessionController
-  ctx.effect(() => () => { ledger.close() })
+  const questionRouter = new QuestionRouter({
+    member: sessionId => ledger.member(sessionId),
+    openTask: (projectId, workerSessionId) => ledger.openTask(projectId, workerSessionId),
+    supervisor: projectId => ledger.supervisor(projectId),
+    name: (projectId, sessionId) => ledger.name(projectId, sessionId),
+    prompt: async (sessionId, text) => {
+      await controller.prompt({
+        requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text }],
+      }, AbortSignal.timeout(60_000))
+    },
+    log: message => appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
+      `questions ${message} at=${new Date().toISOString()}
+`),
+    now: () => Date.now(),
+    newId: () => randomUUID(),
+    setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+    clearTimer: handle => clearTimeout(handle as NodeJS.Timeout),
+  }, {
+    ...(config.questionTimeoutMs === undefined ? {} : { timeoutMs: config.questionTimeoutMs }),
+    ...(config.questionMaxPendingPerWorker === undefined ? {} : { maxPendingPerWorker: config.questionMaxPendingPerWorker }),
+  })
+  ctx.effect(() => () => { questionRouter.dispose(); ledger.close() })
 
   const callerOf = (run: ToolRun): string => {
     const id = run.agent?.id
@@ -1627,7 +1683,62 @@ export function apply(ctx: HostContext): void {
   // `agent/pre-step` is a waterfall: every listener must call `next()` and
   // return its decision, even when it changes nothing. Returning early yields
   // `undefined` to the downstream listeners, which read `decision.kind`.
-  ctx.on('agent/pre-step', ({ agent }, next) => {
+  ctx.tools.register({
+    name: 'resolve_employee_question',
+    description: 'Answer, reject, or escalate one employee question routed to this supervisor. Use the questionId from the 【员工请示】 message.',
+    parameters: {
+      type: 'object', additionalProperties: false, required: ['questionId', 'action'],
+      properties: {
+        questionId: { type: 'string' },
+        action: { type: 'string', enum: ['answer', 'reject', 'escalate'] },
+        answers: {
+          type: 'array',
+          items: {
+            type: 'object', additionalProperties: false, required: ['id', 'selected'],
+            properties: {
+              id: { type: 'string' }, selected: { type: 'array', items: { type: 'string' } },
+              custom: { type: 'string' },
+            },
+          },
+        },
+        reason: { type: 'string' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, required: ['ok'],
+        properties: {
+          ok: { type: 'boolean' },
+          state: { type: 'string' },
+          replayed: { type: 'boolean' },
+          code: { type: 'string' },
+          message: { type: 'string' },
+        },
+      },
+      render: (_args: unknown, value: { ok: boolean; state?: string; code?: string; message?: string }) => [text(
+        value.ok ? `员工请示已处理：${value.state ?? '完成'}` : `处理失败：${value.code ?? ''} ${value.message ?? ''}`.trim())],
+    },
+    isConcurrencySafe: () => false,
+    execute: async (args: ResolveRequest, run: ToolRun) =>
+      questionRouter.resolve(args, callerOf(run)),
+  })
+
+  ctx.on('user-questions/request', async (payload, next) => {
+    const agent = payload.agent
+    const questions = payload.questions
+    if (agent === undefined || questions === undefined) return next()
+    const request: RoutedRequest = {
+      questions,
+      ...(payload.signal === undefined ? {} : { signal: payload.signal }),
+      ...(payload.wait === undefined ? {} : { wait: payload.wait }),
+    }
+    const answer: RoutedAnswer | undefined = await questionRouter.intercept(request, agent.id)
+    return answer === undefined ? next() : answer
+  }, { prepend: true })
+
+  ctx.on('agent/pre-step', (payload, next) => {
+    const agent = payload.agent
+    if (agent === undefined) return next()
     attachSection(agent)
     const member = memberFor(agent.id)
     if (member === undefined) {
@@ -1648,8 +1759,8 @@ export function apply(ctx: HostContext): void {
       previous?.lift()
       try {
         const desired = role === 'worker'
-          ? ['dispatch_task', 'list_employees', 'transition_task']
-          : ['report_task', 'bash', 'pwsh', 'write', 'edit', 'str_replace_editor']
+          ? ['dispatch_task', 'list_employees', 'transition_task', 'ask_user_question']
+          : ['report_task', 'bash', 'pwsh', 'write', 'edit', 'str_replace_editor', 'ask_user_question', 'resolve_employee_question']
         const outcome = applyToolRestriction(agent.ctx.tools, desired)
         restricted.set(agent.id, { role, lift: outcome.lift })
         appendFileSync(process.env.CADRE_LEDGER_PATH ? `${process.env.CADRE_LEDGER_PATH}.plugin.log` : 'cadre-collab-missing.log',
