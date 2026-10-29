@@ -27,7 +27,9 @@ const VITEST_TARGETS = [
   'apps/desktop/tests/cadre-projects.spec.ts',
   'apps/desktop/tests/cadre-ledger-migration.spec.ts',
   'apps/desktop/tests/cadre-retire.spec.ts',
+  'apps/desktop/tests/cadre-packaging-guard.spec.ts',
   'packages/cadre/host-collab/tests',
+  'packages/cadre/host-governance/tests',
 ]
 
 /** 判别力自证（two-state-evidence）通过该变量临时追加注入样本。 */

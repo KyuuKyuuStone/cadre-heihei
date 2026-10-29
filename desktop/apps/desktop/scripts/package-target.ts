@@ -24,6 +24,7 @@ import { suggestDesktopBuildVersion } from './desktop-build-version-discovery.ts
 import { desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
 import { requireDesktopToolchain } from './desktop-toolchain-preflight.ts'
 import { withMacOSNotarizationProxy } from './macos-notarization-proxy.ts'
+import { assertCadreAsarEntries, cadreAsarPath, ensureCadreBundles } from './cadre-bundles.mjs'
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
@@ -474,6 +475,11 @@ export async function packageTarget(
     })
   }
   await execute(['run', 'build:official'], buildEnv, REPOSITORY_ROOT)
+  // The two cadre CJS bundles are gitignored build outputs that `pnpm install`
+  // and `build:official` do not create. Rebuild them here — after the repo build
+  // may clean lib/ and before prepare:packages copies the host package — so a
+  // clean checkout can never package an app without the ledger bridge.
+  ensureCadreBundles(REPOSITORY_ROOT)
   await execute(['run', 'release:pack', '--family', 'dsh', '--out', buildPaths.packedDsh, ...packArguments], buildEnv, REPOSITORY_ROOT)
   await execute([
     '--dir',
@@ -523,6 +529,10 @@ export async function packageTarget(
     await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts',
       ...(invocation.unsigned ? ['--unsigned'] : []), ...(invocation.skipNotarization ? ['--skip-notarization'] : [])], targetEnv)
   }
+  // Packaging must fail closed when either CJS is absent from the archive: the
+  // installed app reads the ledger through `dsh/.../cadre-ledger.cjs`, and the
+  // main process requires `lib/cadre-collab.cjs`.
+  assertCadreAsarEntries(cadreAsarPath(target, artifactsRoot))
   if (!invocation.directory && !invocation.unsigned && !invocation.skipNotarization) {
     writeReleaseRecord(target, electronBuilderEnv, buildPaths.artifacts)
   }
