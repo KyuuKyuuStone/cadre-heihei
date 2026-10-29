@@ -2,16 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { Scope } from '@deepseek-ai/dsh-scope'
-// The scope tag is a module-level symbol. ToolRuntime's runtime copy resolves
-// dsh-scope from lib, while the tsconfig path alias maps the bare specifier in
-// this test to src; minting through the runtime copy keeps the tag identity.
-// Keep a static ESM import (require() would load a second instance); the lib
-// build ships no root declaration, so suppress TS7016 and take the package's
-// source types for the call signature.
-// @ts-expect-error -- runtime-only ESM copy of a declaration-less lib build
-import { createScope as createScopeRuntime } from '../../../core/scope/lib/index.js'
-const createScope = createScopeRuntime as typeof import('@deepseek-ai/dsh-scope').createScope
+// Source plane on purpose: the scope tag is a module-level symbol, so the
+// runtime and the scope must come from one module instance. Vitest resolves
+// the bare specifier to `src`, hence `createScope` from the same specifier.
+import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -201,5 +195,18 @@ describe('allow: [] against the real ToolRegistry', () => {
 
     outcome.lift()
     expect(real.ctx.tools.schemas(real.key).map(tool => tool.name).sort()).toEqual(['bash', 'write'])
+  })
+
+  it('fails closed instead of masking every agent when the registry is unscoped', async () => {
+    const real = await mountRealRegistry(['bash', 'write'])
+
+    // A context-global registry cannot target one agent; the wrapper must throw
+    // rather than fall back to a mask that would hide tools from every agent.
+    expect(() => applyToolRestriction(real.ctx.tools, ['bash', 'write']))
+      .toThrow(/fail-closed 无法禁用全局工具/u)
+
+    // The refusal must leave the shared registry untouched.
+    expect(real.ctx.tools.schemas().map(tool => tool.name).sort()).toEqual(['bash', 'write'])
+    expect(await runTool(real, 'bash')).toBe('ran:bash')
   })
 })
