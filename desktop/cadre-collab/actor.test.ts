@@ -151,6 +151,40 @@ test('员工汇报走状态机：每一跳都记录 from_status', () => {
   }
 })
 
+test('rework 后再次汇报不复用上一轮幂等键', () => {
+  const setup = fixture()
+  try {
+    insertTask(setup.db, { taskId: 'task-rework-report', status: 'rework', seq: 1 })
+    const raw = new DatabaseSync(setup.db)
+    try {
+      // A prior delivery cycle already recorded this unscoped key.
+      raw.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
+        actor_session_id, reason, idempotency_key, at)
+        VALUES (?, ?, ?, 'in_progress', 'delivered', ?, NULL, ?, ?)`).run(
+        'legacy-event', PROJECT, 'task-rework-report', WORKER,
+        'report:task-rework-report:delivered', new Date().toISOString(),
+      )
+    } finally {
+      raw.close()
+    }
+    const second = advanceReportToDelivered({
+      databasePath: setup.db,
+      projectId: PROJECT,
+      taskId: 'task-rework-report',
+      actorSessionId: WORKER,
+      idempotencyBase: 'report:task-rework-report',
+    })
+    assert.equal(second.ok, true)
+    if (!second.ok) return
+    assert.deepEqual(events(setup.db, 'task-rework-report').map(row => [row.from_status, row.to_status]).slice(-2), [
+      ['rework', 'in_progress'],
+      ['in_progress', 'delivered'],
+    ])
+  } finally {
+    setup.close()
+  }
+})
+
 test('汇报人只能是自己：他人身份代替汇报被状态机拒绝', () => {
   const setup = fixture()
   try {

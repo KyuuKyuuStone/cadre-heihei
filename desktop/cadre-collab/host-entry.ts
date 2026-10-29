@@ -97,7 +97,9 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
         from: from as never,
         to: to as never,
         actor: { kind: 'session', sessionId: input.actorSessionId as never, role },
-        idempotencyKey: `${input.idempotencyBase}:${to}` as never,
+        // Scope keys to the starting status: reports after `rework` must not
+        // replay keys recorded by the earlier delivery cycle.
+        idempotencyKey: `${input.idempotencyBase}:${startedFrom}:${to}` as never,
       })
       if (!step.ok) {
         return { ok: false, code: step.error.code, message: `${from} → ${to}：${step.error.message}` }
