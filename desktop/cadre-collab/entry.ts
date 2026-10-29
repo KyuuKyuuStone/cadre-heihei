@@ -297,3 +297,100 @@ export function returnOpenTasksToSupervisor(input: CadreReturnOpenTasksInput): C
     store.close()
   }
 }
+
+/** One stalled task handed to an in-roster worker (DF-014 reassign). */
+export interface CadreReassignTaskInput {
+  readonly databasePath: string
+  readonly projectId: string
+  readonly taskId: string
+  readonly actorSessionId: string
+  readonly toSessionId: string
+  readonly reason: string
+  readonly idempotencyKey: string
+}
+
+/** Result of {@link reassignOpenTask}. */
+export type CadreReassignTaskResult =
+  | { readonly ok: true; readonly version: number; readonly replayed: boolean }
+  | { readonly ok: false; readonly code: string; readonly message: string }
+
+/**
+ * Move one open task to another in-roster worker without changing its status.
+ *
+ * This is an audited reassignment (one `task_events` row, `from_status` =
+ * `to_status` = current status), not a state-machine transition: the status
+ * stays, only the assignee changes, and the next dispatch loop starts from the
+ * same state. The supervisor actor and target worker are re-validated here.
+ * @param input - ledger path, task, acting supervisor, target worker, reason and replay key.
+ * @returns the new task version, or a fail-closed error.
+ */
+export function reassignOpenTask(input: CadreReassignTaskInput): CadreReassignTaskResult {
+  if (input.reason.trim() === '') {
+    return { ok: false, code: 'INVALID_ARGUMENT', message: '重派必须填写原因' }
+  }
+  if (input.idempotencyKey.trim() === '') {
+    return { ok: false, code: 'INVALID_ARGUMENT', message: 'idempotencyKey 不能为空' }
+  }
+  const store = new SqliteCollabStore({ databasePath: input.databasePath })
+  try {
+    const members = store.listMembers(input.projectId as never)
+    const actor = members.find(member => member.sessionId === input.actorSessionId && (member.state as string) !== 'departed')
+    if (actor === undefined || actor.role !== 'supervisor') {
+      return { ok: false, code: 'FORBIDDEN_ACTOR', message: '重派必须由本项目在册 supervisor 执行' }
+    }
+    const target = members.find(member => member.sessionId === input.toSessionId && (member.state as string) !== 'departed')
+    if (target === undefined || target.role !== 'worker') {
+      return { ok: false, code: 'REASSIGN_TARGET_INVALID', message: '目标必须是本项目在职员工' }
+    }
+    if (target.sessionId === actor.sessionId) {
+      return { ok: false, code: 'REASSIGN_TARGET_INVALID', message: '不能重派给执行人自己' }
+    }
+    const db = store.ledger.core.db
+    const key = `stall-reassign:${input.taskId}:${input.idempotencyKey}`
+    let version = 0
+    let replayed = false
+    try {
+      store.ledger.withTransaction(() => {
+        const row = db.prepare(
+          'SELECT status, assignee_session_id, version FROM tasks WHERE project_id = ? AND task_id = ?',
+        ).get(input.projectId, input.taskId) as
+          { status?: unknown; assignee_session_id?: unknown; version?: unknown } | undefined
+        if (row === undefined) throw new ReturnTaskError('TASK_NOT_FOUND', `任务不存在：${input.taskId}`)
+        const seen = db.prepare(
+          'SELECT 1 AS x FROM task_events WHERE project_id = ? AND idempotency_key = ?',
+        ).get(input.projectId, key)
+        if (seen !== undefined) {
+          replayed = true
+          version = Number(row.version ?? 0)
+          return
+        }
+        const status = String(row.status)
+        if (!(RETIRABLE_STATUSES as readonly string[]).includes(status)) {
+          throw new ReturnTaskError('INVALID_TRANSITION', `任务 ${input.taskId} 的状态 ${status} 不能重派`)
+        }
+        if (String(row.assignee_session_id) === input.toSessionId) {
+          throw new ReturnTaskError('REASSIGN_TARGET_INVALID', '任务已在目标员工名下')
+        }
+        const now = new Date().toISOString()
+        db.prepare(`UPDATE tasks
+          SET assignee_session_id = ?, updated_at = ?, version = version + 1
+          WHERE project_id = ? AND task_id = ?`).run(input.toSessionId, now, input.projectId, input.taskId)
+        db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
+          actor_session_id, reason, idempotency_key, at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          crypto.randomUUID(), input.projectId, input.taskId, status, status,
+          input.actorSessionId, `stalled-reassign: ${input.reason.trim()}`, key, now,
+        )
+        version = Number(row.version ?? 0) + 1
+      })
+    } catch (error) {
+      if (error instanceof ReturnTaskError) return { ok: false, code: error.code, message: error.message }
+      throw error
+    }
+    return { ok: true, version, replayed }
+  } catch (error) {
+    return { ok: false, code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) }
+  } finally {
+    store.close()
+  }
+}

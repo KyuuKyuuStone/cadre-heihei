@@ -2,8 +2,16 @@
 #
 # The four `cadre-*` employee presets are gone (0.6.1): roles are data on the
 # roster, injected per Session by `@deepseek-ai/dsh-host-collab`. This patch
-# therefore contributes exactly one row — the collaboration tools.
+# contributes the collaboration tools and the DF-014 stall watchdog (0.9.4).
 
 - insert:
     - id: cadre-collab
       name: '@deepseek-ai/dsh-host-collab'
+    - id: cadre-governance
+      name: '@deepseek-ai/dsh-host-governance'
+
+# Compaction at an absolute 150k pressure cap for Cadre employees. The row is
+# owned by the base bundle; this layer only adds the Cadre-specific threshold.
+- id: compaction-basic
+  config:
+    thresholdTokens: 150000

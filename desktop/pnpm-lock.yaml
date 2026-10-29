@@ -2508,6 +2508,9 @@ importers:
       '@deepseek-ai/dsh-host-collab':
         specifier: workspace:*
         version: link:../../cadre/host-collab
+      '@deepseek-ai/dsh-host-governance':
+        specifier: workspace:*
+        version: link:../../cadre/host-governance
 
   packages/bundle/headless:
     dependencies:
@@ -3165,6 +3168,8 @@ importers:
         version: link:../../workspace/workspace
 
   packages/cadre/host-collab: {}
+
+  packages/cadre/host-governance: {}
 
   packages/client/connection:
     dependencies:

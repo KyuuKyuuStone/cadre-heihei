@@ -475,6 +475,7 @@
     { "path": "./packages/bundle/sdk-minimal" },
     { "path": "./packages/bundle/web-app" },
     { "path": "./packages/cadre/host-collab" },
+    { "path": "./packages/cadre/host-governance" },
     { "path": "./packages/bundle/cadre-app" },
     { "path": "./packages/boot/app-boot" },
     { "path": "./packages/boot/cmdline" },
