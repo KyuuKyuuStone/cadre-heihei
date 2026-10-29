@@ -70,6 +70,27 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+.overdueRow {
+  box-shadow: inset 3px 0 var(--dsw-alias-state-error-primary);
+}
+
+.overdueRow:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 7%, transparent);
+}
+
+.dueOverdue {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  color: var(--dsw-alias-state-error-primary);
+  font-weight: 500;
+}
+
+.overdueLabel {
+  font-size: 10px;
+  line-height: 12px;
+}
+
 .row > span {
   min-width: 0;
   overflow: hidden;

@@ -54,12 +54,20 @@ export interface CadreRosterMember {
   readonly state?: string
 }
 
+export interface CadreProjectRosterState {
+  readonly status: 'loading' | 'ready' | 'error'
+  readonly memberCount: number
+  readonly error?: string
+}
+
 export interface CadreRosterState {
   readonly status: 'loading' | 'ready' | 'error'
   readonly members: readonly CadreRosterMember[]
   readonly error: string | null
   /** Set when the ledger was recreated and a formerly populated roster is gone. */
   readonly notice?: string | null
+  /** Per-project read state; absent in old fixtures, present in production reads. */
+  readonly projects?: ReadonlyMap<string, CadreProjectRosterState>
 }
 
 /** The part of one official Session summary the row subtitle reads. */
@@ -85,10 +93,14 @@ const ACTIVE_TASK_STATUS = new Set(['in_progress', 'accepted', 'rework', 'review
 
 /** Face of the project-row action entries. */
 export interface CadreProjectActionsInjected {
-  hooks: { projectState: HostObservable<CadreProjectState> }
+  hooks: {
+    projectState: HostObservable<CadreProjectState>
+    roster: HostObservable<CadreRosterState>
+  }
   startSession: (workspaceId: string) => void
   requestCadreCreate: (kind: 'supervisor' | 'worker', workspaceId: string) => void
   openLedger: (request: { projectId: string; label: string; cwd?: string }) => void
+  retryRoster: () => void
 }
 
 /** Face of the Session identity entries. */
@@ -115,6 +127,32 @@ export interface CadreRetireRequest {
   readonly token: number
 }
 
+/** Task disposition accepted by the retire IPC; transfer is disabled in 0.9.3. */
+export type CadreRetireTaskDisposition = 'cancel' | 'return' | 'transfer'
+
+/** One open task returned by the backend's OPEN_TASKS refusal. */
+export interface CadreOpenTask {
+  readonly taskId: string
+  readonly title: string
+  readonly status: string
+  readonly updatedAt: string
+}
+
+/** Optional fields sent with the second retire attempt. */
+export interface CadreRetireOptions {
+  readonly taskDisposition?: CadreRetireTaskDisposition
+  readonly transferTo?: string
+  readonly actorSessionId?: string
+}
+
+/** Result of a retire attempt, including the open-task blocker. */
+export interface CadreRetireResult {
+  readonly ok: boolean
+  readonly code?: string
+  readonly message?: string
+  readonly tasks?: readonly CadreOpenTask[]
+}
+
 /** Face of the retire action: the menu row raises, the overlay dialog answers. */
 export interface CadreRetireInjected {
   hooks: {
@@ -123,7 +161,7 @@ export interface CadreRetireInjected {
   }
   requestRetire: (sessionId: string, displayTitle: string) => void
   settleRetire: () => void
-  retire: (sessionId: string) => Promise<{ ok: boolean; code?: string; message?: string }>
+  retire: (sessionId: string, options?: CadreRetireOptions) => Promise<CadreRetireResult>
 }
 
 /** Face of the row-menu profile edit action. */
@@ -217,12 +255,49 @@ function useMenuListClass(): string {
 }
 
 /**
+ * Per-project roster state on the project row. Loading and empty are distinct
+ * from a failed read; a failed read owns a retry action instead of looking
+ * like a healthy empty team.
+ */
+function CadreProjectRosterStatus({
+  workspaceId, useRoster, retryRoster,
+}: {
+  workspaceId: string
+  useRoster: InjectFace<CadreProjectActionsInjected>['useRoster']
+  retryRoster: () => void
+}) {
+  const project = useRoster(state => state.projects?.get(workspaceId))
+  if (project === undefined) return null
+  if (project.status === 'loading') {
+    return <span className={css.projectRosterState} role="status">读取中</span>
+  }
+  if (project.status === 'error') {
+    return (
+      <button
+        type="button"
+        className={`${css.projectRosterState} ${css.projectRosterError}`}
+        title={project.error ?? '花名册读取失败'}
+        aria-label={`花名册读取失败，重试${project.error === undefined ? '' : `：${project.error}`}`}
+        onClick={retryRoster}
+      >
+        读取失败 · 重试
+      </button>
+    )
+  }
+  if (project.memberCount === 0) {
+    return <span className={css.projectRosterState} role="status">空团队</span>
+  }
+  return null
+}
+
+/**
  * Project row actions: ＋ (supervisor/employee/plain) and 台账.
  * The old single New Session button is replaced by the ＋ when this slot is
  * occupied (see ui-workspace's ProjectRowItem).
  */
 export function CadreProjectRowActions({
-  workspaceId, label, cwd, useProjectState, startSession, requestCadreCreate, openLedger,
+  workspaceId, label, cwd, useProjectState, useRoster, retryRoster,
+  startSession, requestCadreCreate, openLedger,
 }: CadreProjectRowOwner & InjectFace<CadreProjectActionsInjected>) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuClass = useMenuListClass()
@@ -236,6 +311,7 @@ export function CadreProjectRowActions({
       onPointerEnter={hover.enter}
       onPointerLeave={hover.leave}
     >
+      <CadreProjectRosterStatus workspaceId={workspaceId} useRoster={useRoster} retryRoster={retryRoster} />
       <Menu
         open={menuOpen}
         onClose={closeMenu}
@@ -293,7 +369,14 @@ export function CadreSessionBadge({
 }: CadreSessionRowOwner & InjectFace<CadreRosterBadgeInjected>) {
   const members = useRoster(state => state.members)
   const member = memberOf(members, sessionId)
-  if (member === undefined || member.state === 'departed') return null
+  if (member === undefined) return null
+  if (member.state === 'departed') {
+    return (
+      <span className={css.departedBadge} title="已离职 · 历史归属（会话与台账保留）">
+        已离职
+      </span>
+    )
+  }
   if (member.role === 'supervisor') {
     return (
       <span className={`${css.supervisorBadge} cadre-role-supervisor`}>
@@ -329,7 +412,7 @@ export function CadreSessionSubtitle({
   const tasks = useTasks(state => state)
   const member = memberOf(members, sessionId)
 
-  if (member === undefined || member.state === 'departed') {
+  if (member === undefined) {
     // A recreated ledger must not masquerade as an ordinary session: say the
     // roster is missing so the user can restore it instead of silently
     // rebuilding the team.
@@ -338,6 +421,9 @@ export function CadreSessionSubtitle({
     }
     // Before the roster answers, an unknown row must not claim to be ordinary.
     return rosterStatus === 'ready' ? <span className={css.plainSubtitle}>普通会话</span> : null
+  }
+  if (member.state === 'departed') {
+    return <span className={css.plainSubtitle} title="历史归属：会话与台账保留">历史归属</span>
   }
 
   const owned = tasks.filter(task => task.assigneeSessionId === sessionId && ACTIVE_TASK_STATUS.has(task.status))
@@ -503,6 +589,19 @@ export function CadreRetireDialog({ useRoster, useRequest, retire, settleRetire 
   )
 }
 
+const RETIRE_TASK_STATUS: Readonly<Record<string, string>> = {
+  dispatched: '进行中',
+  accepted: '进行中',
+  in_progress: '进行中',
+  delivered: '待验收',
+  review: '待验收',
+  rework: '返工中',
+}
+
+function retireTaskStatus(status: string): string {
+  return RETIRE_TASK_STATUS[status] ?? status
+}
+
 function RetireForm({ request, useRoster, retire, settleRetire }: {
   readonly request: CadreRetireRequest
   readonly useRoster: InjectFace<CadreRetireInjected>['useRoster']
@@ -513,14 +612,27 @@ function RetireForm({ request, useRoster, retire, settleRetire }: {
   const member = memberOf(members, request.sessionId)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [openTasks, setOpenTasks] = useState<readonly CadreOpenTask[] | null>(null)
+  const [disposition, setDisposition] = useState<'cancel' | 'return' | ''>('')
   const supervisor = member?.role === 'supervisor'
   const close = (): void => { if (!pending) settleRetire() }
   const run = async (): Promise<void> => {
     setPending(true)
     setError(null)
-    const result = await retire(request.sessionId)
+    const result = disposition === ''
+      ? await retire(request.sessionId)
+      : await retire(request.sessionId, { taskDisposition: disposition })
     setPending(false)
     if (!result.ok) {
+      if (result.code === 'OPEN_TASKS') {
+        const tasks = result.tasks ?? []
+        setOpenTasks(tasks)
+        setDisposition('')
+        setError(tasks.length === 0
+          ? `${result.code} · ${result.message ?? '有未结任务但未返回任务列表'}`
+          : null)
+        return
+      }
       setError(`${result.code ?? 'ERROR'} · ${result.message ?? '离职失败'}`)
       return
     }
@@ -536,7 +648,11 @@ function RetireForm({ request, useRoster, retire, settleRetire }: {
       footer={(
         <>
           <Button variant="outline" disabled={pending} onClick={close}>取消</Button>
-          <Button variant="primary" disabled={pending} onClick={() => { void run() }}>
+          <Button
+            variant="primary"
+            disabled={pending || (openTasks !== null && disposition === '')}
+            onClick={() => { void run() }}
+          >
             {pending ? '处理中…' : '确认离职'}
           </Button>
         </>
@@ -547,6 +663,62 @@ function RetireForm({ request, useRoster, retire, settleRetire }: {
           离职后从在职花名册移除，会话与历史任务保留
           {supervisor ? '；该项目部随后可以新建主管。' : '。'}
         </p>
+        {openTasks !== null && openTasks.length > 0 && (
+          <section className={css.retireTasks} aria-label="未结任务">
+            <p className={css.retireBlocker}>
+              该成员有 {openTasks.length} 个未结任务，必须先选择处置方式。
+            </p>
+            <ul className={css.retireTaskList}>
+              {openTasks.map(task => (
+                <li key={task.taskId} className={css.retireTask} data-task-id={task.taskId}>
+                  <span className={css.retireTaskMain}>
+                    <span className={css.retireTaskTitle} title={task.title}>{task.title}</span>
+                    <code className={css.retireTaskId}>{task.taskId}</code>
+                  </span>
+                  <span className={css.retireTaskStatus}>{retireTaskStatus(task.status)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className={css.retireOptions} role="radiogroup" aria-label="未结任务处置">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={disposition === 'cancel'}
+                className={css.retireOption}
+                disabled={pending}
+                onClick={() => { setDisposition('cancel') }}
+              >
+                取消任务
+              </button>
+              {!supervisor && (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={disposition === 'return'}
+                  className={css.retireOption}
+                  disabled={pending}
+                  onClick={() => { setDisposition('return') }}
+                >
+                  转回主管
+                </button>
+              )}
+              {supervisor && (
+                <span className={css.hint}>主管离职后无其他接手人，不能转回主管；请取消未结任务。</span>
+              )}
+              <button
+                type="button"
+                role="radio"
+                aria-checked={false}
+                aria-label="转给其他员工（0.10.0 支持）"
+                className={css.retireOption}
+                disabled
+              >
+                转给其他员工
+              </button>
+              <span className={css.hint}>转给其他员工：0.10.0 支持，当前版本不可用。</span>
+            </div>
+          </section>
+        )}
         {error !== null && <p role="alert" className={css.error}>{error}</p>}
       </div>
     </Modal>

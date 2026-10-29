@@ -56,6 +56,8 @@ export interface RetryOutcome {
 /** Retry seam: replay one queued failure by its pending id. */
 export interface DispatchRowInjected {
   retry(pendingId: string): Promise<RetryOutcome>
+  /** Resolve the current Session's project at call time; a stale closure would query the wrong ledger. */
+  resolveProjectId?(): string | undefined
 }
 
 type DispatchRowProps = ToolCallViewProps & InjectFace<DispatchRowInjected>
@@ -187,6 +189,7 @@ function RunningBar() {
  */
 export function DispatchStatusRow(props: DispatchRowProps) {
   const [ledger, setLedger] = useState<ReadonlyMap<string, LedgerRow>>(new Map())
+  const [syncError, setSyncError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState<string | null>(null)
   const [addedDispatched, setAddedDispatched] = useState<readonly DispatchedItem[]>([])
   /** pendingId → null when the retry succeeded, or the replacement failure row. */
@@ -209,15 +212,32 @@ export function DispatchStatusRow(props: DispatchRowProps) {
     const list = typeof window === 'undefined'
       ? undefined
       : (window as unknown as { cadre?: LedgerBridge }).cadre?.listTasks
-    if (list === undefined) return
+    if (list === undefined) {
+      setSyncError('状态未同步：台账通道未接入')
+      return
+    }
     let cancelled = false
     const tick = async () => {
+      const projectId = props.resolveProjectId?.()
+      if (projectId === undefined) {
+        setSyncError('状态未同步：当前会话不属于任何项目部')
+        return
+      }
       try {
-        const response = await list()
+        const response = await list({ projectId })
         if (cancelled) return
-        setLedger(new Map((response?.rows ?? []).map(row => [row.taskId, row])))
-      } catch {
-        // Keep the last snapshot; a ledger read failure never blanks the bar.
+        if (response === undefined || !Array.isArray(response.rows)) {
+          setSyncError('状态未同步：台账响应缺少 rows')
+          return
+        }
+        setSyncError(null)
+        const rows = response.rows as readonly LedgerRow[]
+        setLedger(new Map(rows.map(row => [row.taskId, row])))
+      } catch (error) {
+        if (cancelled) return
+        // Keep the last snapshot, but make the failed join visible instead of
+        // letting the card imply that the ledger still agrees with it.
+        setSyncError(`状态未同步：${error instanceof Error ? error.message : String(error)}`)
       }
     }
     void tick()
@@ -369,6 +389,10 @@ export function DispatchStatusRow(props: DispatchRowProps) {
         </div>
       )}
 
+      {syncError !== null && (
+        <span role="status" style={{ color: TEXT_ERROR, fontSize: 12 }}>{syncError}</span>
+      )}
+
       {failed.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {failed.map(item => {
@@ -414,13 +438,23 @@ export function DispatchStatusRow(props: DispatchRowProps) {
   )
 }
 
+/** Minimal Workspace lookup used to address the ledger by the calling Session's project. */
+interface WorkspaceSessionIndex {
+  readonly list: {
+    getSnapshot(): { readonly items: readonly { readonly workspaceId: string; readonly sessionIds: readonly string[] }[] }
+  }
+}
+
 /** Registers the dispatch status row; retry replays one pending id over the app channel. */
 export const dispatchToolview = {
   name: 'dispatch-toolview',
-  inject: ['slots'],
+  inject: ['slots', 'workspaces'],
   apply(ctx: Context): void {
+    const workspaces = ctx.get('workspaces') as WorkspaceSessionIndex | undefined
     ctx.slots.inject('tool.call.toolview', function* () {
       const render = (sessionId: string) => ({
+        resolveProjectId: (): string | undefined => workspaces?.list.getSnapshot().items
+          .find(item => item.sessionIds.some(id => id === sessionId))?.workspaceId,
         retry: async (pendingId: string): Promise<RetryOutcome> => {
           try {
             const response = await fetch('/cadre/retry-dispatch', {

@@ -42,6 +42,7 @@ function props(overrides: Record<string, unknown>): Props {
     block: result({ dispatched: [], failed: [] }),
     sessionId: 's1',
     retry: vi.fn(async (): Promise<RetryOutcome> => ({ ok: true })),
+    resolveProjectId: () => 'ws-1',
     ...overrides,
   } as unknown as Props
 }
@@ -132,19 +133,28 @@ describe('DispatchStatusRow', () => {
     expect(screen.queryByText(/^已派给/)).toBeNull()
   })
 
-  it('joins the ledger to show a delivered task waiting for review', async () => {
-    ;(window as unknown as { cadre: unknown }).cadre = {
-      listTasks: async () => ({
-        rows: [
-          { taskId: 'task-1', title: '复核清单', status: 'delivered' },
-          { taskId: 'task-2', title: '补检定报告', status: 'in_progress' },
-          { taskId: 'task-3', title: '结论汇总', status: 'dispatched' },
-        ],
-      }),
-    }
+  it('joins the ledger with the current project and shows a delivered task waiting for review', async () => {
+    const listTasks = vi.fn(async () => ({
+      rows: [
+        { taskId: 'task-1', title: '复核清单', status: 'delivered' },
+        { taskId: 'task-2', title: '补检定报告', status: 'in_progress' },
+        { taskId: 'task-3', title: '结论汇总', status: 'dispatched' },
+      ],
+    }))
+    ;(window as unknown as { cadre: unknown }).cadre = { listTasks }
     render(<DispatchStatusRow {...props({ block: result({ dispatched: DISPATCHED, failed: [] }) })} />)
     expect(await screen.findByText('陈允 · 复核清单 — 已交付，主管正在审')).toBeTruthy()
     expect(screen.getByText('陈允 · 补检定报告 — 正在执行')).toBeTruthy()
     expect(screen.getByText('陈允 · 复核清单')).toBeTruthy()
+    expect(listTasks).toHaveBeenCalledWith({ projectId: 'ws-1' })
+  })
+
+  it('shows 状态未同步 when the ledger join fails', async () => {
+    ;(window as unknown as { cadre: unknown }).cadre = {
+      listTasks: async () => { throw new Error('ledger unavailable') },
+    }
+    render(<DispatchStatusRow {...props({ block: result({ dispatched: DISPATCHED, failed: [] }) })} />)
+    expect(await screen.findByText(/状态未同步/)).toBeTruthy()
+    expect(screen.getByText(/ledger unavailable/)).toBeTruthy()
   })
 })

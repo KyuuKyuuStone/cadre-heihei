@@ -135,6 +135,23 @@ function dueText(iso: string | undefined): string {
   return timeText(iso)
 }
 
+/** Due timestamps are overdue only when they parse and are strictly earlier than now. */
+export function isCadreTaskOverdue(dueAt: string | undefined, now: number): boolean {
+  if (dueAt === undefined || dueAt === '') return false
+  const at = Date.parse(dueAt)
+  return !Number.isNaN(at) && at < now
+}
+
+/** Keep the overdue marker current while the overlay stays open. */
+function useLedgerNow(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => { setNow(Date.now()) }, 30_000)
+    return () => { window.clearInterval(timer) }
+  }, [])
+  return now
+}
+
 function positionText(row: LedgerRow): string {
   const title = row.assigneeTitle?.trim()
   if (title !== undefined && title !== '') return title
@@ -171,6 +188,7 @@ function LedgerBody({ request, closeLedger }: { readonly request: CadreLedgerReq
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const now = useLedgerNow()
 
   const reload = useCallback(() => {
     setLoad({ kind: 'loading' })
@@ -269,12 +287,14 @@ function LedgerBody({ request, closeLedger }: { readonly request: CadreLedgerReq
           </div>
           {visible.map(row => {
             const open = expanded === row.taskId
+            const overdue = isCadreTaskOverdue(row.dueAt, now)
             return (
               <div key={row.taskId} className={css.rowGroup} role="rowgroup">
                 <button
                   type="button"
                   role="row"
-                  className={css.row}
+                  className={overdue ? `${css.row} ${css.overdueRow}` : css.row}
+                  data-overdue={overdue ? 'true' : undefined}
                   aria-expanded={open}
                   onClick={() => { setExpanded(open ? null : row.taskId) }}
                 >
@@ -284,7 +304,10 @@ function LedgerBody({ request, closeLedger }: { readonly request: CadreLedgerReq
                   </span>
                   <span role="cell">{row.assigneeName ?? row.assigneeSessionId}（{positionText(row)}）</span>
                   <span role="cell"><Pill>{STATUS_LABELS[row.status] ?? row.status}</Pill></span>
-                  <span role="cell">{dueText(row.dueAt)}</span>
+                  <span role="cell" className={overdue ? css.dueOverdue : undefined}>
+                    {overdue && <span className={css.overdueLabel}>已超期</span>}
+                    {dueText(row.dueAt)}
+                  </span>
                   <span role="cell">{deliverablesText(row)}</span>
                   <span role="cell">{acceptanceText(row)}</span>
                   <span className={css.chevron} aria-hidden="true">{open ? '⌄' : '›'}</span>

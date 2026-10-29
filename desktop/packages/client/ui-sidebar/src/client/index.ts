@@ -26,7 +26,8 @@ import {
   CadreSessionBadge, CadreSessionSubtitle,
   type CadreEditInjected, type CadreProjectActionsInjected,
   type CadreRetireInjected, type CadreRetireRequest,
-  type CadreRosterBadgeInjected, type CadreRosterMember, type CadreRosterState,
+  type CadreProjectRosterState, type CadreRetireOptions, type CadreRetireResult,
+  type CadreRetireTaskDisposition, type CadreRosterBadgeInjected, type CadreRosterMember, type CadreRosterState,
   type CadreSessionSubtitleInjected, type CadreSessionsState, type CadreTaskFact,
 } from './CadreSidebar.tsx'
 import type { CadreSessionRankService } from './cadre-session-rank.ts'
@@ -87,8 +88,13 @@ interface CadreBridge {
     displayName?: string
     description?: string
   }) => Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
-  retireMember?: (query: { sessionId: string; projectId?: string }) =>
-  Promise<{ ok?: boolean; code?: string; message?: string } | undefined>
+  retireMember?: (query: {
+    sessionId: string
+    projectId?: string
+    taskDisposition?: CadreRetireTaskDisposition
+    actorSessionId?: string
+    transferTo?: string
+  }) => Promise<CadreRetireResult | undefined>
 }
 
 interface EmployeeRecord {
@@ -207,7 +213,9 @@ export function apply(ctx: ClientContext): void {
   // Roster is the ledger's authority for supervisor/worker identity. The unit
   // is the project, and a project IS an official Workspace (DC-001 R2/R3), so
   // the roster is read per Workspace id and merged for the sidebar's rows.
-  const roster = createSnapshotStore<CadreRosterState>({ status: 'loading', members: [], error: null })
+  const roster = createSnapshotStore<CadreRosterState>({
+    status: 'loading', members: [], error: null, projects: new Map(),
+  })
   const projectState = createSnapshotStore<CadreProjectState>({ supervisors: new Set(), defaultProjectId: null })
   // The browser is another client plugin; a cordis service is the only
   // allowed value channel between them (bundle purity gate).
@@ -279,46 +287,74 @@ export function apply(ctx: ClientContext): void {
 
   const refreshRoster = (): void => {
     syncDefaultProject()
+    const projects = projectItems().map(item => item.workspaceId)
+    const loadingProjects = new Map<string, CadreProjectRosterState>(
+      projects.map(projectId => [projectId, { status: 'loading', memberCount: 0 }]),
+    )
+    roster.set({ ...roster.getSnapshot(), status: 'loading', error: null, projects: loadingProjects })
     const target = bridge()
     const read = target?.listRoster
+    const channelError = '花名册通道未接入：window.cadre.listRoster 未注册'
     if (read === undefined) {
+      const failedProjects = new Map<string, CadreProjectRosterState>(
+        projects.map(projectId => [projectId, { status: 'error', memberCount: 0, error: channelError }]),
+      )
       roster.set({
         status: 'error',
         members: roster.getSnapshot().members,
-        error: '花名册通道未接入：window.cadre.listRoster 未注册',
+        error: channelError,
         notice: roster.getSnapshot().notice ?? null,
+        projects: failedProjects,
       })
       return
     }
-    const projects = projectItems().map(item => item.workspaceId)
     if (projects.length === 0) {
-      roster.set({ status: 'ready', members: [], error: null, notice: null })
+      roster.set({ status: 'ready', members: [], error: null, notice: null, projects: new Map() })
       projectState.set({ supervisors: new Set(), defaultProjectId: null })
       sessionRank.set(new Map())
       return
     }
-    void Promise.allSettled(projects.map(projectId => read({ projectId }).then(result => ({
+    const readProject = (projectId: string): Promise<{
+      projectId: string
+      rows: readonly RosterRow[]
+      warning: string | undefined
+    }> => Promise.resolve().then(() => read({ projectId })).then(result => ({
       projectId,
-      rows: (result?.members ?? result?.rows ?? []) as readonly RosterRow[],
+      rows: result?.members ?? result?.rows ?? [],
       warning: result?.warning?.message,
-    })))).then((results) => {
+    }))
+    void Promise.allSettled(projects.map(readProject)).then((results) => {
       const previousSupervisors = projectState.getSnapshot().supervisors
       const members: CadreRosterMember[] = []
       const supervisors = new Set<string>()
       const failedProjects = new Set<string>()
+      const projectStates = new Map<string, CadreProjectRosterState>()
       const failures: string[] = []
       const warnings: string[] = []
       let succeeded = 0
       for (const [index, result] of results.entries()) {
+        const projectId = projects[index]
+        if (projectId === undefined) continue
         if (result.status === 'rejected') {
-          failures.push(reasonOf(result.reason))
-          const failed = projects[index]
-          if (failed !== undefined) failedProjects.add(failed)
+          const reason = reasonOf(result.reason)
+          failures.push(reason)
+          failedProjects.add(projectId)
+          projectStates.set(projectId, { status: 'error', memberCount: 0, error: reason })
+          continue
+        }
+        const { rows, warning } = result.value
+        if (warning !== undefined) warnings.push(warning)
+        // A missing-roster warning on an empty read is data loss, not an empty
+        // team. Keep the project in error so the row exposes retry.
+        if (warning !== undefined && rows.length === 0) {
+          failures.push(warning)
+          failedProjects.add(projectId)
+          projectStates.set(projectId, { status: 'error', memberCount: 0, error: warning })
           continue
         }
         succeeded += 1
-        if (result.value.warning !== undefined) warnings.push(result.value.warning)
-        for (const row of result.value.rows) {
+        projectStates.set(projectId, { status: 'ready', memberCount: rows.length })
+        for (const row of rows) {
           members.push({
             sessionId: row.sessionId,
             role: row.role,
@@ -327,7 +363,7 @@ export function apply(ctx: ClientContext): void {
             ...(row.state === undefined ? {} : { state: row.state }),
           })
           if (row.role === 'supervisor' && row.state !== 'departed') {
-            supervisors.add(result.value.projectId)
+            supervisors.add(projectId)
           }
         }
       }
@@ -337,6 +373,7 @@ export function apply(ctx: ClientContext): void {
           members: roster.getSnapshot().members,
           error: `ROSTER_READ_FAILED · ${failures[0] ?? '未知错误'}`,
           notice: roster.getSnapshot().notice ?? null,
+          projects: projectStates,
         })
         return
       }
@@ -355,6 +392,7 @@ export function apply(ctx: ClientContext): void {
         members,
         error: failures.length === 0 ? null : `ROSTER_PARTIAL · ${failures[0] ?? '未知错误'}`,
         notice: members.length > 0 ? null : warnings[0] ?? null,
+        projects: projectStates,
       })
     })
   }
@@ -497,19 +535,20 @@ export function apply(ctx: ClientContext): void {
   })
 
   const projectActionsInjected = (): CadreProjectActionsInjected => ({
-    hooks: { projectState },
+    hooks: { projectState, roster },
     startSession: (workspaceId) => {
       workspaceNavigation.startSession(workspaceId as Parameters<WorkspaceNavigation['startSession']>[0])
     },
     requestCadreCreate: requestCreate,
     openLedger,
+    retryRoster: refreshRoster,
   })
 
   const retireInjected = (): CadreRetireInjected => ({
     hooks: { roster, request: cadreRetireRequest },
     requestRetire,
     settleRetire,
-    retire: async (sessionId) => {
+    retire: async (sessionId, options?: CadreRetireOptions) => {
       const target = bridge()
       if (target?.retireMember === undefined) {
         return { ok: false, code: 'CHANNEL_MISSING', message: 'window.cadre.retireMember 未注册' }
@@ -519,14 +558,21 @@ export function apply(ctx: ClientContext): void {
         return { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
       }
       try {
-        const result = await target.retireMember({ projectId, sessionId })
+        const result = await target.retireMember({
+          projectId,
+          sessionId,
+          ...(options?.taskDisposition === undefined ? {} : { taskDisposition: options.taskDisposition }),
+          ...(options?.actorSessionId === undefined ? {} : { actorSessionId: options.actorSessionId }),
+          ...(options?.transferTo === undefined ? {} : { transferTo: options.transferTo }),
+        })
         refreshRoster()
         refreshEmployees()
         return {
           ok: result?.ok === true,
           ...(result?.code === undefined ? {} : { code: result.code }),
           ...(result?.message === undefined ? {} : { message: result.message }),
-        }
+          ...(result?.tasks === undefined ? {} : { tasks: result.tasks }),
+        } satisfies CadreRetireResult
       } catch (error) {
         return { ok: false, code: 'RETIRE_FAILED', message: reasonOf(error) }
       }
