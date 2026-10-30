@@ -476,6 +476,8 @@
     { "path": "./packages/bundle/web-app" },
     { "path": "./packages/cadre/host-collab" },
     { "path": "./packages/cadre/host-governance" },
+    { "path": "./packages/cadre/host-write-guard" },
+    { "path": "./packages/cadre/host-supervisor-skill" },
     { "path": "./packages/bundle/cadre-app" },
     { "path": "./packages/boot/app-boot" },
     { "path": "./packages/boot/cmdline" },

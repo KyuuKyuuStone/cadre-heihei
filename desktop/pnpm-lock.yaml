@@ -2511,6 +2511,12 @@ importers:
       '@deepseek-ai/dsh-host-governance':
         specifier: workspace:*
         version: link:../../cadre/host-governance
+      '@deepseek-ai/dsh-host-supervisor-skill':
+        specifier: workspace:*
+        version: link:../../cadre/host-supervisor-skill
+      '@deepseek-ai/dsh-host-write-guard':
+        specifier: workspace:*
+        version: link:../../cadre/host-write-guard
 
   packages/bundle/headless:
     dependencies:
@@ -3170,6 +3176,10 @@ importers:
   packages/cadre/host-collab: {}
 
   packages/cadre/host-governance: {}
+
+  packages/cadre/host-supervisor-skill: {}
+
+  packages/cadre/host-write-guard: {}
 
   packages/client/connection:
     dependencies:
@@ -5668,6 +5678,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-workspace':
         specifier: workspace:*
         version: link:../ui-workspace
+      '@deepseek-ai/dsh-host-governance':
+        specifier: workspace:*
+        version: link:../../cadre/host-governance
       clsx:
         specifier: ^2.0.0
         version: 2.1.1

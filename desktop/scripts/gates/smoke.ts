@@ -30,6 +30,8 @@ const VITEST_TARGETS = [
   'apps/desktop/tests/cadre-packaging-guard.spec.ts',
   'packages/cadre/host-collab/tests',
   'packages/cadre/host-governance/tests',
+  'packages/cadre/host-write-guard/tests',
+  'packages/cadre/host-supervisor-skill/tests',
 ]
 
 /** 判别力自证（two-state-evidence）通过该变量临时追加注入样本。 */

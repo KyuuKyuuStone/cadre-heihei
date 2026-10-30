@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "roles": ["supervisor"],
+  "roots": ["project", "reports"],
+  "reportDirName": "reports",
+  "allowExtensions": [".md", ".txt"],
+  "writeTools": {
+    "write": { "path": "file_path" },
+    "edit": { "path": "file_path" },
+    "str_replace_editor": { "path": "path", "altPaths": ["file_path"] }
+  },
+  "denyTools": {
+    "office_docx": "office",
+    "office_xlsx": "office",
+    "office_pptx": "office",
+    "bash": "shell",
+    "pwsh": "shell"
+  },
+  "denyToolPrefixes": ["office_", "docx_", "xlsx_", "pptx_"],
+  "extraRoots": []
+}

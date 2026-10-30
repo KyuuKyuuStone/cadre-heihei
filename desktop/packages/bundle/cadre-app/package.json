@@ -31,6 +31,8 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-host-collab": "workspace:*",
-    "@deepseek-ai/dsh-host-governance": "workspace:*"
+    "@deepseek-ai/dsh-host-governance": "workspace:*",
+    "@deepseek-ai/dsh-host-write-guard": "workspace:*",
+    "@deepseek-ai/dsh-host-supervisor-skill": "workspace:*"
   }
 }

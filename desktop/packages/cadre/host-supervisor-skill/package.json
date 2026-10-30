@@ -1,0 +1,15 @@
+{
+  "name": "@deepseek-ai/dsh-host-supervisor-skill",
+  "description": "Supervisor-only Cadre management Skill",
+  "version": "0.10.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": ["lib/**", "skills/**", "!lib/**/*.map"],
+  "license": "MIT"
+}
