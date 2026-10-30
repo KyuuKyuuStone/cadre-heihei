@@ -265,7 +265,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       if (supervisor === undefined) return { ok: false, code: 'ESCALATE_FAILED', message: '本项目没有在册 supervisor' }
       await ctx.sessionController.prompt({
         requestId: randomUUID(), sessionId: supervisor.sessionId, mode: 'queue',
-        content: [{ type: 'text', text: `【升级】任务 ${input.taskId} 已停摆较久且催办无回应，请向用户汇报并请求裁决。` }],
+        content: [{ type: 'text', text: `【需要您决定】任务 ${input.taskId} 已停摆较久且催办无回应，请向用户汇报并请求裁决。` }],
       }, AbortSignal.timeout(60_000))
       return { ok: true }
     },

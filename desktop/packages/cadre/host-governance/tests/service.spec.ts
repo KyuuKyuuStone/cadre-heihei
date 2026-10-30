@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { StallService, type StallPorts } from '../src/service.ts'
 import type {
@@ -130,6 +131,13 @@ describe('stall detection', () => {
     await h.service.scan()
     const view = h.service.views()[0]
     expect(view).toMatchObject({ stallState: 'stalled', assigneeName: '小明', nudgeCount: 0 })
+    expect(view).toMatchObject({
+      elapsedMs: null,
+      heartbeatAt: null,
+      firstTokenAt: null,
+      tokensSoFar: null,
+      stallBasis: { kind: 'no_events', stepKind: null, toolName: null, elapsedMs: 15 * MIN },
+    })
     expect(h.prompts).toHaveLength(1)
     expect(h.prompts[0]?.sessionId).toBe(SUP)
     expect(h.prompts[0]?.text).toContain('已停摆')
@@ -204,6 +212,108 @@ describe('stall detection', () => {
     expect(h.service.views()[0]?.stallState).toBe('waiting_question')
     expect(h.prompts).toEqual([])
     expect(h.goals).toEqual([])
+  })
+
+  it('does not flag a 7-minute model generation step, and escalates only past 10 minutes', async () => {
+    const h = harness()
+    const base = Date.UTC(2026, 9, 29, 12, 0, 0)
+    h.setNow(base)
+    h.setActivity({
+      lastActivityAt: base - 7 * MIN, kind: 'assistant', waitingQuestion: false,
+      stepKind: 'model_generation', stepSince: base - 7 * MIN,
+    })
+    await h.service.scan()
+    await h.service.scan()
+    expect(h.service.views()[0]?.stallState).toBe('normal')
+    expect(h.service.views()[0]).toMatchObject({
+      elapsedMs: 7 * MIN,
+      heartbeatAt: base,
+      firstTokenAt: null,
+      tokensSoFar: null,
+      inferred: false,
+      stallBasis: {
+        kind: 'model_generation', stepKind: 'model_generation', toolName: null,
+        elapsedMs: 7 * MIN, heartbeatAgeMs: 0,
+      },
+    })
+    expect(h.prompts).toEqual([])
+
+    h.setNow(base + 4 * MIN)
+    h.setActivity({
+      lastActivityAt: base + 4 * MIN - 11 * MIN, kind: 'assistant', waitingQuestion: false,
+      stepKind: 'model_generation', stepSince: base + 4 * MIN - 11 * MIN,
+    })
+    await h.service.scan()
+    expect(h.service.views()[0]?.stallState).toBe('stalled')
+    const nudged = await h.service.act(request(h))
+    expect(nudged).toMatchObject({ ok: true, action: 'nudge' })
+    expect(h.prompts.at(-1)?.text).toContain('stallBasis')
+  })
+
+  it('treats a 3.5-minute tool execution as normal, not stalled', async () => {
+    const h = harness()
+    const base = Date.UTC(2026, 9, 29, 12, 0, 0)
+    h.setNow(base)
+    h.setActivity({
+      lastActivityAt: base - 3.5 * MIN, kind: 'tool', waitingQuestion: false,
+      stepKind: 'tool_execution', stepSince: base - 3.5 * MIN, toolName: 'docx_build',
+    })
+    await h.service.scan()
+    await h.service.scan()
+    expect(h.service.views()[0]?.stallState).toBe('normal')
+    expect(h.service.views()[0]).toMatchObject({
+      elapsedMs: 3.5 * MIN,
+      stallBasis: { kind: 'tool_execution', stepKind: 'tool_execution', toolName: 'docx_build' },
+    })
+    expect(h.prompts).toEqual([])
+  })
+
+  it('exposes the same fields as the shared front-end contract fixture', async () => {
+    const fixture = JSON.parse(readFileSync(new URL('./fixtures/stall-view-contract.json', import.meta.url), 'utf8')) as {
+      generation: Record<string, unknown>
+      tool: Record<string, unknown>
+    }
+    const h = harness()
+    const base = Date.UTC(2026, 9, 29, 12, 0, 0)
+    h.setNow(base)
+    h.setActivity({
+      lastActivityAt: base - 7 * MIN, kind: 'assistant', waitingQuestion: false,
+      stepKind: 'model_generation', stepSince: base - 7 * MIN,
+    })
+    await h.service.scan()
+    expect(h.service.views()[0]).toMatchObject(fixture.generation)
+
+    h.setActivity({
+      lastActivityAt: base - 3.5 * MIN, kind: 'tool', waitingQuestion: false,
+      stepKind: 'tool_execution', stepSince: base - 3.5 * MIN, toolName: 'docx_build',
+    })
+    await h.service.scan()
+    expect(h.service.views()[0]).toMatchObject(fixture.tool)
+  })
+
+  it('recovers once a long generation is followed by a normal step', async () => {
+    const h = harness()
+    const base = Date.UTC(2026, 9, 29, 12, 0, 0)
+    h.setNow(base)
+    h.setActivity({
+      lastActivityAt: base - 7 * MIN, kind: 'assistant', waitingQuestion: false,
+      stepKind: 'model_generation', stepSince: base - 7 * MIN,
+    })
+    await h.service.scan()
+    await h.service.scan()
+    expect(h.service.views()[0]?.stallState).toBe('normal')
+  })
+
+  it('marks an old log without additive events as inferred and leaves lifecycle fields null', async () => {
+    const h = harness()
+    const base = Date.UTC(2026, 9, 29, 12, 0, 0)
+    h.setNow(base)
+    h.setActivity({ lastActivityAt: base - 15 * MIN, kind: 'assistant', waitingQuestion: false, inferred: true })
+    await h.service.scan()
+    expect(h.service.views()[0]).toMatchObject({
+      inferred: true, firstTokenAt: null, tokensSoFar: null, heartbeatAt: null,
+      stallBasis: { kind: 'no_events', stepKind: null },
+    })
   })
 
   it('recovers only after the activity stays normal for recoverAfterMs', async () => {

@@ -1,0 +1,36 @@
+{
+  "generation": {
+    "stallState": "normal",
+    "elapsedMs": 420000,
+    "heartbeatAt": 1793275200000,
+    "firstTokenAt": null,
+    "tokensSoFar": null,
+    "inferred": false,
+    "stallBasis": {
+      "kind": "model_generation",
+      "since": "2026-10-29T11:53:00.000Z",
+      "stepKind": "model_generation",
+      "toolName": null,
+      "elapsedMs": 420000,
+      "heartbeatAgeMs": 0,
+      "evidenceEventSeq": null
+    }
+  },
+  "tool": {
+    "stallState": "normal",
+    "elapsedMs": 210000,
+    "heartbeatAt": 1793275200000,
+    "firstTokenAt": null,
+    "tokensSoFar": null,
+    "inferred": false,
+    "stallBasis": {
+      "kind": "tool_execution",
+      "since": "2026-10-29T11:56:30.000Z",
+      "stepKind": "tool_execution",
+      "toolName": "docx_build",
+      "elapsedMs": 210000,
+      "heartbeatAgeMs": 0,
+      "evidenceEventSeq": null
+    }
+  }
+}

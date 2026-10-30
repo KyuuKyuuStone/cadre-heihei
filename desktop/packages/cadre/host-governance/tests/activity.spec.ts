@@ -49,3 +49,56 @@ describe('windowed waiting_question', () => {
     expect(waitingQuestion(events, NEW_TASK)).toBe(true)
   })
 })
+
+describe('three-state step projection', () => {
+  it('reports model_generation for an open turn with a started model call', () => {
+    const events: ActivityEvent[] = [
+      { type: 'turn/received', time: NEW_TASK, data: { turn: 1 } },
+      { type: 'model_call/started', time: NEW_TASK + MIN, data: { turn: 1, step: 1, provider: 'p', model: 'm' } },
+    ]
+    expect(activityFrom(events, NEW_TASK)).toMatchObject({
+      stepKind: 'model_generation', stepSince: NEW_TASK + MIN,
+    })
+  })
+
+  it('reports tool_execution for an unanswered tool call and no step after a turn closes', () => {
+    const events: ActivityEvent[] = [
+      { type: 'turn/received', time: NEW_TASK, data: { turn: 1 } },
+      { type: 'tool/call', time: NEW_TASK + 2 * MIN, data: { callId: 'c1', name: 'docx_build' } },
+    ]
+    expect(activityFrom(events, NEW_TASK)).toMatchObject({
+      stepKind: 'tool_execution', stepSince: NEW_TASK + 2 * MIN, toolName: 'docx_build',
+    })
+    const closed: ActivityEvent[] = [
+      ...events,
+      { type: 'turn/aborted', time: NEW_TASK + 3 * MIN, data: { turn: 1, reason: { kind: 'aborted', reason: 'x' }, hadFirstToken: false } },
+      { type: 'turn/end', time: NEW_TASK + 3 * MIN, data: { turn: 1, reason: { kind: 'aborted', reason: 'x' } } },
+    ]
+    expect(activityFrom(closed, NEW_TASK).stepKind).toBeUndefined()
+  })
+
+  it('derives first token, usage and evidence seq from the active step', () => {
+    const events: ActivityEvent[] = [
+      { type: 'turn/received', time: NEW_TASK, seq: 1, data: { turn: 1 } },
+      { type: 'model_call/started', time: NEW_TASK + MIN, seq: 2, data: { turn: 1, step: 1, provider: 'p', model: 'm' } },
+      { type: 'model_call/first_token', time: NEW_TASK + MIN + 1000, seq: 3, data: { turn: 1, step: 1 } },
+      { type: 'assistant/message', time: NEW_TASK + 2 * MIN, seq: 4, data: { usage: { outputTokens: 12 } } },
+    ]
+    expect(activityFrom(events, NEW_TASK)).toMatchObject({
+      stepKind: 'model_generation',
+      firstTokenAt: NEW_TASK + MIN + 1000,
+      tokensSoFar: 12,
+      evidenceEventSeq: 3,
+    })
+  })
+
+  it('marks an open compaction window', () => {
+    const events: ActivityEvent[] = [
+      { type: 'compaction/start', time: NEW_TASK, data: {} },
+      { type: 'compaction/summary', time: NEW_TASK + MIN, data: {} },
+    ]
+    expect(activityFrom(events, NEW_TASK).compactionActive).toBe(true)
+    events.push({ type: 'compaction/end', time: NEW_TASK + 2 * MIN, data: {} })
+    expect(activityFrom(events, NEW_TASK).compactionActive).toBeUndefined()
+  })
+})

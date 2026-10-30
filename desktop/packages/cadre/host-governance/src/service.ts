@@ -12,6 +12,7 @@ import {
   type SessionActivity,
   type StallActionResult,
   type StallActionRequest,
+  type StallBasis,
   type StallConfig,
   type StallState,
   type StallTaskView,
@@ -66,6 +67,16 @@ interface Episode {
   notifiedState: StallState | 'waiting_question' | undefined
   /** First normal sample after activity; the episode only recovers once this window completes. */
   recoveringSince: number | undefined
+  /** Active step class and start from the additive turn lifecycle events. */
+  stepKind: 'model_generation' | 'tool_execution' | undefined
+  stepSince: number | undefined
+  toolName: string | undefined
+  /** Runtime heartbeat age basis; absent on old logs (degraded). */
+  heartbeatAt: number | undefined
+  firstTokenAt: number | undefined
+  tokensSoFar: number | undefined
+  evidenceEventSeq: number | undefined
+  inferred: boolean
 }
 
 /** Owner supervisor for a project's stall notifications and actions. */
@@ -84,16 +95,22 @@ function durationText(ms: number): string {
   return `${String(Math.max(1, Math.round(ms / 60_000)))} 分钟`
 }
 
-function notificationText(view: StallTaskView, kind: 'stalled' | 'possibly_stalled' | 'recovered' | 'escalated'): string {
+/** Internal notifications are model-visible but hidden from users by the UI prefix. */
+const INTERNAL_PREFIX = '【主管内部】'
+/** The one escalation message the user is meant to see. */
+const USER_DECISION_PREFIX = '【需要您决定】'
+
+/** Render one supervisor notification; exported for the prefix contract test. */
+export function notificationText(view: StallTaskView, kind: 'stalled' | 'possibly_stalled' | 'recovered' | 'escalated'): string {
   if (kind === 'recovered') {
-    return `【已恢复活动】任务 ${view.taskId}「${view.title}」的员工重新开始活动，停摆提示解除。`
+    return `${INTERNAL_PREFIX}已恢复活动：任务 ${view.taskId}「${view.title}」的员工重新开始活动，停摆提示解除。`
   }
   if (kind === 'escalated') {
-    return `【升级】任务 ${view.taskId}「${view.title}」已停摆 ${durationText(view.silenceMs ?? 0)}，已催办 ${String(view.nudgeCount)} 次仍无回应，请用户裁决。`
+    return `${USER_DECISION_PREFIX}任务 ${view.taskId}「${view.title}」已停摆 ${durationText(view.silenceMs ?? 0)}，已催办 ${String(view.nudgeCount)} 次仍无回应，请用户裁决。`
   }
   const label = kind === 'stalled' ? '已停摆' : '可能停摆'
   return [
-    `【${label}】任务 ${view.taskId}「${view.title}」`,
+    `${INTERNAL_PREFIX}${label}：任务 ${view.taskId}「${view.title}」`,
     `员工：${view.assigneeName}（${view.assigneeSessionId}）`,
     `最后活动：${view.lastActivityAt === null ? '未知' : new Date(view.lastActivityAt).toISOString()}（${String(view.lastActivityKind ?? 'status')}）`,
     `无活动：${durationText(view.silenceMs ?? 0)}`,
@@ -127,6 +144,27 @@ function viewOf(episode: Episode, member: WatchMember | undefined, now: number):
     version: episode.task.version,
     stale: episode.stale || episode.lastActivityAt === undefined,
     updatedAt: episode.task.updatedAt,
+    elapsedMs: episode.stepSince === undefined ? null : Math.max(0, now - episode.stepSince),
+    heartbeatAt: episode.heartbeatAt ?? null,
+    firstTokenAt: episode.firstTokenAt ?? null,
+    tokensSoFar: episode.tokensSoFar ?? null,
+    stallBasis: basisOf(episode, now),
+    inferred: episode.inferred,
+  }
+}
+
+/** Build the machine-readable stall basis (also for no_events). */
+function basisOf(episode: Episode, now: number): StallBasis {
+  const kind = episode.stepKind ?? 'no_events'
+  const since = episode.stepSince ?? episode.lastActivityAt ?? now
+  return {
+    kind,
+    since: new Date(since).toISOString(),
+    stepKind: episode.stepKind ?? null,
+    toolName: episode.toolName ?? null,
+    elapsedMs: Math.max(0, now - since),
+    heartbeatAgeMs: Math.max(0, now - (episode.heartbeatAt ?? episode.lastActivityAt ?? now)),
+    evidenceEventSeq: episode.evidenceEventSeq ?? null,
   }
 }
 
@@ -185,6 +223,14 @@ export class StallService {
       escalated: false,
       notifiedState: undefined,
       recoveringSince: undefined,
+      stepKind: undefined,
+      stepSince: undefined,
+      toolName: undefined,
+      heartbeatAt: undefined,
+      firstTokenAt: undefined,
+      tokensSoFar: undefined,
+      evidenceEventSeq: undefined,
+      inferred: false,
     }
     this.#episodes.set(key, created)
     return created
@@ -238,6 +284,13 @@ export class StallService {
             : 'status'
         }
         episode.waitingQuestion = activity.waitingQuestion
+        episode.firstTokenAt = activity.firstTokenAt
+        episode.tokensSoFar = activity.tokensSoFar
+        episode.evidenceEventSeq = activity.stepKind === undefined
+          ? (activity.lastActivitySeq ?? episode.evidenceEventSeq)
+          : (activity.evidenceEventSeq ?? activity.lastActivitySeq ?? episode.evidenceEventSeq)
+        episode.inferred = activity.inferred === true
+        episode.heartbeatAt = activity.stepKind === undefined ? undefined : now
 
         if (!stallable) {
           if (episode.state !== 'normal') {
@@ -262,12 +315,51 @@ export class StallService {
           await this.notify(projectId, viewOf(episode, member, now), next)
         }
 
-        if (activity.waitingQuestion) {
+        if (activity.compactionActive === true) {
+          // Compaction owns the turn log for its duration; do not call it a stall.
+          episode.silenceStreak = 0
+          episode.recoveringSince = undefined
+          if (episode.state !== 'normal') {
+            episode.state = 'normal'
+            episode.stateSince = now
+          }
+        } else if (activity.waitingQuestion) {
           episode.silenceStreak = 0
           episode.recoveringSince = undefined
           if (episode.state !== 'waiting_question') {
             episode.state = 'waiting_question'
             episode.stateSince = now
+          }
+        } else if (activity.stepKind !== undefined) {
+          // model_generation / tool_execution: long single-step work is normal.
+          // Only a step whose own age crosses the 10-minute ceiling is escalated;
+          // no_events keeps the classic 3/10-minute thresholds.
+          episode.stepKind = activity.stepKind
+          episode.stepSince = activity.stepSince ?? episode.stepSince ?? last
+          episode.toolName = activity.toolName
+          episode.heartbeatAt = now
+          episode.silenceStreak = 0
+          const stepAge = Math.max(0, now - (episode.stepSince ?? last ?? now))
+          if (stepAge >= this.#config.stalledAfterMs) {
+            if (episode.state !== 'stalled') {
+              episode.state = 'stalled'
+              episode.stateSince = now
+              episode.notifiedState = 'stalled'
+              await this.notify(projectId, viewOf(episode, member, now), 'stalled')
+            }
+          } else {
+            if (previouslyStalled) {
+              const recovered = viewOf({ ...episode, state: 'normal' }, member, now)
+              await this.notify(projectId, recovered, 'recovered')
+              episode.episodeId = `${task.taskId}:${new Date(now).toISOString()}`
+              episode.nudgeCount = 0
+              episode.lastNudgedAt = undefined
+              episode.escalated = false
+              episode.notifiedState = undefined
+            }
+            episode.state = 'normal'
+            episode.stateSince = now
+            episode.recoveringSince = undefined
           }
         } else if (last === undefined) {
           // No activity source: keep the previous state (never silently call it normal)
@@ -275,6 +367,9 @@ export class StallService {
           episode.silenceStreak = 0
           episode.recoveringSince = undefined
         } else {
+          episode.stepKind = undefined
+          episode.stepSince = undefined
+          episode.toolName = undefined
           const silence = Math.max(0, now - last)
           const level = levelFor(silence, this.#config)
           if (level === 'normal') {
@@ -431,8 +526,17 @@ export class StallService {
         return { ok: false, code: 'NUDGE_COOLDOWN', message: `催办冷却中，还需 ${String(Math.ceil((this.#config.nudgeCooldownMs - (now - episode.lastNudgedAt)) / 1000))} 秒` }
       }
       try {
+        const basis = {
+          kind: episode.stepKind ?? 'no_events',
+          since: new Date(episode.stepSince ?? episode.lastActivityAt ?? now).toISOString(),
+          stepKind: episode.stepKind,
+          toolName: episode.toolName,
+          elapsedMs: now - (episode.stepSince ?? episode.lastActivityAt ?? now),
+          heartbeatAgeMs: now - (episode.heartbeatAt ?? episode.lastActivityAt ?? now),
+        }
         await this.#ports.prompt(episode.task.assigneeSessionId,
-          `【主管催办】任务 ${episode.task.taskId}「${episode.task.title}」已 ${durationText(now - (episode.lastActivityAt ?? now))} 无活动。请立即继续；如遇阻塞，请用 report_task 或请示主管说明。`)
+          `【主管催办】任务 ${episode.task.taskId}「${episode.task.title}」已 ${durationText(now - (episode.lastActivityAt ?? now))} 无活动。`
+          + ` stallBasis=${JSON.stringify(basis)}。请立即继续；如遇阻塞，请用 report_task 或请示主管说明。`)
       } catch (error) {
         return { ok: false, code: 'NUDGE_FAILED', message: error instanceof Error ? error.message : String(error) }
       }

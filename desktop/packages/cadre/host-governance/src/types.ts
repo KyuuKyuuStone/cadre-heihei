@@ -67,6 +67,36 @@ export interface SessionActivity {
   readonly kind?: ActivityKind
   /** True while an unanswered `ask_user_question` call owns the turn (DF-011). */
   readonly waitingQuestion: boolean
+  /** Active step class from the additive turn lifecycle events. */
+  readonly stepKind?: 'model_generation' | 'tool_execution'
+  /** When the active step started (epoch ms). */
+  readonly stepSince?: number
+  /** Tool name when `stepKind` is `tool_execution`. */
+  readonly toolName?: string
+  /** A compaction window is open; stall detection pauses until it closes. */
+  readonly compactionActive?: boolean
+  /** First non-terminal chunk of the active model call (epoch ms). */
+  readonly firstTokenAt?: number
+  /** Output tokens observed for the active step, when a usage-bearing event exists. */
+  readonly tokensSoFar?: number
+  /** Seq of the event that establishes the active step / last activity. */
+  readonly evidenceEventSeq?: number
+  /** Seq of the latest real activity event (fallback for no_events). */
+  readonly lastActivitySeq?: number
+  /** True when the log predates additive turn lifecycle events. */
+  readonly inferred?: boolean
+}
+
+/** Machine-readable basis for a stall/nudge decision. */
+export interface StallBasis {
+  readonly kind: 'model_generation' | 'tool_execution' | 'no_events'
+  /** ISO UTC timestamp of the step or last activity. */
+  readonly since: string
+  readonly stepKind: 'model_generation' | 'tool_execution' | null
+  readonly toolName: string | null
+  readonly elapsedMs: number
+  readonly heartbeatAgeMs: number
+  readonly evidenceEventSeq: number | null
 }
 
 /** Task view returned to the Host/IPC surface. */
@@ -90,6 +120,18 @@ export interface StallTaskView {
   readonly version: number
   readonly stale: boolean
   readonly updatedAt: string
+  /** Age of the active step; null when no step is active. */
+  readonly elapsedMs: number | null
+  /** Runtime heartbeat timestamp for the active step; null for old/no-step logs. */
+  readonly heartbeatAt: number | null
+  /** First token of the active model call; null when absent or not generated yet. */
+  readonly firstTokenAt: number | null
+  /** Output tokens observed so far, when the log carries usage. */
+  readonly tokensSoFar: number | null
+  /** Decision basis for the current state (also present for no_events). */
+  readonly stallBasis: StallBasis | null
+  /** True when additive turn events are absent and the view is inferred. */
+  readonly inferred: boolean
 }
 
 /** Supported supervisor actions. */
