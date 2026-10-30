@@ -11,6 +11,7 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { PropsRenderFactories, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { UserContentAttachment, UserContentData, UserContentInput } from '../src/client/contract/slots.ts'
 import { UserContent } from '../src/client/chat/UserContent.tsx'
+import { createChatStore } from '../src/client/stores.ts'
 import { en, NS, zh } from '../src/client/locale.ts'
 import type { UserTextInjected } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { UserTextRegistry } from '../../ui-conversation/src/client/conversation/user-text-registry.ts'
@@ -87,9 +88,10 @@ async function bench() {
         data-current-session={props.useSession(snapshot => snapshot.sessionId)}>{name}</span>
     }))
   } })
+  const chatStore = createChatStore()
   const mountContent = () => runtime.mount({ inject: ['slots'], apply: (ctx) => {
     ctx.slots.registerFactory({
-      name: 'conversation.chat.user.content', scope: 'session', locale: NS,
+      name: 'conversation.chat.user.content', scope: 'session', locale: NS, store: chatStore,
       children: { 'conversation.chat.user.images': { kind: 'single', scope: 'session' } },
     }, UserContent)
   } })

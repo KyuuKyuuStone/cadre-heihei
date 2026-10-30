@@ -57,6 +57,7 @@
 }
 
 .meta,
+.basis,
 .suggestion,
 .hint {
   color: var(--dsw-alias-label-secondary);
@@ -84,12 +85,116 @@
   font-size: 11px;
 }
 
+.internalBar {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
 .actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
   padding-top: 2px;
+}
+
+.executionRow,
+.writeGuard,
+.lastError {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-left: 3px solid var(--dsw-alias-state-business-primary);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+}
+
+.executionHead,
+.executionMeta,
+.errorHead,
+.errorAt,
+.errorHint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.executionHead {
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+}
+
+.executionDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.executionTask {
+  overflow: hidden;
+  margin-left: auto;
+  color: var(--dsw-alias-label-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.executionMeta,
+.errorAt,
+.errorHint {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.degraded {
+  color: var(--dsw-alias-state-warn-label);
+  font-size: 10px;
+}
+
+.writeGuard,
+.lastError {
+  border-left-color: var(--dsw-alias-state-error-primary);
+}
+
+.errorHead {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.errorCode {
+  margin-left: auto;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--ds-font-family-code);
+  font-size: 10px;
+}
+
+.errorTask,
+.errorMessage {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.errorTask {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.errorMessage {
+  color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
+}
+
+.errorHint {
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .errorState {

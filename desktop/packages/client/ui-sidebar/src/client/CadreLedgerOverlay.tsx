@@ -8,7 +8,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Input, Modal, Pill, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { type CadreStallState, type CadreStallTaskView, stallStateText } from './cadre-stall.ts'
+import {
+  type CadreStallState,
+  type CadreStallTaskView,
+  executionOf,
+  executionText,
+  stallStateText,
+} from './cadre-stall.ts'
 import css from './CadreLedgerOverlay.module.css'
 
 
@@ -166,7 +172,7 @@ function positionText(row: LedgerRow): string {
 function deliverablesText(row: LedgerRow): string {
   const items = row.latestReport?.deliverables ?? []
   if (items.length === 0) return '—'
-  if (items.length === 1) return items[0]!
+  if (items.length === 1) return items[0] ?? '—'
   return `${items.length} 个文件`
 }
 
@@ -271,7 +277,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
           value={query}
           placeholder="搜索任务 / 员工 / 交付物…"
           aria-label="搜索台账"
-          onChange={event => { setQuery(event.target.value) }}
+          onChange={(event) => { setQuery(event.target.value) }}
         />
         <Button variant="outline" size="sm" onClick={reload}>刷新</Button>
       </div>
@@ -324,19 +330,23 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
             <span role="columnheader">交付物</span>
             <span role="columnheader">验收结果</span>
           </div>
-          {visible.map(row => {
+          {visible.map((row) => {
             const open = expanded === row.taskId
             const overdue = isCadreTaskOverdue(row.dueAt, now)
             const stallTask = stallTasks.get(row.taskId)
-            const stallText = stallTask !== undefined
-              ? stallStateText(stallTask.stallState, stallTask.lastActivityAt, t)
-              : stallProject?.status === 'ready' ? t('stall.activityUnknown') : null
-            const stallClass = stallTask?.stallState === 'stalled'
-              ? css.stallStalled
-              : stallTask?.stallState === 'possibly_stalled'
-                ? css.stallPossiblyStalled
-                : stallTask?.stallState === 'recovered'
-                  ? css.stallRecovered
+            const execution = stallTask === undefined ? null : executionOf(stallTask)
+            const progress = executionText(execution, t)
+            const stallText = progress !== ''
+              ? progress
+              : stallTask !== undefined
+                ? stallStateText(stallTask.stallState, stallTask.lastActivityAt, t)
+                : stallProject?.status === 'ready' ? t('stall.activityUnknown') : null
+            const stallClass = progress !== ''
+              ? css.stallNormal
+              : stallTask?.stallState === 'stalled'
+                ? css.stallStalled
+                : stallTask?.stallState === 'possibly_stalled'
+                  ? css.stallPossiblyStalled
                   : css.stallNormal
             return (
               <div key={row.taskId} className={css.rowGroup} role="rowgroup">
@@ -346,6 +356,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
                   className={overdue ? `${css.row} ${css.overdueRow}` : css.row}
                   data-overdue={overdue ? 'true' : undefined}
                   data-stall-state={stallTask?.stallState}
+                  data-execution-state={execution?.state}
                   aria-expanded={open}
                   onClick={() => { setExpanded(open ? null : row.taskId) }}
                 >

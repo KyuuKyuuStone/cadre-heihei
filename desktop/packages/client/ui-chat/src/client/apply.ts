@@ -32,6 +32,7 @@ import { ChatView } from './chat/ChatView.tsx'
 import { ChatFlow } from './chat/ChatFlow.tsx'
 import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
 import { UserContent } from './chat/UserContent.tsx'
+import { CadreInternalEventsToggle } from './chat/CadreInternalEventsToggle.tsx'
 import { ActivityPill, UsagePill } from './chat/StatsPills.tsx'
 import { registerConversationNodes } from './conversation-nodes/register.ts'
 import { QuotaNoticeHost } from './chat/QuotaNoticeHost.tsx'
@@ -171,9 +172,16 @@ export function apply(ctx: Context): void {
   const performanceUsage = performancePolicy.mode
   registerChatNodeRenderers(ctx, performanceUsage, presentation)
   ctx.slots.registerFactory({
-    name: 'conversation.chat.user.content', scope: 'session', locale: NS,
+    name: 'conversation.chat.user.content', scope: 'session', locale: NS, store: chatStore,
     children: { 'conversation.chat.user.images': { kind: 'single', scope: 'session' } },
   }, UserContent)
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock',
+    id: 'cadre-internal-events-toggle',
+    order: 40,
+    locale: NS,
+    store: chatStore,
+  }, CadreInternalEventsToggle))
 
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
     name: 'settings.general.item',

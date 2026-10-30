@@ -18,7 +18,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreProjectState } from './contract/slots.ts'
-import { type CadreStallState, stallStateText } from './cadre-stall.ts'
+import { type CadreStallState, executionText, stallStateText } from './cadre-stall.ts'
 import css from './CadreSidebar.module.css'
 
 /*
@@ -309,7 +309,7 @@ export function CadreProjectRowActions({
   return (
     <span
       className={css.projectActions}
-      onClick={event => { event.stopPropagation() }}
+      onClick={(event) => { event.stopPropagation() }}
       onPointerEnter={hover.enter}
       onPointerLeave={hover.leave}
     >
@@ -431,12 +431,16 @@ export function CadreSessionSubtitle({
 
   const owned = tasks.filter(task => task.assigneeSessionId === sessionId && ACTIVE_TASK_STATUS.has(task.status))
   const current = owned.find(task => task.status === 'in_progress') ?? owned[0]
+  const progress = executionText(stall?.execution, t)
 
   if (member.role === 'supervisor') {
+    const activity = running ? '运行中' : '空闲'
     return (
       <span className={css.sessionSubtitle}>
-        <span className={running ? css.statusDotRunning : css.statusDotIdle} aria-hidden="true" />
-        <span className={css.subtitleText}>{running ? '运行中 · 正在拆解' : '空闲'}</span>
+        <span className={progress === '' ? (running ? css.statusDotRunning : css.statusDotIdle) : css.statusDotExecution} aria-hidden="true" />
+        <span className={css.subtitleText}>
+          {activity}{progress === '' ? (running ? ' · 正在拆解' : '') : ` · ${progress}`}
+        </span>
       </span>
     )
   }
@@ -449,12 +453,16 @@ export function CadreSessionSubtitle({
       : owned.length > 0
         ? `空闲 · 待处理 ${String(owned.length)}`
         : '空闲'
-  const stallText = stall === undefined ? '' : ` · ${stallStateText(stall.worstState, stall.lastActivityAt, t)}`
-  const dotClass = stall?.worstState === 'stalled'
-    ? css.statusDotStalled
-    : stall?.worstState === 'possibly_stalled'
-      ? css.statusDotMaybeStalled
-      : running ? css.statusDotRunning : css.statusDotIdle
+  const stallText = progress !== ''
+    ? ` · ${progress}`
+    : stall === undefined ? '' : ` · ${stallStateText(stall.worstState, stall.lastActivityAt, t)}`
+  const dotClass = progress !== ''
+    ? css.statusDotExecution
+    : stall?.worstState === 'stalled'
+      ? css.statusDotStalled
+      : stall?.worstState === 'possibly_stalled'
+        ? css.statusDotMaybeStalled
+        : running ? css.statusDotRunning : css.statusDotIdle
   return (
     <span className={css.sessionSubtitle}>
       <span className={dotClass} aria-hidden="true" />
@@ -530,7 +538,7 @@ export function CadreEditMemberMenuItem({
             id="cadre-member-name"
             value={name}
             disabled={pending}
-            onChange={event => { setName(event.target.value) }}
+            onChange={(event) => { setName(event.target.value) }}
           />
           <label className={css.label} htmlFor="cadre-member-description">岗位 / 职责描述</label>
           <textarea
@@ -540,7 +548,7 @@ export function CadreEditMemberMenuItem({
             rows={5}
             maxLength={2000}
             disabled={pending}
-            onChange={event => { setDescription(event.target.value) }}
+            onChange={(event) => { setDescription(event.target.value) }}
           />
           <span className={css.hint}>这里是运行时注入的职责描述，也是会话行上的岗位标识；最多 2000 字。</span>
           {error !== null && <p role="alert" className={css.error}>{error}</p>}

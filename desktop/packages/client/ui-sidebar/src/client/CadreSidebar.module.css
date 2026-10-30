@@ -125,11 +125,13 @@
 .statusDotRunning,
 .statusDotIdle,
 .statusDotStalled,
-.statusDotMaybeStalled {
+.statusDotMaybeStalled,
+.statusDotExecution {
   flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  corner-shape: round;
 }
 
 .statusDotRunning {
@@ -147,6 +149,10 @@
 .statusDotMaybeStalled {
   border: 1px solid var(--dsw-alias-state-warn-primary);
   background: transparent;
+}
+
+.statusDotExecution {
+  background: var(--dsw-alias-state-business-primary);
 }
 
 /* Retire menu + dialog */

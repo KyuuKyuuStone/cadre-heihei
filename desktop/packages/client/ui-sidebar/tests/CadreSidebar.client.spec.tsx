@@ -298,6 +298,36 @@ describe('session identity', () => {
     expect(screen.getByText(/空闲 · 已停摆 · 5 分钟前/)).toBeTruthy()
   })
 
+  it('shows generation/tool execution distinct from no_events stall state', () => {
+    const state = roster({ sessionId: 's1', role: 'worker', description: '前端' })
+    const stall: CadreStallState = {
+      byProject: new Map(),
+      bySession: new Map([['s1', {
+        worstState: 'normal',
+        stalledCount: 0,
+        possiblyStalledCount: 0,
+        lastActivityAt: Date.now() - 3 * 60_000,
+        episodeIds: [],
+        execution: {
+          state: 'model_generation',
+          elapsedMs: 180_000,
+        },
+      }]]),
+    }
+    const useStall = ((selector: (value: CadreStallState) => unknown) => selector(stall)) as never
+    render(<CadreSessionSubtitle {...({
+      sessionId: 's1',
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
+        selector({ byId: {} })) as never,
+      useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+      useStall,
+      t,
+    })} />)
+    expect(screen.getByText(/空闲 · 生成中 · 3 分钟/)).toBeTruthy()
+    expect(screen.queryByText(/已停摆/)).toBeNull()
+  })
+
   it('shows a lost-roster warning instead of claiming an ordinary session', () => {
     const state: CadreRosterState = {
       status: 'ready',

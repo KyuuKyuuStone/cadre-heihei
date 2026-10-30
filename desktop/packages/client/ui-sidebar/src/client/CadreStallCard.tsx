@@ -11,11 +11,18 @@ import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreRosterMember, CadreRosterState } from './CadreSidebar.tsx'
 import {
+  type CadreExecutionView,
   type CadreStallActionBase,
   type CadreStallActionResult,
+  type CadreStallError,
   type CadreStallState,
   type CadreStallTaskView,
   type CadreStallThresholds,
+  elapsedText,
+  executionOf,
+  executionText,
+  isWriteGuardError,
+  localTime,
   relativeTime,
   silenceText,
 } from './cadre-stall.ts'
@@ -75,6 +82,15 @@ function roleText(role: string, t: PropsLocale<'sidebar'>['t']): string {
   return role === 'worker' ? t('stall.card.worker') : role
 }
 
+function basisKindText(
+  kind: NonNullable<CadreStallTaskView['stallBasis']>['kind'],
+  t: PropsLocale<'sidebar'>['t'],
+): string {
+  if (kind === 'model_generation') return t('stall.basis.model_generation')
+  if (kind === 'tool_execution') return t('stall.basis.tool_execution')
+  return t('stall.basis.no_events')
+}
+
 function targetsFrom(members: readonly CadreRosterMember[]): readonly CadreRosterMember[] {
   return members.filter(member => member.role === 'worker' && member.state !== 'departed')
 }
@@ -98,12 +114,33 @@ export function CadreStallCard({
   }
   if (project === undefined || project.status === 'loading' || project.status === 'unavailable') return null
 
-  const stalled = project.tasks.filter(task => task.stallState === 'stalled')
+  const executions = project.tasks.flatMap((task) => {
+    const execution = executionOf(task)
+    return execution === null ? [] : [{ task, execution }]
+  })
+  const errors = project.tasks.flatMap(task => task.lastError === undefined || task.lastError === null
+    ? []
+    : [{ task, error: task.lastError }])
+  // A stalled task is actionable only when it has no live turn; generation and
+  // tool execution are progress, never a stall card.
+  const stalled = project.tasks.filter(task => task.stallState === 'stalled' && executionOf(task) === null)
   const cards = [...new Map(stalled.map(task => [task.episodeId, task])).values()]
-  if (cards.length === 0) return null
+  if (cards.length === 0 && executions.length === 0 && errors.length === 0) return null
 
   return (
     <section className={css.stack} aria-label={t('stall.card.aria')}>
+      {executions.map(({ task, execution }) => (
+        <CadreExecutionRow key={`execution:${task.taskId}`} task={task} execution={execution} t={t} />
+      ))}
+      {errors.map(({ task, error }) => (
+        <CadreErrorMessage
+          key={`error:${task.taskId}:${error.code}:${error.at}`}
+          taskId={task.taskId}
+          title={task.title}
+          error={error}
+          t={t}
+        />
+      ))}
       {cards.map(task => (
         <CadreStallCardItem
           key={task.episodeId}
@@ -120,6 +157,62 @@ export function CadreStallCard({
         />
       ))}
     </section>
+  )
+}
+
+function CadreExecutionRow({
+  task, execution, t,
+}: {
+  readonly task: CadreStallTaskView
+  readonly execution: CadreExecutionView
+  readonly t: PropsLocale<'sidebar'>['t']
+}) {
+  return (
+    <article className={css.executionRow} data-execution-state={execution.state} aria-label={t('stall.execution.aria')}>
+      <div className={css.executionHead}>
+        <span className={css.executionDot} aria-hidden="true" />
+        <strong>{executionText(execution, t)}</strong>
+        <span className={css.executionTask}>{task.title}</span>
+      </div>
+      <div className={css.executionMeta}>
+        <span>{task.assigneeName}</span>
+        {execution.firstTokenAt !== undefined && execution.firstTokenAt !== null && (
+          <span>{t('stall.execution.firstToken', { time: localTime(execution.firstTokenAt, t) })}</span>
+        )}
+        {execution.heartbeatAt !== undefined && execution.heartbeatAt !== null && (
+          <span>{t('stall.execution.heartbeat', { time: localTime(execution.heartbeatAt, t) })}</span>
+        )}
+        {execution.tokensSoFar !== undefined && execution.tokensSoFar !== null && (
+          <span>{t('stall.execution.tokens', { count: execution.tokensSoFar })}</span>
+        )}
+        {task.inferred && <span className={css.degraded}>{t('stall.execution.inferred')}</span>}
+      </div>
+    </article>
+  )
+}
+
+function CadreErrorMessage({
+  taskId, title, error, t,
+}: {
+  readonly taskId: string
+  readonly title: string
+  readonly error: CadreStallError
+  readonly t: PropsLocale<'sidebar'>['t']
+}) {
+  const guard = isWriteGuardError(error.code)
+  return (
+    <article className={guard ? css.writeGuard : css.lastError} role="alert" data-error-code={error.code}>
+      <div className={css.errorHead}>
+        <strong>{guard ? t('stall.writeGuard.title') : t('stall.lastError.title')}</strong>
+        <span className={css.errorCode}>{error.code}</span>
+      </div>
+      <div className={css.errorTask}>{title} · {taskId}</div>
+      <div className={css.errorMessage}>{error.message}</div>
+      <div className={css.errorAt}>
+        {t(guard ? 'stall.writeGuard.at' : 'stall.lastError.at', { time: localTime(error.at, t) })}
+      </div>
+      {guard && <div className={css.errorHint}>{t('stall.writeGuard.hint')}</div>}
+    </article>
   )
 }
 
@@ -144,6 +237,7 @@ function CadreStallCardItem({
   const [reason, setReason] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [internalActionsVisible, setInternalActionsVisible] = useState(false)
   const cooldown = cooldownLeft(task, thresholds.nudgeCooldownMs)
   const canNudge = !stale && task.capabilities.nudge && cooldown === 0
   const cooldownSeconds = Math.ceil(cooldown / 1000)
@@ -226,13 +320,32 @@ function CadreStallCardItem({
           activity: relativeTime(task.lastActivityAt, t),
         })}
       </div>
+      {task.inferred && <div className={css.degraded}>{t('stall.execution.inferred')}</div>}
+      {task.stallBasis !== null && (
+        <div className={css.basis}>
+          {t('stall.card.basis', {
+            kind: basisKindText(task.stallBasis.kind, t),
+            heartbeat: elapsedText(task.stallBasis.heartbeatAgeMs, t),
+          })}
+        </div>
+      )}
       {suggestionText(task.suggestedAction, t) !== '' && (
         <div className={css.suggestion}>{suggestionText(task.suggestedAction, t)}</div>
       )}
       {stale && <div className={css.warning} role="status">{t('stall.card.stale')}</div>}
       {error !== null && <div className={css.error} role="alert">{error}</div>}
       {notice !== null && <div className={css.notice} role="status">{notice}</div>}
-      <div className={css.actions}>
+      <div className={css.internalBar}>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-pressed={internalActionsVisible}
+          onClick={() => { setInternalActionsVisible(visible => !visible) }}
+        >
+          {internalActionsVisible ? t('stall.card.internal.hide') : t('stall.card.internal.show')}
+        </Button>
+      </div>
+      {internalActionsVisible && <div className={css.actions}>
         <Button
           variant="primary"
           size="sm"
@@ -267,7 +380,7 @@ function CadreStallCardItem({
         >
           {pending === 'escalate' ? t('stall.card.escalatePending') : t('stall.card.escalate')}
         </Button>
-      </div>
+      </div>}
       <Modal
         open={modal !== null}
         onClose={() => { if (!modalPending) setModal(null) }}

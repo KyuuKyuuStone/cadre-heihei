@@ -43,6 +43,63 @@ function stalledView(): CadreStallState {
         version: 3,
         stale: false,
         updatedAt: '2026-10-29T08:00:00.000Z',
+        elapsedMs: null,
+        heartbeatAt: null,
+        firstTokenAt: null,
+        tokensSoFar: null,
+        stallBasis: null,
+        inferred: false,
+      }],
+      thresholds: {
+        suspectAfterMs: 180_000, stalledAfterMs: 600_000, recoverAfterMs: 30_000,
+        scanIntervalMs: 15_000, consecutiveSamples: 2, nudgeCooldownMs: 60_000,
+        escalateAfterMs: 1_800_000, maxGoalRounds: 20,
+      },
+      stale: false,
+      error: null,
+    }]]),
+    bySession: new Map(),
+  }
+}
+
+function executionView(): CadreStallState {
+  return {
+    byProject: new Map([['p1', {
+      status: 'ready',
+      tasks: [{
+        taskId: 'task-1',
+        title: '逾期任务',
+        taskStatus: 'in_progress',
+        assigneeSessionId: 's1',
+        assigneeName: '前端',
+        assigneeRole: 'worker',
+        lastActivityAt: Date.now() - 3 * 60_000,
+        lastActivityKind: 'assistant',
+        silenceMs: null,
+        stallState: 'normal',
+        stateSince: Date.now() - 3 * 60_000,
+        episodeId: 'task-1:episode',
+        nudgeCount: 0,
+        lastNudgedAt: null,
+        suggestedAction: null,
+        capabilities: { nudge: false, reassign: false, cancel: false, escalate: false },
+        version: 3,
+        stale: false,
+        updatedAt: '2026-10-29T08:00:00.000Z',
+        elapsedMs: 180_000,
+        heartbeatAt: Date.now() - 30_000,
+        firstTokenAt: Date.now() - 60_000,
+        tokensSoFar: 128,
+        stallBasis: {
+          kind: 'model_generation',
+          since: new Date(Date.now() - 180_000).toISOString(),
+          stepKind: 'model_generation',
+          toolName: null,
+          elapsedMs: 180_000,
+          heartbeatAgeMs: 30_000,
+          evidenceEventSeq: 10,
+        },
+        inferred: false,
       }],
       thresholds: {
         suspectAfterMs: 180_000, stalledAfterMs: 600_000, recoverAfterMs: 30_000,
@@ -106,6 +163,12 @@ describe('CadreLedgerOverlay overdue state', () => {
   it('shows the ledger empty state', async () => {
     mount([])
     expect(await screen.findByText('这个项目部还没有台账记录。')).toBeTruthy()
+  })
+
+  it('shows live execution progress instead of a stall state', async () => {
+    mount([row()], executionView())
+    expect(await screen.findByText(/生成中 · 3 分钟/)).toBeTruthy()
+    expect(document.querySelector('[data-execution-state="model_generation"]')).toBeTruthy()
   })
 
   it('joins the host stall view to the task row', async () => {

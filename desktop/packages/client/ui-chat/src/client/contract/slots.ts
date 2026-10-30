@@ -375,6 +375,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       scope: 'session'
       props: UserContentInput
       locale: 'chat'
+      store: ChatStore
       children: { 'conversation.chat.user.images': { kind: 'single'; scope: 'session' } }
     }
     /** Session-independent reasoning Markdown with Chat labels and compact typography. */

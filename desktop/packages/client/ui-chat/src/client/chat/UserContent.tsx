@@ -1,25 +1,40 @@
 /** Reusable user contents inside a caller-owned message row. */
 import { Fragment } from 'react'
-import type { FactoryComponentPropsOf } from '@deepseek-ai/dsh-client-ui-slots'
+import type { FactoryComponentPropsOf, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { fileExtension, FileTypeIcon, fileSizeText, JsonBlock } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { ChatStore } from '../contract/slots.ts'
+import { isCadreInternalEvent } from './internal-events.ts'
 import css from './MessageItem.module.css'
 
 const EMPTY_LABELS: readonly string[] = []
 
+type UserContentProps = Omit<FactoryComponentPropsOf<'conversation.chat.user.content'>, 'useStore'>
+  & { readonly useStore?: PropsStore<ChatStore>['useStore'] }
+
 /**
  * Render prepared text, ordered attachments, and references without message chrome.
  * The caller owns row identity, pending/echo state, time, and message actions.
- * @param props - prepared content, facts, authorized image loader, and framework Factory/locale seats.
+ * Supervisor-internal messages are collapsed by default and revealed through
+ * the Chat store's explicit toggle; ordinary user messages are untouched.
+ * @param props - prepared content, facts, authorized image loader, and framework Factory/locale/store seats.
  * @returns the content stack using the existing user-message layout.
  */
-export function UserContent({ content, loadImage, facts, interactive = false, ellipsis = false, renderSlot, renderFactorySlot, t }:
-FactoryComponentPropsOf<'conversation.chat.user.content'>) {
+export function UserContent({
+  content, loadImage, facts, interactive = false, ellipsis = false, renderSlot, renderFactorySlot, t, useStore,
+}: UserContentProps) {
   const { text, attachments, extraBlocks, referenceLabels = EMPTY_LABELS } = content
   const compactImages = attachments.length > 1
   const truncated = (total: number): string => t('json.truncated', { total })
   const showBubble = text !== '' || extraBlocks.length > 0
+  const internal = isCadreInternalEvent(text)
+  const internalVisible = (useStore ?? (() => false))(state => state.internalEventsVisible)
+  if (internal && !internalVisible) {
+    // The row owns its chrome; this marker lets MessageItem.module.css collapse
+    // the whole row without hiding ordinary user messages.
+    return <span data-cadre-internal-hidden hidden />
+  }
   return (
-    <div className={css.userStack}>
+    <div className={internal ? `${css.userStack} ${css.internalEvent}` : css.userStack} data-internal-event={internal || undefined}>
       {attachments.length > 0 && (
         <div className={css.attachmentRow} data-message-attachments>
           {attachments.map((attachment, index) => attachment.type === 'image'

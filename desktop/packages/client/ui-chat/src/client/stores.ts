@@ -3,13 +3,14 @@ import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-sto
 import type { ChatStoreState, TurnProcessViewEntry } from './contract/store.ts'
 import type { TurnProcessSpec } from './contract/turn-process.ts'
 
-type ChatActions = {
+export type ChatActions = {
   setTurnProcessOpen: (
     draft: ChatStoreState,
     turn: number,
     answerStep: number,
     open: boolean,
   ) => void
+  setInternalEventsVisible: (draft: ChatStoreState, visible: boolean) => void
 }
 
 /**
@@ -49,7 +50,7 @@ export function turnProcessOpen(
  */
 export function createChatStore(): EngineStoreHandle<ChatStoreState, ChatActions> {
   return defineStore({
-    init: (): ChatStoreState => ({ turnProcesses: [] }),
+    init: (): ChatStoreState => ({ turnProcesses: [], internalEventsVisible: false }),
     actions: {
       setTurnProcessOpen: (draft, turn, answerStep, open) => {
         const index = draft.turnProcesses.findIndex(entry => entry.turn === turn)
@@ -57,6 +58,7 @@ export function createChatStore(): EngineStoreHandle<ChatStoreState, ChatActions
         if (index < 0) draft.turnProcesses.push(next)
         else draft.turnProcesses[index] = next
       },
+      setInternalEventsVisible: (draft, visible) => { draft.internalEventsVisible = visible },
     },
   })
 }

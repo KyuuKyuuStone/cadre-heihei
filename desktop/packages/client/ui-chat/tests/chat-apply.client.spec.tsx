@@ -154,7 +154,7 @@ describe('Chat apply wiring', () => {
     expect(userContent).toMatchObject({ scope: 'session', locale: 'chat', component: UserContent })
     expect(userContent.children?.['conversation.chat.user.images']).toMatchObject({ kind: 'single', scope: 'session' })
     expect(assistant?.children?.['conversation.chat.message.images']).toMatchObject({ kind: 'single', scope: 'session' })
-    expect(userContent.store).toBeUndefined()
+    expect(userContent.store).toBeDefined()
     expect(userContent.inject).toBeUndefined()
     expect(view?.children?.['conversation.chat.flow']).toBeDefined()
     expect(view?.children?.['conversation.chat.node']).toBeUndefined()
