@@ -115,6 +115,35 @@ export interface PiAiAdapterOptions {
   onReplayDegrade?: (detail: { provider: string; model: string; reason: string }) => void
 }
 
+/** Render one thrown value without trusting provider error shape. */
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object' && error !== null && 'message' in error
+    && typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message
+  }
+  return String(error)
+}
+
+/** Whether a provider error blames the thinking envelope. */
+function isThinkingRejection(error: unknown): boolean {
+  const message = errorMessage(error)
+  const status = typeof error === 'object' && error !== null && 'status' in error
+    ? (error as { status?: unknown }).status
+    : undefined
+  const statusRejected = status === 400 || /(?:^|\D)400(?:\D|$)/u.test(message)
+  return statusRejected
+    && /thinking/iu.test(message)
+    && /(not supported|unsupported|invalidparameter|invalid parameter|disabled)/iu.test(message)
+}
+
+/** The provider message of a terminal thinking error chunk, if this is one. */
+function thinkingFailureMessage(chunk: StreamChunk): string | undefined {
+  if (chunk.type !== 'finish' || chunk.reason.kind !== 'error') return undefined
+  const message = chunk.reason.failure.message
+  return isThinkingRejection({ status: 400, message }) ? message : undefined
+}
+
 /** The two auth injectables a pi-ai collection is built with. */
 export interface PiAiAuthInjection {
   /** Durable storage for credentials pi-ai itself writes: logins, and the refreshes it runs under its own lock. */
@@ -230,6 +259,8 @@ function requestHeaders(headers: Readonly<Record<string, string>> | undefined): 
  */
 export class PiAiAdapter extends LlmAdapter {
   private snapshot: PiAiSnapshot | undefined
+  /** route/model keys that rejected a thinking envelope; later calls omit it. */
+  private readonly thinkingUnsupported = new Set<string>()
 
   constructor(private readonly config: PiAiAdapterOptions) {
     super()
@@ -353,9 +384,38 @@ export class PiAiAdapter extends LlmAdapter {
     return this.streamWithSnapshot(options, this.current())
   }
 
+  /**
+   * Fetch wrapper for anthropic-messages routes: one retry without the
+   * thinking envelope, then remember the model and surface MODEL_CONFIG.
+   */
+  private thinkingSafeFetch(key: string, modelId: string): typeof globalThis.fetch {
+    let retried = false
+    return async (input, init) => {
+      const response = await globalThis.fetch(input, init)
+      if (response.status !== 400) return response
+      const text = await response.clone().text()
+      if (!isThinkingRejection({ status: 400, message: text })) return response
+      if (retried) {
+        throw new LlmError(
+          `模型 "${modelId}" 不接受 thinking 参数（已去掉 thinking 重试仍失败）：${text}`,
+          'MODEL_CONFIG',
+        )
+      }
+      if (typeof init?.body !== 'string') return response
+      retried = true
+      this.thinkingUnsupported.add(key)
+      const body = JSON.parse(init.body) as Record<string, unknown>
+      delete body.thinking
+      delete body.output_config
+      delete body.reasoning_effort
+      return globalThis.fetch(input, { ...init, body: JSON.stringify(body) })
+    }
+  }
+
   private async * streamWithSnapshot(
     options: GenerateOptions,
     snapshot: PiAiSnapshot,
+    omitThinking = false,
   ): AsyncIterable<StreamChunk> {
     if (options.stop !== undefined) {
       throw new LlmError('llm-pi-ai does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
@@ -377,10 +437,22 @@ export class PiAiAdapter extends LlmAdapter {
     const request = needsPlaceholder
       ? { ...options, tools: [ANTHROPIC_TOOL_UPDATE_PLACEHOLDER, ...tools] }
       : options
-    const reasoning = resolveReasoningLevel(
-      model,
-      options.reasoningEffort ?? profile.reasoning,
-    )
+    const key = `${options.provider}/${options.model}`
+    const forcedOmit = omitThinking || this.thinkingUnsupported.has(key)
+    const requestedReasoning = options.reasoningEffort ?? profile.reasoning
+    const reasoning = forcedOmit || requestedReasoning === 'off'
+      ? undefined
+      : resolveReasoningLevel(model, requestedReasoning)
+    // pi-ai sends `thinking: {type:'disabled'}` when reasoning is off and the
+    // model's `off` mapping is absent. For anthropic-messages routes pin it to
+    // null so "off" means "omit the field"; providers such as GLM reject
+    // `disabled` while accepting its absence.
+    const callModel: Model<Api> = reasoning === undefined && model.api === 'anthropic-messages'
+      ? { ...model, thinkingLevelMap: { ...model.thinkingLevelMap, off: null } }
+      : model
+    const safeFetch = model.api === 'anthropic-messages'
+      ? this.thinkingSafeFetch(key, model.id)
+      : undefined
     const apiKey = await this.config.resolveApiKey(options.provider, profile)
 
     const consumer = new AbortController()
@@ -389,6 +461,7 @@ export class PiAiAdapter extends LlmAdapter {
       : AbortSignal.any([options.signal, consumer.signal])
     const streamIdleTimeoutMs = profile.streamIdleTimeoutMs
     using watchdog = idleWatchdog(upstream, streamIdleTimeoutMs, 'LLM_STREAM_IDLE_TIMEOUT')
+    let yielded = false
 
     try {
       const containsImage = options.messages.some(message => contentHasImage(message.content))
@@ -413,8 +486,9 @@ export class PiAiAdapter extends LlmAdapter {
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade)
-      const events = snapshot.models.streamSimple(model, context, {
+      const events = snapshot.models.streamSimple(callModel, context, {
         ...profileOptions(profile, reasoning, apiKey),
+        ...safeFetch === undefined ? {} : { fetch: safeFetch },
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
@@ -432,6 +506,19 @@ export class PiAiAdapter extends LlmAdapter {
             exhausted = true
             return
           }
+          const thinkingFailure = thinkingFailureMessage(result.value)
+          if (thinkingFailure !== undefined) {
+            if (!this.thinkingUnsupported.has(key) && !yielded) {
+              this.thinkingUnsupported.add(key)
+              yield* this.streamWithSnapshot(options, snapshot, true)
+              return
+            }
+            throw new LlmError(
+              `模型 "${options.model}"（${options.provider}）不接受 thinking 参数（已去掉 thinking 重试仍失败）：${thinkingFailure}`,
+              'MODEL_CONFIG',
+            )
+          }
+          yielded = true
           yield result.value
         }
       } finally {
@@ -444,11 +531,24 @@ export class PiAiAdapter extends LlmAdapter {
         }
       }
     } catch (error: unknown) {
+      if (error instanceof LlmError && error.code === 'MODEL_CONFIG') throw error
       if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
         throw new LlmError(`pi-ai stream idle timeout after ${streamIdleTimeoutMs}ms`, 'TIMEOUT', { cause: error })
       }
       if (options.signal?.aborted) {
         throw new LlmError('pi-ai request aborted by caller', 'ABORTED', { cause: error })
+      }
+      if (isThinkingRejection(error)) {
+        if (!this.thinkingUnsupported.has(key) && !yielded) {
+          this.thinkingUnsupported.add(key)
+          yield* this.streamWithSnapshot(options, snapshot, true)
+          return
+        }
+        throw new LlmError(
+          `模型 "${options.model}"（${options.provider}）不接受 thinking 参数（已去掉 thinking 重试仍失败）：${errorMessage(error)}`,
+          'MODEL_CONFIG',
+          { cause: error },
+        )
       }
       throw error
     } finally {

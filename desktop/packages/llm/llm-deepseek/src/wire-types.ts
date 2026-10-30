@@ -27,7 +27,7 @@ export type WireRequest = {
   max_tokens: number
   messages: WireMessage[]
   system?: string
-  thinking: { type: 'enabled' | 'disabled' }
+  thinking?: { type: 'enabled' | 'disabled' }
   output_config?: { effort: 'low' | 'high' | 'max' }
   temperature?: number
   stop_sequences?: string[]

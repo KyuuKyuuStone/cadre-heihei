@@ -18,9 +18,18 @@ import { providerError, providerErrorDetail } from './transport.ts'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { resolveRequestImageTarget } from './request-pricing.ts'
 
+/** Whether a 400 blames the thinking envelope rather than the conversation. */
+function isThinkingRejection(status: number, text: string): boolean {
+  return status === 400
+    && /thinking/iu.test(text)
+    && /(not supported|unsupported|invalidparameter|invalid parameter|disabled)/iu.test(text)
+}
+
 /** DeepSeek provider using Messages content and native thinking replay. */
 export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapter {
   private readonly files: DeepSeekFileStore
+  /** Models that rejected a thinking envelope; later requests omit it. */
+  private readonly thinkingUnsupported = new Set<string>()
   private readonly imageAccess: ImageAttachmentAccessResolver = (ref) => {
     const attachments = this.dependencies.resolveAttachments?.()
     return attachments === undefined ? undefined : this.dependencies.resolveImageAccess?.(attachments, ref)
@@ -102,6 +111,7 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
       },
       connection.filePolicy, connection.filesApiTimeoutMs, signal, activity)
       let inline = false
+      let thinkingFallbackTried = false
       while (true) {
         signal.throwIfAborted()
         files.beginAttempt()
@@ -118,7 +128,7 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
         const history = inline ? inlineImages(messages, versions, connection) : messages
         const body = serialize(options, connection, history, versions, this.imageAccess, (reason) => {
           this.dependencies.onReplayDegrade?.({ provider: options.provider, model: options.model, reason })
-        }, fileIds)
+        }, fileIds, this.thinkingUnsupported.has(options.model))
         const extensions = await prepareRequestExtensions(body as Readonly<Record<string, DeepSeekLlmApiJson>>, {
           signal,
           ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
@@ -156,7 +166,21 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
           }
           const detail = providerErrorDetail(raw)
           if (await files.retry(detail)) continue
+          const thinkingRejected = isThinkingRejection(response.status, `${text} ${detail}`)
+          if (thinkingRejected && !thinkingFallbackTried && !this.thinkingUnsupported.has(options.model)) {
+            // Capability fallback: one retry without the thinking envelope, then remember it.
+            thinkingFallbackTried = true
+            this.thinkingUnsupported.add(options.model)
+            continue
+          }
           const failure = providerError(raw, response.status, response.headers)
+          if (thinkingRejected && this.thinkingUnsupported.has(options.model)) {
+            throw new LlmError(
+              `模型 "${options.model}" 不接受 thinking 参数（已去掉 thinking 重试仍失败）：${failure.message}`,
+              'MODEL_CONFIG',
+              { ...failure.failure, cause: new Error(text) },
+            )
+          }
           const message = files.errorMessage(response.status, failure.message, detail)
           throw new LlmError(message, failure.code, { ...failure.failure, cause: new Error(text) })
         }

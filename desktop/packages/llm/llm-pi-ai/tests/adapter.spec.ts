@@ -646,6 +646,112 @@ describe('provider profile lifecycle', () => {
     expect(server.requests).toHaveLength(1)
   })
 
+  it('omits thinking instead of sending disabled on an anthropic-messages route', async () => {
+    vi.stubEnv('PI_TEST_KEY', 'test-key')
+    const server = await mockServer([{ events: anthropicTextEvents }])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        huoshanai: {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'anthropic-messages',
+          baseURL: server.url,
+          models: [{
+            id: 'glm-5.3-flash',
+            contextWindow: 1_049_000,
+            maxTokens: 128_000,
+            reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high' },
+          }],
+        },
+      },
+    })
+    await assemble(ctx, {
+      provider: 'huoshanai',
+      model: 'glm-5.3-flash',
+      reasoningEffort: ReasoningEffortId('off'),
+      messages: [],
+    })
+    expect(server.requests[0]).not.toHaveProperty('thinking')
+  })
+
+  it('retries once without thinking after a thinking 400 and remembers the model', async () => {
+    vi.stubEnv('PI_TEST_KEY', 'test-key')
+    const server = await mockServer([
+      {
+        status: 400,
+        body: JSON.stringify({ error: { type: 'invalid_request_error', message: 'thinking.type `disabled` is not supported by this model' } }),
+      },
+      { events: anthropicTextEvents },
+      { events: anthropicTextEvents },
+    ])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        huoshanai: {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'anthropic-messages',
+          baseURL: server.url,
+          models: [{
+            id: 'glm-5.3-flash',
+            contextWindow: 1_049_000,
+            maxTokens: 128_000,
+            reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high' },
+          }],
+        },
+      },
+    })
+    const prompt = (): Promise<unknown> => assemble(ctx, {
+      provider: 'huoshanai',
+      model: 'glm-5.3-flash',
+      reasoningEffort: ReasoningEffortId('low'),
+      messages: [],
+    })
+    await prompt()
+    expect(server.requests).toHaveLength(2)
+    expect(server.requests[0]).toHaveProperty('thinking')
+    expect((server.requests[0] as { thinking?: { type?: string } }).thinking?.type).not.toBe('disabled')
+    expect(server.requests[1]).not.toHaveProperty('thinking')
+
+    await prompt()
+    expect(server.requests).toHaveLength(3)
+    expect(server.requests[2]).not.toHaveProperty('thinking')
+  })
+
+  it('classifies a repeated thinking 400 as MODEL_CONFIG', async () => {
+    vi.stubEnv('PI_TEST_KEY', 'test-key')
+    const server = await mockServer([
+      { status: 400, body: JSON.stringify({ error: { message: 'thinking.type disabled is not supported by this model' } }) },
+      { status: 400, body: JSON.stringify({ error: { message: 'thinking.type disabled is not supported by this model' } }) },
+    ])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        huoshanai: {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'anthropic-messages',
+          baseURL: server.url,
+          models: [{
+            id: 'glm-5.3-flash',
+            contextWindow: 1_049_000,
+            maxTokens: 128_000,
+            reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high' },
+          }],
+        },
+      },
+    })
+    const result = await assemble(ctx, {
+      provider: 'huoshanai',
+      model: 'glm-5.3-flash',
+      reasoningEffort: ReasoningEffortId('low'),
+      messages: [],
+    })
+    expect(result.finish).toMatchObject({ kind: 'error', failure: { code: 'MODEL_CONFIG' } })
+    expect(server.requests).toHaveLength(2)
+  })
+
   it('dispatches the compat-switched dialect on a declared route', async () => {
     vi.stubEnv('PI_TEST_KEY', 'test-key')
     const server = await mockServer([{ events: textEvents }, { events: textEvents }])
@@ -836,7 +942,10 @@ describe('provider profile lifecycle', () => {
       thinking: { type: 'adaptive' },
       output_config: { effort: 'low' },
     })
-    expect(server.requests[2]).toMatchObject({ max_tokens: 64, thinking: { type: 'disabled' } })
+    // `off` now means "omit the thinking envelope": anthropic-messages
+    // providers such as GLM reject `thinking.type='disabled'`.
+    expect(server.requests[2]).toMatchObject({ max_tokens: 64 })
+    expect(server.requests[2]).not.toHaveProperty('thinking')
     expect(server.requests[2]).not.toHaveProperty('output_config')
   })
 

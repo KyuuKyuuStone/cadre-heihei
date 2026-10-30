@@ -315,7 +315,7 @@ describe('Messages request conversion', () => {
 
   it.each(['off', 'low', 'high', 'max'])('maps reasoning effort %s', (effort) => {
     const request = body([user()], { reasoningEffort: ReasoningEffortId(effort) })
-    expect(request.thinking.type).toBe(effort === 'off' ? 'disabled' : 'enabled')
+    expect(request.thinking?.type).toBe(effort === 'off' ? 'disabled' : 'enabled')
     expect(request.output_config).toEqual(effort === 'off' ? undefined : { effort })
   })
 

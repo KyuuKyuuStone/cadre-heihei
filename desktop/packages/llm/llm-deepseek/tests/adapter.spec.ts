@@ -64,6 +64,51 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 describe('direct Messages HTTP', () => {
+  it('retries once without thinking when the provider rejects it, then remembers', async () => {
+    const http = await endpoint((response, count) => {
+      if (count === 1) {
+        response.statusCode = 400
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify({ error: { type: 'invalid_request_error', code: 'InvalidParameter', message: 'thinking.type `disabled` is not supported by this model' } }))
+        return
+      }
+      response.end(sse(textEvents))
+    })
+    const llm = adapter({ baseURL: http.url })
+    const first = await assemble(llm.stream(options()))
+    expect(first.assembler.finish.kind).toBe('stop')
+    expect(http.requests).toHaveLength(2)
+    expect(http.requests[0]?.body).toHaveProperty('thinking')
+    expect(http.requests[1]?.body).not.toHaveProperty('thinking')
+
+    // The rejected model is remembered: the next request omits thinking up front.
+    await chunks(llm.stream(options()))
+    expect(http.requests).toHaveLength(3)
+    expect(http.requests[2]?.body).not.toHaveProperty('thinking')
+  })
+
+  it('fails once with a visible MODEL_CONFIG error when the no-thinking retry is rejected too', async () => {
+    const http = await endpoint((response) => {
+      response.statusCode = 400
+      response.setHeader('content-type', 'application/json')
+      response.end(JSON.stringify({ error: { type: 'invalid_request_error', code: 'InvalidParameter', message: 'thinking.type `disabled` is not supported by this model' } }))
+    })
+    const llm = adapter({ baseURL: http.url })
+    await expect(chunks(llm.stream(options()))).rejects.toMatchObject({
+      code: 'MODEL_CONFIG',
+      message: expect.stringContaining('thinking'),
+    })
+    expect(http.requests).toHaveLength(2)
+  })
+
+  it('keeps the DeepSeek thinking envelope when the provider accepts it', async () => {
+    const http = await endpoint()
+    const llm = adapter({ baseURL: http.url })
+    await chunks(llm.stream(options()))
+    expect(http.requests).toHaveLength(1)
+    expect(http.requests[0]?.body).toHaveProperty('thinking')
+  })
+
   it('continues through Messages with assistant blocks in saved user history', async () => {
     const http = await endpoint()
     const notice = createUserMessage({ source: { kind: 'saved-notice' }, content: [
