@@ -398,19 +398,23 @@ export class ReactLoopAgent implements Agent {
       this.throwError(error)
     } finally {
       try {
-        if (turnEnds!.kind === 'completed') {
+        // Defensive: a plugin/stream edge that exits without a terminal reason
+        // must still produce a well-formed turn/end, never `reason: undefined`.
+        const ending: TurnEndReason = turnEnds ?? {
+          kind: 'error', error: { message: 'turn ended without a terminal reason', code: 'UNKNOWN' },
+        }
+        if (ending.kind === 'completed') {
           this.session.appendIgnorable('turn/completed', { turn })
         } else {
           this.session.appendIgnorable('turn/aborted', {
-            turn, reason: turnEnds!, hadFirstToken: this.turnHadFirstToken,
+            turn, reason: ending, hadFirstToken: this.turnHadFirstToken,
           })
-          if (turnEnds!.kind === 'aborted') {
-            this.pendingAbortNotice = `[系统通知] 上一轮（turn ${String(turn)}）未完成，原因：${turnEnds!.kind}`
+          if (ending.kind === 'aborted') {
+            this.pendingAbortNotice = `[系统通知] 上一轮（turn ${String(turn)}）未完成，原因：${ending.kind}`
               + `${this.turnHadFirstToken ? '' : '（未出首 token）'}。不要假设它已完成；可继续或重新执行。`
           }
         }
-        // oxlint-disable-next-line typescript/no-non-null-assertion -- every exit assigns a turn ending
-        this.session.append('turn/end', { turn, reason: turnEnds! })
+        this.session.append('turn/end', { turn, reason: ending })
       } catch (error: unknown) {
         this.throwError(error)
       }
