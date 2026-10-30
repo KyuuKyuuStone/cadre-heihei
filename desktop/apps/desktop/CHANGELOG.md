@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.1（主管强锁、Skill 与停摆三态）
+
+- **主管写文件强锁**：新增 host-write-guard，在 `tools/pre-execute` 只拦在册 supervisor——只允许项目工作区与 `reports/` 下的 `.md/.txt`，Office 与 bash/pwsh 显式拒绝，路径经 realpath 归一，策略 JSON 可热更新，失败一律 fail-closed 并写审计行；worker 与普通会话不受影响
+- **主管 Skill**：新增 host-supervisor-skill，把「讨论 vs 派任务、明确指令才执行、澄清六步、偏好与边界、汇报聚合、精致汇报派员工、只读诊断」写成独立 SKILL.md，按花名册只注册到 supervisor 的 agent scope，worker 不可见；row config 可关闭，工具掩码仍优先
+- **停摆三态与 turn 生命周期**：新增 additive Session 事件 `turn/received`、`model_call/started`、`model_call/first_token`、`turn/completed`、`turn/aborted`（含 `hadFirstToken`）；中止（含从未出首 token）在下一轮回注员工；watchdog 区分 model_generation / tool_execution / no_events，长单步生成 3–7 分钟不再误报，单步超 10 分钟才升级，no_events 维持 3/10 分钟；compaction 窗口暂停判定
+- **停摆视图字段**：StallTaskView 暴露 `elapsedMs/heartbeatAt/firstTokenAt/tokensSoFar/stallBasis/inferred`，旧会话字段为 null 且 `inferred:true`，不伪造心跳；nudge 带机器可读 stallBasis
+- **通知内部化**：possibly_stalled/stalled/recovered 统一加 `【主管内部】` 前缀（模型可见、UI 隐藏），只有 `【需要您决定】` 的升级文案对用户可见；员工 nudge 文本不变
+- **M4**：修正 waiting_question 历史 ask 误判——停摆判定窗口收敛到当前任务下发/返工时间，旧会话的未答问题不再冻结新任务
+
+### 已知限制
+
+- **心跳为扫描节拍推导**：`heartbeatAt` 来自 watchdog 扫描确认活动的时间，不是独立 30 秒定时采样；流式过程中的 `tokensSoFar` 依赖 usage，可能为 null
+- **aborted 回注不覆盖 error/blocked**：只有 `aborted` 且带中断原因时向员工回注，模型错误与 pre-step 拒绝仍按原路径处理
+- **lastError 未接 DF-017**：停摆视图尚未消费任务 `lastError`，DF-017 的失败原因展示待接线
+- **前缀碰撞/开关未按会话挂载**：`【主管内部】`/`【需要您决定】` 为文本前缀协议，普通消息若以相同前缀开头会被同样处理；「显示内部事件」开关是客户端状态，尚未按会话持久化
+- **强锁只覆盖已登记写工具**：未登记的新写工具默认不拦，需在策略中补登记；supervisor 的 shell 整工具拒绝，worker shell 不受本锁约束
+
 ## 0.10.0（员工请示路由与停摆治理）
 
 - **员工会请示了**（DF-011）：员工遇到拿不准的事向主管提问，问题先经 host-collab 路由（每员工待答上限、30 分钟无答复自动升级，均可配置），主管答复后原路回流员工会话；不再靠员工自己抄送；角色工具掩码修正为 deny 式——worker 隐藏派活/花名册/状态迁移三件（`ask_user_question` 保留），supervisor 隐藏汇报与全部执行工具（`resolve_employee_question` 保留），未来新增工具不再误留给员工
