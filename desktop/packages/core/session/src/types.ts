@@ -296,6 +296,23 @@ export interface SessionEventMap {
    * reported live and does not prevent later work.
    */
   'turn/end': { turn: number; reason: TurnEndReason }
+  /**
+   * Additive lifecycle breadcrumb emitted with `turn/start`. Older readers may
+   * ignore it; the watchdog uses it to distinguish a live turn from no events.
+   */
+  'turn/received': { turn: number }
+  /** The model call for one step has started (before the first stream chunk). */
+  'model_call/started': { turn: number; step: number; provider: string; model: string }
+  /** The model call produced its first non-terminal stream chunk. */
+  'model_call/first_token': { turn: number; step: number }
+  /** A turn completed normally; additive companion to `turn/end`. */
+  'turn/completed': { turn: number }
+  /**
+   * A turn ended without completing. `hadFirstToken` is false when it was
+   * aborted before the model produced any output (e.g. a lost request), which
+   * is the case workers otherwise cannot observe.
+   */
+  'turn/aborted': { turn: number; reason: TurnEndReason; hadFirstToken: boolean }
   /** Opens step `step` of turn `turn` — one model call plus the tool executions it requested. */
   'step/start': { turn: number; step: number }
   /** Closes step `step` of turn `turn`. */

@@ -55,6 +55,8 @@ function userTexts(agent: Agent): string[] {
     .filter(e => e.type === 'user/message')
     .flatMap(e => e.type === 'user/message' ? e.data.content : [])
     .flatMap(b => b.type === 'text' ? [b.text] : [])
+    // Additive turn/aborted notices are worker-visible context, not caller input.
+    .filter(text => !text.startsWith('[系统通知]'))
 }
 
 describe('Agent.cancel()', () => {

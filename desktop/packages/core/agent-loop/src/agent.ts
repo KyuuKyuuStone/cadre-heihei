@@ -21,6 +21,7 @@ import {
   LlmError,
   createAssistantMessage,
   createDeveloperMessage,
+  createUserMessage,
   errorChain,
   markAgentLoopRequest,
 } from '@deepseek-ai/dsh-llm'
@@ -115,6 +116,10 @@ export class ReactLoopAgent implements Agent {
   /** Process-local revision of assistant frames for this attached Session. */
   private assistantStreamRevision = 0
   private assistantAttemptCounter = 0
+  /** Per-turn first-output marker for turn/aborted and the abort notice. */
+  private turnHadFirstToken = false
+  /** One pending worker-visible notice for the next turn after an abort/error. */
+  private pendingAbortNotice: string | undefined
   private readonly systemPrompt: SystemPromptProjection
   /** Identities fully frozen by this loop; weak references do not retain replaced history. */
   private readonly frozenMessages = new WeakSet<Message>()
@@ -305,6 +310,16 @@ export class ReactLoopAgent implements Agent {
     const turn = phase.turn + 1
     try {
       this.session.append('turn/start', { turn })
+      this.session.append('turn/received', { turn })
+      this.turnHadFirstToken = false
+      const notice = this.pendingAbortNotice
+      this.pendingAbortNotice = undefined
+      if (notice !== undefined) {
+        this.session.append('user/message', createUserMessage({
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: notice }],
+        }), { surfaceOp: 'append' })
+      }
     } catch (error: unknown) {
       this.throwError(error)
     }
@@ -383,6 +398,17 @@ export class ReactLoopAgent implements Agent {
       this.throwError(error)
     } finally {
       try {
+        if (turnEnds!.kind === 'completed') {
+          this.session.append('turn/completed', { turn })
+        } else {
+          this.session.append('turn/aborted', {
+            turn, reason: turnEnds!, hadFirstToken: this.turnHadFirstToken,
+          })
+          if (turnEnds!.kind === 'aborted') {
+            this.pendingAbortNotice = `[系统通知] 上一轮（turn ${String(turn)}）未完成，原因：${turnEnds!.kind}`
+              + `${this.turnHadFirstToken ? '' : '（未出首 token）'}。不要假设它已完成；可继续或重新执行。`
+          }
+        }
         // oxlint-disable-next-line typescript/no-non-null-assertion -- every exit assigns a turn ending
         this.session.append('turn/end', { turn, reason: turnEnds! })
       } catch (error: unknown) {
@@ -452,10 +478,17 @@ export class ReactLoopAgent implements Agent {
       try {
         const stream = preparedCall?.stream(request) ?? this.loopCtx.llm.stream(request)
         signal.throwIfAborted()
+        this.session.append('model_call/started', {
+          turn, step, provider: request.provider, model: request.model,
+        })
         live.start()
         started = true
         for await (const chunk of stream) {
           signal.throwIfAborted()
+          if (!this.turnHadFirstToken && chunk.type !== 'finish') {
+            this.turnHadFirstToken = true
+            this.session.append('model_call/first_token', { turn, step })
+          }
           live.push(chunk)
         }
         signal.throwIfAborted()

@@ -696,7 +696,8 @@ describe('tool-call scheduler: failure quiescence', () => {
       phase === 'execution-mode' ? undefined : [calls[1]?.seq],
       undefined,
     ])
-    expect(failedEvents.slice(-3).map(event => event.type)).toEqual(['tool/result', 'step/end', 'turn/end'])
+    expect(failedEvents.filter(event => event.type !== 'turn/aborted').slice(-3).map(event => event.type))
+      .toEqual(['tool/result', 'step/end', 'turn/end'])
     expect(failedEvents.at(-1)).toMatchObject({
       data: { reason: { kind: 'error', error: { message: failure.message, code: 'UNKNOWN' } } },
     })
