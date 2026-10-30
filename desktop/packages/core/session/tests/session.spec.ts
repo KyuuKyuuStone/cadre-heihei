@@ -1817,4 +1817,13 @@ describe('SessionStore', () => {
 
     expect(heard).toEqual([session])
   })
+
+  it('marks additive lifecycle events ignorable so older readers can skip them', () => {
+    const session = Session.create(SessionId('ignorable-events'))
+    const additive = session.appendIgnorable('turn/received', { turn: 1 })
+    const required = session.append('turn/start', { turn: 1 })
+
+    expect(additive.ignorable).toBe(true)
+    expect(required.ignorable).toBeUndefined()
+  })
 })

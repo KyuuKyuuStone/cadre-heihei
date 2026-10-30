@@ -310,7 +310,7 @@ export class ReactLoopAgent implements Agent {
     const turn = phase.turn + 1
     try {
       this.session.append('turn/start', { turn })
-      this.session.append('turn/received', { turn })
+      this.session.appendIgnorable('turn/received', { turn })
       this.turnHadFirstToken = false
       const notice = this.pendingAbortNotice
       this.pendingAbortNotice = undefined
@@ -399,9 +399,9 @@ export class ReactLoopAgent implements Agent {
     } finally {
       try {
         if (turnEnds!.kind === 'completed') {
-          this.session.append('turn/completed', { turn })
+          this.session.appendIgnorable('turn/completed', { turn })
         } else {
-          this.session.append('turn/aborted', {
+          this.session.appendIgnorable('turn/aborted', {
             turn, reason: turnEnds!, hadFirstToken: this.turnHadFirstToken,
           })
           if (turnEnds!.kind === 'aborted') {
@@ -478,7 +478,7 @@ export class ReactLoopAgent implements Agent {
       try {
         const stream = preparedCall?.stream(request) ?? this.loopCtx.llm.stream(request)
         signal.throwIfAborted()
-        this.session.append('model_call/started', {
+        this.session.appendIgnorable('model_call/started', {
           turn, step, provider: request.provider, model: request.model,
         })
         live.start()
@@ -487,7 +487,7 @@ export class ReactLoopAgent implements Agent {
           signal.throwIfAborted()
           if (!this.turnHadFirstToken && chunk.type !== 'finish') {
             this.turnHadFirstToken = true
-            this.session.append('model_call/first_token', { turn, step })
+            this.session.appendIgnorable('model_call/first_token', { turn, step })
           }
           live.push(chunk)
         }

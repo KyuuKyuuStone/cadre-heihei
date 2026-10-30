@@ -800,7 +800,27 @@ export class Session {
     data: SessionEventMap[T],
     ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T>] : []
   ): SessionEvent<T> {
-    const surfaceOpts: SurfaceIntent | undefined = opts[0]
+    return this.#appendEvent(type, data, opts[0], false)
+  }
+
+  /**
+   * Append an additive event that older harnesses may safely skip.
+   * The envelope's `ignorable` marker is what lets a downgraded build resume a
+   * log written by a newer one instead of refusing the unknown type.
+   * @param type - event type.
+   * @param data - JSON payload.
+   * @returns the committed event.
+   */
+  appendIgnorable<T extends SessionEventType>(type: T, data: SessionEventMap[T]): SessionEvent<T> {
+    return this.#appendEvent(type, data, undefined, true)
+  }
+
+  #appendEvent<T extends SessionEventType>(
+    type: T,
+    data: SessionEventMap[T],
+    surfaceOpts: SurfaceIntent | undefined,
+    ignorable: boolean,
+  ): SessionEvent<T> {
     const surfaceMetadata = {
       ...surfaceOpts?.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: surfaceOpts.sourceEventSeqs },
       ...surfaceOpts?.surfaceOp === undefined ? {} : { surfaceOp: surfaceOpts.surfaceOp },
@@ -819,6 +839,7 @@ export class Session {
       seq: SessionSeq(this.log.length),
       time: Date.now(),
       data: dataSnapshot,
+      ...(ignorable ? { ignorable: true } : {}),
       ...(surfaceMetadataSnapshot as { surfaceOp?: unknown; sourceEventSeqs?: unknown }),
     } as unknown as SessionEvent<T>)
     validateSessionEventData(event, `session event "${type}" at seq ${event.seq}`)
