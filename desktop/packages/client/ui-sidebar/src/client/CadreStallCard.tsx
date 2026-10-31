@@ -114,9 +114,11 @@ export function CadreStallCard({
   }
   if (project === undefined || project.status === 'loading' || project.status === 'unavailable') return null
 
+  // Generation and tool progress belong to the sidebar row; only a waiting
+  // question is actionable here. no_events remains the stall-card source.
   const executions = project.tasks.flatMap((task) => {
     const execution = executionOf(task)
-    return execution === null ? [] : [{ task, execution }]
+    return execution?.state === 'waiting_question' ? [{ task, execution }] : []
   })
   const errors = project.tasks.flatMap(task => task.lastError === undefined || task.lastError === null
     ? []

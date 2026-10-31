@@ -207,7 +207,7 @@ describe('CadreStallCard', () => {
     expect(document.querySelectorAll('[data-episode-id]')).toHaveLength(1)
   })
 
-  it('renders model generation progress instead of a stall card', () => {
+  it('does not render a card for model generation progress', () => {
     const generating: CadreStallTaskView = {
       ...TASK,
       stallState: 'normal',
@@ -226,16 +226,11 @@ describe('CadreStallCard', () => {
       },
       inferred: true,
     }
-    render(<CadreStallCard {...props(stallState([generating]))} />)
-    expect(document.querySelector('[data-execution-state="model_generation"]')).toBeTruthy()
-    expect(screen.getByText(/生成中 · 3 分钟/)).toBeTruthy()
-    expect(screen.getByText(/128 tokens/)).toBeTruthy()
-    expect(screen.getByText('推断（降级）')).toBeTruthy()
-    expect(screen.queryByText(/已停摆 ·/)).toBeNull()
-    expect(screen.queryByRole('button', { name: '催办' })).toBeNull()
+    const { container } = render(<CadreStallCard {...props(stallState([generating]))} />)
+    expect(container.firstChild).toBeNull()
   })
 
-  it('renders tool execution with tool name and elapsed time', () => {
+  it('does not render a card for tool execution progress', () => {
     const tool: CadreStallTaskView = {
       ...TASK,
       stallState: 'normal',
@@ -251,9 +246,8 @@ describe('CadreStallCard', () => {
         evidenceEventSeq: 11,
       },
     }
-    render(<CadreStallCard {...props(stallState([tool]))} />)
-    expect(document.querySelector('[data-execution-state="tool_execution"]')).toBeTruthy()
-    expect(screen.getByText(/工具执行中 · office_docx · 已等 3 分钟/)).toBeTruthy()
+    const { container } = render(<CadreStallCard {...props(stallState([tool]))} />)
+    expect(container.firstChild).toBeNull()
   })
 
   it('never turns a live generation into an actionable stall card', () => {
@@ -270,9 +264,29 @@ describe('CadreStallCard', () => {
         evidenceEventSeq: 12,
       },
     }
-    render(<CadreStallCard {...props(stallState([generating]))} />)
-    expect(screen.getByText(/生成中 · 10 分钟/)).toBeTruthy()
-    expect(screen.queryByText(/已停摆 · 12 分钟无活动/)).toBeNull()
+    const { container } = render(<CadreStallCard {...props(stallState([generating]))} />)
+    expect(container.firstChild).toBeNull()
+  })
+
+  it('keeps waiting_question visible without stall actions', () => {
+    const waiting: CadreStallTaskView = {
+      ...TASK,
+      stallState: 'waiting_question',
+      elapsedMs: 46_000,
+      stallBasis: {
+        kind: 'no_events',
+        since: new Date(NOW - 46_000).toISOString(),
+        stepKind: null,
+        toolName: null,
+        elapsedMs: 46_000,
+        heartbeatAgeMs: 0,
+        evidenceEventSeq: null,
+      },
+    }
+    render(<CadreStallCard {...props(stallState([waiting]))} />)
+    expect(document.querySelector('[data-execution-state="waiting_question"]')).toBeTruthy()
+    expect(screen.getByText(/等待回答 · 46 秒/)).toBeTruthy()
+    expect(screen.queryByText(/已停摆 ·/)).toBeNull()
     expect(screen.queryByRole('button', { name: '催办' })).toBeNull()
   })
 
