@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.7（0.10.6 + 台账分页）
+
+- **台账分页**：项目台账每页 20 行，底部显示总条数/当前页并给出页码窗口（`1 … 4 5 6 … 10`）、上一页/下一页；搜索与筛选变化自动回到第 1 页
+- **空状态**：有台账但筛选/搜索无匹配时显示「没有匹配的任务；换一个筛选或关键词。」
+- 0.10.7 包含 0.10.6 全部修复（强锁工具分类/roots、pre-step 不短路、terminal reason 读写、底部单行状态、内部化/三态）
+
+### 已知限制
+
+- 心跳为 watchdog 扫描节拍，不是独立 30 秒采样；`tokensSoFar` 依赖 usage
+- aborted 回注不覆盖 error/blocked
+- lastError 未接 DF-017
+- 通知前缀为文本协议；内部事件开关未按会话持久化
+- 强锁只覆盖已登记写工具
+- 旧 0.10.0 仍无法读取 0.10.1+ 新事件日志
+- 版本策略备忘：0.10.9 之后直接发 1.0.0，不单独发 0.10.10
+
 ## 0.10.6（合并发布：强锁、pre-step、terminal reason 与单行状态）
 
 - **强锁工具分类/roots**：host-write-guard 先分类再查策略；`dispatch_task/list_tasks/transition_task/read/grep` 等非写工具直接放行；shell/office 分别返回 `WRITE_SHELL_DENIED`/`WRITE_OFFICE_DENIED`；roots 按 `projects.root_path → 会话 cwd → workspaceRoot → reportsDir` 兜底，workspace 下 `.md/.txt` 允许、`.ts` 拒绝
