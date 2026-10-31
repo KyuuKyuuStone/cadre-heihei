@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      # 公开镜像：CI 不依赖本机代理与密钥
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+      npm_config_registry: https://registry.npmmirror.com
+      DSH_RESOURCE_DOWNLOAD_TIMEOUT_MS: '900000'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "dir=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
+
+      - name: Install (frozen lockfile)
+        working-directory: desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (5/5)
+        working-directory: desktop
+        run: pnpm run typecheck
+
+      - name: Gates (5/5)
+        working-directory: desktop
+        run: pnpm run gates
+
+      - name: Build:check
+        working-directory: desktop
+        run: pnpm run build:check
+
+      - name: Unit smoke (node:test + vitest, keyless)
+        working-directory: desktop
+        run: pnpm run gates:smoke
+
+      - name: Two-state evidence (7/7)
+        working-directory: desktop
+        run: pnpm run gates:evidence
