@@ -1,35 +1,29 @@
 .stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 4px;
   width: 100%;
   min-width: 0;
 }
 
-.strip,
-.stripDetails > summary {
-  display: flex;
+.strip {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   box-sizing: border-box;
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
   min-width: 0;
-  padding: 5px 9px;
+  height: 24px;
+  padding: 2px 8px;
   border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-bg-layer-1);
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  line-height: 1.4;
-  list-style: none;
-}
-
-.stripDetails > summary::-webkit-details-marker {
-  display: none;
-}
-
-.stripDetails > summary {
-  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .statusDot {
