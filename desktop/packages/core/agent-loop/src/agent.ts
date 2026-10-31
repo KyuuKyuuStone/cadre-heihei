@@ -383,8 +383,12 @@ export class ReactLoopAgent implements Agent {
       this.throwError(error)
     } finally {
       try {
-        // oxlint-disable-next-line typescript/no-non-null-assertion -- every exit assigns a turn ending
-        this.session.append('turn/end', { turn, reason: turnEnds! })
+        // Defensive: a plugin/stream edge that exits without a terminal reason
+        // must still produce a well-formed turn/end, never `reason: undefined`.
+        const ending: TurnEndReason = turnEnds ?? {
+          kind: 'error', error: { message: 'turn ended without a terminal reason', code: 'UNKNOWN' },
+        }
+        this.session.append('turn/end', { turn, reason: ending })
       } catch (error: unknown) {
         this.throwError(error)
       }
