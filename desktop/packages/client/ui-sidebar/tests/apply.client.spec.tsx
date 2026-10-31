@@ -69,9 +69,9 @@ describe('ui-sidebar apply', () => {
     expect(hostApply).not.toThrow()
   })
 
-  it('registers the Cadre status chip in the header, not the composer', () => {
+  it('does not register a conversation-area status strip', () => {
     const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
-    expect(source).toContain("inject('conversation.session.header.utilities'")
+    expect(source).not.toContain("inject('conversation.session.header.utilities'")
     expect(source).not.toContain("inject('conversation.input.dock'")
   })
 

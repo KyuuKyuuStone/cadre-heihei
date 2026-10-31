@@ -117,6 +117,7 @@ node desktop/scripts/check-upstream-drift.mjs --fail-on-drift
 | K45 | `packages/client/ui-sidebar/src/client/{CadreLedgerOverlay.tsx,CadreLedgerOverlay.module.css,locales.ts}`、`packages/client/ui-sidebar/tests/CadreLedgerOverlay.client.spec.tsx` | 0.10.5 台账分页：每页 20 条，筛选/搜索重置第 1 页，底部固定「共 N 条 · 第 x/y 页」+ 窗口页码（含省略号）+ 上一页/下一页禁用态；顶部 tab 数字随全部行状态变化；空结果保留空状态 | 官方没有台账分页；95 条一次渲染会撑满覆盖层 | 只改覆盖层、locale 与 spec；无 schema/main/preload/发布链改动 |
 | K46 | `packages/client/ui-sidebar/src/client/CadreStallCard.module.css` | 0.10.5 底部状态改为内容宽度 chip：`inline-flex`/`width: fit-content`/`max-width:100%`，左对齐，24px 高、12px 字号，去掉整行深色背景与分隔线，仅保留细边框、圆角、状态色点；窄屏文字截断不换行 | 官方没有状态条附件式 chip；原条横跨输入区像外挂面板 | 只改 CSS；无 schema/main/preload/发布链改动；行为与测试不变 |
 | K47 | `packages/client/ui-sidebar/src/client/{index.ts,CadreStallCard.module.css}` | 0.10.5 状态 chip 移到主管会话顶部：注册从 `conversation.input.dock` 改为 `conversation.session.header.utilities`；`CadreStallCard` 自检 supervisor 角色，普通会话不显示；芯片右对齐、内容宽度，输入区不再渲染状态条 | 官方 ui-sidebar 没有“状态条在标题栏”的约束；输入区需要保持干净 | 只改注册位置与 `.stack` 对齐；无 schema/main/preload/发布链改动 |
+| K48 | `packages/client/ui-sidebar/src/client/index.ts`、`packages/client/ui-sidebar/tests/apply.client.spec.tsx` | 0.10.5 删除对话区状态条：移除 `CadreStallCard` 及 `conversation.input.dock`/`conversation.session.header.utilities` 注册和停摆动作接线；对话区（输入区与标题栏）不再显示状态条，侧栏/台账状态保留 | 任务改派为“删除对话区状态条”；顶部 chip 仍属于对话区，产品要求输入/标题完全干净 | 只移除注册与 action 接线；组件文件保留供测试/后续独立入口，无 schema/main/preload/发布链改动 |
 
 **内核补丁结论：17 处，其中 3 处（K7/K8/K10）本可完全走官方扩展点、K12 已迁走、1 处（K9）应换实现方式。真正无法避免的只剩桌面壳 6 处（K1–K6）+ 构建 4 处（K14–K17）。**
 

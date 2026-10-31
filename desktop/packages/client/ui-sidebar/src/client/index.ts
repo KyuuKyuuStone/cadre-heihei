@@ -21,7 +21,6 @@ import { CADRE_SKIN_TOKENS, CADRE_THEME_ENABLED, CADRE_THEME_SOURCE } from './ca
 import { CadreBrandMark, CadreBrandName, CadreHeroBrandMark } from './CadreBrand.tsx'
 import { CadreCreateDialog, type CadreCreateInjected, type CadreCreateRequest } from './CadreCreateDialog.tsx'
 import { CadreLedgerOverlay, type CadreLedgerInjected, type CadreLedgerRequest } from './CadreLedgerOverlay.tsx'
-import { CadreStallCard, type CadreStallCardInjected } from './CadreStallCard.tsx'
 import {
   CadreEditMemberMenuItem, CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
@@ -32,8 +31,7 @@ import {
   type CadreSessionSubtitleInjected, type CadreSessionsState, type CadreTaskFact,
 } from './CadreSidebar.tsx'
 import {
-  CADRE_STALL_DEFAULTS, actCadreStall, fetchCadreStallView, summarizeStalls,
-  type CadreStallAction, type CadreStallActionBase, type CadreStallActionResult,
+  CADRE_STALL_DEFAULTS, fetchCadreStallView, summarizeStalls,
   type CadreStallProjectState, type CadreStallState, type CadreStallSummary,
 } from './cadre-stall.ts'
 import type { CadreSessionRankService } from './cadre-session-rank.ts'
@@ -633,43 +631,6 @@ export function apply(ctx: ClientContext): void {
     hooks: { roster, sessions: sessionsSource, tasks, stall },
   })
 
-  const runStallAction = async (
-    action: CadreStallAction,
-    projectId: string,
-    sessionId: string,
-    input: CadreStallActionBase,
-  ): Promise<CadreStallActionResult> => {
-    const result = await actCadreStall({
-      action,
-      projectId,
-      actorSessionId: sessionId,
-      ...input,
-    })
-    refreshStalls()
-    return result
-  }
-
-  const stallCardInjected = (sessionId: string): CadreStallCardInjected => {
-    const projectId = projectOfSession(sessionId)
-    return {
-      hooks: { stall, roster },
-      ...(projectId === undefined ? {} : { projectId }),
-      nudge: async input => projectId === undefined
-        ? { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
-        : runStallAction('nudge', projectId, sessionId, input),
-      reassign: async input => projectId === undefined
-        ? { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
-        : runStallAction('reassign', projectId, sessionId, input),
-      cancel: async input => projectId === undefined
-        ? { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
-        : runStallAction('cancel', projectId, sessionId, input),
-      escalate: async input => projectId === undefined
-        ? { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
-        : runStallAction('escalate', projectId, sessionId, input),
-      refresh: refreshStalls,
-    }
-  }
-
   const projectActionsInjected = (): CadreProjectActionsInjected => ({
     hooks: { projectState, roster },
     startSession: (workspaceId) => {
@@ -847,16 +808,6 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: subtitleInjected,
   } as never, CadreSessionSubtitle as never))
-
-  // Supervisor-only status chip sits in the conversation header's right-hand
-  // utilities; the component itself checks the active Session's roster role.
-  ctx.slots.inject('conversation.session.header.utilities' as never, () => ctx.slots.register({
-    name: 'conversation.session.header.utilities',
-    id: 'cadre-stall-card',
-    order: 20,
-    locale: NS,
-    inject: (sessionId: string) => stallCardInjected(sessionId),
-  } as never, CadreStallCard as never))
 
   // Non-blocking GitHub release notice in the sidebar foot. The desktop bridge
   // owns the network and the preference; this component only renders.
