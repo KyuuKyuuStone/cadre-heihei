@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.5（强锁工具分类热修）
+
+- **强锁只拦写工具**：host-write-guard 先分类再查策略/roots；`dispatch_task`、`list_tasks`、`transition_task`、`read`、`grep` 等直接放行，不会因项目未登记/策略缺失被 fail-closed
+- **shell/office 优先拒绝**：`bash/pwsh` 返回 `WRITE_SHELL_DENIED`，`office_*/docx_*/xlsx_*/pptx_*` 返回 `WRITE_OFFICE_DENIED`，不再报 `WRITE_POLICY_UNAVAILABLE`
+- **roots 兜底**：`projects.root_path` → 会话 header cwd → 配置 `workspaceRoot` → 绝对 `reportsDir`；全部缺失才 `WRITE_POLICY_UNAVAILABLE`
+- 主管在 workspace 下 `.md/.txt` 允许、`.ts` 拒绝；普通会话不受影响
+
 ## 0.10.4（pre-step 短路热修）
 
 - **修复 supervisor Skill 短路 `agent/pre-step`**：监听器改为 `(payload, next)`，无 agent、非主管、已注册、注册失败等所有分支都 `return next()`；此前返回 undefined 会让 agent loop 读 `decision.kind` 抛 `Cannot read properties of undefined (reading 'kind')`，普通会话新开一轮也必失败
