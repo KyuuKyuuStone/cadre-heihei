@@ -40,7 +40,7 @@ export interface CadreCollab {
   close(): void
 }
 
-/** Input of the DF-006 `return` disposition (reassign without a status change). */
+/** Input of the `return` disposition (reassign without a status change). */
 export interface CadreReturnOpenTasksInput {
   readonly databasePath: string
   readonly projectId: string
@@ -50,7 +50,7 @@ export interface CadreReturnOpenTasksInput {
   readonly reason?: string
 }
 
-/** Result of the DF-006 `return` disposition. */
+/** Result of the `return` disposition. */
 export type CadreReturnOpenTasksResult =
   | { readonly ok: true; readonly returned: number; readonly replayed: number }
   | { readonly ok: false; readonly code: string; readonly message: string; readonly taskId?: string }

@@ -1,5 +1,5 @@
 /**
- * Retirement guard (DF-006): a member with open tasks cannot simply disappear.
+ * Retirement guard: a member with open tasks cannot simply disappear.
  *
  * The renderer cannot move ledger tasks itself, so the main process owns the
  * disposition:

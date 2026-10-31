@@ -10,7 +10,7 @@
 
 - 心跳为 watchdog 扫描节拍，不是独立 30 秒采样；`tokensSoFar` 依赖 usage
 - aborted 回注不覆盖 error/blocked
-- lastError 未接 DF-017
+- 早期版本未结构化暴露 lastError（1.0.0 已补）
 - 通知前缀为文本协议；内部事件开关未按会话持久化
 - 强锁只覆盖已登记写工具
 - 旧 0.10.0 仍无法读取 0.10.1+ 新事件日志
@@ -25,7 +25,7 @@
 
 - 心跳为 watchdog 扫描节拍，不是独立 30 秒采样；`tokensSoFar` 依赖 usage
 - aborted 回注不覆盖 error/blocked
-- lastError 未接 DF-017
+- 早期版本未结构化暴露 lastError（1.0.0 已补）
 - 通知前缀为文本协议；内部事件开关未按会话持久化
 - 强锁只覆盖已登记写工具
 - 旧 0.10.0 仍无法读取 0.10.1+ 新事件日志
@@ -41,7 +41,7 @@
 
 - 心跳为 watchdog 扫描节拍，不是独立 30 秒采样；`tokensSoFar` 依赖 usage
 - aborted 回注不覆盖 error/blocked
-- lastError 未接 DF-017
+- 早期版本未结构化暴露 lastError（1.0.0 已补）
 - 通知前缀为文本协议；内部事件开关未按会话持久化
 - 强锁只覆盖已登记写工具
 - 旧 0.10.0 仍无法读取 0.10.1+ 新事件日志
@@ -59,7 +59,7 @@
 
 - 心跳为 watchdog 扫描节拍，不是独立 30 秒定时采样；`tokensSoFar` 依赖 usage
 - aborted 回注不覆盖 error/blocked
-- lastError 未接 DF-017
+- 早期版本未结构化暴露 lastError（1.0.0 已补）
 - 通知前缀为文本协议，普通消息同前缀会被一并隐藏；「显示内部事件」开关未按会话持久化
 - 强锁只覆盖已登记写工具；未登记的新写工具需补策略
 - 历史日志不会被重写；旧 0.10.0 仍无法读取 0.10.1+ 写入的新事件
@@ -97,14 +97,14 @@
 
 - **心跳为扫描节拍推导**：`heartbeatAt` 来自 watchdog 扫描确认活动的时间，不是独立 30 秒定时采样；流式过程中的 `tokensSoFar` 依赖 usage，可能为 null
 - **aborted 回注不覆盖 error/blocked**：只有 `aborted` 且带中断原因时向员工回注，模型错误与 pre-step 拒绝仍按原路径处理
-- **lastError 未接 DF-017**：停摆视图尚未消费任务 `lastError`，DF-017 的失败原因展示待接线
+- **早期 lastError 展示简化**：0.10.x 停摆视图未消费任务 `lastError`；1.0.0 已补结构化字段
 - **前缀碰撞/开关未按会话挂载**：`【主管内部】`/`【需要您决定】` 为文本前缀协议，普通消息若以相同前缀开头会被同样处理；「显示内部事件」开关是客户端状态，尚未按会话持久化
 - **强锁只覆盖已登记写工具**：未登记的新写工具默认不拦，需在策略中补登记；supervisor 的 shell 整工具拒绝，worker shell 不受本锁约束
 
 ## 0.10.0（员工请示路由与停摆治理）
 
-- **员工会请示了**（DF-011）：员工遇到拿不准的事向主管提问，问题先经 host-collab 路由（每员工待答上限、30 分钟无答复自动升级，均可配置），主管答复后原路回流员工会话；不再靠员工自己抄送；角色工具掩码修正为 deny 式——worker 隐藏派活/花名册/状态迁移三件（`ask_user_question` 保留），supervisor 隐藏汇报与全部执行工具（`resolve_employee_question` 保留），未来新增工具不再误留给员工
-- **任务停摆治理**（DF-014）：host-governance 停摆检测按最后活动判 normal/possibly_stalled/stalled/waiting_question，goal 自动续跑；主管侧可催办、重派（reassign：open 任务原状态改派在册员工，逐事件留幂等键）、取消、升级——前端停摆卡按 episodeId 原位更新，stale 时禁用动作；停摆视图 version 口径改为直接取任务行版本，与台账并发写同源，消除重派/取消的版本冲突误报；waiting_question 判定窗口收敛进 activity 模块，最后活动取数与归一化可测且边界全覆盖
+- **员工会请示了**：员工遇到拿不准的事向主管提问，问题先经 host-collab 路由（每员工待答上限、30 分钟无答复自动升级，均可配置），主管答复后原路回流员工会话；不再靠员工自己抄送；角色工具掩码修正为 deny 式——worker 隐藏派活/花名册/状态迁移三件（`ask_user_question` 保留），supervisor 隐藏汇报与全部执行工具（`resolve_employee_question` 保留），未来新增工具不再误留给员工
+- **任务停摆治理**：host-governance 停摆检测按最后活动判 normal/possibly_stalled/stalled/waiting_question，goal 自动续跑；主管侧可催办、重派（reassign：open 任务原状态改派在册员工，逐事件留幂等键）、取消、升级——前端停摆卡按 episodeId 原位更新，stale 时禁用动作；停摆视图 version 口径改为直接取任务行版本，与台账并发写同源，消除重派/取消的版本冲突误报；waiting_question 判定窗口收敛进 activity 模块，最后活动取数与归一化可测且边界全覆盖
 - **汇报幂等键修复**：rework 后再次汇报不再重放上一轮 delivered 的幂等键（键按起始状态收窄），二次汇报不再被静默吞掉；rework 二次汇报按周期键落库，跨周期键不冲突，轮次中途重试亦不复用键
 - **会话压缩不再滚雪球**：compaction 新增绝对阈值 `thresholdTokens`（Cadre 默认 150k），有效阈值取窗口比例/预留/绝对值的最小值；摘要强制输出 Status、Commands and Exit Codes、Failing Tests、Contract Decisions、Unverified、Evidence 并保留 file:line/exit code/失败用例/spill 引用——压缩后证据仍可寻址
 - **打包缺件门禁**：打包链强制重建两个 cadre CJS 并在 asar 组装后校验在档，干净检出不再可能打出台账不可用的包（0.9.3 P0 的流程性根治）
@@ -117,12 +117,12 @@
 
 ## 0.9.3（员工管理闭环：职责可见、返工通知、离职处置）
 
-- **主管能看到员工的职责与模型**（DF-002）：`list_employees` 返回角色明细（sessionId、姓名、状态、职责描述、模板、偏好模型），派活前先看清谁在做什么、用什么模型
-- **打回返工闭环补上**（DF-005）：任务被打回 rework 时，员工会话立即收到一条含打回原因的通知，不用再等主管口头转达；通知失败不回滚状态，只在结果里标注 `notifyError` 供追问
-- **员工离职必须先处置未结任务**（DF-006）：有未结任务时直接离职会被拒绝并给出选择——`cancel`（未结任务全部取消，原因 assignee-retired）或 `return`（任务原状态退回在岗主管，逐任务留痕）；`transfer` 本版未实现（0.10.0）
-- **离职员工看得见、找得回**（DF-007）：花名册 departed 行显示「已离职/历史归属」徽标，会话与台账保留不删
-- **花名册读失败不再伪装成空团队**（DF-008）：loading/空/读失败三态分开，失败可重试
-- **台账超期一眼可见**（DF-009 关联）：任务行按截止时间判定超期并高亮「已超期」；派活卡按 projectId 回查台账状态，通道失败显示「状态未同步」而不是静默
+- **主管能看到员工的职责与模型**：`list_employees` 返回角色明细（sessionId、姓名、状态、职责描述、模板、偏好模型），派活前先看清谁在做什么、用什么模型
+- **打回返工闭环补上**：任务被打回 rework 时，员工会话立即收到一条含打回原因的通知，不用再等主管口头转达；通知失败不回滚状态，只在结果里标注 `notifyError` 供追问
+- **员工离职必须先处置未结任务**：有未结任务时直接离职会被拒绝并给出选择——`cancel`（未结任务全部取消，原因 assignee-retired）或 `return`（任务原状态退回在岗主管，逐任务留痕）；`transfer` 本版未实现（0.10.0）
+- **离职员工看得见、找得回**：花名册 departed 行显示「已离职/历史归属」徽标，会话与台账保留不删
+- **花名册读失败不再伪装成空团队**：loading/空/读失败三态分开，失败可重试
+- **台账超期一眼可见**：任务行按截止时间判定超期并高亮「已超期」；派活卡按 projectId 回查台账状态，通道失败显示「状态未同步」而不是静默
 - **构建防陈旧门禁**（K39）：`lib/*.cjs` 漏建/过期时 gates 首位即失败（cadre-build gate + 双态自证）；`pretest`/`predev`/`pregates:evidence` 自动重建；release dry-run 预演同一时序
 
 ### 已知限制

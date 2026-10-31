@@ -125,7 +125,7 @@ const CADRE_REASON_MAX = 2_000
 interface CadreCollabModule {
   openCadreCollab?: (input: CadreCollabOptions) => CadreCollab
   initCadreStore?: (databasePath: string) => void
-  /** DF-006 `return`: reassign open tasks to the acting supervisor. */
+  /** `return` disposition: reassign open tasks to the acting supervisor. */
   returnOpenTasksToSupervisor?: (input: CadreReturnOpenTasksInput) => CadreReturnOpenTasksResult
 }
 
@@ -1154,7 +1154,7 @@ async function main(): Promise<void> {
         return view
       }
       const snapshot = collab.listTasks()
-      // DF-005: a rework must reach the assignee Session, not only the ledger.
+      // A rework must reach the assignee Session, not only the ledger.
       // Only a fresh transition notifies (a replay already delivered once); a
       // failed notice is reported without rolling the status back.
       let assigneeNotified: boolean | undefined
@@ -1625,7 +1625,7 @@ async function main(): Promise<void> {
     if (project.ok === false) return project
     const request = { ...parsed.value, projectId: project.projectId }
     try {
-      // DF-006: open tasks must be refused or disposed of before the roster row
+      // Open tasks must be refused or disposed of before the roster row
       // leaves. The actor comes from the roster (`returnTasks` re-validates too).
       const result = retireMemberWithDisposition({
         listMembers: projectId => cadreLedger.listMembers(projectId).rows,

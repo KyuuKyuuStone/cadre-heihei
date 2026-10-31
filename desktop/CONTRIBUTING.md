@@ -1,23 +1,23 @@
-# Contributing
+# 参与贡献（CONTRIBUTING）
 
-English | [中文](CONTRIBUTING.zh.md)
+感谢关注 Cadre Heihei（基于 DeepSeek Harness 的多会话协作发行版）。
 
-Thank you for your interest in contributing to DeepSeek Harness!
+## 当前阶段
 
-We deeply believe in the power of open source communities, and that belief has shaped this project from the very beginning.
+1.0 前以核心闭环打磨为主；欢迎 issue 与讨论，代码 PR 请先开讨论对齐范围。
 
-DeepSeek Harness is still at an early stage and under active development. We are sorry that we cannot accept external pull requests at the moment. However, contributing code to this repository is far from the only way to help. There are many other ways to get involved:
+## 提交纪律
 
-- Identify and report issues or bugs in GitHub Discussions:
-  - Upvote discussions that you would like to bring to the team's attention. We are a very small team and may not be able to reply to every post, but we monitor them and consider them when allocating resources.
-- Contribute to the ecosystem:
-  - Create a plugin that excites you and share it with others:
-    - Associate your GitHub project with the `dsh-plugin` topic to help others discover your plugin.
-  - Write blog posts and how-to guides about DeepSeek Harness.
-  - Answer questions and help other members of the community.
+- 只 `git add` 自己的文件（共享工作树多人在途）；`git diff --cached --name-only` 核验恰好 N 个。
+- 禁 stash/reset/checkout 公共分支；`push` 必须先获得维护者授权。
+- 改 `cadre-collab/**` 必须重建 CJS（`pnpm run build:cadre`）——门禁 `cadre-build` 会拒绝陈旧产物。
+- 测试描述行为而非正确性；破坏样本（改坏必红）与修复同提交。
 
-DeepSeek Harness is designed to be deeply customizable. We do not believe that packages in the official repository are inherently more important than packages created by the community. You may consider this repository an idea, an official showcase, and a source of inspiration, but not a mandate from us.
+## 欢迎的贡献
 
-We have already seen exciting projects emerge from the community, and we hope to see the ecosystem continue to grow in its own directions.
+- 缺陷报告：现象 → 复现步骤 → 预期（内部缺陷台账由维护者维护，外部用 issue）。
+- 插件生态（`dsh-plugin` topic）、文档与翻译、复现与最小用例。
 
-Into the unknown.
+## 不做的事
+
+- 不引入云服务/遥测；不改变「写的人和验收的人分离」的角色边界；不提交凭据或内部文档。

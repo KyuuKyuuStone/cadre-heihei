@@ -76,7 +76,9 @@ function parseArgs(argv) {
     else if (arg === '--fail-on-drift') options.failOnDrift = true
     else throw new Error(`unknown argument: ${arg}`)
   }
-  options.registry ??= join(options.workspace, 'UPSTREAM.md')
+  options.registry ??= existsSync(join(options.workspace, '.internal', 'UPSTREAM.md'))
+    ? join(options.workspace, '.internal', 'UPSTREAM.md')
+    : join(options.workspace, 'UPSTREAM.md')
   return options
 }
 

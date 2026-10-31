@@ -47,3 +47,7 @@ worktrees/
 .agents/worktrees/
 .typert-*/
 native/system/test/bin/
+
+# Internal fork-difference registry (not published)
+.internal/
+UPSTREAM.internal.md

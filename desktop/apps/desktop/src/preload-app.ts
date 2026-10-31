@@ -170,7 +170,7 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
     retireMember: (options: {
       sessionId: string
       projectId?: string
-      /** DF-006: `cancel` | `return`; `transfer` is not implemented in 0.9.3. */
+      /** Retirement disposition: `cancel` | `return`; `transfer` is not implemented. */
       taskDisposition?: 'cancel' | 'return' | 'transfer'
       actorSessionId?: string
       transferTo?: string
