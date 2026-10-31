@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.6（合并发布：强锁、pre-step、terminal reason 与单行状态）
+
+- **强锁工具分类/roots**：host-write-guard 先分类再查策略；`dispatch_task/list_tasks/transition_task/read/grep` 等非写工具直接放行；shell/office 分别返回 `WRITE_SHELL_DENIED`/`WRITE_OFFICE_DENIED`；roots 按 `projects.root_path → 会话 cwd → workspaceRoot → reportsDir` 兜底，workspace 下 `.md/.txt` 允许、`.ts` 拒绝
+- **pre-step 不短路**：supervisor Skill 的 `agent/pre-step` 监听器改为 `(payload, next)`，所有分支 `return next()`；不再让 agent loop 读 `decision.kind` 抛 undefined
+- **terminal reason 读写修复**：写侧 turn 退出统一落结构化 reason（缺失 fallback error/UNKNOWN）；读侧 Session 加载/回放对历史 `turn/end` 缺 reason 做内存归一化，不重写日志；goal/ACP/session-query/subagent/telemetry/workflow/chat 消费点加守卫
+- **底部单行状态**：侧栏底部状态收敛为单行，长生成进度不再撑高面板
+- **内部化/三态**：停摆/催办/恢复通知默认 `【主管内部】`，仅升级 `【需要您决定】` 可见；停摆视图暴露 elapsed/heartbeat/firstToken/tokens/stallBasis/inferred 三态字段
+
+### 已知限制
+
+- 心跳为 watchdog 扫描节拍，不是独立 30 秒定时采样；`tokensSoFar` 依赖 usage
+- aborted 回注不覆盖 error/blocked
+- lastError 未接 DF-017
+- 通知前缀为文本协议，普通消息同前缀会被一并隐藏；「显示内部事件」开关未按会话持久化
+- 强锁只覆盖已登记写工具；未登记的新写工具需补策略
+- 历史日志不会被重写；旧 0.10.0 仍无法读取 0.10.1+ 写入的新事件
+
 ## 0.10.5（强锁工具分类热修）
 
 - **强锁只拦写工具**：host-write-guard 先分类再查策略/roots；`dispatch_task`、`list_tasks`、`transition_task`、`read`、`grep` 等直接放行，不会因项目未登记/策略缺失被 fail-closed
