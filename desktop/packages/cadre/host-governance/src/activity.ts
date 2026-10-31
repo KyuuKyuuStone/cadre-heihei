@@ -100,7 +100,7 @@ function lastErrorOf(events: readonly ActivityEvent[], windowStartAt?: number): 
     if (reason?.kind !== 'error') return undefined
     const code = typeof reason.error?.code === 'string' ? reason.error.code : 'UNKNOWN'
     const message = typeof reason.error?.message === 'string' ? reason.error.message : '模型请求失败'
-    return { ...readableModelError(code, message), at: event.time }
+    return { ...readableModelError(code, message), at: new Date(event.time).toISOString() }
   }
   return undefined
 }

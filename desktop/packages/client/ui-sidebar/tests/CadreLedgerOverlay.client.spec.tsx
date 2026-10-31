@@ -49,6 +49,7 @@ function stalledView(): CadreStallState {
         tokensSoFar: null,
         stallBasis: null,
         inferred: false,
+        lastError: null,
       }],
       thresholds: {
         suspectAfterMs: 180_000, stalledAfterMs: 600_000, recoverAfterMs: 30_000,
@@ -100,6 +101,7 @@ function executionView(): CadreStallState {
           evidenceEventSeq: 10,
         },
         inferred: false,
+        lastError: null,
       }],
       thresholds: {
         suspectAfterMs: 180_000, stalledAfterMs: 600_000, recoverAfterMs: 30_000,

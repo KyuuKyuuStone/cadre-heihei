@@ -72,6 +72,7 @@ function realView(overrides: Partial<CadreStallTaskView> = {}): CadreStallTaskVi
     tokensSoFar: null,
     stallBasis: NO_EVENTS_BASIS,
     inferred: false,
+    lastError: null,
     ...overrides,
   }
   // A partial fixture may omit this optional-shaped field by accident; the

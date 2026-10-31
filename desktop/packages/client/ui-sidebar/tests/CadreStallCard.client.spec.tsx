@@ -42,6 +42,7 @@ const TASK: CadreStallTaskView = {
   tokensSoFar: null,
   stallBasis: null,
   inferred: false,
+  lastError: null,
 }
 
 function stallState(tasks: readonly CadreStallTaskView[] = [TASK], stale = false): CadreStallState {

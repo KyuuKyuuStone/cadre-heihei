@@ -93,8 +93,8 @@ export interface SessionActivity {
 export interface TaskLastError {
   readonly code: string
   readonly message: string
-  /** Epoch milliseconds of the failing turn/end. */
-  readonly at: number
+  /** ISO-8601 UTC timestamp of the failing turn/end. */
+  readonly at: string
 }
 
 /** Machine-readable basis for a stall/nudge decision. */

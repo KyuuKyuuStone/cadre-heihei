@@ -300,12 +300,12 @@ describe('stall detection', () => {
       lastError: {
         code: 'MODEL_CONFIG',
         message: '模型能力不匹配：当前模型不支持所选能力（如 thinking）。请切换模型或关闭思考后重试。',
-        at: base - MIN,
+        at: new Date(base - MIN).toISOString(),
       },
     })
     await h.service.scan()
     expect(h.service.views()[0]?.lastError).toMatchObject({
-      code: 'MODEL_CONFIG', at: base - MIN,
+      code: 'MODEL_CONFIG', at: new Date(base - MIN).toISOString(),
     })
   })
 

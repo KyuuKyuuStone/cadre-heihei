@@ -114,7 +114,7 @@ describe('three-state step projection', () => {
     expect(activityFrom(events, NEW_TASK).lastError).toEqual({
       code: 'MODEL_CONFIG',
       message: '模型能力不匹配：当前模型不支持所选能力（如 thinking）。请切换模型或关闭思考后重试。',
-      at: NEW_TASK,
+      at: new Date(NEW_TASK).toISOString(),
     })
   })
 })

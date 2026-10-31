@@ -81,8 +81,8 @@ export interface CadreStallTaskView {
   readonly tokensSoFar: number | null
   readonly stallBasis: CadreStallBasis | null
   readonly inferred: boolean
-  /** DF-017 pending: the host has no lastError field yet. */
-  readonly lastError?: CadreStallError | null
+  /** Latest terminal model failure exposed by host-governance (DF-017). */
+  readonly lastError: CadreStallError | null
 }
 
 /** Employee aggregation consumed by the sidebar row. */
