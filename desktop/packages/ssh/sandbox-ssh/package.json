@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-sandbox-ssh",
   "description": "Remote POSIX sandbox argv provider over the shared SSH helper",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "publishConfig": {
     "access": "public"
   },
