@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.4（pre-step 短路热修）
+
+- **修复 supervisor Skill 短路 `agent/pre-step`**：监听器改为 `(payload, next)`，无 agent、非主管、已注册、注册失败等所有分支都 `return next()`；此前返回 undefined 会让 agent loop 读 `decision.kind` 抛 `Cannot read properties of undefined (reading 'kind')`，普通会话新开一轮也必失败
+- **Cadre pre-step 审计**：host-collab 既有监听器所有分支返回 next；host-governance/host-write-guard 不注册该事件；新增 Skill「不短路 waterfall」回归
+- 0.10.4 unsigned 包可覆盖 0.10.3/0.10.0-hotfix.2，不要求新建主管或团队
+
 ## 0.10.3（terminal reason 兼容性热修）
 
 - **写侧兜底**：agent-loop 所有 turn 退出路径统一落结构化 `turn/end.reason`；没有终止原因时写 `error/UNKNOWN`，不再产生 `reason: undefined`
