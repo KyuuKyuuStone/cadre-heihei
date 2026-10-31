@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-tool-bash",
   "description": "Model-facing bash tool with optional generic background-job and sandbox-escalation support",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "publishConfig": {
     "access": "public"
   },

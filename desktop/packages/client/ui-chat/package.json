@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-chat",
   "description": "Chat Conversation target, node definitions, renderers, and details surface",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "publishConfig": {
     "access": "public"
   },

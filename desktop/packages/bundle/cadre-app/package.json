@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-bundle-cadre",
   "description": "Cadre employee templates: four agent presets (development, fiction writing, general assistant, role-play) declared as bundle rows",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

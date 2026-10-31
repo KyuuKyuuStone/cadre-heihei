@@ -1,7 +1,7 @@
 {
   "name": "cadre-heihei-desktop",
   "description": "Electron desktop shell for a bundled dsh runtime and external plugins",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "private": true,
   "license": "MIT",
   "type": "module",
