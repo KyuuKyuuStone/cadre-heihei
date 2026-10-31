@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
-import { CadreLedgerOverlay, isCadreTaskOverdue } from '../src/client/CadreLedgerOverlay.tsx'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { CadreLedgerOverlay, isCadreTaskOverdue, ledgerPageWindow } from '../src/client/CadreLedgerOverlay.tsx'
 import type { CadreStallState } from '../src/client/cadre-stall.ts'
 import { zh, type SidebarKey } from '../src/client/locales.ts'
 
@@ -144,6 +144,14 @@ afterEach(() => {
   delete (window as unknown as { cadre?: unknown }).cadre
 })
 
+function manyRows(): readonly Record<string, unknown>[] {
+  return Array.from({ length: 95 }, (_, index) => row({
+    taskId: `task-${String(index)}`,
+    title: `任务 ${String(index)}`,
+    status: index < 60 ? 'in_progress' : index < 80 ? 'delivered' : 'verified',
+  }))
+}
+
 describe('CadreLedgerOverlay overdue state', () => {
   it('marks a past due task and keeps a future due task unmarked', async () => {
     expect(isCadreTaskOverdue('2020-01-01T00:00:00+08:00', Date.now())).toBe(true)
@@ -163,6 +171,47 @@ describe('CadreLedgerOverlay overdue state', () => {
   it('shows the ledger empty state', async () => {
     mount([])
     expect(await screen.findByText('这个项目部还没有台账记录。')).toBeTruthy()
+  })
+
+  it('renders only 20 of 95 rows and pages through the ledger', async () => {
+    mount(manyRows())
+    expect(await screen.findByText('任务 0')).toBeTruthy()
+    expect(document.querySelectorAll('[data-ledger-row]')).toHaveLength(20)
+    expect(screen.getByText('共 95 条 · 第 1/5 页')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '全部 95' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '进行中 60' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '待验收 20' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '已完成 15' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '第 2 页' }))
+    expect(document.querySelectorAll('[data-ledger-row]')).toHaveLength(20)
+    expect(screen.getByText('共 95 条 · 第 2/5 页')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '第 5 页' }))
+    expect(document.querySelectorAll('[data-ledger-row]')).toHaveLength(15)
+    expect(screen.getByText('共 95 条 · 第 5/5 页')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '下一页' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '上一页' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('resets to page 1 after changing filter or search', async () => {
+    mount(manyRows())
+    expect(await screen.findByText('任务 0')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '第 2 页' }))
+    fireEvent.click(screen.getByRole('button', { name: /进行中/ }))
+    expect(screen.getByText('共 60 条 · 第 1/3 页')).toBeTruthy()
+    expect(document.querySelectorAll('[data-ledger-row]')).toHaveLength(20)
+
+    fireEvent.click(screen.getByRole('button', { name: '第 2 页' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索台账' }), { target: { value: '任务 9' } })
+    expect(screen.getByText(/第 1\/1 页/)).toBeTruthy()
+  })
+
+  it('builds a bounded page window with ellipses', () => {
+    expect(ledgerPageWindow(1, 10)).toEqual([1, 2, 3, 4, 'ellipsis', 10])
+    expect(ledgerPageWindow(5, 10)).toEqual([1, 'ellipsis', 4, 5, 6, 'ellipsis', 10])
+    expect(ledgerPageWindow(10, 10)).toEqual([1, 'ellipsis', 7, 8, 9, 10])
+    expect(ledgerPageWindow(1, 1)).toEqual([1])
   })
 
   it('shows live execution progress instead of a stall state', async () => {

@@ -93,6 +93,11 @@ export const zh = {
   'stall.card.cancelPlaceholder': '例如：需求取消',
   'stall.card.cancelWarning': '取消后任务不可验收、不可恢复。',
   'stall.card.ledgerStale': '停摆状态可能已过期，任务活动时间仅供参考。',
+  'ledger.page.summary': '共 {total} 条 · 第 {page}/{pages} 页',
+  'ledger.page.prev': '上一页',
+  'ledger.page.next': '下一页',
+  'ledger.page.goto': '第 {page} 页',
+  'ledger.pager.aria': '台账分页',
 } satisfies Record<string, string>
 
 /** The sidebar namespace key union. */
@@ -191,4 +196,9 @@ export const en = {
   'stall.card.cancelPlaceholder': 'e.g. requirement cancelled',
   'stall.card.cancelWarning': 'A cancelled task cannot be accepted or restored.',
   'stall.card.ledgerStale': 'Stall data may be stale; activity times are informational.',
+  'ledger.page.summary': '{total} total · page {page}/{pages}',
+  'ledger.page.prev': 'Previous page',
+  'ledger.page.next': 'Next page',
+  'ledger.page.goto': 'Go to page {page}',
+  'ledger.pager.aria': 'Ledger pages',
 } satisfies Record<SidebarKey, string>

@@ -84,6 +84,25 @@ type Load =
 
 type Filter = 'all' | 'active' | 'pending' | 'done'
 
+const PAGE_SIZE = 20
+
+/** Page slots for a compact window such as `1 … 4 5 6 … 10`. */
+export function ledgerPageWindow(current: number, total: number): readonly (number | 'ellipsis')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
+  const pages = new Set<number>([1, total, current - 1, current, current + 1])
+  if (current <= 3) for (const page of [2, 3, 4]) pages.add(page)
+  if (current >= total - 2) for (const page of [total - 3, total - 2, total - 1]) pages.add(page)
+  const sorted = [...pages].filter(page => page >= 1 && page <= total).sort((left, right) => left - right)
+  const slots: (number | 'ellipsis')[] = []
+  let previous = 0
+  for (const page of sorted) {
+    if (page - previous > 1) slots.push('ellipsis')
+    slots.push(page)
+    previous = page
+  }
+  return slots
+}
+
 const FILTERS: readonly { readonly id: Filter; readonly label: string }[] = [
   { id: 'all', label: '全部' },
   { id: 'active', label: '进行中' },
@@ -215,6 +234,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
+  const [page, setPage] = useState(1)
   const [expanded, setExpanded] = useState<string | null>(null)
   const now = useLedgerNow()
   const stallProject = useStall(state => state.byProject.get(request.projectId))
@@ -257,6 +277,9 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
     pending: rows.filter(row => filterOf(row.status) === 'pending').length,
     done: rows.filter(row => filterOf(row.status) === 'done').length,
   }
+  const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pageRows = visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   const summary = load.kind === 'ready'
     ? `${String(counts.all)} 条：进行中 ${String(counts.active)} · 待验收 ${String(counts.pending)} · 已完成 ${String(counts.done)}`
     : load.kind === 'loading' ? '读取台账…' : load.reason
@@ -277,7 +300,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
           value={query}
           placeholder="搜索任务 / 员工 / 交付物…"
           aria-label="搜索台账"
-          onChange={(event) => { setQuery(event.target.value) }}
+          onChange={(event) => { setQuery(event.target.value); setPage(1) }}
         />
         <Button variant="outline" size="sm" onClick={reload}>刷新</Button>
       </div>
@@ -300,7 +323,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
             key={item.id}
             variant={filter === item.id ? 'primary' : 'outline'}
             size="sm"
-            onClick={() => { setFilter(item.id) }}
+            onClick={() => { setFilter(item.id); setPage(1) }}
           >
             {item.label} {counts[item.id]}
           </Button>
@@ -320,7 +343,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
       {load.kind === 'ready' && rows.length > 0 && visible.length === 0 && (
         <p role="status" className={css.hint}>没有匹配的任务；换一个筛选或关键词。</p>
       )}
-      {visible.length > 0 && (
+      {pageRows.length > 0 && (
         <div className={css.table} role="table" aria-label="项目台账">
           <div className={css.headerRow} role="row">
             <span role="columnheader">任务</span>
@@ -330,7 +353,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
             <span role="columnheader">交付物</span>
             <span role="columnheader">验收结果</span>
           </div>
-          {visible.map((row) => {
+          {pageRows.map((row) => {
             const open = expanded === row.taskId
             const overdue = isCadreTaskOverdue(row.dueAt, now)
             const stallTask = stallTasks.get(row.taskId)
@@ -354,6 +377,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
                   type="button"
                   role="row"
                   className={overdue ? `${css.row} ${css.overdueRow}` : css.row}
+                  data-ledger-row
                   data-overdue={overdue ? 'true' : undefined}
                   data-stall-state={stallTask?.stallState}
                   data-execution-state={execution?.state}
@@ -380,6 +404,39 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
             )
           })}
         </div>
+      )}
+      {visible.length > 0 && (
+        <nav className={css.pager} aria-label={t('ledger.pager.aria')}>
+          <span className={css.pageSummary}>
+            {t('ledger.page.summary', { total: visible.length, page: currentPage, pages: totalPages })}
+          </span>
+          <div className={css.pageNumbers}>
+            {ledgerPageWindow(currentPage, totalPages).map((slot, index) => slot === 'ellipsis'
+              ? <span key={`ellipsis:${index}`} className={css.pageEllipsis} aria-hidden="true">…</span>
+              : (
+                <Button
+                  key={slot}
+                  variant={slot === currentPage ? 'primary' : 'ghost'}
+                  size="sm"
+                  aria-label={t('ledger.page.goto', { page: slot })}
+                  aria-current={slot === currentPage ? 'page' : undefined}
+                  onClick={() => { setPage(slot) }}
+                >
+                  {String(slot)}
+                </Button>
+              ))}
+          </div>
+          <div className={css.pageNav}>
+            <Button variant="outline" size="sm" disabled={currentPage <= 1}
+              onClick={() => { setPage(currentPage - 1) }}>
+              {t('ledger.page.prev')}
+            </Button>
+            <Button variant="outline" size="sm" disabled={currentPage >= totalPages}
+              onClick={() => { setPage(currentPage + 1) }}>
+              {t('ledger.page.next')}
+            </Button>
+          </div>
+        </nav>
       )}
       {load.kind === 'ready' && load.elapsedMs !== undefined && (
         <span className={css.hint}>只读查询 {String(load.elapsedMs)} ms</span>
