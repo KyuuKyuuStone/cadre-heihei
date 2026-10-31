@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.3（terminal reason 兼容性热修）
+
+- **写侧兜底**：agent-loop 所有 turn 退出路径统一落结构化 `turn/end.reason`；没有终止原因时写 `error/UNKNOWN`，不再产生 `reason: undefined`
+- **读侧归一化**：会话加载/回放遇到历史 `turn/end` 缺 reason 时在内存归一化为 `error/UNKNOWN`，不重写日志；goal-round-driver、ACP codec、session-query、subagent、telemetry、workflow、chat/trajectory 等所有 `reason.kind` 消费点加守卫
+- **降级兼容**：`turn/received` 等 additive 生命周期事件标记 `ignorable`，旧版本读取新会话不再整条拒绝
+- 覆盖 hotfix.2 用户的 terminal reason 复发；不需要新建主管或团队
+
 ## 0.10.1（主管强锁、Skill 与停摆三态）
 
 - **主管写文件强锁**：新增 host-write-guard，在 `tools/pre-execute` 只拦在册 supervisor——只允许项目工作区与 `reports/` 下的 `.md/.txt`，Office 与 bash/pwsh 显式拒绝，路径经 realpath 归一，策略 JSON 可热更新，失败一律 fail-closed 并写审计行；worker 与普通会话不受影响
