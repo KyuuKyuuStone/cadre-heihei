@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-write-guard",
   "description": "Supervisor write-path guard: .md/.txt under the project workspace and reports directory",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

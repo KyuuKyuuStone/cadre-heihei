@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-collab",
   "description": "Host collaboration tools: dispatch_task / report_task / list_employees over the cadre ledger and the official Session prompt channel",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
