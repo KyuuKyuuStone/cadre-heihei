@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-governance",
   "description": "Stall watchdog and supervisor goal for the cadre task ledger",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
