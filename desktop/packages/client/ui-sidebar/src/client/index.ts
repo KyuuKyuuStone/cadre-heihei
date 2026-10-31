@@ -848,10 +848,10 @@ export function apply(ctx: ClientContext): void {
     inject: subtitleInjected,
   } as never, CadreSessionSubtitle as never))
 
-  // Supervisor-only stall cards sit above the composer through the official
-  // input dock; the component itself checks the active Session's roster role.
-  ctx.slots.inject('conversation.input.dock' as never, () => ctx.slots.register({
-    name: 'conversation.input.dock',
+  // Supervisor-only status chip sits in the conversation header's right-hand
+  // utilities; the component itself checks the active Session's roster role.
+  ctx.slots.inject('conversation.session.header.utilities' as never, () => ctx.slots.register({
+    name: 'conversation.session.header.utilities',
     id: 'cadre-stall-card',
     order: 20,
     locale: NS,

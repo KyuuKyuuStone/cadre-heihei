@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 /** Sidebar shell slot registration and its Session/layout callbacks. */
 import { Context, type Fiber } from '@deepseek-ai/cordis'
@@ -66,6 +67,12 @@ async function bench(declare = true) {
 describe('ui-sidebar apply', () => {
   it('keeps the host Loader entry inert', () => {
     expect(hostApply).not.toThrow()
+  })
+
+  it('registers the Cadre status chip in the header, not the composer', () => {
+    const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+    expect(source).toContain("inject('conversation.session.header.utilities'")
+    expect(source).not.toContain("inject('conversation.input.dock'")
   })
 
   it('declares only the services it uses', () => {
