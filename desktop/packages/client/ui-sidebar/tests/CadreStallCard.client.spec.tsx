@@ -102,12 +102,13 @@ function props(state: CadreStallState = stallState(), overrides: Partial<Props> 
 afterEach(cleanup)
 
 describe('CadreStallCard', () => {
-  it('renders one supervisor card with task, employee, silence and last activity', () => {
+  it('renders one single-line stall strip without title or actions', () => {
     render(<CadreStallCard {...props()} />)
     expect(screen.getByText(/已停摆 · 12 分钟无活动/)).toBeTruthy()
-    expect(screen.getByText('修复登录失败')).toBeTruthy()
-    expect(screen.getByText(/走查前端（员工）/)).toBeTruthy()
-    expect(document.querySelectorAll('[data-episode-id]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-status-strip]')).toHaveLength(1)
+    expect(screen.queryByText('修复登录失败')).toBeNull()
+    expect(screen.queryByText(/走查前端（员工）/)).toBeNull()
+    expect(document.querySelector('[data-episode-id]')).toBeNull()
     expect(screen.queryByRole('button', { name: '催办' })).toBeNull()
   })
 
@@ -128,9 +129,9 @@ describe('CadreStallCard', () => {
   it('disables actions and says data may be stale', () => {
     const p = props(stallState([{ ...TASK, stale: true }], true))
     render(<CadreStallCard {...p} />)
-    expect(screen.getByText(/数据可能过期/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: '催办' })).toBeNull()
     openInternalActions()
+    expect(screen.getByText(/数据可能过期/)).toBeTruthy()
     expect(button('催办').disabled).toBe(true)
     expect(button('重派…').disabled).toBe(true)
     expect(button('取消…').disabled).toBe(true)
@@ -201,13 +202,13 @@ describe('CadreStallCard', () => {
     expect(screen.getByText('修复登录失败')).toBeTruthy()
   })
 
-  it('dedupes cards by episodeId', () => {
+  it('renders at most one status strip for duplicate episodes', () => {
     const duplicate = { ...TASK, title: '重复通知' }
     render(<CadreStallCard {...props(stallState([TASK, duplicate]))} />)
-    expect(document.querySelectorAll('[data-episode-id]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-status-strip]')).toHaveLength(1)
   })
 
-  it('does not render a card for model generation progress', () => {
+  it('renders one generation strip without detail or heartbeat', () => {
     const generating: CadreStallTaskView = {
       ...TASK,
       stallState: 'normal',
@@ -226,11 +227,16 @@ describe('CadreStallCard', () => {
       },
       inferred: true,
     }
-    const { container } = render(<CadreStallCard {...props(stallState([generating]))} />)
-    expect(container.firstChild).toBeNull()
+    render(<CadreStallCard {...props(stallState([generating]))} />)
+    expect(document.querySelectorAll('[data-status-strip]')).toHaveLength(1)
+    expect(screen.getByText(/生成中 · 3 分钟/)).toBeTruthy()
+    expect(screen.queryByText(/心跳/)).toBeNull()
+    expect(screen.queryByText(/128 tokens/)).toBeNull()
+    expect(screen.queryByText('修复登录失败')).toBeNull()
+    expect(screen.queryByRole('button', { name: '催办' })).toBeNull()
   })
 
-  it('does not render a card for tool execution progress', () => {
+  it('renders one tool strip with tool name and elapsed time', () => {
     const tool: CadreStallTaskView = {
       ...TASK,
       stallState: 'normal',
@@ -246,11 +252,13 @@ describe('CadreStallCard', () => {
         evidenceEventSeq: 11,
       },
     }
-    const { container } = render(<CadreStallCard {...props(stallState([tool]))} />)
-    expect(container.firstChild).toBeNull()
+    render(<CadreStallCard {...props(stallState([tool]))} />)
+    expect(document.querySelectorAll('[data-status-strip]')).toHaveLength(1)
+    expect(screen.getByText(/工具执行中 · office_docx · 已等 3 分钟/)).toBeTruthy()
+    expect(screen.queryByText(/心跳/)).toBeNull()
   })
 
-  it('never turns a live generation into an actionable stall card', () => {
+  it('keeps a long generation as a non-actionable strip', () => {
     const generating: CadreStallTaskView = {
       ...TASK,
       elapsedMs: 600_000,
@@ -264,11 +272,13 @@ describe('CadreStallCard', () => {
         evidenceEventSeq: 12,
       },
     }
-    const { container } = render(<CadreStallCard {...props(stallState([generating]))} />)
-    expect(container.firstChild).toBeNull()
+    render(<CadreStallCard {...props(stallState([generating]))} />)
+    expect(screen.getByText(/生成中 · 10 分钟/)).toBeTruthy()
+    expect(screen.queryByText(/已停摆 ·/)).toBeNull()
+    expect(screen.queryByRole('button', { name: '催办' })).toBeNull()
   })
 
-  it('keeps waiting_question visible without stall actions', () => {
+  it('keeps waiting_question in the single status strip', () => {
     const waiting: CadreStallTaskView = {
       ...TASK,
       stallState: 'waiting_question',
@@ -284,13 +294,13 @@ describe('CadreStallCard', () => {
       },
     }
     render(<CadreStallCard {...props(stallState([waiting]))} />)
-    expect(document.querySelector('[data-execution-state="waiting_question"]')).toBeTruthy()
+    expect(document.querySelectorAll('[data-status-strip]')).toHaveLength(1)
     expect(screen.getByText(/等待回答 · 46 秒/)).toBeTruthy()
     expect(screen.queryByText(/已停摆 ·/)).toBeNull()
     expect(screen.queryByRole('button', { name: '催办' })).toBeNull()
   })
 
-  it('shows write-guard denial and localizes its UTC timestamp', () => {
+  it('shows a write-guard error as a single error strip', () => {
     const denied: CadreStallTaskView = {
       ...TASK,
       stallState: 'normal',
@@ -301,22 +311,22 @@ describe('CadreStallCard', () => {
       },
     }
     render(<CadreStallCard {...props(stallState([denied]))} />)
-    expect(screen.getByText('写入被拒绝')).toBeTruthy()
-    expect(screen.getByText('WRITE_EXTENSION_DENIED')).toBeTruthy()
-    expect(screen.getByText('只允许 .md/.txt')).toBeTruthy()
-    expect(screen.queryByText(/2026-10-30T03:00:00/)).toBeNull()
-    expect(document.querySelector('[data-error-code="WRITE_EXTENSION_DENIED"]')).toBeTruthy()
+    expect(document.querySelectorAll('[data-status-strip]')).toHaveLength(1)
+    expect(screen.getByText('最近错误')).toBeTruthy()
+    expect(screen.queryByText('WRITE_EXTENSION_DENIED')).toBeNull()
+    expect(screen.queryByText('只允许 .md/.txt')).toBeNull()
   })
 
-  it('shows a non-guard lastError without a stall card', () => {
+  it('shows a non-guard lastError as a single error strip', () => {
     const failed: CadreStallTaskView = {
       ...TASK,
       stallState: 'normal',
       lastError: { code: 'TOOL_FAILED', message: '工具失败', at: '2026-10-30T03:00:00.000Z' },
     }
     render(<CadreStallCard {...props(stallState([failed]))} />)
+    expect(document.querySelectorAll('[data-status-strip]')).toHaveLength(1)
     expect(screen.getByText('最近错误')).toBeTruthy()
-    expect(screen.getByText('TOOL_FAILED')).toBeTruthy()
+    expect(screen.queryByText('TOOL_FAILED')).toBeNull()
     expect(screen.queryByText(/已停摆 ·/)).toBeNull()
   })
 

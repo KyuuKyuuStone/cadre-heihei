@@ -11,18 +11,14 @@ import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreRosterMember, CadreRosterState } from './CadreSidebar.tsx'
 import {
-  type CadreExecutionView,
   type CadreStallActionBase,
   type CadreStallActionResult,
-  type CadreStallError,
   type CadreStallState,
   type CadreStallTaskView,
   type CadreStallThresholds,
   elapsedText,
   executionOf,
   executionText,
-  isWriteGuardError,
-  localTime,
   relativeTime,
   silenceText,
 } from './cadre-stall.ts'
@@ -118,108 +114,86 @@ export function CadreStallCard({
   // question is actionable here. no_events remains the stall-card source.
   const executions = project.tasks.flatMap((task) => {
     const execution = executionOf(task)
-    return execution?.state === 'waiting_question' ? [{ task, execution }] : []
+    return execution === null ? [] : [{ task, execution }]
   })
   const errors = project.tasks.flatMap(task => task.lastError === undefined || task.lastError === null
     ? []
     : [{ task, error: task.lastError }])
-  // A stalled task is actionable only when it has no live turn; generation and
-  // tool execution are progress, never a stall card.
+  // Only no_events reaches a stalled task; generation and tool execution are
+  // progress and belong to the sidebar row.
   const stalled = project.tasks.filter(task => task.stallState === 'stalled' && executionOf(task) === null)
-  const cards = [...new Map(stalled.map(task => [task.episodeId, task])).values()]
-  if (cards.length === 0 && executions.length === 0 && errors.length === 0) return null
+  const primary = stalled[0]
+    ?? executions.find(entry => entry.execution.state === 'waiting_question')
+    ?? executions.find(entry => entry.execution.state === 'tool_execution')
+    ?? executions.find(entry => entry.execution.state === 'model_generation')
+    ?? errors[0]
+  if (primary === undefined) return null
+
+  const state = stalled[0] !== undefined
+    ? 'stalled'
+    : 'execution' in primary ? primary.execution.state : 'error'
+  const text: string = stalled[0] !== undefined
+    ? t('stall.card.header', { silence: silenceText(stalled[0].silenceMs, t) })
+    : 'execution' in primary
+      ? executionText(primary.execution, t)
+      : t('stall.lastError.title')
+  const dot: string = (state === 'stalled'
+    ? css.dotStalled
+    : state === 'waiting_question' ? css.dotWaiting
+      : state === 'error' ? css.dotError : css.dotRunning) ?? ''
 
   return (
     <section className={css.stack} aria-label={t('stall.card.aria')}>
-      {executions.map(({ task, execution }) => (
-        <CadreExecutionRow key={`execution:${task.taskId}`} task={task} execution={execution} t={t} />
-      ))}
-      {errors.map(({ task, error }) => (
-        <CadreErrorMessage
-          key={`error:${task.taskId}:${error.code}:${error.at}`}
-          taskId={task.taskId}
-          title={task.title}
-          error={error}
-          t={t}
-        />
-      ))}
-      {cards.map(task => (
-        <CadreStallCardItem
-          key={task.episodeId}
-          t={t}
-          task={task}
-          stale={project.stale || task.stale}
-          thresholds={project.thresholds}
-          targets={targetsFrom(members)}
-          nudge={nudge}
-          reassign={reassign}
-          cancel={cancel}
-          escalate={escalate}
-          refresh={refresh}
-        />
-      ))}
+      {stalled[0] === undefined
+        ? (
+          <div className={css.strip} data-status-strip data-status={state}>
+            <span className={`${css.statusDot} ${dot}`} aria-hidden="true" />
+            <span className={css.stripText}>{text}</span>
+          </div>
+        )
+        : <StallStrip task={stalled[0]} state={state} text={text} dot={dot} t={t} stale={project.stale || stalled[0].stale}
+          thresholds={project.thresholds} targets={targetsFrom(members)} nudge={nudge} reassign={reassign}
+          cancel={cancel} escalate={escalate} refresh={refresh} />}
     </section>
   )
 }
 
-function CadreExecutionRow({
-  task, execution, t,
+function StallStrip({
+  task, state, text, dot, t, stale, thresholds, targets, nudge, reassign, cancel, escalate, refresh,
 }: {
   readonly task: CadreStallTaskView
-  readonly execution: CadreExecutionView
+  readonly state: string
+  readonly text: string
+  readonly dot: string
   readonly t: PropsLocale<'sidebar'>['t']
+  readonly stale: boolean
+  readonly thresholds: CadreStallThresholds
+  readonly targets: readonly CadreRosterMember[]
+  readonly nudge: CadreStallCardInjected['nudge']
+  readonly reassign: CadreStallCardInjected['reassign']
+  readonly cancel: CadreStallCardInjected['cancel']
+  readonly escalate: CadreStallCardInjected['escalate']
+  readonly refresh: () => void
 }) {
+  const [open, setOpen] = useState(false)
   return (
-    <article className={css.executionRow} data-execution-state={execution.state} aria-label={t('stall.execution.aria')}>
-      <div className={css.executionHead}>
-        <span className={css.executionDot} aria-hidden="true" />
-        <strong>{executionText(execution, t)}</strong>
-        <span className={css.executionTask}>{task.title}</span>
+    <>
+      <div className={css.strip} data-status-strip data-status={state}>
+        <span className={`${css.statusDot} ${dot}`} aria-hidden="true" />
+        <span className={css.stripText}>{text}</span>
+        <button type="button" className={css.internalHint} aria-expanded={open}
+          onClick={() => { setOpen(value => !value) }}>
+          {open ? t('stall.card.internal.hide') : t('stall.card.internal.show')}
+        </button>
       </div>
-      <div className={css.executionMeta}>
-        <span>{task.assigneeName}</span>
-        {execution.firstTokenAt !== undefined && execution.firstTokenAt !== null && (
-          <span>{t('stall.execution.firstToken', { time: localTime(execution.firstTokenAt, t) })}</span>
-        )}
-        {execution.heartbeatAt !== undefined && execution.heartbeatAt !== null && (
-          <span>{t('stall.execution.heartbeat', { time: localTime(execution.heartbeatAt, t) })}</span>
-        )}
-        {execution.tokensSoFar !== undefined && execution.tokensSoFar !== null && (
-          <span>{t('stall.execution.tokens', { count: execution.tokensSoFar })}</span>
-        )}
-        {task.inferred && <span className={css.degraded}>{t('stall.execution.inferred')}</span>}
-      </div>
-    </article>
-  )
-}
-
-function CadreErrorMessage({
-  taskId, title, error, t,
-}: {
-  readonly taskId: string
-  readonly title: string
-  readonly error: CadreStallError
-  readonly t: PropsLocale<'sidebar'>['t']
-}) {
-  const guard = isWriteGuardError(error.code)
-  return (
-    <article className={guard ? css.writeGuard : css.lastError} role="alert" data-error-code={error.code}>
-      <div className={css.errorHead}>
-        <strong>{guard ? t('stall.writeGuard.title') : t('stall.lastError.title')}</strong>
-        <span className={css.errorCode}>{error.code}</span>
-      </div>
-      <div className={css.errorTask}>{title} · {taskId}</div>
-      <div className={css.errorMessage}>{error.message}</div>
-      <div className={css.errorAt}>
-        {t(guard ? 'stall.writeGuard.at' : 'stall.lastError.at', { time: localTime(error.at, t) })}
-      </div>
-      {guard && <div className={css.errorHint}>{t('stall.writeGuard.hint')}</div>}
-    </article>
+      {open && <CadreStallCardItem t={t} task={task} stale={stale} thresholds={thresholds} targets={targets}
+        nudge={nudge} reassign={reassign} cancel={cancel} escalate={escalate} refresh={refresh} showActions />}
+    </>
   )
 }
 
 function CadreStallCardItem({
-  task, t, stale, thresholds, targets, nudge, reassign, cancel, escalate, refresh,
+  task, t, stale, thresholds, targets, nudge, reassign, cancel, escalate, refresh, showActions = false,
 }: {
   readonly task: CadreStallTaskView
   readonly t: PropsLocale<'sidebar'>['t']
@@ -231,6 +205,7 @@ function CadreStallCardItem({
   readonly cancel: CadreStallCardInjected['cancel']
   readonly escalate: CadreStallCardInjected['escalate']
   readonly refresh: () => void
+  readonly showActions?: boolean
 }) {
   const [pending, setPending] = useState<'nudge' | 'escalate' | null>(null)
   const [modal, setModal] = useState<'reassign' | 'cancel' | null>(null)
@@ -239,7 +214,7 @@ function CadreStallCardItem({
   const [reason, setReason] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [internalActionsVisible, setInternalActionsVisible] = useState(false)
+  const [internalActionsVisible, setInternalActionsVisible] = useState(showActions)
   const cooldown = cooldownLeft(task, thresholds.nudgeCooldownMs)
   const canNudge = !stale && task.capabilities.nudge && cooldown === 0
   const cooldownSeconds = Math.ceil(cooldown / 1000)
@@ -337,16 +312,18 @@ function CadreStallCardItem({
       {stale && <div className={css.warning} role="status">{t('stall.card.stale')}</div>}
       {error !== null && <div className={css.error} role="alert">{error}</div>}
       {notice !== null && <div className={css.notice} role="status">{notice}</div>}
-      <div className={css.internalBar}>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-pressed={internalActionsVisible}
-          onClick={() => { setInternalActionsVisible(visible => !visible) }}
-        >
-          {internalActionsVisible ? t('stall.card.internal.hide') : t('stall.card.internal.show')}
-        </Button>
-      </div>
+      {!showActions && (
+        <div className={css.internalBar}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-pressed={internalActionsVisible}
+            onClick={() => { setInternalActionsVisible(visible => !visible) }}
+          >
+            {internalActionsVisible ? t('stall.card.internal.hide') : t('stall.card.internal.show')}
+          </Button>
+        </div>
+      )}
       {internalActionsVisible && <div className={css.actions}>
         <Button
           variant="primary"
