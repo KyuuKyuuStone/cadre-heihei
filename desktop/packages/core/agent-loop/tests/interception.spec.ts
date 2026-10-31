@@ -368,7 +368,8 @@ describe('agent/pre-step', () => {
     await waitForIdle(ctx, agent)
 
     const staged = events(agent).filter(event =>
-      event.type === 'user/message')
+      event.type === 'user/message'
+      && !event.data.content.some(block => block.type === 'text' && block.text.startsWith('[系统通知]')))
     expect(staged.map(event => event.type)).toEqual([
       'user/message',
       'user/message',
@@ -377,6 +378,11 @@ describe('agent/pre-step', () => {
     expect(JSON.stringify(adapter.requests[0]?.messages)).not.toContain('blocked prompt')
     expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('staged context')
     expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('staged steering')
+    const blockedNotice = events(agent).find(event => event.type === 'user/message'
+      && event.data.content.some(block => block.type === 'text' && block.text.startsWith('[系统通知]')))
+    expect(blockedNotice?.type === 'user/message'
+      ? blockedNotice.data.content.map(block => block.type === 'text' ? block.text : '').join('')
+      : '').toContain('blocked（未出首 token）')
   })
 
   it('preserves later queued work when a step is rejected', async () => {
