@@ -126,7 +126,8 @@
 .statusDotIdle,
 .statusDotStalled,
 .statusDotMaybeStalled,
-.statusDotExecution {
+.statusDotExecution,
+.statusDotError {
   flex: none;
   width: 6px;
   height: 6px;
@@ -153,6 +154,10 @@
 
 .statusDotExecution {
   background: var(--dsw-alias-state-business-primary);
+}
+
+.statusDotError {
+  background: var(--dsw-alias-state-error-primary);
 }
 
 /* Retire menu + dialog */

@@ -122,6 +122,32 @@
   white-space: nowrap;
 }
 
+.taskError {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.taskErrorDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.taskErrorText {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
 .stallNormal {
   color: var(--dsw-alias-label-tertiary);
 }

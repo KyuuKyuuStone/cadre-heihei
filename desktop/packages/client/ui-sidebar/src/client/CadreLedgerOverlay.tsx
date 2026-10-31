@@ -13,6 +13,8 @@ import {
   type CadreStallTaskView,
   executionOf,
   executionText,
+  lastErrorText,
+  lastErrorTooltip,
   stallStateText,
 } from './cadre-stall.ts'
 import css from './CadreLedgerOverlay.module.css'
@@ -357,6 +359,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
             const open = expanded === row.taskId
             const overdue = isCadreTaskOverdue(row.dueAt, now)
             const stallTask = stallTasks.get(row.taskId)
+            const lastError = stallTask?.lastError ?? null
             const execution = stallTask === undefined ? null : executionOf(stallTask)
             const progress = executionText(execution, t)
             const stallText = progress !== ''
@@ -388,6 +391,13 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
                     <span className={css.taskTitle}>{row.title}</span>
                     <span className={css.taskMeta}>派发 {timeText(row.updatedAt)} · {row.taskId}</span>
                     {stallText !== null && <span className={`${css.taskStall} ${stallClass}`}>{stallText}</span>}
+                    {lastError !== null && (
+                      <span className={css.taskError} title={lastErrorTooltip(lastError, t)}
+                        data-last-error-code={lastError.code}>
+                        <span className={css.taskErrorDot} aria-hidden="true" />
+                        <span className={css.taskErrorText}>{lastErrorText(lastError, t)}</span>
+                      </span>
+                    )}
                   </span>
                   <span role="cell">{row.assigneeName ?? row.assigneeSessionId}（{positionText(row)}）</span>
                   <span role="cell"><Pill>{STATUS_LABELS[row.status] ?? row.status}</Pill></span>

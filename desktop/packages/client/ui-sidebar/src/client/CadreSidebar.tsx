@@ -18,7 +18,13 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreProjectState } from './contract/slots.ts'
-import { type CadreStallState, executionText, stallStateText } from './cadre-stall.ts'
+import {
+  type CadreStallState,
+  executionText,
+  lastErrorText,
+  lastErrorTooltip,
+  stallStateText,
+} from './cadre-stall.ts'
 import css from './CadreSidebar.module.css'
 
 /*
@@ -427,6 +433,17 @@ export function CadreSessionSubtitle({
   }
   if (member.state === 'departed') {
     return <span className={css.plainSubtitle} title="历史归属：会话与台账保留">历史归属</span>
+  }
+
+  const lastError = stall?.lastError
+  if (lastError !== null && lastError !== undefined) {
+    return (
+      <span className={css.sessionSubtitle} title={lastErrorTooltip(lastError, t)}
+        data-last-error-code={lastError.code}>
+        <span className={css.statusDotError} aria-hidden="true" />
+        <span className={css.subtitleText}>{lastErrorText(lastError, t)}</span>
+      </span>
+    )
   }
 
   const owned = tasks.filter(task => task.assigneeSessionId === sessionId && ACTIVE_TASK_STATUS.has(task.status))

@@ -298,6 +298,54 @@ describe('session identity', () => {
     expect(screen.getByText(/空闲 · 已停摆 · 5 分钟前/)).toBeTruthy()
   })
 
+  it.each([['worker'], ['supervisor']] as const)('shows the last error for a %s row', (role) => {
+    const state = roster({ sessionId: 's1', role, description: '前端' })
+    const message = '工具失败：无法读取项目配置，请检查路径后重试'
+    const at = '2026-10-30T03:00:00.000Z'
+    const stall: CadreStallState = {
+      byProject: new Map(),
+      bySession: new Map([['s1', {
+        worstState: 'normal',
+        stalledCount: 0,
+        possiblyStalledCount: 0,
+        lastActivityAt: Date.now() - 3 * 60_000,
+        episodeIds: [],
+        lastError: { code: 'TOOL_FAILED', message, at },
+      }]]),
+    }
+    const useStall = ((selector: (value: CadreStallState) => unknown) => selector(stall)) as never
+    render(<CadreSessionSubtitle {...({
+      sessionId: 's1',
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
+        selector({ byId: {} })) as never,
+      useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+      useStall,
+      t,
+    })} />)
+    const error = document.querySelector('[data-last-error-code="TOOL_FAILED"]')
+    expect(error).toBeTruthy()
+    expect(error?.textContent).toContain(message)
+    const title = error?.getAttribute('title') ?? ''
+    expect(title).toContain('TOOL_FAILED')
+    expect(title).toContain(message)
+    expect(title).toContain(new Date(at).toLocaleString())
+  })
+
+  it('does not show an error row when lastError is null', () => {
+    const state = roster({ sessionId: 's1', role: 'worker', description: '前端' })
+    render(<CadreSessionSubtitle {...({
+      sessionId: 's1',
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      useSessions: ((selector: (value: { byId: Record<string, { running?: boolean }> }) => unknown) =>
+        selector({ byId: {} })) as never,
+      useTasks: ((selector: (value: readonly unknown[]) => unknown) => selector([])) as never,
+      useStall: emptyStallHook,
+      t,
+    })} />)
+    expect(document.querySelector('[data-last-error-code]')).toBeNull()
+  })
+
   it('shows generation/tool execution distinct from no_events stall state', () => {
     const state = roster({ sessionId: 's1', role: 'worker', description: '前端' })
     const stall: CadreStallState = {

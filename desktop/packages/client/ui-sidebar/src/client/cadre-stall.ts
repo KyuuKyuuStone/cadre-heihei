@@ -94,6 +94,8 @@ export interface CadreStallSummary {
   readonly episodeIds: readonly string[]
   /** Present while a generation/tool/question owns the employee. */
   readonly execution?: CadreExecutionView | null
+  /** Newest terminal failure among the employee's tasks. */
+  readonly lastError?: CadreStallError | null
 }
 
 /** Host config fields; the view is allowed to omit any value. */
@@ -266,6 +268,9 @@ export function summarizeStalls(
       ?? views.find(view => view.state === 'tool_execution')
       ?? views.find(view => view.state === 'model_generation')
       ?? null
+    const lastError = own
+      .flatMap(task => task.lastError === null ? [] : [task.lastError])
+      .sort((left, right) => Date.parse(right.at) - Date.parse(left.at))[0] ?? null
     summaries.set(sessionId, {
       worstState: stalled > 0 ? 'stalled' : possible > 0 ? 'possibly_stalled' : waiting ? 'waiting_question' : 'normal',
       stalledCount: stalled,
@@ -274,6 +279,7 @@ export function summarizeStalls(
       episodeIds: own.filter(task => task.stallState === 'stalled' || task.stallState === 'possibly_stalled')
         .map(task => task.episodeId),
       ...(execution === null ? {} : { execution }),
+      ...(lastError === null ? {} : { lastError }),
     })
   }
   return summaries
@@ -331,6 +337,18 @@ export function executionText(execution: CadreExecutionView | null | undefined, 
     return t('stall.execution.waiting', { elapsed: elapsedText(execution.elapsedMs, t) })
   }
   return ''
+}
+
+/** Short last-error label; long messages are ellipsized by the row CSS. */
+export function lastErrorText(error: CadreStallError, t: Translate): string {
+  return t('stall.lastError.short', { message: error.message })
+}
+
+/** Full code/message/local time for the row tooltip. */
+export function lastErrorTooltip(error: CadreStallError, t: Translate): string {
+  const at = new Date(error.at)
+  const time = Number.isNaN(at.getTime()) ? t('stall.time.unknown') : at.toLocaleString()
+  return t('stall.lastError.tooltip', { code: error.code, message: error.message, time })
 }
 
 export function silenceText(milliseconds: number | null, t: Translate): string {

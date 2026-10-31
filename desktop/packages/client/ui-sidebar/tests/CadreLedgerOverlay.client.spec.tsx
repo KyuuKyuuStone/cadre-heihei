@@ -115,6 +115,26 @@ function executionView(): CadreStallState {
   }
 }
 
+function errorView(): CadreStallState {
+  const base = stalledView()
+  const project = base.byProject.get('p1')
+  if (project === undefined) throw new Error('missing fixture project')
+  return {
+    ...base,
+    byProject: new Map([['p1', {
+      ...project,
+      tasks: project.tasks.map(task => ({
+        ...task,
+        lastError: {
+          code: 'TOOL_FAILED',
+          message: '工具失败：无法读取项目配置',
+          at: '2026-10-30T03:00:00.000Z',
+        },
+      })),
+    }]]),
+  }
+}
+
 function row(overrides: Record<string, unknown> = {}) {
   return {
     taskId: 'task-1',
@@ -220,6 +240,16 @@ describe('CadreLedgerOverlay overdue state', () => {
     mount([row()], executionView())
     expect(await screen.findByText(/生成中 · 3 分钟/)).toBeTruthy()
     expect(document.querySelector('[data-execution-state="model_generation"]')).toBeTruthy()
+  })
+
+  it('shows lastError in the ledger row with a full tooltip', async () => {
+    mount([row()], errorView())
+    const error = await screen.findByText(/错误 · 工具失败/)
+    const holder = error.closest('[data-last-error-code]')
+    expect(holder?.getAttribute('data-last-error-code')).toBe('TOOL_FAILED')
+    expect(holder?.getAttribute('title')).toContain('TOOL_FAILED')
+    expect(holder?.getAttribute('title')).toContain('工具失败：无法读取项目配置')
+    expect(holder?.getAttribute('title')).toContain(new Date('2026-10-30T03:00:00.000Z').toLocaleString())
   })
 
   it('joins the host stall view to the task row', async () => {
