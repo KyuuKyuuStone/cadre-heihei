@@ -97,7 +97,7 @@ export const subagentTimingProjectionDefinition = {
       return {
         ...rest,
         settledMs: state.settledMs + Math.max(0, event.time - active.since),
-        lastTurnCompleted: event.data.reason.kind === 'completed',
+        lastTurnCompleted: event.data.reason?.kind === 'completed',
       }
     }
     if (state.active === undefined) return state

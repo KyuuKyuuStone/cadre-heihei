@@ -5,6 +5,7 @@
 
 import type { StopReason } from '@agentclientprotocol/sdk'
 import type { TurnEndReason } from '@deepseek-ai/dsh-session'
+import { normalizeTurnEndReason } from '@deepseek-ai/dsh-session'
 
 /**
  * Map a harness turn ending to ACP's terminal reason vocabulary.
@@ -12,7 +13,7 @@ import type { TurnEndReason } from '@deepseek-ai/dsh-session'
  * @returns the closest legal ACP stop reason.
  */
 export function turnEndToStopReason(reason: TurnEndReason): StopReason {
-  switch (reason.kind) {
+  switch (normalizeTurnEndReason(reason).kind) {
     case 'completed':
       return 'end_turn'
     case 'max-tokens':

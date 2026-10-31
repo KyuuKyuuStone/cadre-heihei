@@ -467,8 +467,8 @@ export class ClaudeCodeMods extends TypertRemoteService {
         turnId: String(turn),
         answer: folded?.answer ?? '',
         durationMs: folded === undefined ? 0 : Date.now() - folded.startedAt,
-        isAborted: reason.kind === 'aborted',
-        reason: reason.kind === 'aborted' ? 'aborted' : reason.kind === 'error' ? 'error' : 'answer',
+        isAborted: reason?.kind === 'aborted',
+        reason: reason?.kind === 'aborted' ? 'aborted' : reason?.kind === 'error' ? 'error' : 'answer',
         ...agentIdOf(agent),
         ...folded?.usage === undefined ? {} : { usage: { ...folded.usage } },
       }

@@ -88,7 +88,7 @@ function statusFromOutcome(outcome: WorkflowAgentOutcome): WorkflowRunStatus {
  */
 function turnAbandoned(location: ConversationLocation): boolean {
   if (location.kind !== 'step' && location.kind !== 'turn') return false
-  const reason = location.turn.end?.data.reason.kind
+  const reason = location.turn.end?.data.reason?.kind
   return reason === 'interrupted' || reason === 'forked'
 }
 

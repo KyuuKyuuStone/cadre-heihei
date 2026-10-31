@@ -13,6 +13,7 @@
  */
 
 import type { SessionEvent, TurnEndReason } from '@deepseek-ai/dsh-session'
+import { normalizeTurnEndReason } from '@deepseek-ai/dsh-session'
 
 /** How one agent log accounts for the work it consumed. */
 export interface ConsumedWork {
@@ -93,7 +94,7 @@ export function foldConsumedWork(events: readonly SessionEvent[]): ConsumedWork 
       case 'turn/end': {
         const { turn, reason } = event.data
         open = undefined
-        if (stepped.delete(turn) || (claimed.delete(turn) && accountsForClaim(reason))) {
+        if (stepped.delete(turn) || (claimed.delete(turn) && accountsForClaim(normalizeTurnEndReason(reason)))) {
           end = event
           // Anything dropped before this turn closed is what its own ending
           // reports; only a later drop is still unaccounted for.

@@ -1,6 +1,7 @@
 /** First-party semantic text extraction for session-query consumers. */
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { normalizeTurnEndReason } from '@deepseek-ai/dsh-session'
 // Type-only: includes the first-party todo event consumed below.
 import type {} from '@deepseek-ai/dsh-tool-todo'
 
@@ -44,9 +45,10 @@ export function extractSessionEventText(event: SessionEvent): string {
 }
 
 function turnEndText(reason: SessionEvent<'turn/end'>['data']['reason']): string {
-  switch (reason.kind) {
+  const normalized = normalizeTurnEndReason(reason)
+  switch (normalized.kind) {
     case 'error':
-      return joinText(['error', reason.error.message])
+      return joinText(['error', normalized.error.message])
     case 'aborted':
       return 'aborted'
     case 'max-tokens':

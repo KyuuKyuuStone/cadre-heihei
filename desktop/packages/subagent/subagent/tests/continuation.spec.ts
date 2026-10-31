@@ -145,6 +145,7 @@ function userTexts(events: readonly SessionEvent[]): string[] {
   return events.flatMap(event => event.type === 'user/message' && event.data.source.kind !== 'runtime-context'
     ? event.data.content.flatMap(block => block.type === 'text'
       && !block.text.startsWith('Your parent agent id is ')
+      && !block.text.startsWith('[系统通知]')
       ? [block.text]
       : [])
     : [])

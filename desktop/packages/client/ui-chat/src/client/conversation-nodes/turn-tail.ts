@@ -79,7 +79,7 @@ function tailData(context: ConversationNodeContext<TurnTailState>): TurnTailChat
     const event = match.event
     const candidate = event.type === 'tool/call'
       || (event.type === 'tool/result' && event.surfaceOp === 'append')
-      || (event.type === 'turn/end' && event.data.reason.kind === 'error')
+      || (event.type === 'turn/end' && event.data.reason?.kind === 'error')
       || event.type === 'llm/retry'
       ? event.seq
       : undefined

@@ -255,6 +255,13 @@ describe('same-session goal driving', () => {
     expect(test.adapter.requests).toHaveLength(1)
   })
 
+  it('ignores a legacy turn/end that lost its reason instead of throwing', async () => {
+    const test = await harness([])
+    expect(() => {
+      test.agent.session.append('turn/end', { turn: 1 } as never)
+    }).not.toThrow()
+  })
+
   it('maps a downstream step rejection to blocked without entering the round', async () => {
     const test = await harness([])
     test.ctx.on('agent/pre-step', ({ messages }, next) => messages[0]?.source.kind === 'goal'

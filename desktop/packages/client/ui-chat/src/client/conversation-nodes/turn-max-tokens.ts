@@ -39,7 +39,7 @@ function noticeAnchor(context: ConversationNodeContext<TurnMaxTokensState>, seq:
 }
 
 function stateFrom(match: ConversationMatch): TurnMaxTokensState | undefined {
-  if (match.event.type !== 'turn/end' || match.event.data.reason.kind !== 'max-tokens') return undefined
+  if (match.event.type !== 'turn/end' || match.event.data.reason?.kind !== 'max-tokens') return undefined
   return { turn: match.event.data.turn, seq: match.event.seq, time: match.event.time }
 }
 
@@ -48,7 +48,7 @@ export const turnMaxTokensDefinition: ConversationNodeDefinition<TurnMaxTokensSt
   kind: 'turn-max-tokens',
   target: 'chat',
   match: (event) => {
-    if (event.type === 'turn/end' && event.data.reason.kind === 'max-tokens') {
+    if (event.type === 'turn/end' && event.data.reason?.kind === 'max-tokens') {
       return { id: String(event.data.turn), role: 'start' }
     }
     return null

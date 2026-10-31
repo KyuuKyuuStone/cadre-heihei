@@ -5,8 +5,10 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import SessionStore, {
   adoptSessionEvent,
+  normalizeTurnEndReason,
   SESSION_FORMAT_VERSION,
   Session,
+  turnEndReason,
   SessionEvent,
   SessionId,
   SessionLogOffset,
@@ -1825,5 +1827,19 @@ describe('SessionStore', () => {
 
     expect(additive.ignorable).toBe(true)
     expect(required.ignorable).toBeUndefined()
+  })
+
+  it('normalizes a replayed turn/end that lost its reason without rewriting the log', () => {
+    const legacy = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 1, time: 2, data: { turn: 1 } },
+    ] as unknown as readonly SessionEvent[]
+    const session = Session.create(SessionId('legacy-reason'), legacy)
+    const end = session.snapshotEvents()[1]
+    expect(end?.type).toBe('turn/end')
+    expect(end === undefined ? undefined : turnEndReason(end)).toEqual({
+      kind: 'error', error: { message: 'turn ended without a reason', code: 'UNKNOWN' },
+    })
+    expect(normalizeTurnEndReason(undefined).kind).toBe('error')
   })
 })

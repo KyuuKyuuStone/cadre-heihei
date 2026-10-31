@@ -13,4 +13,8 @@ describe('ACP codec', () => {
   ] satisfies Array<[TurnEndReason, string]>)('maps %o to %s', (reason, expected) => {
     expect(turnEndToStopReason(reason)).toBe(expected)
   })
+
+  it('maps a legacy turn ending without a reason to end_turn instead of throwing', () => {
+    expect(turnEndToStopReason(undefined as never)).toBe('end_turn')
+  })
 })

@@ -11,6 +11,7 @@ import type { GoalMessageSource, GoalRef, GoalView } from '@deepseek-ai/dsh-goal
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
+import { turnEndReason } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
 import { renderGoalRoundPrompt } from './prompt.ts'
 
@@ -345,16 +346,19 @@ export function apply(ctx: Context): void {
             state.attempt.phase = 'admitted'
           }
           return
-        case 'turn/end':
-          if (event.data.reason.kind === 'max-tokens') {
+        case 'turn/end': {
+          const reason = turnEndReason(event)
+          if (reason === undefined) return
+          if (reason.kind === 'max-tokens') {
             disarm(state)
             return
           }
-          if (event.data.reason.kind !== 'aborted') return
+          if (reason.kind !== 'aborted') return
           if (state.attempt?.phase === 'claimed' || state.attempt?.phase === 'admitted') {
             state.attempt.cancelled = true
           }
           else disarm(state)
+        }
           return
         default:
           return

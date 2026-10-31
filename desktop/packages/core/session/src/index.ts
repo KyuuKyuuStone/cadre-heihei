@@ -15,7 +15,7 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Message } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq } from './types.ts'
 import type { TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
-import type { CreateSessionOptions, EpochHeader, PluginRecord, PluginRecordMap, PluginRecordType, PrepareSessionOptions, RequestContext, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SessionSeedEventState, SurfaceIntent, SurfaceEventType } from './types.ts'
+import type { CreateSessionOptions, EpochHeader, PluginRecord, PluginRecordMap, PluginRecordType, PrepareSessionOptions, RequestContext, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SessionSeedEventState, SurfaceIntent, SurfaceEventType, TurnEndReason } from './types.ts'
 import { SurfaceManager, validateSessionEventData, validateSurfaceMetadata } from './surface.ts'
 import type { SessionSurface, SessionMessageProjection } from './surface.ts'
 import { foldRequestHeader } from './request-header.ts'
@@ -186,6 +186,31 @@ export function adoptSessionEvent<T extends SessionEvent>(event: T): T {
       break
   }
   return event
+}
+
+/**
+ * Replace a missing or malformed turn ending with a structured terminal error.
+ * Replay may encounter logs written by an older build that omitted `reason`;
+ * reading one must not crash every consumer that switches on `reason.kind`.
+ * @param value - untrusted persisted reason.
+ * @returns the original reason when it names a kind, otherwise UNKNOWN error.
+ */
+export function normalizeTurnEndReason(value: unknown): TurnEndReason {
+  if (typeof value === 'object' && value !== null
+    && typeof (value as { kind?: unknown }).kind === 'string') {
+    return value as TurnEndReason
+  }
+  return { kind: 'error', error: { message: 'turn ended without a reason', code: 'UNKNOWN' } }
+}
+
+/**
+ * Read the normalized end reason of one event.
+ * @param event - any session event.
+ * @returns the normalized reason for `turn/end`; undefined otherwise.
+ */
+export function turnEndReason(event: SessionEvent): TurnEndReason | undefined {
+  if (event.type !== 'turn/end') return undefined
+  return normalizeTurnEndReason((event.data as { reason?: unknown }).reason)
 }
 
 /**
@@ -652,15 +677,27 @@ export class Session {
         if (snapshot.seq !== index) {
           throw new Error(`seed event at index ${index} has seq ${snapshot.seq} (expected ${index}); seed must be contiguous from 0`)
         }
+        // Replay normalizes a legacy turn/end that lost its reason in memory.
+        // The durable event is never rewritten; consumers still see a terminal
+        // reason instead of crashing on `undefined.kind`.
+        const normalized: SessionEvent = snapshot.type === 'turn/end'
+          ? {
+              ...snapshot,
+              data: {
+                ...snapshot.data,
+                reason: normalizeTurnEndReason((snapshot.data as { reason?: unknown }).reason),
+              },
+            }
+          : snapshot
         // A seed is accepted incrementally through the same transition as a
         // live append and a full-log fold. The candidate is planned before it
         // enters `log`, so a failure cannot partially mutate the surface.
         try {
-          this.surfaceManager.validateNext(snapshot)
+          this.surfaceManager.validateNext(normalized)
         } catch (error: unknown) {
           throw new Error(`invalid seed event at index ${index}: ${error instanceof Error ? error.message : 'invalid surface metadata'}`)
         }
-        this.log.push(mode === 'snapshot' ? deepFreeze(snapshot) : snapshot)
+        this.log.push(mode === 'snapshot' ? deepFreeze(normalized) : normalized)
       }
     }
     this.firstLiveSeq = SessionLogOffset(this.log.length)

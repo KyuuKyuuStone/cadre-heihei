@@ -133,7 +133,7 @@ export function createActivationObserver(
  */
 export function epochStopReason(events: readonly SessionEvent[]): SubagentResult['stopReason'] {
   const { end, droppedUnrun } = foldConsumedWork(events)
-  switch (end?.data.reason.kind) {
+  switch (end?.data.reason?.kind) {
     case 'max-tokens':
       return 'max-tokens'
     case 'aborted':

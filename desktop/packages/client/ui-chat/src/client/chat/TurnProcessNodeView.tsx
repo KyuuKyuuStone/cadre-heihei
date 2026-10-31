@@ -17,7 +17,7 @@ export const TurnProcessNodeView = memo(function TurnProcessNodeView({
     : undefined
   if (turn?.status !== 'closed') return null
   const canCollapse = turnProcess.foldable && turnProcess.hasContent && !turnProcessAlwaysOpen(node)
-  const reason = turn.end?.data.reason.kind
+  const reason = turn.end?.data.reason?.kind
   const stopped = reason === 'aborted' || reason === 'interrupted'
   const elapsedMs = turn.start === undefined || turn.end === undefined ? undefined
     : Math.max(1000, turn.end.time - turn.start.time)

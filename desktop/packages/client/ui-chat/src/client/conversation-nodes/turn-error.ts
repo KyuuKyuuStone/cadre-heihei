@@ -52,7 +52,9 @@ function endFailure(reason: TurnEndReason): { readonly message: string; readonly
 
 function failureFrom(match: ConversationMatch): TurnErrorState['failure'] | undefined {
   if (match.event.type !== 'turn/end') return undefined
-  const failure = endFailure(match.event.data.reason)
+  const reason = match.event.data.reason
+  if (reason === undefined) return undefined
+  const failure = endFailure(reason)
   if (failure === undefined) return undefined
   const display = displayFailure(failure)
   return {

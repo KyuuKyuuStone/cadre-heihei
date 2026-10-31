@@ -272,7 +272,7 @@ function severityOf(event: SessionEvent): SessionTelemetrySeverity {
     case 'tool/result':
       return event.data.message.isError === true ? 'error' : 'info'
     case 'turn/end':
-      return event.data.reason.kind === 'error' ? 'error' : 'info'
+      return (event.data.reason?.kind ?? 'error') === 'error' ? 'error' : 'info'
     default:
       // Merge-extensible fall-through (no assertNever): event types this coordinator
       // does not depend on — including plugin-merged ones it never heard of —
