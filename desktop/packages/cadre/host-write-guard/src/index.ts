@@ -4,7 +4,7 @@
  * @module @deepseek-ai/dsh-host-write-guard
  */
 import { appendFileSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { evaluatePolicy, parsePolicy, type WritePolicy } from './policy.ts'
@@ -14,18 +14,36 @@ export interface Config {
   readonly policyPath?: string
   /** Disable the guard without removing the row. */
   readonly enabled?: boolean
+  /** Workspace fallback when the project has no ledger row. */
+  readonly workspaceRoot?: string
+  /** Additional report directory, absolute or relative to the resolved root. */
+  readonly reportsDir?: string
 }
 
 interface AgentLike { readonly id: string }
 interface HostContext {
   on(event: string, handler: (payload: never, next: () => Promise<unknown>) => unknown, options?: { prepend?: boolean }): () => void
   effect(setup: () => () => void): void
+  readonly sessions?: { get(id: string): { readonly header: { readonly cwd?: string } } | undefined }
 }
 
 interface MemberRow { readonly projectId: string; readonly role: string; readonly state: string }
 interface ProjectRow { readonly rootPath: string }
 
 interface CachedPolicy { readonly stamp: string; readonly policy?: WritePolicy; readonly error?: string }
+
+const BUILTIN_WRITE_TOOLS = new Set(['write', 'edit', 'str_replace_editor'])
+const OFFICE_PREFIXES = ['office_', 'docx_', 'xlsx_', 'pptx_'] as const
+const SHELL_TOOLS = new Set(['bash', 'pwsh'])
+
+/** Classify a tool before any project/policy lookup so non-write tools never fail closed. */
+function builtinClass(tool: string): 'write' | 'office' | 'shell' | 'other' {
+  if (SHELL_TOOLS.has(tool)) return 'shell'
+  if (BUILTIN_WRITE_TOOLS.has(tool) || OFFICE_PREFIXES.some(prefix => tool.startsWith(prefix))) {
+    return OFFICE_PREFIXES.some(prefix => tool.startsWith(prefix)) ? 'office' : 'write'
+  }
+  return 'other'
+}
 
 /** Validate/load the policy and cache it by mtime+size for hot reload. */
 function readPolicy(path: string, previous?: CachedPolicy): CachedPolicy {
@@ -100,6 +118,14 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     }
   }
 
+  const sessionRoot = (sessionId: string): string | undefined => {
+    try {
+      return ctx.sessions?.get(sessionId)?.header.cwd
+    } catch {
+      return undefined
+    }
+  }
+
   const listener = async (payload: {
     readonly name: string
     readonly arguments: unknown
@@ -112,8 +138,37 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     // to their existing tool masks and sandbox policy.
     if (who === undefined || who.role !== 'supervisor' || who.state === 'departed') return next()
 
+    const deny = (code: string, message: string, rule: string): unknown => {
+      audit({
+        actor: sessionId, project: who.projectId, role: who.role, tool: payload.name,
+        decision: 'deny', code, rule,
+      })
+      return {
+        kind: 'deny',
+        reason: `${code}: ${message}`,
+        info: { name: 'cadre-write-guard', code, reason: message },
+      }
+    }
+
+    // Classify before any project/policy lookup: read, dispatch_task, list_tasks,
+    // and every other non-write tool must pass even when no root is registered.
+    const builtin = builtinClass(payload.name)
     cached = readPolicy(policyPath, cached)
-    if (cached.policy === undefined) {
+    const policy = cached.policy
+    const policyDeny = policy === undefined
+      ? undefined
+      : policy.denyTools[payload.name]
+        ?? policy.denyToolPrefixes.find(prefix => payload.name.startsWith(prefix))
+    if (builtin === 'office' || policyDeny === 'office') {
+      return deny('WRITE_OFFICE_DENIED', '主管不能写 Office 文件；请派员工产出后验收', 'deny:office')
+    }
+    if (builtin === 'shell' || policyDeny === 'shell') {
+      return deny('WRITE_SHELL_DENIED', '主管不能执行 shell；请用 read/grep 只读诊断或派员工', 'deny:shell')
+    }
+    const policyWrite = policy?.writeTools[payload.name] !== undefined
+    if (builtin !== 'write' && !policyWrite) return next()
+
+    if (policy === undefined) {
       audit({ actor: sessionId, project: who.projectId, role: who.role, tool: payload.name, decision: 'deny', code: 'WRITE_POLICY_UNAVAILABLE', error: cached.error })
       return {
         kind: 'deny',
@@ -121,22 +176,24 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         info: { name: 'cadre-write-guard', code: 'WRITE_POLICY_UNAVAILABLE', reason: cached.error },
       }
     }
-    const projectRow = project(who.projectId)
-    if (projectRow === undefined) {
-      audit({ actor: sessionId, project: who.projectId, role: who.role, tool: payload.name, decision: 'deny', code: 'WRITE_POLICY_UNAVAILABLE', error: 'project root missing' })
-      return {
-        kind: 'deny',
-        reason: 'WRITE_POLICY_UNAVAILABLE: 项目根目录未登记',
-        info: { name: 'cadre-write-guard', code: 'WRITE_POLICY_UNAVAILABLE' },
-      }
+    const root = project(who.projectId)?.rootPath
+      ?? sessionRoot(sessionId)
+      ?? config.workspaceRoot
+      ?? (config.reportsDir !== undefined && isAbsolute(config.reportsDir) ? dirname(config.reportsDir) : undefined)
+    if (root === undefined || root === '') {
+      return deny('WRITE_POLICY_UNAVAILABLE', '项目根目录/工作区未登记', 'root-missing')
     }
+    const reportsRoot = config.reportsDir === undefined
+      ? undefined
+      : isAbsolute(config.reportsDir) ? config.reportsDir : resolve(root, config.reportsDir)
     const args = typeof payload.arguments === 'object' && payload.arguments !== null
       ? payload.arguments as Record<string, unknown>
       : {}
-    const decision = evaluatePolicy(cached.policy, {
+    const decision = evaluatePolicy(policy, {
       tool: payload.name,
       args,
-      projectRoot: projectRow.rootPath,
+      projectRoot: root,
+      ...(reportsRoot === undefined ? {} : { extraRoots: [reportsRoot] }),
     }, real)
     audit({
       actor: sessionId, project: who.projectId, role: who.role, tool: payload.name,

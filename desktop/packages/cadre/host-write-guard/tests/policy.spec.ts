@@ -57,11 +57,11 @@ describe('write policy', () => {
   it('denies Office and shell tools explicitly, regardless of path/extension', () => {
     const root = project()
     expect(evaluatePolicy(policy(), { tool: 'office_docx', args: {}, projectRoot: root }, identity))
-      .toMatchObject({ allow: false, code: 'WRITE_POLICY_DENIED', rule: 'deny:office' })
+      .toMatchObject({ allow: false, code: 'WRITE_OFFICE_DENIED', rule: 'deny:office' })
     expect(evaluatePolicy(policy(), { tool: 'bash', args: {}, projectRoot: root }, identity))
-      .toMatchObject({ allow: false, code: 'WRITE_POLICY_DENIED', rule: 'deny:shell' })
+      .toMatchObject({ allow: false, code: 'WRITE_SHELL_DENIED', rule: 'deny:shell' })
     expect(evaluatePolicy(policy(), { tool: 'office_xlsx', args: {}, projectRoot: root }, identity))
-      .toMatchObject({ allow: false, code: 'WRITE_POLICY_DENIED' })
+      .toMatchObject({ allow: false, code: 'WRITE_OFFICE_DENIED' })
   })
 
   it('rejects a registered write tool with a missing path argument', () => {

@@ -34,6 +34,7 @@ export interface GuardInput {
   readonly tool: string
   readonly args: Record<string, unknown>
   readonly projectRoot: string
+  readonly extraRoots?: readonly string[]
 }
 
 /** Result of one policy decision. */
@@ -127,13 +128,14 @@ export function evaluatePolicy(
   input: GuardInput,
   resolve: (path: string) => string,
 ): GuardDecision {
-  const denyKind = policy.denyTools[input.tool]
-    ?? policy.denyToolPrefixes.find(prefix => input.tool.startsWith(prefix))
+  const prefixDenied = policy.denyToolPrefixes.some(prefix => input.tool.startsWith(prefix))
+  const denyKind = policy.denyTools[input.tool] ?? (prefixDenied ? 'office' : undefined)
   if (denyKind !== undefined) {
+    const office = denyKind === 'office'
     return {
       allow: false,
-      code: 'WRITE_POLICY_DENIED',
-      message: denyKind === 'office'
+      code: office ? 'WRITE_OFFICE_DENIED' : 'WRITE_SHELL_DENIED',
+      message: office
         ? '主管不能写 Office 文件；请派员工产出后验收'
         : '主管不能执行 shell；请用 read/grep 只读诊断或派员工',
       rule: `deny:${denyKind}`,
@@ -148,7 +150,8 @@ export function evaluatePolicy(
   const candidate = resolve(raw)
   const roots = [
     ...policy.roots.map(root => root === 'project' ? input.projectRoot : joinRoot(input.projectRoot, policy.reportDirName)),
-    ...(policy.extraRoots ?? []).map(root => root),
+    ...(policy.extraRoots ?? []),
+    ...(input.extraRoots ?? []),
   ].map(resolve)
   if (!roots.some(root => inside(root, candidate))) {
     return { allow: false, code: 'WRITE_PATH_DENIED', message: `路径不在允许范围：${candidate}`, path: candidate, rule: 'path-outside-roots' }

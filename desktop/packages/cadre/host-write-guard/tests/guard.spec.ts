@@ -34,15 +34,17 @@ function mount(policy: object = {
   writeTools: { write: { path: 'file_path' } },
   denyTools: { office_docx: 'office', bash: 'shell' },
   denyToolPrefixes: ['office_'],
-}) {
+}, options: { project?: boolean; workspace?: string } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'write-guard-index-'))
   roots.push(dir)
   const db = join(dir, 'cadre.sqlite')
   initCadreStore(db)
   const raw = new DatabaseSync(db)
   try {
-    raw.prepare(`INSERT INTO projects (project_id, name, root_path, status, created_at)
-      VALUES (?, 'p', ?, 'active', ?)`).run(PROJECT, ROOT, AT)
+    if (options.project !== false) {
+      raw.prepare(`INSERT INTO projects (project_id, name, root_path, status, created_at)
+        VALUES (?, 'p', ?, 'active', ?)`).run(PROJECT, ROOT, AT)
+    }
     const member = raw.prepare(`INSERT INTO members
       (project_id, session_id, role, display_name, state, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'active', ?, ?)`)
@@ -56,10 +58,14 @@ function mount(policy: object = {
   process.env.CADRE_LEDGER_PATH = db
   let listener: Listener | undefined
   let dispose: (() => void) | undefined
+  const workspace = options.workspace
   apply({
     on: (_event, handler) => { listener = handler as Listener; return () => {} },
     effect: (setup) => { dispose = setup(); return () => {} },
-  }, { policyPath })
+    ...(workspace === undefined ? {} : {
+      sessions: { get: () => ({ header: { cwd: workspace } }) },
+    }),
+  }, { policyPath, ...(workspace === undefined ? {} : { workspaceRoot: workspace }) })
   if (listener === undefined) throw new Error('guard listener missing')
   closers.push(() => dispose?.())
   const next = async (): Promise<unknown> => ({ allow: true })
@@ -91,11 +97,34 @@ describe('write guard pre-execute', () => {
     expect(await guard.call('write', { file_path: `${ROOT}/a.ts` }, SUP))
       .toMatchObject({ kind: 'deny', info: { code: 'WRITE_EXTENSION_DENIED' } })
     expect(await guard.call('office_docx', { output: `${ROOT}/a.docx` }, SUP))
-      .toMatchObject({ kind: 'deny', info: { code: 'WRITE_POLICY_DENIED' } })
+      .toMatchObject({ kind: 'deny', info: { code: 'WRITE_OFFICE_DENIED' } })
     expect(await guard.call('bash', { command: 'echo x > a.md' }, SUP))
-      .toMatchObject({ kind: 'deny', info: { code: 'WRITE_POLICY_DENIED' } })
+      .toMatchObject({ kind: 'deny', info: { code: 'WRITE_SHELL_DENIED' } })
     expect(await guard.call('write', {}, SUP))
       .toMatchObject({ kind: 'deny', info: { code: 'WRITE_POLICY_TOOL_UNSUPPORTED' } })
+  })
+
+  it('never blocks non-write tools when the project row is missing', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'write-guard-ws-'))
+    roots.push(workspace)
+    const guard = mount(undefined, { project: false, workspace })
+    expect(await guard.call('dispatch_task', {}, SUP)).toEqual({ allow: true })
+    expect(await guard.call('list_tasks', {}, SUP)).toEqual({ allow: true })
+    expect(await guard.call('read', { file_path: `${workspace}/a.md` }, SUP)).toEqual({ allow: true })
+    expect(await guard.call('write', { file_path: `${workspace}/a.md` }, SUP)).toEqual({ allow: true })
+    expect(await guard.call('write', { file_path: `${workspace}/a.ts` }, SUP))
+      .toMatchObject({ kind: 'deny', info: { code: 'WRITE_EXTENSION_DENIED' } })
+    expect(await guard.call('bash', { command: 'echo x' }, SUP))
+      .toMatchObject({ kind: 'deny', info: { code: 'WRITE_SHELL_DENIED' } })
+    expect(await guard.call('office_docx', {}, SUP))
+      .toMatchObject({ kind: 'deny', info: { code: 'WRITE_OFFICE_DENIED' } })
+  })
+
+  it('fails closed for a write tool when no root exists at all, but still passes reads', async () => {
+    const guard = mount(undefined, { project: false })
+    expect(await guard.call('dispatch_task', {}, SUP)).toEqual({ allow: true })
+    expect(await guard.call('write', { file_path: 'C:/x/a.md' }, SUP))
+      .toMatchObject({ kind: 'deny', info: { code: 'WRITE_POLICY_UNAVAILABLE' } })
   })
 
   it('denies a supervisor whose project has no registered root and fails closed on a broken policy', async () => {
@@ -103,6 +132,9 @@ describe('write guard pre-execute', () => {
     expect(await guard.call('write', { file_path: `${ROOT}/a.md` }, 'stranger'))
       .toEqual({ allow: true }) // ordinary/unknown sessions are not this guard's scope
     guard.rewrite({ version: 99 })
+    expect(await guard.call('dispatch_task', {}, SUP)).toEqual({ allow: true })
+    expect(await guard.call('bash', {}, SUP))
+      .toMatchObject({ kind: 'deny', info: { code: 'WRITE_SHELL_DENIED' } })
     expect(await guard.call('write', { file_path: `${ROOT}/a.md` }, SUP))
       .toMatchObject({ kind: 'deny', info: { code: 'WRITE_POLICY_UNAVAILABLE' } })
   })
