@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.0
+
+- **主管写文件强锁**：host-write-guard 在 `tools/pre-execute` 只拦 supervisor 写工具；只允许 workspace/`reports/` 下 `.md/.txt`，Office/shell 分别返回专用错误码；roots 按项目/会话/配置兜底，策略 JSON 热更新、fail-closed、审计；非写工具（派活/查台账/读文件）直接放行
+- **主管 Skill**：host-supervisor-skill 以独立 SKILL.md 提供讨论/派活/验收/汇报方法，按花名册只注册到 supervisor 的 agent scope；pre-step 全分支 `next()`，不短路 waterfall
+- **停摆三态与视图**：additive turn 生命周期事件（含 aborted/无首 token 回注与 ignorable 降级）、model_generation/tool_execution/no_events 投影、compaction 暂停、`elapsedMs/heartbeatAt/firstTokenAt/tokensSoFar/stallBasis/inferred` 字段；长单步 10 分钟才升级
+- **通知内部化**：停摆/催办/恢复统一 `【主管内部】`，仅 `【需要您决定】` 对用户可见；侧栏内部事件开关
+- **台账分页**：台账每页 20 行，底部页码窗口/上下页，筛选与搜索重置第 1 页，无匹配空状态
+- **lastError 与失败回注**：停摆/任务视图暴露 `lastError{code,message,at}`，模型能力不匹配（thinking/400）等分类为可读错误；aborted 及未出首 token 的 error/blocked 在下一轮回注 `[系统通知]`
+- **工程与开源边界**：公开版 UPSTREAM（第三方/ vendored 归属）、BUILD/CONTRIBUTING/SECURITY、CHANGELOG 与源码注释去除内部编号、Windows keyless CI（typecheck/gates/build:check/smoke/evidence）
+
+### 已知限制
+
+- 心跳为 watchdog 15 秒扫描节拍推导，不是独立定时采样
+- `inferred` 旧日志投影无独立 spec
+- 安装包未签名（SmartScreen 提示）
+- 429/外部依赖仅做有界重试并告知，不自动改派修复任务
+
 ## 0.10.9（1.0.0 前 RC：移除对话区状态条）
 
 - **删除用户可见状态条**：移除 CadreStallCard 在对话输入区/标题栏的状态条注册与渲染，普通对话不再出现停摆/执行状态条
