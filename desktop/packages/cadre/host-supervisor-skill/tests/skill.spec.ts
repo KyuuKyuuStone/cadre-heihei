@@ -53,17 +53,25 @@ function mount(enabled = true) {
       return entry.dispose
     } } },
   })
-  let listener: ((payload: { agent?: { id: string; ctx: unknown } }) => void) | undefined
+  let listener: ((payload: { agent?: { id: string; ctx: unknown } }, next: () => Promise<unknown>) => Promise<unknown>) | undefined
   let dispose: (() => void) | undefined
+  let nextCalls = 0
   apply({
     on: (_event, handler) => { listener = handler as typeof listener; return () => {} },
     effect: (setup) => { dispose = setup(); return () => {} },
   }, { enabled })
   if (enabled && listener === undefined) throw new Error('skill listener missing')
   return {
-    fire: (agent: { id: string; ctx: unknown }) => listener?.({ agent }),
+    fire: async (agent: { id: string; ctx: unknown }) => {
+      const decision = await listener?.({ agent }, async () => {
+        nextCalls += 1
+        return { kind: 'allow' }
+      })
+      return { decision, nextCalls }
+    },
     makeAgent,
     registered,
+    nextCalls: () => nextCalls,
     dispose: () => dispose?.(),
   }
 }
@@ -86,6 +94,18 @@ describe('supervisor skill', () => {
     expect(String(skill.content)).toContain('聚合，不逐条转述')
     expect(String(skill.content)).toContain('精致交付时，派员工')
     expect(String(skill.content)).toContain('read`/`grep`')
+    mounted.dispose()
+  })
+
+  it('does not short-circuit the agent/pre-step waterfall in any branch', async () => {
+    const mounted = mount()
+    const supervisor = mounted.makeAgent(SUP)
+    const worker = mounted.makeAgent(WORKER)
+    expect((await mounted.fire(supervisor)).decision).toEqual({ kind: 'allow' })
+    expect((await mounted.fire(supervisor)).decision).toEqual({ kind: 'allow' })
+    expect((await mounted.fire(worker)).decision).toEqual({ kind: 'allow' })
+    expect((await mounted.fire(mounted.makeAgent('stranger'))).decision).toEqual({ kind: 'allow' })
+    expect(mounted.nextCalls()).toBe(4)
     mounted.dispose()
   })
 
@@ -123,13 +143,13 @@ describe('supervisor skill', () => {
     const workerScope = await scoped(workerKey)
     let skillDispose: (() => void) | undefined
     try {
-      let listener: ((payload: { agent?: { id: string; ctx: unknown } }) => void) | undefined
+      let listener: ((payload: { agent?: { id: string; ctx: unknown } }, next: () => Promise<unknown>) => Promise<unknown>) | undefined
       apply({
         on: (_event, handler) => { listener = handler as typeof listener; return () => {} },
         effect: (setup) => { skillDispose = setup(); return () => {} },
       }, {})
-      listener?.({ agent: { id: SUP, ctx: supervisorScope.ctx } })
-      listener?.({ agent: { id: WORKER, ctx: workerScope.ctx } })
+      await listener?.({ agent: { id: SUP, ctx: supervisorScope.ctx } }, async () => ({ kind: 'allow' }))
+      await listener?.({ agent: { id: WORKER, ctx: workerScope.ctx } }, async () => ({ kind: 'allow' }))
       const supervisorSkills = await ctx.skills.list({ scope: supervisorKey })
       const workerSkills = await ctx.skills.list({ scope: workerKey })
       expect(supervisorSkills.map(skill => skill.name)).toContain('cadre-supervisor')

@@ -91,9 +91,12 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     }
   }
 
-  const listener = (payload: { readonly agent?: AgentLike }): void => {
+  const listener = async (
+    payload: { readonly agent?: AgentLike },
+    next: () => Promise<unknown>,
+  ): Promise<unknown> => {
     const agent = payload.agent
-    if (agent === undefined) return
+    if (agent === undefined) return next()
     const member = roleOf(agent.id)
     const supervisor = member?.role === 'supervisor' && member.state !== 'departed'
     const existing = registered.get(agent.id)
@@ -102,9 +105,9 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         existing.dispose()
         registered.delete(agent.id)
       }
-      return
+      return next()
     }
-    if (existing !== undefined) return
+    if (existing !== undefined) return next()
     try {
       const dispose = agent.ctx.skills.register({
         name: skill.name,
@@ -123,9 +126,10 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     } catch (error) {
       console.error(`host-supervisor-skill: register failed agent=${agent.id}: ${error instanceof Error ? error.message : String(error)}`)
     }
+    return next()
   }
 
-  ctx.on('agent/pre-step', listener as never)
+  ctx.on('agent/pre-step', listener)
   ctx.effect(() => () => {
     for (const entry of registered.values()) entry.dispose()
     registered.clear()
