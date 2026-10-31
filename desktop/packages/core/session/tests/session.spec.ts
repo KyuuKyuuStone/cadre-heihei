@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createDeveloperMessage, createSystemMessage, createUserMessage, ToolCallId, createMessage, createToolResultMessage, MessageId, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
@@ -1830,10 +1831,9 @@ describe('SessionStore', () => {
   })
 
   it('normalizes a replayed turn/end that lost its reason without rewriting the log', () => {
-    const legacy = [
-      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
-      { type: 'turn/end', seq: 1, time: 2, data: { turn: 1 } },
-    ] as unknown as readonly SessionEvent[]
+    const legacy = JSON.parse(readFileSync(
+      new URL('./fixtures/turn-end-missing-reason.json', import.meta.url), 'utf8',
+    )) as readonly SessionEvent[]
     const session = Session.create(SessionId('legacy-reason'), legacy)
     const end = session.snapshotEvents()[1]
     expect(end?.type).toBe('turn/end')
