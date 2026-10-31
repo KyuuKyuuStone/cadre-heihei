@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-cadre-engine",
   "description": "EnginePort: the four official engine capabilities (models, sessions, presets, turn flow) our product layer may call",
-  "version": "0.10.5",
+  "version": "0.10.6",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
