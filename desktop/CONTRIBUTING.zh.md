@@ -1,4 +1,6 @@
-# 参与贡献（CONTRIBUTING）
+# 参与贡献
+
+[English](CONTRIBUTING.md) | 中文
 
 感谢关注 Cadre Heihei（基于 DeepSeek Harness 的多会话协作发行版）。
 
