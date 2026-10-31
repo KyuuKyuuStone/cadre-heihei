@@ -333,24 +333,6 @@ export function executionText(execution: CadreExecutionView | null | undefined, 
   return ''
 }
 
-/** Convert an ISO-8601 UTC timestamp for local display; invalid values stay unknown. */
-export function localTime(value: string | number | null | undefined, t: Translate): string {
-  if (value === null || value === undefined) return t('stall.time.unknown')
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? t('stall.time.unknown') : date.toLocaleString()
-}
-
-/** Write-guard denial codes that need a distinct visible surface. */
-export function isWriteGuardError(code: string): boolean {
-  return code === 'WRITE_EXTENSION_DENIED'
-    || code === 'WRITE_PATH_DENIED'
-    || code === 'WRITE_OFFICE_DENIED'
-    || code === 'WRITE_SHELL_DENIED'
-    || code === 'WRITE_POLICY_UNAVAILABLE'
-    || code === 'WRITE_POLICY_TOOL_UNSUPPORTED'
-    || code === 'WRITE_POLICY_DENIED'
-}
-
 export function silenceText(milliseconds: number | null, t: Translate): string {
   if (milliseconds === null) return t('stall.silence.unknown')
   const minutes = Math.max(0, Math.floor(milliseconds / 60_000))

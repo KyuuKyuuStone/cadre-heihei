@@ -1,73 +1,9 @@
 .stack {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  width: fit-content;
-  max-width: 100%;
+  gap: 8px;
+  width: 100%;
   min-width: 0;
-}
-
-.strip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  box-sizing: border-box;
-  width: fit-content;
-  max-width: 100%;
-  min-width: 0;
-  height: 24px;
-  padding: 2px 8px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-sm);
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.statusDot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  corner-shape: round;
-}
-
-.dotRunning {
-  background: var(--dsw-alias-state-success-primary);
-}
-
-.dotWaiting {
-  background: var(--dsw-alias-state-warn-primary);
-}
-
-.dotStalled {
-  background: var(--dsw-alias-state-error-primary);
-}
-
-.dotError {
-  background: var(--dsw-alias-state-error-primary);
-}
-
-.stripText {
-  overflow: hidden;
-  min-width: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.internalHint {
-  margin-left: auto;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--dsw-alias-label-secondary);
-  font: inherit;
-  font-size: 10px;
-  cursor: pointer;
-  white-space: nowrap;
 }
 
 .card {

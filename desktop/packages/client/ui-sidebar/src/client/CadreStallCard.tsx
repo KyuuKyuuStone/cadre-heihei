@@ -18,7 +18,6 @@ import {
   type CadreStallThresholds,
   elapsedText,
   executionOf,
-  executionText,
   relativeTime,
   silenceText,
 } from './cadre-stall.ts'
@@ -110,85 +109,28 @@ export function CadreStallCard({
   }
   if (project === undefined || project.status === 'loading' || project.status === 'unavailable') return null
 
-  // Generation and tool progress belong to the sidebar row; only a waiting
-  // question is actionable here. no_events remains the stall-card source.
-  const executions = project.tasks.flatMap((task) => {
-    const execution = executionOf(task)
-    return execution === null ? [] : [{ task, execution }]
-  })
-  const errors = project.tasks.flatMap(task => task.lastError === undefined || task.lastError === null
-    ? []
-    : [{ task, error: task.lastError }])
-  // Only no_events reaches a stalled task; generation and tool execution are
-  // progress and belong to the sidebar row.
+  // The user-facing status strip is gone. Keep only the internal supervisor
+  // stall card for future internal entry points; no conversation registration
+  // mounts this component.
   const stalled = project.tasks.filter(task => task.stallState === 'stalled' && executionOf(task) === null)
-  const primary = stalled[0]
-    ?? executions.find(entry => entry.execution.state === 'waiting_question')
-    ?? executions.find(entry => entry.execution.state === 'tool_execution')
-    ?? executions.find(entry => entry.execution.state === 'model_generation')
-    ?? errors[0]
-  if (primary === undefined) return null
-
-  const state = stalled[0] !== undefined
-    ? 'stalled'
-    : 'execution' in primary ? primary.execution.state : 'error'
-  const text: string = stalled[0] !== undefined
-    ? t('stall.card.header', { silence: silenceText(stalled[0].silenceMs, t) })
-    : 'execution' in primary
-      ? executionText(primary.execution, t)
-      : t('stall.lastError.title')
-  const dot: string = (state === 'stalled'
-    ? css.dotStalled
-    : state === 'waiting_question' ? css.dotWaiting
-      : state === 'error' ? css.dotError : css.dotRunning) ?? ''
+  const task = stalled[0]
+  if (task === undefined) return null
 
   return (
     <section className={css.stack} aria-label={t('stall.card.aria')}>
-      {stalled[0] === undefined
-        ? (
-          <div className={css.strip} data-status-strip data-status={state}>
-            <span className={`${css.statusDot} ${dot}`} aria-hidden="true" />
-            <span className={css.stripText}>{text}</span>
-          </div>
-        )
-        : <StallStrip task={stalled[0]} state={state} text={text} dot={dot} t={t} stale={project.stale || stalled[0].stale}
-          thresholds={project.thresholds} targets={targetsFrom(members)} nudge={nudge} reassign={reassign}
-          cancel={cancel} escalate={escalate} refresh={refresh} />}
+      <CadreStallCardItem
+        t={t}
+        task={task}
+        stale={project.stale || task.stale}
+        thresholds={project.thresholds}
+        targets={targetsFrom(members)}
+        nudge={nudge}
+        reassign={reassign}
+        cancel={cancel}
+        escalate={escalate}
+        refresh={refresh}
+      />
     </section>
-  )
-}
-
-function StallStrip({
-  task, state, text, dot, t, stale, thresholds, targets, nudge, reassign, cancel, escalate, refresh,
-}: {
-  readonly task: CadreStallTaskView
-  readonly state: string
-  readonly text: string
-  readonly dot: string
-  readonly t: PropsLocale<'sidebar'>['t']
-  readonly stale: boolean
-  readonly thresholds: CadreStallThresholds
-  readonly targets: readonly CadreRosterMember[]
-  readonly nudge: CadreStallCardInjected['nudge']
-  readonly reassign: CadreStallCardInjected['reassign']
-  readonly cancel: CadreStallCardInjected['cancel']
-  readonly escalate: CadreStallCardInjected['escalate']
-  readonly refresh: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <div className={css.strip} data-status-strip data-status={state}>
-        <span className={`${css.statusDot} ${dot}`} aria-hidden="true" />
-        <span className={css.stripText}>{text}</span>
-        <button type="button" className={css.internalHint} aria-expanded={open}
-          onClick={() => { setOpen(value => !value) }}>
-          {open ? t('stall.card.internal.hide') : t('stall.card.internal.show')}
-        </button>
-      </div>
-      {open && <CadreStallCardItem t={t} task={task} stale={stale} thresholds={thresholds} targets={targets}
-        nudge={nudge} reassign={reassign} cancel={cancel} escalate={escalate} refresh={refresh} showActions />}
-    </>
   )
 }
 
