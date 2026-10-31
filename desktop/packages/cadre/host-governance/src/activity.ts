@@ -5,7 +5,7 @@
  * question cannot freeze a newly dispatched (or reworked) task forever.
  * @module
  */
-import type { ActivityKind, SessionActivity } from './types.ts'
+import type { ActivityKind, SessionActivity, TaskLastError } from './types.ts'
 
 /** One raw Session event the projection needs. */
 export interface ActivityEvent {
@@ -54,6 +54,7 @@ export function waitingQuestion(events: readonly ActivityEvent[], windowStartAt?
 export function activityFrom(events: readonly ActivityEvent[], windowStartAt?: number): SessionActivity {
   const event = events.at(-1)
   const step = activeStep(events)
+  const lastError = lastErrorOf(events, windowStartAt)
   return {
     ...(event === undefined ? {} : { lastActivityAt: event.time, kind: kindOf(event) ?? 'assistant' }),
     ...(event?.seq === undefined ? {} : { lastActivitySeq: event.seq }),
@@ -61,10 +62,47 @@ export function activityFrom(events: readonly ActivityEvent[], windowStartAt?: n
     ...step,
     ...(step.stepSince === undefined ? {} : stepDetails(events, step.stepSince)),
     ...(compactionActive(events) ? { compactionActive: true } : {}),
+    ...(lastError === undefined ? {} : { lastError }),
     ...(events.some(candidate => candidate.type.startsWith('turn/') || candidate.type.startsWith('model_call/'))
       ? {}
       : { inferred: true }),
   }
+}
+
+/** Turn a provider failure into a readable task-view error. */
+export function readableModelError(code: string, message: string): { code: string; message: string } {
+  const text = `${code} ${message}`
+  if (/MODEL_CONFIG|thinking|not supported by this model|unsupported model|能力不匹配/iu.test(text)) {
+    return {
+      code: 'MODEL_CONFIG',
+      message: '模型能力不匹配：当前模型不支持所选能力（如 thinking）。请切换模型或关闭思考后重试。',
+    }
+  }
+  if (/AUTH|401|unauthori[sz]ed|api key/iu.test(text)) {
+    return { code: 'AUTH', message: '模型鉴权失败：请检查 API Key 或登录状态。' }
+  }
+  if (/RATE_LIMIT|429|rate limit|too many requests/iu.test(text)) {
+    return { code: 'RATE_LIMIT', message: '模型请求限流：请稍后重试。' }
+  }
+  if (/TIMEOUT|ETIMEDOUT|timed out/iu.test(text)) {
+    return { code: 'TIMEOUT', message: '模型请求超时：请重试或切换模型。' }
+  }
+  return { code, message }
+}
+
+/** Latest terminal error in the task window, normalized for the view. */
+function lastErrorOf(events: readonly ActivityEvent[], windowStartAt?: number): TaskLastError | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'turn/end') continue
+    if (windowStartAt !== undefined && event.time < windowStartAt) return undefined
+    const reason = (event.data as { reason?: { kind?: unknown; error?: { code?: unknown; message?: unknown } } } | undefined)?.reason
+    if (reason?.kind !== 'error') return undefined
+    const code = typeof reason.error?.code === 'string' ? reason.error.code : 'UNKNOWN'
+    const message = typeof reason.error?.message === 'string' ? reason.error.message : '模型请求失败'
+    return { ...readableModelError(code, message), at: event.time }
+  }
+  return undefined
 }
 
 /** First token and latest usage inside the active step. */

@@ -312,14 +312,6 @@ export class ReactLoopAgent implements Agent {
       this.session.append('turn/start', { turn })
       this.session.appendIgnorable('turn/received', { turn })
       this.turnHadFirstToken = false
-      const notice = this.pendingAbortNotice
-      this.pendingAbortNotice = undefined
-      if (notice !== undefined) {
-        this.session.append('user/message', createUserMessage({
-          source: { kind: 'user' },
-          content: [{ type: 'text', text: notice }],
-        }), { surfaceOp: 'append' })
-      }
     } catch (error: unknown) {
       this.throwError(error)
     }
@@ -409,7 +401,8 @@ export class ReactLoopAgent implements Agent {
           this.session.appendIgnorable('turn/aborted', {
             turn, reason: ending, hadFirstToken: this.turnHadFirstToken,
           })
-          if (ending.kind === 'aborted') {
+          if (ending.kind === 'aborted'
+            || (!this.turnHadFirstToken && (ending.kind === 'error' || ending.kind === 'blocked'))) {
             this.pendingAbortNotice = `[系统通知] 上一轮（turn ${String(turn)}）未完成，原因：${ending.kind}`
               + `${this.turnHadFirstToken ? '' : '（未出首 token）'}。不要假设它已完成；可继续或重新执行。`
           }
@@ -451,6 +444,19 @@ export class ReactLoopAgent implements Agent {
       })
       for (const { message, intent } of commits) {
         this.session.append('system/message', { turn, step, message }, intent)
+      }
+      // The abort notice is model-visible context, not caller input. Admit it
+      // after the system prompt so the request still starts with system and the
+      // notice precedes the user's next message.
+      if (firstAttempt) {
+        const notice = this.pendingAbortNotice
+        this.pendingAbortNotice = undefined
+        if (notice !== undefined) {
+          this.session.append('user/message', createUserMessage({
+            source: { kind: 'user' },
+            content: [{ type: 'text', text: notice }],
+          }), { surfaceOp: 'append' })
+        }
       }
       let contextAdmitted = false
       if (firstAttempt) {

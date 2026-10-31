@@ -101,4 +101,20 @@ describe('three-state step projection', () => {
     events.push({ type: 'compaction/end', time: NEW_TASK + 2 * MIN, data: {} })
     expect(activityFrom(events, NEW_TASK).compactionActive).toBeUndefined()
   })
+
+  it('exposes a readable lastError for a model-capability turn failure', () => {
+    const events: ActivityEvent[] = [
+      {
+        type: 'turn/end',
+        time: NEW_TASK,
+        seq: 9,
+        data: { turn: 1, reason: { kind: 'error', error: { code: 'MODEL_CONFIG', message: 'thinking.type `disabled` is not supported by this model' } } },
+      },
+    ]
+    expect(activityFrom(events, NEW_TASK).lastError).toEqual({
+      code: 'MODEL_CONFIG',
+      message: '模型能力不匹配：当前模型不支持所选能力（如 thinking）。请切换模型或关闭思考后重试。',
+      at: NEW_TASK,
+    })
+  })
 })

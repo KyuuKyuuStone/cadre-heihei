@@ -11,7 +11,7 @@ const VIEW: StallTaskView = {
   capabilities: { nudge: true, reassign: true, cancel: true, escalate: true },
   version: 3, stale: false, updatedAt: '2026-10-29T12:00:00.000Z',
   elapsedMs: null, heartbeatAt: null, firstTokenAt: null, tokensSoFar: null,
-  stallBasis: null, inferred: false,
+  stallBasis: null, inferred: false, lastError: null,
 }
 
 const INTERNAL = '【主管内部】'

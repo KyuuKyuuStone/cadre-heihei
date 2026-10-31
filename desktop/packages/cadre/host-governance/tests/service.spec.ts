@@ -291,6 +291,24 @@ describe('stall detection', () => {
     expect(h.service.views()[0]).toMatchObject(fixture.tool)
   })
 
+  it('projects a readable lastError into the task view', async () => {
+    const h = harness()
+    const base = Date.UTC(2026, 9, 29, 12, 0, 0)
+    h.setNow(base)
+    h.setActivity({
+      lastActivityAt: base - MIN, kind: 'assistant', waitingQuestion: false,
+      lastError: {
+        code: 'MODEL_CONFIG',
+        message: '模型能力不匹配：当前模型不支持所选能力（如 thinking）。请切换模型或关闭思考后重试。',
+        at: base - MIN,
+      },
+    })
+    await h.service.scan()
+    expect(h.service.views()[0]?.lastError).toMatchObject({
+      code: 'MODEL_CONFIG', at: base - MIN,
+    })
+  })
+
   it('recovers once a long generation is followed by a normal step', async () => {
     const h = harness()
     const base = Date.UTC(2026, 9, 29, 12, 0, 0)

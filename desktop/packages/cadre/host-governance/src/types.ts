@@ -85,6 +85,16 @@ export interface SessionActivity {
   readonly lastActivitySeq?: number
   /** True when the log predates additive turn lifecycle events. */
   readonly inferred?: boolean
+  /** Latest terminal model failure in the current task window (DF-017). */
+  readonly lastError?: TaskLastError
+}
+
+/** A readable terminal error for the task/stall view. */
+export interface TaskLastError {
+  readonly code: string
+  readonly message: string
+  /** Epoch milliseconds of the failing turn/end. */
+  readonly at: number
 }
 
 /** Machine-readable basis for a stall/nudge decision. */
@@ -132,6 +142,8 @@ export interface StallTaskView {
   readonly stallBasis: StallBasis | null
   /** True when additive turn events are absent and the view is inferred. */
   readonly inferred: boolean
+  /** Latest terminal model failure, or null when none in this task window. */
+  readonly lastError: TaskLastError | null
 }
 
 /** Supported supervisor actions. */

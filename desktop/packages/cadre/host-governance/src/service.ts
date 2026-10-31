@@ -16,6 +16,7 @@ import {
   type StallConfig,
   type StallState,
   type StallTaskView,
+  type TaskLastError,
   type WatchMember,
   type WatchTask,
 } from './types.ts'
@@ -77,6 +78,7 @@ interface Episode {
   tokensSoFar: number | undefined
   evidenceEventSeq: number | undefined
   inferred: boolean
+  lastError: TaskLastError | undefined
 }
 
 /** Owner supervisor for a project's stall notifications and actions. */
@@ -150,6 +152,7 @@ function viewOf(episode: Episode, member: WatchMember | undefined, now: number):
     tokensSoFar: episode.tokensSoFar ?? null,
     stallBasis: basisOf(episode, now),
     inferred: episode.inferred,
+    lastError: episode.lastError ?? null,
   }
 }
 
@@ -231,6 +234,7 @@ export class StallService {
       tokensSoFar: undefined,
       evidenceEventSeq: undefined,
       inferred: false,
+      lastError: undefined,
     }
     this.#episodes.set(key, created)
     return created
@@ -290,6 +294,7 @@ export class StallService {
           ? (activity.lastActivitySeq ?? episode.evidenceEventSeq)
           : (activity.evidenceEventSeq ?? activity.lastActivitySeq ?? episode.evidenceEventSeq)
         episode.inferred = activity.inferred === true
+        if (activity.lastError !== undefined) episode.lastError = activity.lastError
         episode.heartbeatAt = activity.stepKind === undefined ? undefined : now
 
         if (!stallable) {

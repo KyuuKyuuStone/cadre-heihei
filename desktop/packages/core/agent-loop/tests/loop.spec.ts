@@ -600,6 +600,13 @@ describe('agent loop', () => {
     const turnEnds = agent.session.snapshotEvents().filter(e => e.type === 'turn/end')
     expect(turnEnds).toHaveLength(2)
     expect(turnEnds[1]?.type === 'turn/end' && turnEnds[1].data.reason.kind).toBe('completed')
+    const notice = agent.session.snapshotEvents().find(event =>
+      event.type === 'user/message'
+      && event.data.content.some(block => block.type === 'text' && block.text.startsWith('[系统通知]')))
+    expect(notice?.type).toBe('user/message')
+    expect(notice?.type === 'user/message'
+      ? notice.data.content.map(block => block.type === 'text' ? block.text : '').join('')
+      : '').toContain('error（未出首 token）')
   })
 
   it('supports the model-via-agent/request path with a {{model}} persona: the supplier states it via the assemble waterfall', async () => {
