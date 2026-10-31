@@ -155,6 +155,28 @@ function fromHeaderLine(line: HeaderLine): SessionStorageMetadata {
   }
 }
 
+/**
+ * Additive lifecycle rows written by 0.10.1 before the writer marked them
+ * ignorable. The 0.10.0 UI can skip their payloads, but must not reject the
+ * whole supervisor log. Keep the allowlist exact: arbitrary unknown events
+ * still require their own `ignorable` marker.
+ */
+const FORWARD_COMPATIBLE_EVENT_TYPES = new Set([
+  'turn/received',
+  'turn/completed',
+  'turn/aborted',
+  'model_call/started',
+  'model_call/first_token',
+])
+
+/** Mark one known additive row as ignorable before the old reader admits it. */
+function admitForwardCompatibleEvent(value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
+  const row = value as Record<string, unknown>
+  if (typeof row.type !== 'string' || !FORWARD_COMPATIBLE_EVENT_TYPES.has(row.type) || row.ignorable === true) return value
+  return { ...row, ignorable: true }
+}
+
 /** Type guard: a parsed first line is a well-formed session header. */
 function isHeaderLine(value: unknown): value is HeaderLine {
   return (
@@ -479,7 +501,7 @@ export class SessionLogScanner {
     this.eventLine += 1
     let decoded: unknown
     try {
-      decoded = JSON.parse(line.toString('utf8')) as unknown
+      decoded = admitForwardCompatibleEvent(JSON.parse(line.toString('utf8')) as unknown)
     } catch {
       const issue = new Error(`corrupt session log: unparsable committed event at line ${this.eventLine}`)
       if (this.recovery === 'strict') throw issue
