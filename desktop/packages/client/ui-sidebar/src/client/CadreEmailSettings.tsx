@@ -325,17 +325,39 @@ function EmailForm({
           <p>{t('email.help.from')}</p>
           <p>{t('email.help.recipients')}</p>
           <p>{t('email.help.apiKey')}</p>
-          <div className={css.helpSection}>
-            <strong>{t('email.help.recommended')}</strong>
+          <p className={css.helpSummaryLine}>{t('email.help.summary')}</p>
+          <div className={css.helpSection} data-filing-group="none">
+            <strong>{t('email.help.noFilingGroup')}</strong>
+            <p className={css.helpGroupNote}>{t('email.help.noFilingNote')}</p>
             <ul className={css.helpLinks}>
-              <li><a href={HELP_LINKS.sendgridSignup} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridSignup')}</a></li>
-              <li><a href={HELP_LINKS.sendgridKeys} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridKeys')}</a></li>
-              <li><a href={HELP_LINKS.sendgridSender} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridSender')}</a></li>
-              <li><a href={HELP_LINKS.aliyun} target="_blank" rel="noopener noreferrer">{t('email.help.aliyun')}</a></li>
-              <li><a href={HELP_LINKS.tencent} target="_blank" rel="noopener noreferrer">{t('email.help.tencent')}</a></li>
+              <li>
+                <span className={css.badgeNoFiling}>{t('email.help.badgeNoFiling')}</span>
+                <a href={HELP_LINKS.sendgridSignup} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridSignup')}</a>
+              </li>
+              <li>
+                <span className={css.badgeNoFiling}>{t('email.help.badgeNoFiling')}</span>
+                <a href={HELP_LINKS.sendgridKeys} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridKeys')}</a>
+              </li>
+              <li>
+                <span className={css.badgeNoFiling}>{t('email.help.badgeNoFiling')}</span>
+                <a href={HELP_LINKS.sendgridSender} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridSender')}</a>
+              </li>
             </ul>
           </div>
-          <p className={css.helpNote}>{t('email.help.domestic')}</p>
+          <div className={css.helpSection} data-filing-group="required">
+            <strong>{t('email.help.filingGroup')}</strong>
+            <p className={css.helpGroupNote}>{t('email.help.filingNote')}</p>
+            <ul className={css.helpLinks}>
+              <li>
+                <span className={css.badgeFiling}>{t('email.help.badgeFiling')}</span>
+                <a href={HELP_LINKS.aliyun} target="_blank" rel="noopener noreferrer">{t('email.help.aliyun')}</a>
+              </li>
+              <li>
+                <span className={css.badgeFiling}>{t('email.help.badgeFiling')}</span>
+                <a href={HELP_LINKS.tencent} target="_blank" rel="noopener noreferrer">{t('email.help.tencent')}</a>
+              </li>
+            </ul>
+          </div>
         </details>
       </div>
     </Modal>

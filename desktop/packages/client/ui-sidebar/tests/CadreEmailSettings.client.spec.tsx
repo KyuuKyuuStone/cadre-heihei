@@ -143,8 +143,22 @@ describe('Cadre email settings', () => {
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
     await screen.findByText('已检测到环境变量')
     fireEvent.click(screen.getByText('如何填写 / 推荐地址'))
+    expect(screen.getByText('想免备案就选 SendGrid。')).toBeTruthy()
+    expect(screen.getByText('无需备案 · 推荐')).toBeTruthy()
+    expect(screen.getByText('需要 ICP 备案')).toBeTruthy()
+    expect(screen.getByText(/SendGrid 当前版本可直接用/)).toBeTruthy()
+    expect(screen.getByText(/大陆节点发信域名需要 ICP 备案/)).toBeTruthy()
+    expect(screen.getByText(/当前版本未接入，仅作后续参考/)).toBeTruthy()
+    expect(screen.getAllByText('无需备案')).toHaveLength(3)
+    expect(screen.getAllByText('需备案')).toHaveLength(2)
     const links = screen.getAllByRole('link')
-    expect(links).toHaveLength(5)
+    expect(links.map(link => link.textContent)).toEqual([
+      'SendGrid 注册',
+      'SendGrid API Keys',
+      'SendGrid Sender Authentication',
+      '阿里云邮件推送',
+      '腾讯云邮件推送 SES',
+    ])
     for (const link of links) {
       expect(link.getAttribute('target')).toBe('_blank')
       expect(link.getAttribute('rel')).toBe('noopener noreferrer')
@@ -155,7 +169,6 @@ describe('Cadre email settings', () => {
       .toBe('https://www.aliyun.com/product/directmail')
     expect(screen.getByRole('link', { name: '腾讯云邮件推送 SES' }).getAttribute('href'))
       .toBe('https://cloud.tencent.com/product/ses')
-    expect(screen.getByText(/当前版本仅支持 SendGrid HTTPS/)).toBeTruthy()
   })
 
   it('rejects invalid email and still exposes test and dry-run results', async () => {
