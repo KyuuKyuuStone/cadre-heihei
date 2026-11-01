@@ -4,10 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { CadreSkillLibraryPage } from '../src/client/CadreSkillLibrary.tsx'
 import type { CadreRosterState } from '../src/client/CadreSidebar.tsx'
-import { zh } from '../src/client/locales.ts'
+import { en, zh } from '../src/client/locales.ts'
 
 const ENTRIES = [
-  { id: 'worker-only', name: '员工技能', description: '只给员工', roles: ['worker'], tokenEstimate: 10, tools: [], source: 'local', license: 'MIT', selected: false },
+  { id: 'ai-design', name: 'AI Design', description: 'English landing page description', roles: ['worker'], tokenEstimate: 100, tools: ['read'], origin: 'builtin', source: 'builtin', license: 'MIT', selected: false },
+  { id: 'worker-only', name: '员工技能', description: '只给员工', roles: ['worker'], tokenEstimate: 10, tools: [], origin: 'installed', source: 'local', license: 'MIT', selected: false },
 ]
 
 const t = ((key: keyof typeof zh, params?: Record<string, unknown>) => {
@@ -15,6 +16,7 @@ const t = ((key: keyof typeof zh, params?: Record<string, unknown>) => {
   for (const [name, value] of Object.entries(params ?? {})) text = text.split(`{${name}}`).join(String(value))
   return text
 }) as never
+const tEn = ((key: keyof typeof en) => en[key]) as never
 
 function json(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as Response
@@ -24,7 +26,7 @@ function requestUrl(input: RequestInfo | URL): string {
   return typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
 }
 
-function pageProps(role: 'supervisor' | 'worker' = 'supervisor'): ComponentProps<typeof CadreSkillLibraryPage> {
+function pageProps(role: 'supervisor' | 'worker' = 'supervisor', translate = t): ComponentProps<typeof CadreSkillLibraryPage> {
   const roster: CadreRosterState = {
     status: 'ready',
     members: [
@@ -38,46 +40,66 @@ function pageProps(role: 'supervisor' | 'worker' = 'supervisor'): ComponentProps
     useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
       selector({ byId: { [role === 'supervisor' ? 'sup' : 'w1']: { retainedBy: { mainView: 1 } } } })) as never,
     projectOfSession: () => 'p1',
-    t,
+    t: translate,
   } as unknown as ComponentProps<typeof CadreSkillLibraryPage>
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('Cadre skill library', () => {
-  it('lists installed skills with metadata and hides install controls from non-supervisors', () => {
+  it('hides all management controls from non-supervisors', () => {
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(screen.getByText('只有主管可以查看和管理技能库。')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '手动添加技能' })).toBeNull()
+    expect(screen.queryByPlaceholderText('GitHub 仓库、tree 或 raw SKILL.md URL')).toBeNull()
+    expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
   })
 
-  it('lists installed skills and supports add/delete', async () => {
-    let catalogs = 0
+  it('groups built-ins and installed skills, localizes descriptions, and keeps built-ins read-only', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: ENTRIES })))
+    render(<CadreSkillLibraryPage {...pageProps()} />)
+    expect(await screen.findByText('内置技能')).toBeTruthy()
+    expect(screen.getByText('已安装')).toBeTruthy()
+    expect(screen.getByText('落地页设计：信息结构、转化文案、视觉规范、状态与上线检查。')).toBeTruthy()
+    expect(screen.queryByText('English landing page description')).toBeNull()
+    expect(screen.queryByText(/技能市场/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: '删除' })).toHaveLength(1)
+    fireEvent.click(screen.getAllByText('详情')[0]!)
+    expect(screen.getByText('约 100 tokens')).toBeTruthy()
+    expect(screen.getByText('builtin')).toBeTruthy()
+  })
+
+  it('localizes built-in descriptions in English', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: ENTRIES })))
+    render(<CadreSkillLibraryPage {...pageProps('supervisor', tEn)} />)
+    expect(await screen.findByText('Landing-page design: information structure, conversion copy, visual rules, states, and ship checks.')).toBeTruthy()
+  })
+
+  it('installs from a GitHub URL without manifest fields and deletes installed skills', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)
-      if (url.endsWith('/catalog')) {
-        catalogs += 1
-        return json({ ok: true, result: catalogs === 1 ? ENTRIES : [{ ...ENTRIES[0], name: '新技能' }] })
-      }
-      return json({ ok: true, result: { removed: true, id: 'worker-only' } })
+      if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      if (url.endsWith('/install-url')) return json({ ok: true, result: { id: 'new-skill' } })
+      return json({ ok: true, result: { removed: true } })
     })
     vi.stubGlobal('fetch', fetchMock)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<CadreSkillLibraryPage {...pageProps()} />)
-    expect(await screen.findByText('员工技能')).toBeTruthy()
-    expect(screen.getByText('local')).toBeTruthy()
-    expect(screen.getByText('约 10 tokens')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '手动添加技能' }))
-    fireEvent.change(screen.getByLabelText('技能 id'), { target: { value: 'new-skill' } })
-    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '新技能' } })
-    fireEvent.change(screen.getByLabelText('描述'), { target: { value: '手动添加' } })
-    fireEvent.change(screen.getByLabelText('SKILL.md 正文'), { target: { value: '# body' } })
-    expect(screen.getByLabelText<HTMLInputElement>('token 估算').value).toBe('2')
-    fireEvent.click(screen.getByRole('button', { name: '添加技能' }))
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/add'))).toBe(true)
+    await screen.findByText('员工技能')
+    expect(screen.queryByLabelText('技能 id')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '高级手动表单' }))
+    expect(screen.getByLabelText('技能 id')).toBeTruthy()
+    fireEvent.change(screen.getByPlaceholderText('GitHub 仓库、tree 或 raw SKILL.md URL'), {
+      target: { value: 'https://github.com/acme/skills/tree/main/skills/new-skill' },
     })
-    expect(await screen.findByText('新技能')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '安装' }))
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/install-url'))).toBe(true)
+    })
+    const installCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/install-url'))
+    expect(JSON.parse((installCall?.[1] as RequestInit).body as string)).toMatchObject({
+      url: 'https://github.com/acme/skills/tree/main/skills/new-skill', confirm: false,
+    })
+    expect(await screen.findByText('技能已安装。')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     expect(await screen.findByText('技能已删除。')).toBeTruthy()
     expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(true)

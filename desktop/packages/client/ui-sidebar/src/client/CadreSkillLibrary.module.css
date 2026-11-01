@@ -44,10 +44,51 @@
 }
 
 .install {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   padding: 12px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-1);
+}
+
+.install > label:first-child,
+.install > span:first-child {
+  flex: 1;
+  min-width: 220px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.group h2 {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.groupEmpty {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.details {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.details summary {
+  cursor: pointer;
+}
+
+.details .meta {
+  margin-top: 5px;
 }
 
 .fields {

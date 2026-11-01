@@ -338,7 +338,7 @@ function CadreCreateForm({
       }
       setSkillActor(supervisor.sessionId)
       try {
-        const entries = await fetchSkillCatalog(request.workspaceId as string, supervisor.sessionId)
+        const entries = await fetchSkillCatalog(request.workspaceId as string, supervisor.sessionId, undefined, navigator.language)
         setSkillEntries(entries.filter(entry => entry.roles.includes('worker')))
       } catch (cause) {
         setSkillError(errorMessage(cause))

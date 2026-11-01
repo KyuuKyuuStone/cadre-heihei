@@ -14,6 +14,7 @@ export interface CadreSkillEntry {
   readonly id: string
   readonly name: string
   readonly description: string
+  readonly origin?: 'builtin' | 'installed'
   readonly roles: readonly string[]
   readonly tokenEstimate: number
   readonly tools: readonly string[]
@@ -55,7 +56,7 @@ interface SkillResponse {
 }
 
 async function skillCall(
-  method: 'catalog' | 'set' | 'preview' | 'add' | 'remove',
+  method: 'catalog' | 'set' | 'preview' | 'add' | 'remove' | 'install-url',
   body: Record<string, unknown>,
 ): Promise<unknown> {
   const response = await fetch(`/cadre/skills/${method}`, {
@@ -73,10 +74,12 @@ async function skillCall(
 }
 
 export async function fetchSkillCatalog(
-  projectId: string, actorSessionId: string, targetSessionId?: string,
+  projectId: string, actorSessionId: string, targetSessionId?: string, locale?: string,
 ): Promise<CadreSkillEntry[]> {
   const result = await skillCall('catalog', {
-    projectId, actorSessionId, ...(targetSessionId === undefined ? {} : { targetSessionId }),
+    projectId, actorSessionId,
+    ...(targetSessionId === undefined ? {} : { targetSessionId }),
+    ...(locale === undefined ? {} : { locale }),
   })
   return Array.isArray(result) ? result as CadreSkillEntry[] : []
 }
@@ -103,6 +106,12 @@ export async function removeSkillFromLibrary(
   projectId: string, actorSessionId: string, packId: string,
 ): Promise<void> {
   await skillCall('remove', { projectId, actorSessionId, packId, confirm: true })
+}
+
+export async function installSkillFromUrl(
+  projectId: string, actorSessionId: string, url: string, confirm: boolean,
+): Promise<void> {
+  await skillCall('install-url', { projectId, actorSessionId, url, confirm })
 }
 
 export function skillTokenTotal(entries: readonly CadreSkillEntry[], selected: readonly string[]): number {
@@ -203,7 +212,7 @@ function SkillEditor({
     setBusy(true)
     setError(null)
     try {
-      const next = (await fetchSkillCatalog(request.projectId, request.sessionId, request.sessionId))
+      const next = (await fetchSkillCatalog(request.projectId, request.sessionId, request.sessionId, navigator.language))
         .filter(entry => entry.roles.includes(request.role))
       setEntries(next)
       setSelected(next.filter(entry => entry.selected || entry.id === selectId).map(entry => entry.id))
