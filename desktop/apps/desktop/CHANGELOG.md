@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0
+
+- **真实库 schema 2→3 修复**：打包始终从当前源码重建 CJS，启动 `initCadreStore` 幂等补齐 `members.skills_json`；旧 schema 下技能 catalog/get 降级为空、set 返回可读 `SKILL_SCHEMA_OUTDATED`
+- **技能改名与员工菜单**：技能入口统一为「技能」；主管可在员工菜单直接调整技能选择
+- **手动添加/删除技能**：`/cadre/skills/add` 接收 manifest + SKILL.md 正文，kebab-case/角色/路径校验，默认不覆盖，`overwrite:true` 才替换；`/cadre/skills/remove` 需 confirm；原子目录写入
+- 包含 1.2.1/1.2.0 全部内容（技能包、4k spill、step 压缩默认关、响应式、邮件）
+
+### 已知限制
+
+- 技能市场（ClawHub/SkillHub）未接
+- 删除技能包不会清理 `members.skills_json` 中的旧选择
+- 安装包未签名（SmartScreen 提示）
+- 429/外部依赖仅做有界重试并告知
+
 ## 1.2.1
 
 - **修复 1.2.0 真实库 `no such column: skills_json`**：打包会沿用 git checkout 里旧的 `lib/cadre-collab.cjs`（schema 2），启动只跑旧 reader，`members.skills_json` 迁移从未执行；现在打包前**始终**从当前源码重建两个 CJS，启动 `initCadreStore` 幂等补齐 v2→v3
