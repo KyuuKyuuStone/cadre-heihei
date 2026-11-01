@@ -31,7 +31,10 @@ export interface CadreSkillPreview {
 }
 
 export interface CadreSkillsRequest {
+  /** Target member whose selection is edited. */
   readonly sessionId: string
+  /** Current supervisor acting on the target. */
+  readonly actorSessionId: string
   readonly projectId: string
   readonly label: string
   readonly role: 'supervisor' | 'worker'
@@ -44,7 +47,12 @@ export interface CadreSkillsInjected {
     sessions: HostObservable<CadreSessionsState>
     request: HostObservable<CadreSkillsRequest | null>
   }
-  openSkills(sessionId: string, label: string, role: 'supervisor' | 'worker'): void
+  openSkills(
+    sessionId: string,
+    label: string,
+    role: 'supervisor' | 'worker',
+    actorSessionId: string,
+  ): void
   closeSkills(): void
 }
 
@@ -178,7 +186,12 @@ export function CadreSkillSettingsMenuItem({
     <button type="button" role="menuitem" className={css.menuItem}
       onClick={() => {
         setMenuOpen(false)
-        openSkills(sessionId, displayTitle, member.role === 'supervisor' ? 'supervisor' : 'worker')
+        openSkills(
+          sessionId,
+          displayTitle,
+          member.role === 'supervisor' ? 'supervisor' : 'worker',
+          actor.sessionId,
+        )
       }}>
       {t('skills.menu')}
     </button>
@@ -212,8 +225,12 @@ function SkillEditor({
     setBusy(true)
     setError(null)
     try {
-      const next = (await fetchSkillCatalog(request.projectId, request.sessionId, request.sessionId, navigator.language))
-        .filter(entry => entry.roles.includes(request.role))
+      const next = (await fetchSkillCatalog(
+        request.projectId,
+        request.actorSessionId,
+        request.sessionId,
+        navigator.language,
+      )).filter(entry => entry.roles.includes(request.role))
       setEntries(next)
       setSelected(next.filter(entry => entry.selected || entry.id === selectId).map(entry => entry.id))
     } catch (cause) {
@@ -221,7 +238,7 @@ function SkillEditor({
     } finally {
       setBusy(false)
     }
-  }, [request.projectId, request.sessionId, request.role])
+  }, [request.projectId, request.actorSessionId, request.sessionId, request.role])
 
   useEffect(() => { void load() }, [load])
 
@@ -232,7 +249,7 @@ function SkillEditor({
   const openPreview = async (id: string): Promise<void> => {
     setError(null)
     try {
-      setPreview(await previewSkill(projectId, request.sessionId, id))
+      setPreview(await previewSkill(projectId, request.actorSessionId, id))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -243,7 +260,7 @@ function SkillEditor({
     setError(null)
     setNotice(null)
     try {
-      await saveMemberSkills(projectId, request.sessionId, request.sessionId, selected)
+      await saveMemberSkills(projectId, request.actorSessionId, request.sessionId, selected)
       setNotice(t('skills.notice.saved'))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))

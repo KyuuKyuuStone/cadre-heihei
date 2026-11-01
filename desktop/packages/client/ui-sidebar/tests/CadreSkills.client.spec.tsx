@@ -6,7 +6,7 @@ import { CadreSkillSettingsDialog, CadreSkillSettingsMenuItem, type CadreSkillsR
 import type { CadreRosterState } from '../src/client/CadreSidebar.tsx'
 import { zh } from '../src/client/locales.ts'
 
-const REQUEST: CadreSkillsRequest = { sessionId: 'w1', projectId: 'p1', label: '员工', role: 'worker', token: 1 }
+const REQUEST: CadreSkillsRequest = { sessionId: 'w1', actorSessionId: 'sup', projectId: 'p1', label: '员工', role: 'worker', token: 1 }
 const ENTRIES = [
   { id: 'worker-only', name: '员工技能', description: '只给员工', roles: ['worker'], tokenEstimate: 10, tools: [], source: 's', license: 'MIT', selected: true },
   { id: 'sup-only', name: '主管技能', description: '只给主管', roles: ['supervisor'], tokenEstimate: 20, tools: [], source: 's', license: 'MIT', selected: false },
@@ -90,8 +90,14 @@ describe('Cadre skill settings', () => {
     expect(await screen.findByText('# 员工技能正文')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '保存技能' }))
     await waitFor(() => { expect(screen.getByText('技能已保存。')).toBeTruthy() })
+    const catalogCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
+    expect(JSON.parse((catalogCall?.[1] as RequestInit).body as string)).toMatchObject({
+      actorSessionId: 'sup', targetSessionId: 'w1',
+    })
     const setCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
-    expect(JSON.parse((setCall?.[1] as RequestInit).body as string)).toMatchObject({ targetSessionId: 'w1', skills: ['worker-only'] })
+    expect(JSON.parse((setCall?.[1] as RequestInit).body as string)).toMatchObject({
+      actorSessionId: 'sup', targetSessionId: 'w1', skills: ['worker-only'],
+    })
   })
 
   it('only selects installed skills and has no install or delete controls', async () => {
