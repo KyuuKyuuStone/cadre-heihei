@@ -3149,6 +3149,8 @@ importers:
         specifier: ^0.1.5
         version: 0.1.5
 
+  packages/cadre/email-notify: {}
+
   packages/cadre/engine:
     devDependencies:
       '@deepseek-ai/dsh-agent':

@@ -478,6 +478,7 @@
     { "path": "./packages/cadre/host-governance" },
     { "path": "./packages/cadre/host-write-guard" },
     { "path": "./packages/cadre/host-supervisor-skill" },
+    { "path": "./packages/cadre/email-notify" },
     { "path": "./packages/bundle/cadre-app" },
     { "path": "./packages/boot/app-boot" },
     { "path": "./packages/boot/cmdline" },

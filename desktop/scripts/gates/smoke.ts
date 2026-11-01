@@ -32,6 +32,7 @@ const VITEST_TARGETS = [
   'packages/cadre/host-governance/tests',
   'packages/cadre/host-write-guard/tests',
   'packages/cadre/host-supervisor-skill/tests',
+  'packages/cadre/email-notify/tests',
 ]
 
 /** 判别力自证（two-state-evidence）通过该变量临时追加注入样本。 */
