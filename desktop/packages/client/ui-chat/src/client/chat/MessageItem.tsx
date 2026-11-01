@@ -13,6 +13,7 @@ import { ContextInjectionRow } from './ContextInjectionRow.tsx'
 import { MessageIconActions } from './MessageIconActions.tsx'
 import css from './MessageItem.module.css'
 import { CadreReportNodeView, parseCadreReport } from './CadreReportCard.tsx'
+import { CadreTaskNodeView, parseCadreTask } from './CadreTaskCard.tsx'
 
 const EMPTY_TEXT_FACTS: Readonly<Partial<UserTextFacts>> = {}
 
@@ -307,6 +308,9 @@ export const UserMessageNodeView = memo(function UserMessageNodeView({
     .find(item => item.sessionIds.some(id => String(id) === String(sessionId)))?.workspaceId)
   if (parseCadreReport(reportText) !== undefined) {
     return <CadreReportNodeView content={reportText} projectId={projectId} sessionId={String(sessionId)} />
+  }
+  if (parseCadreTask(reportText) !== undefined) {
+    return <CadreTaskNodeView content={reportText} t={t} />
   }
   return (
     <UserStyleBubble
