@@ -22,6 +22,12 @@ import { CadreBrandMark, CadreBrandName, CadreHeroBrandMark } from './CadreBrand
 import { CadreCreateDialog, type CadreCreateInjected, type CadreCreateRequest } from './CadreCreateDialog.tsx'
 import { CadreLedgerOverlay, type CadreLedgerInjected, type CadreLedgerRequest } from './CadreLedgerOverlay.tsx'
 import {
+  CadreEmailSettingsDialog,
+  CadreEmailSettingsMenuItem,
+  type CadreEmailInjected,
+  type CadreEmailRequest,
+} from './CadreEmailSettings.tsx'
+import {
   CadreEditMemberMenuItem, CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
   type CadreEditInjected, type CadreProjectActionsInjected,
@@ -553,6 +559,20 @@ export function apply(ctx: ClientContext): void {
       token: ledgerToken,
     })
   }
+  const emailRequest = createSnapshotStore<CadreEmailRequest | null>(null)
+  let emailToken = 0
+  const openEmail = (sessionId: string, label: string): void => {
+    const projectId = projectOfSession(sessionId)
+    if (projectId === undefined) return
+    emailToken += 1
+    emailRequest.set({ sessionId, projectId, label, token: emailToken })
+  }
+  const closeEmail = (): void => { emailRequest.set(null) }
+  const emailInjected = (): CadreEmailInjected => ({
+    hooks: { roster, request: emailRequest },
+    openEmail,
+    closeEmail,
+  })
 
   const createRosterEntry = async (input: {
     role: 'supervisor' | 'worker'
@@ -779,6 +799,9 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay', id: 'cadre-retire', locale: NS, inject: retireInjected,
   }, CadreRetireDialog))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay', id: 'cadre-email', locale: NS, inject: emailInjected,
+  } as never, CadreEmailSettingsDialog as never))
 
   // ui-sidebar cannot reference ui-workspace's SlotMap: ui-workspace depends
   // on this package, so a reverse type import would form a project-reference
@@ -840,6 +863,13 @@ export function apply(ctx: ClientContext): void {
     order: 400,
     inject: retireInjected,
   } as never, CadreRetireMenuItem as never))
+  ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
+    name: 'sidebar.workspaces.session.menu.item',
+    id: 'cadre-email-settings',
+    order: 450,
+    locale: NS,
+    inject: emailInjected,
+  } as never, CadreEmailSettingsMenuItem as never))
 
   syncPanels()
 }
