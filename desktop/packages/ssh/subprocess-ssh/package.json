@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-subprocess-ssh",
   "description": "Subprocess and terminal provider over the shared POSIX SSH helper",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publishConfig": {
     "access": "public"
   },
