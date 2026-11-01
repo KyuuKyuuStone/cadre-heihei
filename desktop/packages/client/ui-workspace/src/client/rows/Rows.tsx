@@ -718,6 +718,7 @@ export function SessionNodeItem({
             open={menuOpen}
             onClose={() => { setMenuOpen(false) }}
             portal
+            listClassName={css.sessionMenu}
             closeOnPointerLeave
             anchor={(
               <button

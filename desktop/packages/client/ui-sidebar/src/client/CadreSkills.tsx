@@ -3,7 +3,7 @@
  * session content never passes through this file.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Checkbox, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Checkbox, IconAgentPresetOutlineRegular, MenuItemButton, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import css from './CadreSkills.module.css'
@@ -183,8 +183,10 @@ export function CadreSkillSettingsMenuItem({
   const member = members.find(item => item.sessionId === sessionId)
   if (actor?.role !== 'supervisor' || member === undefined || member.state === 'departed') return null
   return (
-    <button type="button" role="menuitem" className={css.menuItem}
-      onClick={() => {
+    <MenuItemButton
+      icon={<IconAgentPresetOutlineRegular />}
+      separatorBefore
+      onSelect={() => {
         setMenuOpen(false)
         openSkills(
           sessionId,
@@ -192,9 +194,10 @@ export function CadreSkillSettingsMenuItem({
           member.role === 'supervisor' ? 'supervisor' : 'worker',
           actor.sessionId,
         )
-      }}>
+      }}
+    >
       {t('skills.menu')}
-    </button>
+    </MenuItemButton>
   )
 }
 

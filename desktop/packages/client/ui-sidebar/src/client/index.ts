@@ -877,7 +877,7 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
     name: 'sidebar.workspaces.session.menu.item',
     id: 'cadre-retire-member',
-    order: 400,
+    order: 500,
     inject: retireInjected,
   } as never, CadreRetireMenuItem as never))
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({

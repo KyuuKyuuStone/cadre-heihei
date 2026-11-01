@@ -424,7 +424,10 @@ describe('member retirement', () => {
         requestRetire={requestRetire} settleRetire={vi.fn()} retire={vi.fn()}
       />,
     )
-    fireEvent.click(screen.getByRole('menuitem', { name: '离职…' }))
+    const retire = screen.getByRole('menuitem', { name: '离职' })
+    expect(screen.getByRole('separator')).toBeTruthy()
+    expect(retire.className).toContain('danger')
+    fireEvent.click(retire)
     expect(setMenuOpen).toHaveBeenCalledWith(false)
     expect(requestRetire).toHaveBeenCalledWith('s1', '前端')
     expect(screen.queryByText('确认离职')).toBeNull()

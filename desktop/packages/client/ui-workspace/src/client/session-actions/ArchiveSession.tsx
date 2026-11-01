@@ -38,6 +38,7 @@ export function ArchiveSessionMenuItem({
     <MenuItemButton
       shortcut={archived ? undefined : shortcut}
       icon={archived ? <IconUnarchiveOutlineRegular size={14} /> : <IconArchiveOutlineRegular size={14} />}
+      separatorBefore
       onSelect={() => {
         setMenuOpen(false)
         ;(archived ? unarchiveSession : archiveSession)(sessionId)

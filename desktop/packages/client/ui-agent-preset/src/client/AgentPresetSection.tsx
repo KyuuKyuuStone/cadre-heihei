@@ -132,6 +132,12 @@ export function AgentPresetSection({
                     <Tag tone={row.isDefault ? 'solid' : 'outline'}>
                       {row.isDefault ? t('inUse') : t(builtIn ? 'builtInGroup' : 'customGroup')}
                     </Tag>
+                    {row.source === 'cadre' && (
+                      <Tag tone="solid">{t(row.isDefault ? 'cadreDefault' : 'cadreRecommended')}</Tag>
+                    )}
+                    {(row.source === 'deepseek' || (builtIn && row.source === undefined)) && (
+                      <Tag tone="outline">{t('upstreamSource')}</Tag>
+                    )}
                   </span>
                   <code className={css.cardId} title={row.id}>{row.id}</code>
                 </span>
@@ -159,6 +165,10 @@ export function AgentPresetSection({
         {entry}
       </section>
     })}
+    <footer className={css.attribution}>
+      <p>{t('attribution')} <a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noopener noreferrer">{t('attributionLink')}</a></p>
+      <p>{t('attributionDisclaimer')}</p>
+    </footer>
     {guide === null ? null : <PresetGuideDialog guide={guide.content} initialPage={guide.page} t={t} onClose={() => { setGuide(null) }} />}
     <Modal open={viewed !== null} onClose={closeViewer} closeLabel={t('close')}
       onKeyDownCapture={(event) => {

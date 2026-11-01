@@ -465,3 +465,14 @@
     transition: none;
   }
 }
+
+.sessionMenu {
+  min-width: 224px;
+  padding: 6px;
+}
+
+.sessionMenu [role='menuitem'] {
+  min-height: 36px;
+  padding: 8px 10px;
+  gap: 8px;
+}

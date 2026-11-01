@@ -6,6 +6,27 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.attribution {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.attribution p {
+  margin: 0;
+}
+
+.attribution a {
+  color: var(--dsw-alias-state-business-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .title {
   margin: 0;
   font-size: 18px;

@@ -11,7 +11,9 @@ import {
   IconPlusOutlineRegular,
   IconShieldOutlineRegular,
   IconUserOutlineRegular,
+  IconTrashOutlineRegular,
   Menu,
+  MenuItemButton,
   Modal,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -493,17 +495,17 @@ export function CadreRetireMenuItem({
   if (member === undefined || member.state === 'departed') return null
   const supervisor = member.role === 'supervisor'
   return (
-    <button
-      type="button"
-      role="menuitem"
-      className={css.menuItem}
-      onClick={() => {
+    <MenuItemButton
+      icon={<IconTrashOutlineRegular />}
+      danger
+      separatorBefore
+      onSelect={() => {
         setMenuOpen(false)
         requestRetire(sessionId, displayTitle)
       }}
     >
-      {supervisor ? '主管离职（取消任命）…' : '离职…'}
-    </button>
+      {supervisor ? '主管离职（取消任命）' : '离职'}
+    </MenuItemButton>
   )
 }
 

@@ -90,6 +90,20 @@ it('replaces the default preset group tag with its new-task default status', () 
   expect(within(standard).queryByText(en.setDefault)).toBeNull()
   expect(within(rowFor('mine')).getByText(en.customGroup)).toBeTruthy()
 })
+it('marks Cadre and upstream presets and renders the attribution footer', () => {
+  view({ rows: [
+    { id: 'cadre', name: 'Cadre', isDefault: true, source: 'cadre' },
+    { id: 'standard', isDefault: false, source: 'deepseek' },
+  ] })
+  expect(within(rowFor('cadre')).getByText(en.cadreDefault)).toBeTruthy()
+  expect(within(rowFor('standard')).getByText(en.upstreamSource)).toBeTruthy()
+  const footer = screen.getByText(en.attribution).closest('footer')
+  expect(footer).not.toBeNull()
+  expect(within(footer!).getByText(en.attributionLink).getAttribute('href'))
+    .toBe('https://github.com/deepseek-ai/deepseek-harness')
+  expect(within(footer!).getByText(en.attributionDisclaimer)).toBeTruthy()
+})
+
 it('omits an empty group instead of leaving a heading behind', () => {
   view({ rows: [{ id: 'standard', isDefault: true }] })
   expect(screen.getByRole('heading', { name: en.builtInGroup })).toBeTruthy()

@@ -61,7 +61,9 @@ describe('Cadre skill settings', () => {
       t,
     } as unknown as ComponentProps<typeof CadreSkillSettingsMenuItem>)
     render(<CadreSkillSettingsMenuItem {...menuProps('w1')} />)
-    expect(screen.getByRole('menuitem', { name: '技能…' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '技能' })).toBeTruthy()
+    expect(screen.getByRole('separator')).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '技能' }).textContent).toBe('技能')
 
     cleanup()
     const employeeView = {

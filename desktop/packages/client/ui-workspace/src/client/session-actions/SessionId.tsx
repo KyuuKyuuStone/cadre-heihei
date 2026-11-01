@@ -10,7 +10,7 @@ import type { SessionIdInjected, SessionMenuItemProps } from '../contract/slots.
 export function SessionIdMenuItem({ sessionId, useMenuOpenState, copySessionId, t }: SessionMenuItemProps<SessionIdInjected>) {
   const [, setMenuOpen] = useMenuOpenState()
   return (
-    <MenuItemButton icon={<IconCopyOutlineRegular />} onSelect={() => {
+    <MenuItemButton icon={<IconCopyOutlineRegular />} separatorBefore onSelect={() => {
       setMenuOpen(false)
       void copySessionId(sessionId)
     }}>
