@@ -6,6 +6,7 @@
 - **SendGrid HTTPS**：仅使用 SendGrid v3 `POST /v3/mail/send`，不依赖本机 SMTP；密钥缺失/鉴权失败/HTTP/网络异常均返回结构化错误并 redact
 - **触发**：任务进入 delivered/verified 时发项目汇总；显式/自动升级（`【需要您决定】`）发 escalation；dedupe + 项目级限流，失败不阻断任务与停摆主流程
 - **主管设置页**：侧栏主管邮件通知设置，支持启停/收件人/发件人/环境变量名、测试发送、dry-run；IPC 只返回 `hasKey`，不回传密钥值
+- 移除无用的「编辑资料」菜单
 - 包含 1.0.0 全部修复：强锁/Skill、三态/视图、内部化、台账分页、lastError/aborted、开源文档/CI
 
 ### 已知限制
