@@ -28,9 +28,9 @@ import {
   type CadreEmailRequest,
 } from './CadreEmailSettings.tsx'
 import {
-  CadreEditMemberMenuItem, CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
+  CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
-  type CadreEditInjected, type CadreProjectActionsInjected,
+  type CadreProjectActionsInjected,
   type CadreRetireInjected, type CadreRetireRequest,
   type CadreProjectRosterState, type CadreRetireOptions, type CadreRetireResult,
   type CadreRetireTaskDisposition, type CadreRosterBadgeInjected, type CadreRosterMember, type CadreRosterState,
@@ -696,37 +696,6 @@ export function apply(ctx: ClientContext): void {
     },
   })
 
-  const editInjected = (): CadreEditInjected => ({
-    hooks: { roster },
-    updateMember: async ({ sessionId, displayName, description }) => {
-      const target = bridge()
-      if (target?.upsertEmployee === undefined) {
-        return { ok: false, code: 'CHANNEL_MISSING', message: 'window.cadre.upsertEmployee 未注册' }
-      }
-      const projectId = projectOfSession(sessionId)
-      if (projectId === undefined) {
-        return { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
-      }
-      try {
-        const result = await target.upsertEmployee({
-          sessionId,
-          projectId,
-          displayName,
-          personaNote: description,
-        })
-        refreshRoster()
-        refreshEmployees()
-        return {
-          ok: result?.ok === true,
-          ...(result?.code === undefined ? {} : { code: result.code }),
-          ...(result?.message === undefined ? {} : { message: result.message }),
-        }
-      } catch (error) {
-        return { ok: false, code: 'UPDATE_FAILED', message: reasonOf(error) }
-      }
-    },
-  })
-
   const panels = createSnapshotStore<readonly SidebarPanelMetadata[]>([])
   const syncPanels = (): void => {
     const next = ctx.slots.entriesOfSlot('sidebar.panellist').map(({ options }) => {
@@ -851,12 +820,6 @@ export function apply(ctx: ClientContext): void {
   } as never, UpdateCheckRow as never))
 
   // Employee management stays on the Session row menu.
-  ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
-    name: 'sidebar.workspaces.session.menu.item',
-    id: 'cadre-edit-member',
-    order: 300,
-    inject: editInjected,
-  } as never, CadreEditMemberMenuItem as never))
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
     name: 'sidebar.workspaces.session.menu.item',
     id: 'cadre-retire-member',

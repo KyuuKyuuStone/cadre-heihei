@@ -11,7 +11,6 @@ import {
   IconPlusOutlineRegular,
   IconShieldOutlineRegular,
   IconUserOutlineRegular,
-  Input,
   Menu,
   Modal,
   Tooltip,
@@ -170,16 +169,6 @@ export interface CadreRetireInjected {
   requestRetire: (sessionId: string, displayTitle: string) => void
   settleRetire: () => void
   retire: (sessionId: string, options?: CadreRetireOptions) => Promise<CadreRetireResult>
-}
-
-/** Face of the row-menu profile edit action. */
-export interface CadreEditInjected {
-  hooks: { roster: HostObservable<CadreRosterState> }
-  updateMember: (input: {
-    sessionId: string
-    displayName: string
-    description: string
-  }) => Promise<{ ok: boolean; code?: string; message?: string }>
 }
 
 function memberOf(members: readonly CadreRosterMember[], sessionId: string): CadreRosterMember | undefined {
@@ -488,92 +477,6 @@ export function CadreSessionSubtitle({
   )
 }
 
-
-/**
- * Row-menu profile edit: name and role description are the two pieces the
- * ledger stores for a member; no preset/template switch is exposed.
- */
-export function CadreEditMemberMenuItem({
-  sessionId, displayTitle, useMenuOpenState, useRoster, updateMember,
-}: CadreSessionMenuOwner & { useMenuOpenState: UseMenuOpenState } & InjectFace<CadreEditInjected>) {
-  const [, setMenuOpen] = useMenuOpenState()
-  const members = useRoster(state => state.members)
-  const member = memberOf(members, sessionId)
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  if (member === undefined || member.state === 'departed') return null
-  const begin = (): void => {
-    setMenuOpen(false)
-    setName(member.displayName ?? displayTitle)
-    setDescription(member.description ?? '')
-    setError(null)
-    setOpen(true)
-  }
-  const save = async (): Promise<void> => {
-    const displayName = name.trim()
-    if (displayName === '') {
-      setError('名称不能为空')
-      return
-    }
-    setPending(true)
-    setError(null)
-    const result = await updateMember({ sessionId, displayName, description: description.trim() })
-    setPending(false)
-    if (!result.ok) {
-      setError(`${result.code ?? 'ERROR'} · ${result.message ?? '保存失败'}`)
-      return
-    }
-    setOpen(false)
-  }
-  return (
-    <>
-      <button type="button" role="menuitem" className={css.menuItem} onClick={begin}>
-        编辑资料…
-      </button>
-      <Modal
-        open={open}
-        onClose={() => { if (!pending) setOpen(false) }}
-        title={member.role === 'supervisor' ? '主管资料' : '员工资料'}
-        description={`${member.displayName ?? displayTitle} · ${sessionId}`}
-        closeLabel="关闭"
-        className={css.editDialog ?? ''}
-        footer={(
-          <>
-            <Button variant="outline" disabled={pending} onClick={() => { setOpen(false) }}>取消</Button>
-            <Button variant="primary" disabled={pending} onClick={() => { void save() }}>
-              {pending ? '保存中…' : '保存'}
-            </Button>
-          </>
-        )}
-      >
-        <div className={css.dialogBody}>
-          <label className={css.label} htmlFor="cadre-member-name">名称</label>
-          <Input
-            id="cadre-member-name"
-            value={name}
-            disabled={pending}
-            onChange={(event) => { setName(event.target.value) }}
-          />
-          <label className={css.label} htmlFor="cadre-member-description">岗位 / 职责描述</label>
-          <textarea
-            id="cadre-member-description"
-            className={css.textarea}
-            value={description}
-            rows={5}
-            maxLength={2000}
-            disabled={pending}
-            onChange={(event) => { setDescription(event.target.value) }}
-          />
-          <span className={css.hint}>这里是运行时注入的职责描述，也是会话行上的岗位标识；最多 2000 字。</span>
-          {error !== null && <p role="alert" className={css.error}>{error}</p>}
-        </div>
-      </Modal>
-    </>
-  )
-}
 
 /**
  * Row-menu retire action for members. Ordinary Sessions do not get it. The

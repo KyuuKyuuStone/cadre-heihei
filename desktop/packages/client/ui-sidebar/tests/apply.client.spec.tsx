@@ -75,6 +75,12 @@ describe('ui-sidebar apply', () => {
     expect(source).not.toContain("inject('conversation.input.dock'")
   })
 
+  it('does not register the removed edit-profile menu', () => {
+    const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+    expect(source).not.toContain('cadre-edit-member')
+    expect(source).not.toContain('CadreEditMemberMenuItem')
+  })
+
   it('declares only the services it uses', () => {
     expect(inject).toEqual(['slots', 'theme', 'layout', 'uiWorkspace', 'locale', 'shortcuts', 'sessions', 'workspaces'])
   })
