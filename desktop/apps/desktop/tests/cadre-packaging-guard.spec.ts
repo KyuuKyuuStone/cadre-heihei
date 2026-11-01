@@ -110,12 +110,12 @@ describe('assertCadreAsarEntries', () => {
 })
 
 describe('cadreAsarPath', () => {
-  it('pins the Cadre compaction threshold, retained tail, and spill cap', () => {
+  it('pins the Cadre compaction threshold, retained tail, step check, and spill cap', () => {
     const patch = readFileSync('packages/bundle/cadre-app/cordis.patch.yml', 'utf8')
     expect(patch).toContain('- id: compaction-basic')
     expect(patch).toMatch(/thresholdTokens:\s*150000/)
     expect(patch).toMatch(/retainTokens:\s*50000/)
-    expect(patch).toMatch(/stepPressureCheck:\s*false/)
+    expect(patch).toMatch(/stepPressureCheck:\s*true/)
     expect(patch).toMatch(/stepPressureThresholdTokens:\s*100000/)
     expect(patch).toMatch(/stepMinToolCallsBetweenChecks:\s*2/)
     expect(patch).toContain('- id: cadre-session-skills')

@@ -7,7 +7,7 @@
 - **技能 IPC**：`/cadre/skills/{catalog,get,set,preview}`，supervisor-only、项目/成员/角色校验、数组去重，只更新 `skills_json`
 - **手动添加/删除技能**：`/cadre/skills/add` 接收 manifest + SKILL.md 正文，kebab-case/角色/路径校验，默认不覆盖，`overwrite:true` 才替换；`/cadre/skills/remove` 需 confirm；原子目录写入
 - **工具结果 4k 落盘**：Cadre `spill-policy.maxInlineTokens` 12.5k → 4000，超出保留头尾并写 spill 文件路径，tool call/result 配对不变
-- **Token 治理**：compaction 保留尾部 50k（阈值 150k 不变）；step 级压缩 `stepPressureCheck` 默认 **false**
+- **Token 治理**：compaction 保留尾部 50k（阈值 150k 不变）；step 级压缩 `stepPressureCheck` 默认 **true**（100k 阈值、2 个 tool 起检）
 - **响应式**：台账与邮件设置弹窗适配窄窗口/侧栏宽度
 - **邮件通知**：会话级 SendGrid、主管设置页/测试发送、失败不阻断
 - **台账分页**：台账每页 20 行、页码窗口/上下页，筛选与搜索重置第 1 页
@@ -18,7 +18,7 @@
 - 技能市场（ClawHub/SkillHub）未接
 - 删除技能包不会清理 `members.skills_json` 中的旧选择
 - 安装包未签名（SmartScreen 提示）
-- 429/外部依赖仅做有界重试并告知；`stepPressureCheck` 默认关闭，峰值未做真实长会话 A/B
+- 429/外部依赖仅做有界重试并告知；step 级压缩已默认开，峰值未做真实长会话 A/B
 
 ## 1.1.0
 
