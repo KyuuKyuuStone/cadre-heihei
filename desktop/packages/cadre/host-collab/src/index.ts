@@ -1236,7 +1236,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         await controller.prompt({
           requestId: requestId(), sessionId: assignee.sessionId, mode: 'queue',
           content: [text([
-            '【Cadre 任务】', `任务号：${taskId}`, `标题：${item.title}`,
+            '【主管任务】', `任务号：${taskId}`, `标题：${item.title}`,
             `截止：${item.dueAt}`, '', '交付要求：', item.body, '',
             `完成后调用 report_task 工具回报（taskId=${taskId}，summary 写结论，deliverables 列交付物路径）。`,
           ].join('\n'))],
