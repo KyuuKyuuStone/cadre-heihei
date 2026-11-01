@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-browser-use",
   "description": "Exclusive named browser-use provider registration",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publishConfig": {
     "access": "public"
   },
