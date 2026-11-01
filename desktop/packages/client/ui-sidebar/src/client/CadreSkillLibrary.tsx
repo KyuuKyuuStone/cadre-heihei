@@ -37,6 +37,13 @@ const EMPTY: ManualState = {
   tools: '', source: 'manual', license: '', content: '',
 }
 
+const SKILL_SOURCES = {
+  skillhub: 'https://skillhub.cn',
+  clawhub: 'https://clawhub.ai',
+  aiDesign: 'https://github.com/elayadesign/ai-design-skills',
+  githubTopic: 'https://github.com/topics/agent-skills',
+} as const
+
 const BUILTIN_SOURCES = /^(builtin|internal|cadre)$/iu
 const isBuiltin = (entry: CadreSkillEntry): boolean =>
   entry.origin === 'builtin' || (entry.origin === undefined && BUILTIN_SOURCES.test(entry.source.trim()))
@@ -228,6 +235,14 @@ export function CadreSkillLibraryPage({
           if (!advanced) setForm({ ...EMPTY, tools: t('skills.defaultTools'), license: t('skills.defaultLicense') })
           setAdvanced(value => !value)
         }}>{t('skills.advanced')}</Button>
+      </div>
+      <div className={css.sources} data-skill-sources>
+        <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
+        <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
+        <a href={SKILL_SOURCES.clawhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.clawhub')}</a>
+        <a href={SKILL_SOURCES.aiDesign} target="_blank" rel="noopener noreferrer">{t('skills.sources.aiDesign')}</a>
+        <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
+        <p>{t('skills.sources.caution')}</p>
       </div>
       {advanced && (
         <div className={css.install} data-skill-install>

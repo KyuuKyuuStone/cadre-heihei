@@ -91,6 +91,15 @@ describe('Cadre skill library', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<CadreSkillLibraryPage {...pageProps()} />)
     await screen.findByText('员工技能')
+    const sources = document.querySelector('[data-skill-sources]')
+    expect(sources).not.toBeNull()
+    expect(sources!.querySelectorAll('a')).toHaveLength(4)
+    for (const link of sources!.querySelectorAll('a')) {
+      expect(link.getAttribute('target')).toBe('_blank')
+      expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+    }
+    expect(screen.getByText('第三方技能请先审查再安装。')).toBeTruthy()
+    expect(screen.getByText('SkillHub').getAttribute('href')).toBe('https://skillhub.cn')
     expect(screen.queryByLabelText('技能 id')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '高级手动表单' }))
     expect(screen.getByLabelText('技能 id')).toBeTruthy()

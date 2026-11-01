@@ -60,6 +60,31 @@
   min-width: 220px;
 }
 
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.sourcesLabel {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.sources a {
+  color: var(--dsw-alias-state-business-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sources p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .group {
   display: flex;
   flex-direction: column;
