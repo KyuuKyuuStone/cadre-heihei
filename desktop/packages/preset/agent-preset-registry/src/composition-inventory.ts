@@ -40,6 +40,8 @@ export interface AgentPresetComposition {
   readonly id: string
   /** Display name the preset published. */
   readonly name?: string
+  /** Who ships this preset; absent means DeepSeek Harness. */
+  readonly source?: 'deepseek' | 'cadre'
   /** Whether a session naming no preset composes this one. */
   readonly isDefault: boolean
   /** Why this preset's rows cannot be read; absent when {@link rows} answers. */

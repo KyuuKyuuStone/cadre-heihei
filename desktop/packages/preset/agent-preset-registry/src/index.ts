@@ -181,6 +181,7 @@ export class AgentPresetRegistry extends TypertRemoteService {
         id: record.config.id,
         ...(record.config.name === undefined ? {} : { name: record.config.name }),
         ...(record.config.description === undefined ? {} : { description: record.config.description }),
+        ...(record.config.source === undefined ? {} : { source: record.config.source }),
         ...(record.config.order === undefined ? {} : { order: record.config.order }),
         ...(broken === undefined ? {} : { broken }),
       }
@@ -221,11 +222,12 @@ export class AgentPresetRegistry extends TypertRemoteService {
       return Promise.reject(new RemoteError('agent-preset/not-found', `Unknown agent preset: ${agentPreset}`,
         { agentPreset, available: [...this.definitions.keys()] }))
     }
-    const { id, name, description, plugins } = record.config
+    const { id, name, description, source, plugins } = record.config
     // The Loader's own dialect, so `!!js` conditions read as declared rather than as expression objects.
     const content = dump(plugins, { schema: entryListSchema, noRefs: true, lineWidth: -1 })
     return Promise.resolve({
       agentPreset: id, content, ...(name === undefined ? {} : { name }), ...(description === undefined ? {} : { description }),
+      ...(source === undefined ? {} : { source }),
     })
   }
 
@@ -386,10 +388,11 @@ export class AgentPresetRegistry extends TypertRemoteService {
    */
   compositionInventory(): Promise<AgentPresetComposition[]> {
     return Promise.all([...this.definitions.values()].map(async (record) => {
-      const { id, name, description } = record.config
+      const { id, name, description, source } = record.config
       const broken = await this.diagnostic(record)
       const read = definitionComposition(record.config.plugins, () => { throw new Error('Inactive definition') })
       return { id, ...(name === undefined ? {} : { name }), ...(description === undefined ? {} : { description }),
+        ...(source === undefined ? {} : { source }),
         isDefault: id === this.defaultId,
         ...(broken === undefined ? {} : { broken }),
         rows: record.generation === undefined ? ('rows' in read ? read.rows : []) : mountedCompositionRows(record.generation.mount.tree) }

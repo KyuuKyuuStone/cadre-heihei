@@ -6,6 +6,7 @@
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: standard
+        source: deepseek
         order: 1
         plugins:
           - id: persona

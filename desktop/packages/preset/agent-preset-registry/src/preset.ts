@@ -5,6 +5,8 @@ export interface AgentPreset {
   readonly id: string
   readonly name?: string
   readonly description?: string
+  /** Who ships this preset; absent means DeepSeek Harness. */
+  readonly source?: 'deepseek' | 'cadre'
   readonly order?: number
   readonly broken?: string
 }

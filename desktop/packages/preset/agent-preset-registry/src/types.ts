@@ -14,6 +14,8 @@ export interface AgentPresetRow {
   readonly name?: string
   /** One sentence on what this preset is for. */
   readonly description?: string
+  /** Who ships this preset; absent means DeepSeek Harness. */
+  readonly source?: 'deepseek' | 'cadre'
   /** Why this preset cannot compose a session; absent when it can. */
   readonly broken?: string
 }
@@ -34,6 +36,8 @@ export interface AgentPresetDocument {
   readonly name?: string
   /** One sentence on what this preset is for. */
   readonly description?: string
+  /** Who ships this preset; absent means DeepSeek Harness. */
+  readonly source?: 'deepseek' | 'cadre'
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {

@@ -6,6 +6,7 @@
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: cordis
+        source: deepseek
         order: 4
         plugins:
           # Same persona as `standard`: tool descriptions and the skill catalog carry

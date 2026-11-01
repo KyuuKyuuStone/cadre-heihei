@@ -87,6 +87,20 @@ describe('declarative preset revisions', () => {
     expect(await ctx.agentPresets.resolve()).toEqual({ id: 'standard' })
   })
 
+  it('publishes preset source metadata in list, document and composition', async () => {
+    const ctx = await setup()
+    await declare(ctx, { ...contribution('standard'), source: 'deepseek' })
+    await declare(ctx, { ...contribution('cadre'), source: 'cadre' })
+    expect(await ctx.agentPresets.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'standard', source: 'deepseek' }),
+      expect.objectContaining({ id: 'cadre', source: 'cadre' }),
+    ]))
+    expect(await ctx.agentPresets.readDocument('cadre')).toMatchObject({ agentPreset: 'cadre', source: 'cadre' })
+    expect(await ctx.agentPresets.compositionInventory()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'cadre', source: 'cadre' }),
+    ]))
+  })
+
   it('rebinds a blank scope and preserves a child inheriting its former revision', async () => {
     const ctx = await setup()
     await declare(ctx, contribution('standard'))
