@@ -13,6 +13,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { loadSkillCatalog, type SkillPack } from './catalog.ts'
 import { createSkillApi, SkillIpcError } from './ipc.ts'
 import { SkillAdminApi, type AdminSession, type AdminSessionPort } from './admin.ts'
+import {
+  appendSessionError, collectAdminDiagnostics, type AdminDiagnostics, type PresetDiagnosticsPort,
+} from './diagnostics.ts'
 
 export interface Config {
   /** Disable the plugin while keeping the row mounted. */
@@ -249,6 +252,13 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       })
       const requireAdmin = (): SkillAdminApi => admin
       ctx.provide?.('skillAdmin', admin)
+      const diagnostics = async (): Promise<AdminDiagnostics> => collectAdminDiagnostics({
+        presetId: 'cadre-skill-admin',
+        presets: ctx.get?.('agentPresets') as PresetDiagnosticsPort | undefined,
+        sessionController: ctx.get?.('sessionController'),
+        adminService: ctx.get?.('skillAdmin'),
+      })
+      const errorLog = join(config.skillAdminAuditDir ?? join(homedir(), '.dsh', 'cadre-skill-admin'), 'session-error.log')
       const reply = (res: ServerResponse, status: number, body: unknown): void => {
         res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify(body))
@@ -357,14 +367,55 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           })
           return created
         } catch (error) {
-          if (error instanceof SkillIpcError) throw error
           const message = error instanceof Error ? error.message : String(error)
+          let diagnostic: AdminDiagnostics | undefined
+          try {
+            diagnostic = await diagnostics()
+            appendSessionError(errorLog, error, diagnostic)
+          } catch (diagnosticError) {
+            console.error(`host-session-skills: admin diagnostics failed: ${String(diagnosticError)}`)
+          }
           console.error(`host-session-skills: admin session creation failed: ${message}`)
+          const reason = diagnostic === undefined
+            ? ''
+            : !diagnostic.preset.exists
+              ? '（cadre-skill-admin preset 未注册）'
+              : diagnostic.preset.broken !== undefined
+                ? `（preset broken: ${diagnostic.preset.broken}）`
+                : !diagnostic.sessionController.available
+                  ? '（sessionController 不可用）'
+                  : ''
+          if (error instanceof SkillIpcError) {
+            throw new SkillIpcError(error.code, error.status, `${error.message}${reason}`)
+          }
           const code = /agent preset|agent-preset|preset/i.test(message)
             ? 'SKILL_ADMIN_PRESET_MISSING' : 'SKILL_ADMIN_SESSION_FAILED'
-          throw new SkillIpcError(code, 500, `技能管理员会话创建失败：${message}`)
+          throw new SkillIpcError(code, 500, `技能管理员会话创建失败：${message}${reason}`)
         }
       })
+      web.effect(() => web.webServer.register({
+        kind: 'exact',
+        path: '/cadre/skills/admin/diag',
+        handler: async (req, res) => {
+          if (req.method !== 'GET' && req.method !== 'POST') {
+            return reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 GET/POST' })
+          }
+          const admission = web.connection.admit(req)
+          if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
+            return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
+          }
+          try {
+            const body = req.method === 'POST'
+              ? await readBody(req)
+              : Object.fromEntries(new URL(req.url ?? '/', 'http://127.0.0.1').searchParams)
+            api.catalog({ projectId: required(body, 'projectId'), actorSessionId: required(body, 'operatorSessionId') })
+            reply(res, 200, { ok: true, result: await diagnostics() })
+          } catch (error) {
+            if (error instanceof SkillIpcError) return reply(res, error.status, { ok: false, code: error.code, message: error.message })
+            reply(res, 500, { ok: false, code: 'SKILL_ADMIN_DIAG_FAILED', message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      }), 'host-session-skills: diag')
       route('/cadre/skills/admin/sessions', body => requireAdmin().listSessions({
         projectId: required(body, 'projectId'),
         operatorSessionId: required(body, 'operatorSessionId'),

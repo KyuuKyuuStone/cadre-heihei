@@ -76,7 +76,12 @@ It never writes roster rows or team tools. Its backend routes are:
 - `/cadre/skills/admin/apply` — `{planId, token}`; revalidates the operator as a
   supervisor and applies install/update/remove with backup, rollback and audit;
 - `/cadre/skills/admin/audit` — append-only JSONL records without page bodies or
-  secrets.
+  secrets;
+- `/cadre/skills/admin/diag` — GET query or POST body with `projectId` and
+  `operatorSessionId`; returns the preset roster, whether `cadre-skill-admin`
+  exists/is broken, `sessionController` availability and admin-service state.
+  Failed session creation also appends a redacted record to
+  `~/.dsh/cadre-skill-admin/session-error.log`.
 
 Unknown/unsupported URLs return a plan with `kind: 'unsupported'` and a readable
 reason. The admin operator is authorized from the roster on every call; the
