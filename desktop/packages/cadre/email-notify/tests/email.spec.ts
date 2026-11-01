@@ -153,6 +153,13 @@ describe('dedupe, rate limit and failures', () => {
     expect(() => setEmailConfig(dir, 'p1', { ...config, apiKey: 'SG.secret' })).toThrow(/EMAIL_SECRET_IN_CONFIG/)
   })
 
+  it('stays silent and structured when no project config exists', async () => {
+    const notifier = new CadreEmailNotifier({ configDir: workspace(), env: {}, fetch: vi.fn() as never })
+    expect(await notifier.notify({
+      kind: 'escalation', projectId: 'missing', taskId: 't', title: 'x', reason: 'y', episodeId: 'e',
+    })).toMatchObject({ ok: false, code: 'EMAIL_CONFIG_UNAVAILABLE' })
+  })
+
   it('IPC dry-run/test-send delegate without exposing the key', async () => {
     const dir = workspace()
     writeConfig(dir, { dryRun: true })
