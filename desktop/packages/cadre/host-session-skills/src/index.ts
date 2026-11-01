@@ -233,6 +233,26 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         actorSessionId: required(body, 'actorSessionId'),
         packId: required(body, 'packId'),
       }))
+      route('/cadre/skills/add', body => api.add({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        id: body.id,
+        name: body.name,
+        description: body.description,
+        roles: body.roles,
+        tokenEstimate: body.tokenEstimate,
+        tools: body.tools,
+        source: body.source,
+        license: body.license,
+        content: body.content,
+        ...(body.overwrite === undefined ? {} : { overwrite: body.overwrite }),
+      }))
+      route('/cadre/skills/remove', body => api.remove({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        packId: required(body, 'packId'),
+        confirm: body.confirm,
+      }))
     })
   }
 

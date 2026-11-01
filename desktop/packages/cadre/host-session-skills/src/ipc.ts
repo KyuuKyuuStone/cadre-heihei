@@ -3,6 +3,9 @@
  * @module
  */
 import { DatabaseSync } from 'node:sqlite'
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { loadSkillCatalog, type SkillPack } from './catalog.ts'
 
 /** IPC failure with an HTTP status and stable code. */
@@ -37,6 +40,81 @@ export interface SkillApi {
   set(input: { projectId: string; actorSessionId: string; targetSessionId: string; skills: unknown }): { skills: string[] }
   preview(input: { projectId: string; actorSessionId: string; packId: string }): {
     id: string; content: string; tokenEstimate: number; license: string
+  }
+  add(input: AddSkillInput): CatalogEntry
+  remove(input: { projectId: string; actorSessionId: string; packId: string; confirm: unknown }): { removed: true }
+}
+
+/** Manifest + body supplied by the manual-add dialog. */
+export interface AddSkillInput {
+  readonly projectId: string
+  readonly actorSessionId: string
+  readonly id: unknown
+  readonly name: unknown
+  readonly description: unknown
+  readonly roles: unknown
+  readonly tokenEstimate: unknown
+  readonly tools: unknown
+  readonly source: unknown
+  readonly license: unknown
+  readonly content: unknown
+  readonly overwrite?: unknown
+}
+
+const KEBAB_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
+const ROLES = new Set(['supervisor', 'worker'])
+
+interface ValidPack {
+  readonly id: string
+  readonly name: string
+  readonly description: string
+  readonly roles: readonly ('supervisor' | 'worker')[]
+  readonly tokenEstimate: number
+  readonly tools: readonly string[]
+  readonly source: string
+  readonly license: string
+  readonly content: string
+}
+
+function requiredString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') throw new SkillIpcError('SKILL_INVALID', 400, `${field} 必填`)
+  return value
+}
+
+function validatePack(input: AddSkillInput): ValidPack {
+  const id = requiredString(input.id, 'id')
+  if (!KEBAB_ID.test(id) || id.length > 64) {
+    throw new SkillIpcError('SKILL_INVALID', 400, 'id 必须是 1-64 位 kebab-case（a-z0-9-）')
+  }
+  const roles = Array.isArray(input.roles) ? input.roles : []
+  if (roles.length === 0 || roles.some(role => typeof role !== 'string' || !ROLES.has(role))) {
+    throw new SkillIpcError('SKILL_INVALID', 400, 'roles 必须包含 supervisor/worker')
+  }
+  if (!Array.isArray(input.tools) || input.tools.some(tool => typeof tool !== 'string')) {
+    throw new SkillIpcError('SKILL_INVALID', 400, 'tools 必须是字符串数组')
+  }
+  const tokenEstimate = input.tokenEstimate
+  if (typeof tokenEstimate !== 'number' || !Number.isFinite(tokenEstimate) || tokenEstimate < 0) {
+    throw new SkillIpcError('SKILL_INVALID', 400, 'tokenEstimate 必须是非负数')
+  }
+  const content = requiredString(input.content, 'content')
+  return {
+    id,
+    name: requiredString(input.name, 'name'),
+    description: requiredString(input.description, 'description'),
+    roles: [...new Set(roles)] as ('supervisor' | 'worker')[],
+    tokenEstimate,
+    tools: [...new Set(input.tools as string[])],
+    source: requiredString(input.source, 'source'),
+    license: requiredString(input.license, 'license'),
+    content,
+  }
+}
+
+function entryOf(pack: SkillPack, selected = false): CatalogEntry {
+  return {
+    id: pack.id, name: pack.name, description: pack.description, roles: pack.roles,
+    tokenEstimate: pack.tokenEstimate, tools: pack.tools, source: pack.source, license: pack.license, selected,
   }
 }
 
@@ -107,17 +185,7 @@ export function createSkillApi(options: {
       requireSupervisor(db, input.projectId, input.actorSessionId)
       const target = input.targetSessionId ?? input.actorSessionId
       const selected = new Set(requireMember(db, input.projectId, target).skills)
-      return [...catalog().values()].map(pack => ({
-        id: pack.id,
-        name: pack.name,
-        description: pack.description,
-        roles: pack.roles,
-        tokenEstimate: pack.tokenEstimate,
-        tools: pack.tools,
-        source: pack.source,
-        license: pack.license,
-        selected: selected.has(pack.id),
-      }))
+      return [...catalog().values()].map(pack => entryOf(pack, selected.has(pack.id)))
     },
     get(input) {
       requireSupervisor(db, input.projectId, input.actorSessionId)
@@ -154,6 +222,62 @@ export function createSkillApi(options: {
       requireSupervisor(db, input.projectId, input.actorSessionId)
       const pack = packOf(input.packId)
       return { id: pack.id, content: pack.content, tokenEstimate: pack.tokenEstimate, license: pack.license }
+    },
+    add(input) {
+      requireSupervisor(db, input.projectId, input.actorSessionId)
+      const pack = validatePack(input)
+      const target = join(skillsDir, pack.id)
+      const overwrite = input.overwrite === true
+      if (existsSync(target) && !overwrite) {
+        throw new SkillIpcError('SKILL_EXISTS', 409, `技能包 ${pack.id} 已存在；如需覆盖请传 overwrite:true`)
+      }
+      const manifest = {
+        id: pack.id,
+        name: pack.name,
+        description: pack.description,
+        roles: pack.roles,
+        tokenEstimate: pack.tokenEstimate,
+        tools: pack.tools,
+        source: pack.source,
+        license: pack.license,
+      }
+      const temporary = join(skillsDir, `.${pack.id}.tmp-${randomUUID()}`)
+      const backup = `${target}.old-${randomUUID()}`
+      try {
+        mkdirSync(temporary, { recursive: true })
+        writeFileSync(join(temporary, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+        writeFileSync(join(temporary, 'SKILL.md'), pack.content)
+        if (existsSync(target)) renameSync(target, backup)
+        renameSync(temporary, target)
+        if (existsSync(backup)) rmSync(backup, { recursive: true, force: true })
+      } catch {
+        try { if (existsSync(temporary)) rmSync(temporary, { recursive: true, force: true }) } catch { /* best-effort cleanup */ }
+        try {
+          if (existsSync(backup) && !existsSync(target)) renameSync(backup, target)
+        } catch { /* best-effort rollback */ }
+        throw new SkillIpcError('SKILL_WRITE_FAILED', 500, '写入技能包失败；请检查目录权限')
+      }
+      const saved = catalog().get(pack.id)
+      if (saved === undefined) {
+        throw new SkillIpcError('SKILL_WRITE_FAILED', 500, '技能包写入后无法读取；请检查 manifest')
+      }
+      return entryOf(saved)
+    },
+    remove(input) {
+      requireSupervisor(db, input.projectId, input.actorSessionId)
+      const id = requiredString(input.packId, 'packId')
+      if (!KEBAB_ID.test(id) || id.length > 64) throw new SkillIpcError('SKILL_INVALID', 400, 'packId 格式非法')
+      if (input.confirm !== true) throw new SkillIpcError('SKILL_INVALID', 400, '删除技能包需要 confirm:true')
+      const target = join(skillsDir, id)
+      if (!existsSync(target) || !statSync(target).isDirectory()) {
+        throw new SkillIpcError('SKILL_NOT_FOUND', 404, `未知技能包：${id}`)
+      }
+      try {
+        rmSync(target, { recursive: true, force: false })
+      } catch {
+        throw new SkillIpcError('SKILL_WRITE_FAILED', 500, '删除技能包失败；请检查目录权限')
+      }
+      return { removed: true }
     },
   }
 }

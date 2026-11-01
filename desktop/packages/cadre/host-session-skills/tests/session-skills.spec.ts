@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -199,6 +199,33 @@ describe('session skill packs', () => {
       .toThrow(/未知技能包/)
     expect(() => api.get({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w1' }))
       .toThrow(/只有本项目在册 supervisor/)
+    db.close()
+  })
+
+  it('adds, rejects, overwrites and removes packs', () => {
+    const root = workspace()
+    const packs = join(root, 'packs')
+    const db = ledger(root)
+    insert(db, 's1', 'supervisor', [])
+    const api = createSkillApi({ db, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs })
+    const base = {
+      projectId: 'p1', actorSessionId: 's1', name: 'Manual', description: 'manual pack',
+      roles: ['worker'], tokenEstimate: 10, tools: ['read'], source: 'manual', license: 'MIT',
+    }
+    expect(api.add({ ...base, id: 'manual-pack', content: '# v1' })).toMatchObject({
+      id: 'manual-pack', roles: ['worker'], tokenEstimate: 10,
+    })
+    expect(api.catalog({ projectId: 'p1', actorSessionId: 's1' }).map(pack => pack.id)).toContain('manual-pack')
+    expect(readFileSync(join(packs, 'manual-pack', 'SKILL.md'), 'utf8')).toBe('# v1')
+    expect(() => api.add({ ...base, id: '../escape', content: '# x' })).toThrow(/kebab-case/)
+    expect(() => api.add({ ...base, id: 'manual-pack', content: '# x' })).toThrow(/已存在/)
+    expect(api.add({ ...base, id: 'manual-pack', content: '# v2', overwrite: true })).toMatchObject({ id: 'manual-pack' })
+    expect(readFileSync(join(packs, 'manual-pack', 'SKILL.md'), 'utf8')).toBe('# v2')
+    expect(() => api.remove({ projectId: 'p1', actorSessionId: 's1', packId: 'manual-pack', confirm: false }))
+      .toThrow(/confirm:true/)
+    expect(api.remove({ projectId: 'p1', actorSessionId: 's1', packId: 'manual-pack', confirm: true }))
+      .toEqual({ removed: true })
+    expect(api.catalog({ projectId: 'p1', actorSessionId: 's1' }).map(pack => pack.id)).not.toContain('manual-pack')
     db.close()
   })
 

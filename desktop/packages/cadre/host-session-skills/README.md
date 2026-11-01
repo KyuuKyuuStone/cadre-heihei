@@ -34,7 +34,10 @@ POST JSON, supervisor-only and project-scoped:
 - `/cadre/skills/set` — above + `{skills: string[]}`; validates ids, roles and
   dedupes before writing `members.skills_json`;
 - `/cadre/skills/preview` — `{projectId, actorSessionId, packId}` → `SKILL.md`
-  body and `tokenEstimate`; read-only.
+  body and `tokenEstimate`; read-only;
+- `/cadre/skills/add` — manifest fields + `content`; kebab-case id, valid roles,
+  atomic directory write, `overwrite:true` only replaces;
+- `/cadre/skills/remove` — `{packId, confirm:true}` deletes the pack directory.
 
 ## Known Limitations and Deferred Work
 
