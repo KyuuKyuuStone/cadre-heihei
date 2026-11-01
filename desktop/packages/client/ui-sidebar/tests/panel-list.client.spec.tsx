@@ -21,6 +21,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 const ALPHA = 'sidebar-test-alpha' as MainPanelId
 const BETA = 'sidebar-test-beta' as MainPanelId
+const SKILLS_PANEL = { id: 'cadre-skills', order: 10, label: 'Skills' }
+const panelRows = (navigation: HTMLElement) => within(navigation).getAllByRole('button')
+  .filter(row => !['Skills', '技能'].includes(row.getAttribute('aria-label') ?? ''))
 const runtimes = new Set<SlotTestRuntime>()
 
 afterEach(async () => {
@@ -124,14 +127,15 @@ async function mountPanels(runtime: SlotTestRuntime, locale: LocaleRuntime, beta
 describe('sidebar global panels', () => {
   it('adds late registrations, removes each plugin contribution, and leaves no empty panel-list DOM', async () => {
     const { runtime, locale, view } = await bench()
-    expect(runtime.slots.entries('sidebar.panellist')).toEqual([])
-    expect(view.queryByRole('navigation')).toBeNull()
-    expect(view.container.querySelector('[data-slot="sidebar.panellist"]')).toBeNull()
+    expect(runtime.slots.entries('sidebar.panellist').map(entry => entry.options)).toEqual([
+      expect.objectContaining({ id: SKILLS_PANEL.id, order: SKILLS_PANEL.order }),
+    ])
+    const navigation = await view.findByRole('navigation', { name: 'Global panels' })
+    expect(within(navigation).getByRole('button', { name: 'Skills' })).toBeTruthy()
     expect(view.getByText('Conversation content')).toBeTruthy()
 
     const { alpha, beta } = await mountPanels(runtime, locale)
-    const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-    expect(within(navigation).getAllByRole('button')).toHaveLength(2)
+    expect(panelRows(navigation)).toHaveLength(2)
     fireEvent.click(within(navigation).getByRole('button', { name: 'Alpha panel' }))
     expect(view.getByRole('heading', { name: 'Alpha content' })).toBeTruthy()
 
@@ -140,23 +144,22 @@ describe('sidebar global panels', () => {
       expect(view.queryByRole('button', { name: 'Alpha panel' })).toBeNull()
       expect(view.queryByRole('heading', { name: 'Alpha content' })).toBeNull()
     })
-    expect(runtime.slots.entries('main').map(entry => entry.options.key)).toEqual(['conversation', BETA])
+    expect(runtime.slots.entries('main').map(entry => entry.options.key)).toEqual(['conversation', 'cadre-skills', BETA])
     fireEvent.click(within(navigation).getByRole('button', { name: 'Beta panel' }))
     expect(view.getByRole('heading', { name: 'Beta content' })).toBeTruthy()
 
     await beta.dispose()
-    await waitFor(() => { expect(view.queryByRole('navigation')).toBeNull() })
+    await waitFor(() => { expect(panelRows(navigation)).toHaveLength(0) })
     expect(view.queryByRole('heading', { name: 'Beta content' })).toBeNull()
-    expect(view.container.querySelector('[data-slot="sidebar.panellist"]')).toBeNull()
-    expect(runtime.slots.entries('sidebar.panellist')).toEqual([])
-    expect(runtime.slots.entries('main').map(entry => entry.options.key)).toEqual(['conversation'])
+    expect(runtime.slots.entries('sidebar.panellist')).toHaveLength(1)
+    expect(runtime.slots.entries('main').map(entry => entry.options.key)).toEqual(['conversation', 'cadre-skills'])
   })
 
   it.each([false, true])('renders ordered rows, icon sizes, and tooltip labels with collapsed=%s', async (collapsed) => {
     const { runtime, locale, view } = await bench(collapsed)
     await mountPanels(runtime, locale)
     const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-    const rows = within(navigation).getAllByRole('button')
+    const rows = panelRows(navigation)
     expect(rows.map(row => row.getAttribute('aria-label'))).toEqual(['Beta panel', 'Alpha panel'])
     for (const [id, label] of [[BETA, 'Beta panel'], [ALPHA, 'Alpha panel']] as const) {
       const row = within(navigation).getByRole('button', { name: label })
@@ -181,7 +184,7 @@ describe('sidebar global panels', () => {
     const { runtime, locale, view } = await bench()
     await mountPanels(runtime, locale, 20)
     const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-    expect(within(navigation).getAllByRole('button').map(row => row.textContent)).toEqual(['Alpha panel', 'Beta panel'])
+    expect(panelRows(navigation).map(row => row.textContent)).toEqual(['Alpha panel', 'Beta panel'])
   })
 
   it('selects registered main content and keeps a repeated selection active', async () => {
@@ -233,7 +236,7 @@ describe('sidebar global panels', () => {
     await mountPanel(runtime, { id: ALPHA, heading: 'Alpha content', label: 'Alpha panel', order: 20 })
     await mountPanel(runtime, { id: BETA, heading: 'Beta content' })
     const navigation = await view.findByRole('navigation', { name: 'Global panels' })
-    expect(within(navigation).getAllByRole('button').map(row => row.textContent)).toEqual([BETA, 'Alpha panel'])
+    expect(panelRows(navigation).map(row => row.textContent)).toEqual([BETA, 'Alpha panel'])
     fireEvent.click(within(navigation).getByRole('button', { name: BETA }))
     expect(view.getByRole('heading', { name: 'Beta content' })).toBeTruthy()
   })

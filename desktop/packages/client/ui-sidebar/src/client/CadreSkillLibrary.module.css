@@ -1,0 +1,171 @@
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 15px;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 24px;
+  overflow: auto;
+  color: var(--dsw-alias-label-primary);
+}
+
+.page h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header p,
+.page > p {
+  margin: 4px 0 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.install {
+  padding: 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.fields > label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.fields > label:last-of-type {
+  grid-column: 1 / -1;
+}
+
+.roles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.card p {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.id {
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--dsw-font-mono);
+  font-size: 10px;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border: 0.5px dashed var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.empty p {
+  margin: 0;
+}
+
+.empty code {
+  overflow-wrap: anywhere;
+}
+
+.error {
+  margin: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+}
+
+.notice {
+  margin: 0;
+  color: var(--dsw-alias-state-success-primary);
+  font-size: 12px;
+}

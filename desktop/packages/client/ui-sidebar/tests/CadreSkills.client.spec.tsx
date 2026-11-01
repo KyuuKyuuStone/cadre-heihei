@@ -94,56 +94,13 @@ describe('Cadre skill settings', () => {
     expect(JSON.parse((setCall?.[1] as RequestInit).body as string)).toMatchObject({ targetSessionId: 'w1', skills: ['worker-only'] })
   })
 
-  it('validates, confirms overwrite, saves add, and reselects the refreshed entry', async () => {
-    let catalogs = 0
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-      const url = requestUrl(input)
-      if (url.endsWith('/catalog')) {
-        catalogs += 1
-        return json({ ok: true, result: catalogs === 1 ? ENTRIES : ENTRIES.map(entry => entry.id === 'worker-only' ? { ...entry, name: '覆盖后的技能' } : entry) })
-      }
-      return json({ ok: true, result: { id: 'worker-only' } })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+  it('only selects installed skills and has no install or delete controls', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: ENTRIES })))
     render(<CadreSkillSettingsDialog {...dialogProps()} />)
     await screen.findByText('员工技能')
-    fireEvent.click(screen.getByRole('button', { name: '手动添加技能' }))
-    expect(screen.getByText('SKILL.md 正文')).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('技能 id'), { target: { value: 'worker-only' } })
-    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '覆盖后的技能' } })
-    fireEvent.change(screen.getByLabelText('描述'), { target: { value: '手动添加' } })
-    fireEvent.change(screen.getByPlaceholderText('粘贴或从本地目录导入 SKILL.md 正文'), { target: { value: '# skill body' } })
-    expect(screen.getByLabelText<HTMLInputElement>('token 估算').value).toBe('3')
-    fireEvent.click(screen.getByRole('button', { name: '添加技能' }))
-    expect((await screen.findByRole('alert')).textContent).toContain('同名技能已存在')
-    fireEvent.click(screen.getByRole('checkbox', { name: '同名技能已存在时覆盖' }))
-    fireEvent.click(screen.getByRole('button', { name: '添加技能' }))
-    expect(await screen.findByText('技能已添加并选中。')).toBeTruthy()
-    const addCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/add'))
-    const body = JSON.parse((addCall?.[1] as RequestInit).body as string) as Record<string, unknown>
-    expect(body).toMatchObject({ id: 'worker-only', overwrite: true, content: '# skill body', roles: ['worker'] })
-    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: '覆盖后的技能' }).checked).toBe(true)
-  })
-
-  it('deletes a skill after confirmation and refreshes the catalog', async () => {
-    let catalogs = 0
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-      const url = requestUrl(input)
-      if (url.endsWith('/catalog')) {
-        catalogs += 1
-        return json({ ok: true, result: catalogs === 1 ? ENTRIES : [] })
-      }
-      return json({ ok: true, result: { removed: true } })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    render(<CadreSkillSettingsDialog {...dialogProps()} />)
-    await screen.findByText('员工技能')
-    fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(await screen.findByText('技能已删除。')).toBeTruthy()
-    const removeCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/remove'))
-    expect(JSON.parse((removeCall?.[1] as RequestInit).body as string)).toMatchObject({ packId: 'worker-only', confirm: true })
-    expect(screen.queryByText('员工技能')).toBeNull()
+    expect(screen.queryByRole('button', { name: '手动添加技能' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
+    expect(screen.getByRole('button', { name: '保存技能' })).toBeTruthy()
   })
 
   it('shows the empty state and install directory', async () => {

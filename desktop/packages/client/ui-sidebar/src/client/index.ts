@@ -34,6 +34,11 @@ import {
   type CadreSkillsRequest,
 } from './CadreSkills.tsx'
 import {
+  CadreSkillLibraryIcon,
+  CadreSkillLibraryPage,
+  type CadreSkillLibraryInjected,
+} from './CadreSkillLibrary.tsx'
+import {
   CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
   type CadreProjectActionsInjected,
@@ -593,6 +598,10 @@ export function apply(ctx: ClientContext): void {
     openSkills,
     closeSkills,
   })
+  const skillLibraryInjected = (): CadreSkillLibraryInjected => ({
+    hooks: { roster, sessions: sessionsSource },
+    projectOfSession: (sessionId) => projectOfSession(sessionId),
+  })
 
   const createRosterEntry = async (input: {
     role: 'supervisor' | 'worker'
@@ -794,6 +803,16 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay', id: 'cadre-skills', locale: NS, inject: skillsInjected,
   } as never, CadreSkillSettingsDialog as never))
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main', key: 'cadre-skills' as never, locale: NS, inject: skillLibraryInjected,
+  } as never, CadreSkillLibraryPage as never))
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: 'cadre-skills',
+    order: 10,
+    label: () => ctx.locale.bind(NS)('skills.panel'),
+    locale: NS,
+  } as never, CadreSkillLibraryIcon as never))
 
   // ui-sidebar cannot reference ui-workspace's SlotMap: ui-workspace depends
   // on this package, so a reverse type import would form a project-reference

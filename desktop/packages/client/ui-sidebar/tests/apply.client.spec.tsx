@@ -105,8 +105,10 @@ describe('ui-sidebar apply', () => {
     expect(leading[0]!.inject).toBe(b.slots.entries('sidebar')[0]!.inject)
     const injected = (b.slots.entries('sidebar')[0]!.inject as () => SidebarRootInjected)()
     expect(Object.keys(injected)).toEqual(['startSession', 'toggleSidebar', 'selectPanel', 'requestCadreCreate', 'refreshCadreSupervisor', 'hooks'])
-    expect(injected.hooks.panels.getSnapshot()).toEqual([])
-    expect(b.slots.entries('main')).toEqual([])
+    expect(injected.hooks.panels.getSnapshot()).toEqual([
+      { id: 'cadre-skills', order: 10, label: 'Skills' },
+    ])
+    expect(b.slots.entries('main').map(entry => entry.options.key)).toEqual(['cadre-skills'])
     // Both arms delegate to the Workspace UI's shared New Session action.
     injected.startSession('workspace' as never)
     expect(b.uiWorkspace.startSession).toHaveBeenCalledWith('workspace')
@@ -152,13 +154,16 @@ describe('ui-sidebar apply', () => {
       await panel.await()
       await vi.waitFor(() => {
         expect(injected.hooks.panels.getSnapshot()).toEqual([
+          { id: 'cadre-skills', order: 10, label: 'Skills' },
           { id: 'custom-panel', order: 20, label: 'Custom panel' },
         ])
       })
-      expect(b.slots.entries('main').map(entry => entry.options.key)).toEqual(['custom-panel'])
+      expect(b.slots.entries('main').map(entry => entry.options.key)).toEqual(['cadre-skills', 'custom-panel'])
       await panel.dispose()
-      await vi.waitFor(() => { expect(injected.hooks.panels.getSnapshot()).toEqual([]) })
-      expect(b.slots.entries('main')).toEqual([])
+      await vi.waitFor(() => { expect(injected.hooks.panels.getSnapshot()).toEqual([
+        { id: 'cadre-skills', order: 10, label: 'Skills' },
+      ]) })
+      expect(b.slots.entries('main').map(entry => entry.options.key)).toEqual(['cadre-skills'])
     } finally {
       await panel.dispose()
       await sidebar.dispose()

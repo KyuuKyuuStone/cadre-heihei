@@ -63,6 +63,34 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         </span>
       </button>
     </span>
+    <nav
+      aria-label="Global panels"
+      class="panelList"
+    >
+      <button
+        aria-label="Skills"
+        class="panelRow"
+        type="button"
+      >
+        <span
+          aria-hidden="true"
+          class="panelGlyph"
+        >
+          <div
+            data-slot="sidebar.panellist"
+            style="display: contents;"
+          >
+            <span
+              aria-hidden="true"
+              class="icon"
+              style="width: 18px; height: 18px;"
+            >
+              ✦
+            </span>
+          </div>
+        </span>
+      </button>
+    </nav>
     <div
       class="regionArea"
     >
@@ -205,6 +233,39 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         </span>
       </button>
     </span>
+    <nav
+      aria-label="Global panels"
+      class="panelList"
+    >
+      <button
+        aria-label="Skills"
+        class="panelRow"
+        type="button"
+      >
+        <span
+          aria-hidden="true"
+          class="panelGlyph"
+        >
+          <div
+            data-slot="sidebar.panellist"
+            style="display: contents;"
+          >
+            <span
+              aria-hidden="true"
+              class="icon"
+              style="width: 16px; height: 16px;"
+            >
+              ✦
+            </span>
+          </div>
+        </span>
+        <span
+          class="panelTitle wide"
+        >
+          Skills
+        </span>
+      </button>
+    </nav>
     <div
       class="regionArea"
     >
@@ -322,6 +383,34 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
         </span>
       </button>
     </span>
+    <nav
+      aria-label="Global panels"
+      class="panelList"
+    >
+      <button
+        aria-label="Skills"
+        class="panelRow"
+        type="button"
+      >
+        <span
+          aria-hidden="true"
+          class="panelGlyph"
+        >
+          <div
+            data-slot="sidebar.panellist"
+            style="display: contents;"
+          >
+            <span
+              aria-hidden="true"
+              class="icon"
+              style="width: 18px; height: 18px;"
+            >
+              ✦
+            </span>
+          </div>
+        </span>
+      </button>
+    </nav>
     <div
       class="regionArea"
     >
@@ -464,6 +553,39 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
         </span>
       </button>
     </span>
+    <nav
+      aria-label="Global panels"
+      class="panelList"
+    >
+      <button
+        aria-label="Skills"
+        class="panelRow"
+        type="button"
+      >
+        <span
+          aria-hidden="true"
+          class="panelGlyph"
+        >
+          <div
+            data-slot="sidebar.panellist"
+            style="display: contents;"
+          >
+            <span
+              aria-hidden="true"
+              class="icon"
+              style="width: 16px; height: 16px;"
+            >
+              ✦
+            </span>
+          </div>
+        </span>
+        <span
+          class="panelTitle wide"
+        >
+          Skills
+        </span>
+      </button>
+    </nav>
     <div
       class="regionArea"
     >
@@ -606,6 +728,39 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
         </span>
       </button>
     </span>
+    <nav
+      aria-label="全局面板"
+      class="panelList"
+    >
+      <button
+        aria-label="技能"
+        class="panelRow"
+        type="button"
+      >
+        <span
+          aria-hidden="true"
+          class="panelGlyph"
+        >
+          <div
+            data-slot="sidebar.panellist"
+            style="display: contents;"
+          >
+            <span
+              aria-hidden="true"
+              class="icon"
+              style="width: 16px; height: 16px;"
+            >
+              ✦
+            </span>
+          </div>
+        </span>
+        <span
+          class="panelTitle wide"
+        >
+          技能
+        </span>
+      </button>
+    </nav>
     <div
       class="regionArea"
     >
