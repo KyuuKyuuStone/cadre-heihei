@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-agent-preset-registry",
   "description": "Declarative Agent preset registry and profile-backed editing",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "publishConfig": {
     "access": "public"
   },

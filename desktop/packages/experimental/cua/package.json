@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-cua",
   "description": "Shared Computer Use application objects, authorization, and logged tool execution",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "publishConfig": {
     "access": "public"
   },
