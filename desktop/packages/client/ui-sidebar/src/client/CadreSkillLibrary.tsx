@@ -1,6 +1,6 @@
 /**
- * Global skill library: built-in packs are read-only; installed packs can be
- * installed from a GitHub/raw URL or removed. Member settings only select.
+ * Global skill library: built-in packs are read-only; installation goes through
+ * the skill-administrator conversation. Member settings only select.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -9,7 +9,6 @@ import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import {
   addSkillToLibrary,
   fetchSkillCatalog,
-  installSkillFromUrl,
   removeSkillFromLibrary,
   type CadreSkillEntry,
 } from './CadreSkills.tsx'
@@ -76,8 +75,6 @@ export function CadreSkillLibraryPage({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [url, setUrl] = useState('')
-  const [overwrite, setOverwrite] = useState(false)
   const [advanced, setAdvanced] = useState(false)
   const [form, setForm] = useState<ManualState>(EMPTY)
   const [tokenManual, setTokenManual] = useState(false)
@@ -107,24 +104,6 @@ export function CadreSkillLibraryPage({
     )
   }
 
-  const install = async (): Promise<void> => {
-    setError(null)
-    setNotice(null)
-    setBusy(true)
-    try {
-      await installSkillFromUrl(projectId, actor.sessionId, url.trim(), overwrite)
-      setUrl('')
-      setNotice(t('skills.url.installed'))
-      await load()
-    } catch (cause) {
-      setError(t('skills.url.failed', {
-        message: cause instanceof Error ? cause.message : String(cause),
-      }))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const addManual = async (): Promise<void> => {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(form.id) || form.id.length > 64) {
       setError(t('skills.error.id'))
@@ -142,7 +121,7 @@ export function CadreSkillLibraryPage({
       setError(t('skills.error.builtin'))
       return
     }
-    if (entries.some(entry => entry.id === form.id) && !overwrite) {
+    if (entries.some(entry => entry.id === form.id)) {
       setError(t('skills.error.exists'))
       return
     }
@@ -154,7 +133,7 @@ export function CadreSkillLibraryPage({
         ...form,
         tokenEstimate: Number(form.tokenEstimate),
         tools: form.tools.split(',').map(item => item.trim()).filter(item => item !== ''),
-        overwrite,
+        overwrite: false,
       })
       setAdvanced(false)
       setNotice(t('skills.notice.added'))
@@ -228,20 +207,16 @@ export function CadreSkillLibraryPage({
           <h1>{t('skills.library.title')}</h1>
           <p>{t('skills.library.description')}</p>
         </div>
-        <Button variant="outline" disabled={busy} onClick={() => { setAdminOpen(true) }}>
-          {t('skills.admin.entry')}
-        </Button>
+        <div className={css.headerActions}>
+          <Button variant="primary" disabled={busy} onClick={() => { setAdminOpen(true) }}>
+            {t('skills.admin.installEntry')}
+          </Button>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
+            if (!advanced) setForm({ ...EMPTY, tools: t('skills.defaultTools'), license: t('skills.defaultLicense') })
+            setAdvanced(value => !value)
+          }}>{t('skills.advanced')}</Button>
+        </div>
       </header>
-      <div className={css.install} data-skill-url>
-        <Input value={url} placeholder={t('skills.url.placeholder')} disabled={busy}
-          onChange={(event) => { setUrl(event.target.value) }} />
-        <Button variant="primary" disabled={busy || url.trim() === ''} onClick={() => { void install() }}>{t('skills.url.install')}</Button>
-        <Checkbox checked={overwrite} label={t('skills.overwrite')} disabled={busy} onChange={setOverwrite} />
-        <Button variant="ghost" size="sm" onClick={() => {
-          if (!advanced) setForm({ ...EMPTY, tools: t('skills.defaultTools'), license: t('skills.defaultLicense') })
-          setAdvanced(value => !value)
-        }}>{t('skills.advanced')}</Button>
-      </div>
       <div className={css.sources} data-skill-sources>
         <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
         <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>

@@ -52,7 +52,7 @@ describe('Cadre skill library', () => {
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(screen.getByText('只有主管可以查看和管理技能库。')).toBeTruthy()
     expect(screen.queryByPlaceholderText('GitHub 仓库、tree 或 raw SKILL.md URL')).toBeNull()
-    expect(screen.queryByRole('button', { name: '技能管理员' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '安装技能' })).toBeNull()
     expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
   })
 
@@ -89,7 +89,7 @@ describe('Cadre skill library', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillLibraryPage {...{ ...pageProps(), openSkillAdminSession }} />)
     await screen.findByText('内置技能')
-    fireEvent.click(screen.getByRole('button', { name: '技能管理员' }))
+    fireEvent.click(screen.getByRole('button', { name: '安装技能' }))
     expect(await screen.findByText('还没有技能管理员对话。')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '新建对话' }))
     await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('admin-1') })
@@ -107,7 +107,7 @@ describe('Cadre skill library', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillLibraryPage {...pageProps()} />)
     await screen.findByText('内置技能')
-    fireEvent.click(screen.getByRole('button', { name: '技能管理员' }))
+    fireEvent.click(screen.getByRole('button', { name: '安装技能' }))
     expect(await screen.findByText('旧对话')).toBeTruthy()
     fireEvent.click(screen.getAllByRole('button', { name: '删除' }).at(-1)!)
     await waitFor(() => { expect(screen.queryByText('旧对话')).toBeNull() })
@@ -123,17 +123,19 @@ describe('Cadre skill library', () => {
     expect(await screen.findByText('Landing-page design: information structure, conversion copy, visual rules, states, and ship checks.')).toBeTruthy()
   })
 
-  it('installs from a GitHub URL without manifest fields and deletes installed skills', async () => {
+  it('has no URL installer, keeps sources and the folded manual form, and deletes installed skills', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)
       if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      if (url.endsWith('/install-url')) return json({ ok: true, result: { id: 'new-skill' } })
       return json({ ok: true, result: { removed: true } })
     })
     vi.stubGlobal('fetch', fetchMock)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<CadreSkillLibraryPage {...pageProps()} />)
     await screen.findByText('员工技能')
+    expect(screen.queryByPlaceholderText(/SKILL\.md URL/)).toBeNull()
+    expect(screen.queryByRole('button', { name: '安装' })).toBeNull()
+    expect(screen.queryByText('同名技能已存在时覆盖')).toBeNull()
     const sources = document.querySelector('[data-skill-sources]')
     expect(sources).not.toBeNull()
     expect(sources!.querySelectorAll('a')).toHaveLength(4)
@@ -146,20 +148,23 @@ describe('Cadre skill library', () => {
     expect(screen.queryByLabelText('技能 id')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '高级手动表单' }))
     expect(screen.getByLabelText('技能 id')).toBeTruthy()
-    fireEvent.change(screen.getByPlaceholderText('GitHub 仓库、tree 或 raw SKILL.md URL'), {
-      target: { value: 'https://github.com/acme/skills/tree/main/skills/new-skill' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '安装' }))
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/install-url'))).toBe(true)
-    })
-    const installCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/install-url'))
-    expect(JSON.parse((installCall?.[1] as RequestInit).body as string)).toMatchObject({
-      url: 'https://github.com/acme/skills/tree/main/skills/new-skill', confirm: false,
-    })
-    expect(await screen.findByText('技能已安装。')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     expect(await screen.findByText('技能已删除。')).toBeTruthy()
     expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(true)
+  })
+
+  it('shows a readable error when the administrator is unavailable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/admin/sessions')) {
+        return json({ ok: false, code: 'SKILL_ADMIN_UNAVAILABLE', message: 'no session service' })
+      }
+      return json({ ok: true, result: ENTRIES })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreSkillLibraryPage {...pageProps()} />)
+    await screen.findByText('员工技能')
+    fireEvent.click(screen.getByRole('button', { name: '安装技能' }))
+    expect(await screen.findByText('技能管理员当前不可用：Host 未接入会话服务。')).toBeTruthy()
   })
 })

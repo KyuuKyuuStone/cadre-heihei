@@ -31,6 +31,13 @@
   gap: 12px;
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .header p,
 .page > p {
   margin: 4px 0 0;

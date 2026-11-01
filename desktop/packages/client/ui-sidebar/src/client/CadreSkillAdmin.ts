@@ -141,6 +141,7 @@ export function skillAdminErrorKey(code: string): string {
     case 'SKILL_FORBIDDEN': return 'skills.admin.error.forbidden'
     case 'SKILL_ADMIN_SESSION_UNBOUND': return 'skills.admin.error.unbound'
     case 'SKILL_ADMIN_DELETE_UNSUPPORTED': return 'skills.admin.error.deleteUnsupported'
+    case 'SKILL_ADMIN_UNAVAILABLE': return 'skills.admin.error.unavailable'
     default: return 'skills.admin.error.generic'
   }
 }
