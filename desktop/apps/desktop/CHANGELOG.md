@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.0
+
+- **会话级邮件通知**：每个 Cadre 项目独立配置启停、发件人、收件人、`apiKeyEnv`、dry-run、最小发送间隔；配置存 `~/.dsh/cadre-email/<projectId>.json`，密钥只引用环境变量名，不写入仓库/日志
+- **SendGrid HTTPS**：仅使用 SendGrid v3 `POST /v3/mail/send`，不依赖本机 SMTP；密钥缺失/鉴权失败/HTTP/网络异常均返回结构化错误并 redact
+- **触发**：任务进入 delivered/verified 时发项目汇总；显式/自动升级（`【需要您决定】`）发 escalation；dedupe + 项目级限流，失败不阻断任务与停摆主流程
+- **主管设置页**：侧栏主管邮件通知设置，支持启停/收件人/发件人/环境变量名、测试发送、dry-run；IPC 只返回 `hasKey`，不回传密钥值
+- 包含 1.0.0 全部修复：强锁/Skill、三态/视图、内部化、台账分页、lastError/aborted、开源文档/CI
+
+### 已知限制
+
+- 未用真实 SendGrid API key/邮箱做端到端验证（单测注入 fetch）
+- task-summary 依赖 watchdog 首次扫描建立 Episode；任务在首次扫描前已完成可能漏发
+- 安装包未签名（SmartScreen 提示）
+- 429/外部依赖仅做有界重试并告知，不自动改派修复任务
+
 ## 1.0.0
 
 - **主管写文件强锁**：host-write-guard 在 `tools/pre-execute` 只拦 supervisor 写工具；只允许 workspace/`reports/` 下 `.md/.txt`，Office/shell 分别返回专用错误码；roots 按项目/会话/配置兜底，策略 JSON 热更新、fail-closed、审计；非写工具（派活/查台账/读文件）直接放行
