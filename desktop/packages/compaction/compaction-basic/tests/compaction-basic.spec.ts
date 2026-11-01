@@ -321,6 +321,9 @@ describe('compact configuration and defaults', () => {
       maxOverflowRetries: 1,
       modelPolicies: [],
       auto: true,
+      stepPressureCheck: false,
+      stepPressureThresholdTokens: 100_000,
+      stepMinToolCallsBetweenChecks: 2,
     })
     expect(Object.isFrozen(resolved)).toBe(true)
   })
@@ -1690,6 +1693,42 @@ describe('default one-shot summarizer', () => {
 })
 
 describe('automatic listener and loader composition', () => {
+  /** Small one-tool session: pressure is above 1 but far below the normal cap. */
+  function smallToolStep(): Session {
+    const session = Session.create(SessionId('small-step'))
+    const callId = ToolCallId('small-call')
+    session.append('turn/start', { turn: 1 })
+    session.append('system/message', { turn: 1, step: 1, message: createSystemMessage('system') }, { surfaceOp: 'append' })
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'small request '.repeat(30) }], source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    session.append('step/start', { turn: 1, step: 1 })
+    session.append('request/header', { header: { config: { provider: MODEL, model: MODEL } }, reason: 'initial' })
+    session.append('assistant/message', {
+      stream: [],
+      turn: 1,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'assistant history '.repeat(30) },
+          { type: 'tool-call', id: callId, name: 'read', arguments: '{}' },
+        ],
+        source: { kind: 'model', ...{ provider: MODEL, model: MODEL } },
+      }),
+    }, { surfaceOp: 'append' })
+    session.append('tool/call', { turn: 1, step: 1, callId, name: 'read', arguments: '{}' })
+    session.append('tool/result', {
+      turn: 1,
+      step: 1,
+      message: createToolResultMessage({ callId, content: [{ type: 'text', text: 'tiny' }], isError: false }),
+    }, { surfaceOp: 'append' })
+    session.append('step/end', { turn: 1, step: 1 })
+    session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    session.append('turn/start', { turn: 2 })
+    return session
+  }
+
   function preStep(ctx: Context, owner: Agent, signal = SIGNAL) {
     return agentEvents(ctx, owner).waterfall(
       'agent/pre-step', { messages: [], turn: 1, step: 1, signal },
@@ -1716,6 +1755,90 @@ describe('automatic listener and loader composition', () => {
   function overflow(message = 'provider overflow'): Error & { code: string } {
     return Object.assign(new Error(message), { code: CONTEXT_WINDOW_EXCEEDED_CODE })
   }
+
+  it('does not step-compact when stepPressureCheck is off', async () => {
+    const ctx = createContext()
+    const compact = new TestCompactionEngine(ctx, {
+      headroomTokens: 0,
+      maxTokens: 8192,
+      thresholdRatio: 0.99,
+      thresholdTokens: 100000,
+      retainTokens: 1,
+      stepPressureThresholdTokens: 1,
+      stepPressureCheck: false,
+    })
+    const session = smallToolStep()
+    await preStep(ctx, agent(session, MODEL))
+    expect(session.snapshotEvents().some(event => event.type === 'compaction/start')).toBe(false)
+    expect(compact.calls).toHaveLength(0)
+  })
+
+  it('step-compacts when enabled and the minimum tool interval is met', async () => {
+    const ctx = createContext()
+    const compact = new TestCompactionEngine(ctx, {
+      headroomTokens: 0,
+      maxTokens: 8192,
+      thresholdRatio: 0.99,
+      thresholdTokens: 100000,
+      retainTokens: 1,
+      stepPressureThresholdTokens: 1,
+      stepMinToolCallsBetweenChecks: 1,
+      stepPressureCheck: true,
+    })
+    const session = smallToolStep()
+    compact.summary = [{ type: 'text', text: 's' }]
+    await preStep(ctx, agent(session, MODEL))
+    expect(session.snapshotEvents().some(event => event.type === 'compaction/start')).toBe(true)
+    expect(compact.calls).toHaveLength(2)
+  })
+
+  it('skips step compaction before the minimum tool interval', async () => {
+    const ctx = createContext()
+    const compact = new TestCompactionEngine(ctx, {
+      headroomTokens: 0,
+      maxTokens: 8192,
+      thresholdRatio: 0.99,
+      thresholdTokens: 100000,
+      retainTokens: 1,
+      stepPressureThresholdTokens: 1,
+      stepMinToolCallsBetweenChecks: 10,
+      stepPressureCheck: true,
+    })
+    const session = smallToolStep()
+    await preStep(ctx, agent(session, MODEL))
+    expect(session.snapshotEvents().some(event => event.type === 'compaction/start')).toBe(false)
+    expect(compact.calls).toHaveLength(0)
+  })
+
+  it('skips step compaction while a tool result is missing', async () => {
+    const ctx = createContext()
+    const compact = new TestCompactionEngine(ctx, {
+      headroomTokens: 0,
+      maxTokens: 8192,
+      thresholdRatio: 0.99,
+      thresholdTokens: 100000,
+      retainTokens: 1,
+      stepPressureThresholdTokens: 1,
+      stepMinToolCallsBetweenChecks: 0,
+      stepPressureCheck: true,
+    })
+    const session = smallToolStep()
+    const callId = ToolCallId('unanswered')
+    session.append('assistant/message', {
+      stream: [],
+      turn: 4,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: [{ type: 'tool-call', id: callId, name: 'read', arguments: '{}' }],
+        source: { kind: 'model', ...{ provider: MODEL, model: MODEL } },
+      }),
+    }, { surfaceOp: 'append' })
+    session.append('tool/call', { turn: 4, step: 1, callId, name: 'read', arguments: '{}' })
+    await preStep(ctx, agent(session, MODEL))
+    expect(session.snapshotEvents().some(event => event.type === 'compaction/start')).toBe(false)
+    expect(compact.calls).toHaveLength(0)
+  })
 
   it('compacts before a step above threshold using the durable routed model and remains idle below it', async () => {
     const ctx = createContext()

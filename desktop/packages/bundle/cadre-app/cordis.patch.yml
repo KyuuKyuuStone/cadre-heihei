@@ -23,6 +23,11 @@
     # window left ~150k tokens after every compaction, so a long turn still
     # paid hundreds of thousands of cache-read tokens per request.
     retainTokens: 50000
+    # Step-level pressure checks stay off until a real long-turn regression
+    # proves the lower threshold does not hurt task continuity.
+    stepPressureCheck: false
+    stepPressureThresholdTokens: 100000
+    stepMinToolCallsBetweenChecks: 2
 
 # Tool results are 57% of measured prompts. The base bundle spills above 12.5k
 # estimated tokens; Cadre keeps only 4k inline (head/tail + locator) while the

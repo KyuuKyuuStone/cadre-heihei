@@ -6,7 +6,7 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { CompactionEngine, ManualCompactionError } from '@deepseek-ai/dsh-compaction'
+import { CompactionEngine, ManualCompactionError, toolPairingBalancedAfter } from '@deepseek-ai/dsh-compaction'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
 import type { Session, SessionSeq } from '@deepseek-ai/dsh-session'
 import { CONTEXT_WINDOW_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
@@ -136,11 +136,26 @@ export class BasicCompactionEngine extends CompactionEngine {
   private readonly warnedPressureConfigTargets = new Set<string>()
   private readonly overflowRetries = new WeakMap<Agent, number>()
   private readonly overflowAgents = new WeakMap<Session, Agent>()
+  private stepThresholdOverride: number | undefined
 
   constructor(ctx: Context, config: BasicCompactionConfig = {}) {
     super(ctx)
     this.config = resolveConfig(config)
     if (this.config.auto) this._registerAutomaticCompaction()
+  }
+
+  /** Current surface tool-result count; resets naturally when compaction shrinks it. */
+  private surfaceToolResults(session: Session): number {
+    return session.surface.nodes.filter((seq) => {
+      // oxlint-disable-next-line typescript/no-deprecated -- current surface seq is a durable event.
+      return session.eventAt(seq)?.type === 'tool/result'
+    }).length
+  }
+
+  /** No unanswered tool call may cross the current step boundary. */
+  private stepSurfaceBalanced(session: Session): boolean {
+    const last = session.surface.nodes.at(-1)
+    return last === undefined || toolPairingBalancedAfter(session, last)
   }
 
   /**
@@ -162,18 +177,28 @@ export class BasicCompactionEngine extends CompactionEngine {
       { agent, signal },
       next,
     ): Promise<PreStepDecision> => {
-      if (!signal.aborted) {
-        try {
-          const result = await this.compactIfNeeded(agent, 'pressure', signal)
-          if (result !== null) logResult(result, 'step pressure')
-        } catch (error: unknown) {
-          if (error instanceof TargetPressureConfigError) {
-            if (this.warnedPressureConfigTargets.has(error.targetKey)) return next()
-            this.warnedPressureConfigTargets.add(error.targetKey)
+      const stepDue = this.config.stepPressureCheck
+        && this.surfaceToolResults(agent.session) >= this.config.stepMinToolCallsBetweenChecks
+        && this.stepSurfaceBalanced(agent.session)
+      if (stepDue) this.stepThresholdOverride = this.config.stepPressureThresholdTokens
+      try {
+        if (!signal.aborted) {
+          try {
+            const result = await this.compactIfNeeded(agent, 'pressure', signal)
+            if (result !== null) {
+              logResult(result, stepDue ? 'step pressure' : 'turn pressure')
+            }
+          } catch (error: unknown) {
+            if (error instanceof TargetPressureConfigError) {
+              if (this.warnedPressureConfigTargets.has(error.targetKey)) return next()
+              this.warnedPressureConfigTargets.add(error.targetKey)
+            }
+            const message = error instanceof Error ? error.message : String(error)
+            ctx.logger.warn(`step compaction failed: ${message}; continuing the turn`)
           }
-          const message = error instanceof Error ? error.message : String(error)
-          ctx.logger.warn(`step compaction failed: ${message}; continuing the turn`)
         }
+      } finally {
+        this.stepThresholdOverride = undefined
       }
       return next()
     })
@@ -319,7 +344,10 @@ export class BasicCompactionEngine extends CompactionEngine {
       info.context.contextWindow,
       reservedCompletionTokens(agent, info.defaultMaxTokens),
     )
-    if (measurement.totalTokens < spec.thresholdTokens) return null
+    const effectiveThreshold = this.stepThresholdOverride === undefined
+      ? spec.thresholdTokens
+      : Math.max(spec.retainTokens + 1, Math.min(spec.thresholdTokens, this.stepThresholdOverride))
+    if (measurement.totalTokens < effectiveThreshold) return null
 
     // Once pressure qualifies, land the model-free pass before choosing a
     // summary range, then remeasure through the singleton replay fold.
@@ -327,7 +355,7 @@ export class BasicCompactionEngine extends CompactionEngine {
       prune.pruneSession(agent.session)
       measurement = meter.measure(agent.session)
     }
-    if (measurement.totalTokens < spec.thresholdTokens) return null
+    if (measurement.totalTokens < effectiveThreshold) return null
 
     let result: CompactionResult | null = null
     for (let attempt = 0; attempt <= spec.compactionRetries; attempt += 1) {
@@ -340,7 +368,7 @@ export class BasicCompactionEngine extends CompactionEngine {
       }
       result = await this.compactRegion(range.start, range.end, agent, signal)
       measurement = meter.measure(agent.session)
-      if (measurement.totalTokens < spec.thresholdTokens) return result
+      if (measurement.totalTokens < effectiveThreshold) return result
     }
 
     throw new Error(

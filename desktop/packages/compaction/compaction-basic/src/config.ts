@@ -41,6 +41,9 @@ const BASIC_COMPACT_CONFIG_KEYS: ReadonlySet<string> = new Set([
   ...POLICY_CONFIG_KEYS,
   'modelPolicies',
   'auto',
+  'stepPressureCheck',
+  'stepPressureThresholdTokens',
+  'stepMinToolCallsBetweenChecks',
 ])
 
 /** Complete exact-target override key set. */
@@ -71,6 +74,15 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
   validatePolicy(config, 'BasicCompactionConfig')
   if (config.auto !== undefined && typeof config.auto !== 'boolean') {
     throw new Error('BasicCompactionConfig: auto must be a boolean')
+  }
+  if (config.stepPressureCheck !== undefined && typeof config.stepPressureCheck !== 'boolean') {
+    throw new Error('BasicCompactionConfig: stepPressureCheck must be a boolean')
+  }
+  const stepPressureThresholdTokens = config.stepPressureThresholdTokens ?? 100_000
+  assertPositiveInteger('BasicCompactionConfig.stepPressureThresholdTokens', stepPressureThresholdTokens)
+  const stepMinToolCallsBetweenChecks = config.stepMinToolCallsBetweenChecks ?? 2
+  if (!Number.isSafeInteger(stepMinToolCallsBetweenChecks) || stepMinToolCallsBetweenChecks < 0) {
+    throw new Error('BasicCompactionConfig: stepMinToolCallsBetweenChecks must be a non-negative integer')
   }
 
   const headroomTokens = config.headroomTokens ?? 65_536
@@ -110,6 +122,9 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
     maxOverflowRetries: config.maxOverflowRetries ?? 1,
     modelPolicies,
     auto: config.auto ?? true,
+    stepPressureCheck: config.stepPressureCheck ?? false,
+    stepPressureThresholdTokens,
+    stepMinToolCallsBetweenChecks,
   })
 }
 
