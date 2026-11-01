@@ -69,12 +69,13 @@ function membership(db: DatabaseSync, sessionId: string): Membership | undefined
 
 /**
  * Bind the Host session controller to the narrow port the admin API needs.
- * Sessions remain ordinary; this adapter only filters by the admin preset.
+ * The controller is resolved lazily on each call: a plugin can load before the
+ * session-controller service exists.
  * @param ctx - Host context that may expose `sessionController`.
- * @returns the port, or undefined when no controller is mounted.
+ * @returns the lazy port.
  */
-function adminSessionPort(ctx: HostContext): AdminSessionPort | undefined {
-  const controller = ctx.get?.('sessionController') as {
+export function adminSessionPort(ctx: HostContext): AdminSessionPort {
+  const controller = (): {
     create(request: { readonly cwd: string; readonly agentPreset?: string }): Promise<{ readonly sessionId: string }>
     list(request: Record<string, never>): Promise<{
       readonly items: readonly {
@@ -83,15 +84,29 @@ function adminSessionPort(ctx: HostContext): AdminSessionPort | undefined {
         readonly projections?: { readonly values?: Readonly<Record<string, unknown>> }
       }[]
     }>
-  } | undefined
-  if (controller === undefined) return undefined
+  } => {
+    const service = ctx.get?.('sessionController') as unknown as {
+      create(request: { readonly cwd: string; readonly agentPreset?: string }): Promise<{ readonly sessionId: string }>
+      list(request: Record<string, never>): Promise<{
+        readonly items: readonly {
+          readonly sessionId: string
+          readonly updatedAt: number
+          readonly projections?: { readonly values?: Readonly<Record<string, unknown>> }
+        }[]
+      }>
+    } | undefined
+    if (service === undefined) {
+      throw new SkillIpcError('SKILL_ADMIN_UNAVAILABLE', 503, '当前 Host 没有 sessionController，技能管理员不可用')
+    }
+    return service
+  }
   return {
     create: async input => {
-      const created = await controller.create({ cwd: input.cwd, agentPreset: input.preset })
+      const created = await controller().create({ cwd: input.cwd, agentPreset: input.preset })
       return { sessionId: created.sessionId }
     },
     list: async input => {
-      const listed = await controller.list({})
+      const listed = await controller().list({})
       return listed.items.flatMap((item): AdminSession[] => {
         if (item.projections?.values?.agentPreset !== input.preset) return []
         return [{ sessionId: item.sessionId, title: '技能管理员', updatedAt: item.updatedAt }]
@@ -227,18 +242,13 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       }
       const api = createSkillApi({ db, ledgerPath, skillsDir, builtinDir })
       const sessionPort = adminSessionPort(ctx)
-      const admin = sessionPort === undefined ? undefined : new SkillAdminApi({
+      const admin = new SkillAdminApi({
         db, ledgerPath, skillsDir, builtinDir,
         ...(config.skillAdminAuditDir === undefined ? {} : { auditDir: config.skillAdminAuditDir }),
         sessions: sessionPort,
       })
-      const requireAdmin = (): SkillAdminApi => {
-        if (admin === undefined) {
-          throw new SkillIpcError('SKILL_ADMIN_UNAVAILABLE', 503, '当前 Host 没有 sessionController，技能管理员不可用')
-        }
-        return admin
-      }
-      if (admin !== undefined) ctx.provide?.('skillAdmin', admin)
+      const requireAdmin = (): SkillAdminApi => admin
+      ctx.provide?.('skillAdmin', admin)
       const reply = (res: ServerResponse, status: number, body: unknown): void => {
         res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify(body))
@@ -331,20 +341,29 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         ...(body.confirm === undefined ? {} : { confirm: body.confirm }),
       }))
       route('/cadre/skills/admin/session', async body => {
-        const cwd = typeof body.cwd === 'string' && body.cwd !== ''
-          ? body.cwd : join(homedir(), '.dsh', 'cadre-skill-admin', 'workspace')
-        mkdirSync(cwd, { recursive: true })
-        const created = await requireAdmin().createSession({
-          projectId: required(body, 'projectId'),
-          operatorSessionId: required(body, 'operatorSessionId'),
-          cwd,
-        })
-        requireAdmin().bindSession({
-          sessionId: created.sessionId,
-          projectId: required(body, 'projectId'),
-          operatorSessionId: required(body, 'operatorSessionId'),
-        })
-        return created
+        try {
+          const cwd = typeof body.cwd === 'string' && body.cwd !== ''
+            ? body.cwd : join(homedir(), '.dsh', 'cadre-skill-admin', 'workspace')
+          mkdirSync(cwd, { recursive: true })
+          const created = await requireAdmin().createSession({
+            projectId: required(body, 'projectId'),
+            operatorSessionId: required(body, 'operatorSessionId'),
+            cwd,
+          })
+          requireAdmin().bindSession({
+            sessionId: created.sessionId,
+            projectId: required(body, 'projectId'),
+            operatorSessionId: required(body, 'operatorSessionId'),
+          })
+          return created
+        } catch (error) {
+          if (error instanceof SkillIpcError) throw error
+          const message = error instanceof Error ? error.message : String(error)
+          console.error(`host-session-skills: admin session creation failed: ${message}`)
+          const code = /agent preset|agent-preset|preset/i.test(message)
+            ? 'SKILL_ADMIN_PRESET_MISSING' : 'SKILL_ADMIN_SESSION_FAILED'
+          throw new SkillIpcError(code, 500, `技能管理员会话创建失败：${message}`)
+        }
       })
       route('/cadre/skills/admin/sessions', body => requireAdmin().listSessions({
         projectId: required(body, 'projectId'),

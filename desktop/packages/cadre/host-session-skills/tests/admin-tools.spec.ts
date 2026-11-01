@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/admin-plugin.ts'
+import { adminSessionPort } from '../src/index.ts'
 import { SkillAdminApi, type AdminSessionPort } from '../src/admin.ts'
 
 const roots: string[] = []
@@ -96,5 +97,15 @@ describe('skill admin model tools', () => {
     const unsupported = await find('skill_plan').execute({ url: 'https://example.com/README.md' }, run)
     expect(unsupported).toMatchObject({ kind: 'unsupported' })
     db.close()
+  })
+
+  it('resolves sessionController lazily so plugin load order does not disable admin sessions', async () => {
+    let service: { create: (input: { cwd: string }) => Promise<{ sessionId: string }>; list: () => Promise<{ items: [] }> } | undefined
+    const port = adminSessionPort({ get: () => service } as never)
+    await expect(port.create({ preset: 'cadre-skill-admin', cwd: '.', title: 'x' }))
+      .rejects.toMatchObject({ code: 'SKILL_ADMIN_UNAVAILABLE' })
+    service = { create: async () => ({ sessionId: 'session-late' }), list: async () => ({ items: [] }) }
+    await expect(port.create({ preset: 'cadre-skill-admin', cwd: '.', title: 'x' }))
+      .resolves.toEqual({ sessionId: 'session-late' })
   })
 })
