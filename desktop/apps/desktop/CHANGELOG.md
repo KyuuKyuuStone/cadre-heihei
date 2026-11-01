@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0
+
+- **会话级技能包**：`~/.dsh/cadre-skills/<pack>/manifest.json + SKILL.md`；创建员工/设置时可选择技能包，只对选中会话注册，默认不加载；角色不匹配拒绝；改选/内容变化 dispose 旧注册；`members.skills_json` additive（schema v3，默认 `[]`）
+- **技能 IPC**：`/cadre/skills/{catalog,get,set,preview}`，supervisor-only、项目/成员/角色校验、数组去重，只更新 `skills_json`
+- **工具结果 4k 落盘**：Cadre `spill-policy.maxInlineTokens` 12.5k → 4000，超出保留头尾并写 spill 文件路径，tool call/result 配对不变
+- **step 级压缩**：新增 `stepPressureCheck`（默认 **false**）、阈值/最小 tool 间隔；开启后按 step 检查压力，未答 tool call 跳过，失败不阻断
+- **响应式**：台账与邮件设置弹窗适配窄窗口/侧栏宽度
+- 包含 1.1.0 邮件通知（会话级 SendGrid、主管设置页/测试发送、失败不阻断）及 1.0.0 全部修复
+
+### 已知限制
+
+- `stepPressureCheck` 默认关闭；峰值未做真实长会话 A/B
+- 技能包未内置，需用户/第三方按 manifest 放入目录
+- 安装包未签名（SmartScreen 提示）
+- 429/外部依赖仅做有界重试并告知
+
 ## 1.1.0
 
 - **会话级邮件通知**：每个 Cadre 项目独立配置启停、发件人、收件人、`apiKeyEnv`、dry-run、最小发送间隔；配置存 `~/.dsh/cadre-email/<projectId>.json`，密钥只引用环境变量名，不写入仓库/日志
