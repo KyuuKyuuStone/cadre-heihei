@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0
+## 1.1.1
 
 - **真实库 schema 2→3 修复**：打包始终从当前源码重建 CJS，启动 `initCadreStore` 幂等补齐 `members.skills_json`；旧 schema 下技能 catalog/get 降级为空、set 返回可读 `SKILL_SCHEMA_OUTDATED`
 - **技能库与员工选择分层**：`~/.dsh/cadre-skills/<pack>/manifest.json + SKILL.md`；技能入口统一为「技能」；主管在员工菜单/建员工时选择技能，只对选中会话注册，默认不加载；角色不匹配拒绝；改选/内容变化 dispose 旧注册；`members.skills_json` additive（schema v3，默认 `[]`）
@@ -9,7 +9,9 @@
 - **工具结果 4k 落盘**：Cadre `spill-policy.maxInlineTokens` 12.5k → 4000，超出保留头尾并写 spill 文件路径，tool call/result 配对不变
 - **Token 治理**：compaction 保留尾部 50k（阈值 150k 不变）；step 级压缩 `stepPressureCheck` 默认 **false**
 - **响应式**：台账与邮件设置弹窗适配窄窗口/侧栏宽度
-- 包含 1.1.0 邮件通知（会话级 SendGrid、主管设置页/测试发送、失败不阻断）及 1.0.0 全部修复
+- **邮件通知**：会话级 SendGrid、主管设置页/测试发送、失败不阻断
+- **台账分页**：台账每页 20 行、页码窗口/上下页，筛选与搜索重置第 1 页
+- 包含 1.0.0 全部修复
 
 ### 已知限制
 
