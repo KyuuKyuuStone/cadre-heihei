@@ -19,5 +19,8 @@
     "lib/types/**/*.d.ts",
     "!lib/**/*.map"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/dsh-cadre-email-notify": "workspace:*"
+  }
 }

@@ -2505,6 +2505,9 @@ importers:
 
   packages/bundle/cadre-app:
     dependencies:
+      '@deepseek-ai/dsh-cadre-email-notify':
+        specifier: workspace:*
+        version: link:../../cadre/email-notify
       '@deepseek-ai/dsh-host-collab':
         specifier: workspace:*
         version: link:../../cadre/host-collab
@@ -3177,7 +3180,11 @@ importers:
 
   packages/cadre/host-collab: {}
 
-  packages/cadre/host-governance: {}
+  packages/cadre/host-governance:
+    dependencies:
+      '@deepseek-ai/dsh-cadre-email-notify':
+        specifier: workspace:*
+        version: link:../email-notify
 
   packages/cadre/host-supervisor-skill: {}
 

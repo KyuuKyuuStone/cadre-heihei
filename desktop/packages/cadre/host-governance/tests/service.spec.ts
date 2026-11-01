@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import type { EmailEvent } from '@deepseek-ai/dsh-cadre-email-notify'
 import { StallService, type StallPorts } from '../src/service.ts'
 import type {
   GoalState,
@@ -22,6 +23,8 @@ interface Harness {
   readonly goalRequests: { objective: string; maxGoalRounds: number }[]
   readonly escalations: string[]
   readonly actions: string[]
+  readonly emails: EmailEvent[]
+  emailFailure: boolean
   setNow(value: number): void
   setActivity(value: SessionActivity): void
   tasks: WatchTask[]
@@ -55,6 +58,8 @@ function harness(options: {
   const goalRequests: { objective: string; maxGoalRounds: number }[] = []
   const escalations: string[] = []
   const actions: string[] = []
+  const emails: EmailEvent[] = []
+  let emailFailure = false
   const members: WatchMember[] = options.members ?? [
     { sessionId: SUP, role: 'supervisor', state: 'available', displayName: '主管' },
     { sessionId: WORKER, role: 'worker', state: 'available', displayName: '小明' },
@@ -80,6 +85,11 @@ function harness(options: {
       return { ok: true }
     },
     escalate: async () => { escalations.push('escalate'); return { ok: true } },
+    email: async (event) => {
+      emails.push(event)
+      if (emailFailure) throw new Error('smtp down')
+      return { ok: true, status: 'sent' }
+    },
     goal: () => goal,
     createGoal: (_projectId, objective, maxGoalRounds) => {
       if (!supervisorPresent) return false
@@ -96,7 +106,7 @@ function harness(options: {
   }
   return {
     service: new StallService(ports, { scanIntervalMs: 1, ...options.config }),
-    prompts, goals, goalRequests, escalations, actions,
+    prompts, goals, goalRequests, escalations, actions, emails,
     setNow: value => { now = value },
     setActivity: value => { activity = value },
     get tasks() { return tasks },
@@ -104,6 +114,8 @@ function harness(options: {
     get goal() { return goal },
     get supervisorPresent() { return supervisorPresent },
     set supervisorPresent(value: boolean) { supervisorPresent = value },
+    get emailFailure() { return emailFailure },
+    set emailFailure(value: boolean) { emailFailure = value },
   }
 }
 
@@ -307,6 +319,29 @@ describe('stall detection', () => {
     expect(h.service.views()[0]?.lastError).toMatchObject({
       code: 'MODEL_CONFIG', at: new Date(base - MIN).toISOString(),
     })
+  })
+
+  it('emails a delivered/verified summary once when the task transitions', async () => {
+    const h = harness({ tasks: [task({ status: 'in_progress' })] })
+    await h.service.scan()
+    h.tasks = [task({ status: 'delivered' })]
+    await h.service.scan()
+    expect(h.emails).toHaveLength(1)
+    expect(h.emails[0]).toMatchObject({
+      kind: 'task-summary',
+      projectId: PROJECT,
+      tasks: [{ taskId: 't1', status: 'delivered', assigneeName: '小明' }],
+    })
+    await h.service.scan()
+    expect(h.emails).toHaveLength(1)
+  })
+
+  it('emails an escalation after the supervisor escalates and never blocks on email failure', async () => {
+    const h = await stalled()
+    h.emailFailure = true
+    const result = await h.service.act(request(h, { action: 'escalate' }))
+    expect(result).toMatchObject({ ok: true, action: 'escalate' })
+    expect(h.emails.at(-1)).toMatchObject({ kind: 'escalation', projectId: PROJECT, taskId: 't1' })
   })
 
   it('recovers once a long generation is followed by a normal step', async () => {

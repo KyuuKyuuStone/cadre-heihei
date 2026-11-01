@@ -63,6 +63,25 @@ export class CadreEmailNotifier {
     }, `test:${projectId}:${String(this.#now())}`, true)
   }
 
+  /** Render the test message without touching the network, even when dryRun is off. */
+  async dryRun(projectId: string): Promise<EmailResult> {
+    let config: EmailConfig
+    try {
+      config = loadEmailConfig(this.#options.configDir, projectId)
+    } catch (error) {
+      return { ok: false, code: 'EMAIL_CONFIG_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) }
+    }
+    if (!config.enabled) return { ok: true, status: 'disabled' }
+    return {
+      ok: true,
+      status: 'dry-run',
+      message: renderEmail({
+        kind: 'escalation', projectId, taskId: 'test', title: '邮件通知测试',
+        reason: '这是一封来自 Cadre Heihei 的测试邮件。', episodeId: 'test',
+      }, config),
+    }
+  }
+
   /**
    * Trigger one notification. Never throws and never blocks the caller's flow.
    * @param event - delivered/verified summary or user-decision escalation.

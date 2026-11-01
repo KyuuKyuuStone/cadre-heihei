@@ -4,6 +4,7 @@
  * Ports own IO so the state machine, goal lifecycle, and permission checks are
  * testable without Cordis, Electron, or a real ledger.
  */
+import type { EmailEvent, EmailResult, SummaryTask } from '@deepseek-ai/dsh-cadre-email-notify'
 import {
   DEFAULT_STALL_CONFIG,
   STALLABLE_STATUSES,
@@ -43,6 +44,8 @@ export interface StallPorts {
     reason: string
   }): Promise<PortResult>
   escalate(input: { projectId: string; taskId: string; actorSessionId: string }): Promise<PortResult>
+  /** Optional email hook; failures are logged and never affect the watchdog. */
+  email?(event: EmailEvent): Promise<EmailResult>
   goal(projectId: string): GoalState | undefined
   createGoal(projectId: string, objective: string, maxGoalRounds: number): boolean
   resumeGoal(projectId: string): void
@@ -79,6 +82,7 @@ interface Episode {
   evidenceEventSeq: number | undefined
   inferred: boolean
   lastError: TaskLastError | undefined
+  lastStatus: string
 }
 
 /** Owner supervisor for a project's stall notifications and actions. */
@@ -235,6 +239,7 @@ export class StallService {
       evidenceEventSeq: undefined,
       inferred: false,
       lastError: undefined,
+      lastStatus: task.status,
     }
     this.#episodes.set(key, created)
     return created
@@ -253,6 +258,18 @@ export class StallService {
     }
   }
 
+  private async sendEmail(event: EmailEvent): Promise<void> {
+    if (this.#ports.email === undefined) return
+    try {
+      const result = await this.#ports.email(event)
+      if (!result.ok) {
+        this.#ports.log(`email notify failed project=${event.projectId} kind=${event.kind} code=${result.code} reason=${result.message}`)
+      }
+    } catch (error) {
+      this.#ports.log(`email notify failed project=${event.projectId} kind=${event.kind} reason=${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   /**
    * One watchdog pass. Never throws: every per-task failure is logged and the
    * view is marked stale instead of being silently reported as normal.
@@ -264,6 +281,7 @@ export class StallService {
     for (const projectId of this.#ports.listProjects()) {
       const members = this.#ports.members(projectId)
       const tasks = this.#ports.listTasks(projectId)
+      const summaries: SummaryTask[] = []
       for (const task of tasks) {
         const key = this.key(projectId, task.taskId)
         seen.add(key)
@@ -296,6 +314,15 @@ export class StallService {
         episode.inferred = activity.inferred === true
         if (activity.lastError !== undefined) episode.lastError = activity.lastError
         episode.heartbeatAt = activity.stepKind === undefined ? undefined : now
+        if ((task.status === 'delivered' || task.status === 'verified') && episode.lastStatus !== task.status) {
+          summaries.push({
+            taskId: task.taskId,
+            title: task.title,
+            assigneeName: members.find(member => member.sessionId === task.assigneeSessionId)?.displayName ?? task.assigneeSessionId,
+            status: task.status,
+          })
+        }
+        episode.lastStatus = task.status
 
         if (!stallable) {
           if (episode.state !== 'normal') {
@@ -421,10 +448,21 @@ export class StallService {
           })
           if (escalated.ok) {
             episode.escalated = true
+            await this.sendEmail({
+              kind: 'escalation',
+              projectId,
+              taskId: task.taskId,
+              title: task.title,
+              reason: episode.lastError?.message ?? '停摆较久且催办无回应',
+              episodeId: episode.episodeId,
+            })
           } else {
             this.#ports.log(`stall escalate failed project=${projectId} task=${task.taskId} code=${escalated.code}`)
           }
         }
+      }
+      if (summaries.length > 0) {
+        await this.sendEmail({ kind: 'task-summary', projectId, tasks: summaries })
       }
       await this.reconcileGoal(projectId, tasks, now)
     }
@@ -584,6 +622,14 @@ export class StallService {
     })
     if (!outcome.ok) return outcome
     episode.escalated = true
+    await this.sendEmail({
+      kind: 'escalation',
+      projectId: request.projectId,
+      taskId: request.taskId,
+      title: episode.task.title,
+      reason: episode.lastError?.message ?? '停摆较久且催办无回应',
+      episodeId: episode.episodeId,
+    })
     return { ok: true, action: 'escalate', version: currentVersion, replayed: false }
   }
 }

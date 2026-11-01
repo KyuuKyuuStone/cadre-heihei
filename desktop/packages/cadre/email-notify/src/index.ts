@@ -6,4 +6,6 @@
 export { parseEmailConfig, loadEmailConfig } from './config.ts'
 export { buildSendGridBody, redactSecret, sendWithSendGrid } from './sendgrid.ts'
 export { CadreEmailNotifier, renderEmail } from './notifier.ts'
+export { dryRunEmail, getEmailConfigView, setEmailConfig, testEmail } from './ipc.ts'
+export type { EmailConfigView } from './ipc.ts'
 export type * from './types.ts'

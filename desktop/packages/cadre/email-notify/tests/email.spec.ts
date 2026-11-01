@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { loadEmailConfig, parseEmailConfig } from '../src/config.ts'
 import { CadreEmailNotifier, renderEmail } from '../src/notifier.ts'
+import { dryRunEmail, getEmailConfigView, setEmailConfig, testEmail } from '../src/ipc.ts'
 import { buildSendGridBody, redactSecret, sendWithSendGrid } from '../src/sendgrid.ts'
 
 const roots: string[] = []
@@ -136,5 +137,27 @@ describe('dedupe, rate limit and failures', () => {
     expect(body).toEqual({ personalizations: [{ to: [{ email: 'c@d.com' }] }], from: { email: 'a@b.com' }, subject: 's', content: [{ type: 'text/plain', value: 't' }] })
     const result = await sendWithSendGrid({ apiKey: 'bad', message: { to: ['c@d.com'], from: { email: 'a@b.com' }, subject: 's', text: 't' }, fetch: vi.fn(async () => response(401)) as never })
     expect(result).toMatchObject({ ok: false, code: 'EMAIL_AUTH_FAILED' })
+  })
+
+  it('IPC get/set never returns the secret and hasKey follows the environment', async () => {
+    const dir = workspace()
+    const config = {
+      enabled: true, from: { email: 'a@b.com' }, recipients: ['c@d.com'],
+      apiKeyEnv: 'SENDGRID_TEST_KEY', minIntervalMs: 60_000,
+    }
+    const view = setEmailConfig(dir, 'p1', config, { SENDGRID_TEST_KEY: 'SG.secret' })
+    expect(view.hasKey).toBe(true)
+    expect(JSON.stringify(view)).not.toContain('SG.secret')
+    expect(getEmailConfigView(dir, 'p1', {})).toMatchObject({ enabled: true, hasKey: false })
+    expect(readFileSync(join(dir, 'p1.json'), 'utf8')).not.toContain('SG.secret')
+    expect(() => setEmailConfig(dir, 'p1', { ...config, apiKey: 'SG.secret' })).toThrow(/EMAIL_SECRET_IN_CONFIG/)
+  })
+
+  it('IPC dry-run/test-send delegate without exposing the key', async () => {
+    const dir = workspace()
+    writeConfig(dir, { dryRun: true })
+    const notifier = new CadreEmailNotifier({ configDir: dir, env: {}, fetch: vi.fn() as never })
+    expect(await dryRunEmail(notifier, 'p1')).toMatchObject({ ok: true, status: 'dry-run' })
+    expect(await testEmail(notifier, 'p1')).toMatchObject({ ok: true, status: 'dry-run' })
   })
 })

@@ -7,10 +7,19 @@
  * @module @deepseek-ai/dsh-host-governance
  */
 import { appendFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
+import {
+  CadreEmailNotifier,
+  dryRunEmail,
+  getEmailConfigView,
+  setEmailConfig,
+  testEmail,
+} from '@deepseek-ai/dsh-cadre-email-notify'
 import { activityFrom, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
@@ -30,6 +39,8 @@ export interface Config {
   readonly nudgeCooldownMs?: number
   readonly escalateAfterMs?: number
   readonly maxGoalRounds?: number
+  /** Directory for per-project email JSON configs. */
+  readonly emailConfigDir?: string
 }
 
 interface SessionController {
@@ -213,9 +224,14 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     return ctx.agents.get(member.sessionId)
   }
   const goalRef = (goal: GoalViewLike): { id: string; revision: number } => ({ id: goal.id, revision: goal.revision })
+  const emailConfigDir = config.emailConfigDir
+    ?? process.env.CADRE_EMAIL_CONFIG_DIR
+    ?? join(homedir(), '.dsh', 'cadre-email')
+  const emailNotifier = new CadreEmailNotifier({ configDir: emailConfigDir })
 
   const ports: StallPorts = {
     now: () => Date.now(),
+    email: event => emailNotifier.notify(event),
     listProjects: () => ledger.projects(),
     listTasks: projectId => ledger.tasks(projectId),
     lastTaskEventAt: taskId => ledger.lastTaskEventAt(taskId),
@@ -529,6 +545,46 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           }
         },
       }), 'host-governance: /cadre/stall/snapshot')
+
+      const emailRoute = (
+        path: string,
+        method: 'getConfig' | 'setConfig' | 'testSend' | 'dryRun',
+        operation: (projectId: string, body: Record<string, unknown>) => Promise<unknown> | unknown,
+      ): void => {
+        web.effect(() => web.webServer.register({
+          kind: 'exact',
+          path,
+          handler: async (req, res) => {
+            if (req.method !== 'POST') return reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 POST' })
+            const admission = web.connection.admit(req)
+            if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
+              return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
+            }
+            try {
+              const body = await readBody(req) as Record<string, unknown>
+              if (typeof body.projectId !== 'string' || typeof body.actorSessionId !== 'string') {
+                return reply(res, 400, { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId/actorSessionId 必填' })
+              }
+              if (projectOf(body.actorSessionId) !== body.projectId) {
+                return reply(res, 403, { ok: false, code: 'PERMISSION_DENIED', message: '只有本项目在册 supervisor 可以配置邮件通知' })
+              }
+              reply(res, 200, { ok: true, method, result: await operation(body.projectId, body) })
+            } catch (error) {
+              reply(res, 400, { ok: false, code: 'EMAIL_CONFIG_INVALID', message: error instanceof Error ? error.message : String(error) })
+            }
+          },
+        }), `host-governance: ${path}`)
+      }
+
+      emailRoute('/cadre/email/get', 'getConfig', projectId => getEmailConfigView(emailConfigDir, projectId))
+      emailRoute('/cadre/email/set', 'setConfig', (projectId, body) => {
+        if (typeof body.config !== 'object' || body.config === null) {
+          throw new Error('EMAIL_CONFIG_INVALID: config must be an object')
+        }
+        return setEmailConfig(emailConfigDir, projectId, body.config)
+      })
+      emailRoute('/cadre/email/test', 'testSend', projectId => testEmail(emailNotifier, projectId))
+      emailRoute('/cadre/email/dry-run', 'dryRun', projectId => dryRunEmail(emailNotifier, projectId))
     })
   }
 }
