@@ -8,6 +8,8 @@ export interface PresetDefinition {
   readonly description?: string
   /** Who ships this preset; absent means DeepSeek Harness. */
   readonly source?: 'deepseek' | 'cadre'
+  /** Keep the preset out of user-facing pickers while internal callers may still name it. */
+  readonly hidden?: boolean
   readonly order?: number
   readonly plugins: readonly (Omit<EntryOptions, 'id' | 'disabled'> & { id?: string; disabled?: EntryOptions['disabled'] | JsExpr })[]
 }

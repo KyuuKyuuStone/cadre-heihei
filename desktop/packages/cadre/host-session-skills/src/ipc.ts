@@ -5,7 +5,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { loadSkillCatalog, localizedDescription, type SkillOrigin, type SkillPack } from './catalog.ts'
 
 /** IPC failure with an HTTP status and stable code. */
@@ -46,13 +46,15 @@ export interface SkillApi {
     author?: string; homepage?: string
   }
   add(input: AddSkillInput): CatalogEntry
+  inspectUrl(input: {
+    projectId: string; actorSessionId: string; url: unknown
+  }): Promise<RemotePack>
   remove(input: { projectId: string; actorSessionId: string; packId: string; confirm: unknown }): { removed: true }
   installUrl(input: {
     projectId: string; actorSessionId: string; url: unknown; confirm?: unknown
   }): Promise<CatalogEntry>
 }
 
-/** Manifest + body supplied by the manual-add dialog. */
 export interface AddSkillInput {
   readonly projectId: string
   readonly actorSessionId: string
@@ -74,7 +76,7 @@ export interface AddSkillInput {
 const KEBAB_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const ROLES = new Set(['supervisor', 'worker'])
 
-interface ValidPack {
+export interface ValidPack {
   readonly id: string
   readonly name: string
   readonly description: string
@@ -87,6 +89,13 @@ interface ValidPack {
   readonly license: string
   readonly descriptionI18n?: { readonly zh?: string; readonly en?: string }
   readonly content: string
+}
+
+/** Validated remote pack returned by URL inspection without writing. */
+export interface RemotePack {
+  readonly pack: ValidPack
+  readonly contentHash: string
+  readonly manifestHash: string
 }
 
 function requiredString(value: unknown, field: string): string {
@@ -356,7 +365,7 @@ export function createSkillApi(options: {
       }
       return { removed: true }
     },
-    async installUrl(input) {
+    async inspectUrl(input) {
       requireSupervisor(db, input.projectId, input.actorSessionId)
       const targets = rawTargets(input.url)
       let total = 0
@@ -370,7 +379,7 @@ export function createSkillApi(options: {
       } catch {
         throw new SkillIpcError('SKILL_INVALID', 400, '远程 manifest.json 不是对象 JSON')
       }
-      return this.add({
+      const pack = validatePack({
         projectId: input.projectId,
         actorSessionId: input.actorSessionId,
         id: manifest.id,
@@ -385,6 +394,31 @@ export function createSkillApi(options: {
         source: manifest.source,
         license: manifest.license,
         content,
+      })
+      return {
+        pack,
+        contentHash: createHash('sha256').update(content).digest('hex'),
+        manifestHash: createHash('sha256').update(manifestText).digest('hex'),
+      }
+    },
+    async installUrl(input) {
+      const inspected = await this.inspectUrl(input)
+      const pack = inspected.pack
+      return this.add({
+        projectId: input.projectId,
+        actorSessionId: input.actorSessionId,
+        id: pack.id,
+        name: pack.name,
+        description: pack.description,
+        descriptionI18n: pack.descriptionI18n,
+        author: pack.author,
+        homepage: pack.homepage,
+        roles: pack.roles,
+        tokenEstimate: pack.tokenEstimate,
+        tools: pack.tools,
+        source: pack.source,
+        license: pack.license,
+        content: pack.content,
         overwrite: input.confirm === true,
       })
     },

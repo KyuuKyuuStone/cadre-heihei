@@ -4,6 +4,7 @@
  * previous registration. Unselected sessions register nothing.
  * @module @deepseek-ai/dsh-host-session-skills
  */
+import { mkdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { loadSkillCatalog, type SkillPack } from './catalog.ts'
 import { createSkillApi, SkillIpcError } from './ipc.ts'
+import { SkillAdminApi, type AdminSession, type AdminSessionPort } from './admin.ts'
 
 export interface Config {
   /** Disable the plugin while keeping the row mounted. */
@@ -21,6 +23,8 @@ export interface Config {
   readonly builtinDir?: string
   /** Ledger path; defaults to `CADRE_LEDGER_PATH`. */
   readonly ledgerPath?: string
+  /** Audit directory; defaults to `~/.dsh/cadre-skill-admin`. */
+  readonly skillAdminAuditDir?: string
 }
 
 interface AgentLike {
@@ -40,6 +44,7 @@ interface HostContext {
   on(event: string, handler: (payload: { readonly agent?: AgentLike }, next: () => Promise<unknown>) => unknown): () => void
   effect(setup: () => () => void): void
   inject?(dependencies: readonly string[], callback: (scope: unknown) => void): void
+  get?(name: string): unknown
 }
 interface Membership {
   readonly role: string
@@ -59,6 +64,39 @@ function membership(db: DatabaseSync, sessionId: string): Membership | undefined
     // A corrupt selection is treated as empty; the plugin never blocks the step.
   }
   return { role: String(row.role), state: String(row.state), skills }
+}
+
+/**
+ * Bind the Host session controller to the narrow port the admin API needs.
+ * Sessions remain ordinary; this adapter only filters by the admin preset.
+ * @param ctx - Host context that may expose `sessionController`.
+ * @returns the port, or undefined when no controller is mounted.
+ */
+function adminSessionPort(ctx: HostContext): AdminSessionPort | undefined {
+  const controller = ctx.get?.('sessionController') as {
+    create(request: { readonly cwd: string; readonly agentPreset?: string }): Promise<{ readonly sessionId: string }>
+    list(request: Record<string, never>): Promise<{
+      readonly items: readonly {
+        readonly sessionId: string
+        readonly updatedAt: number
+        readonly projections?: { readonly values?: Readonly<Record<string, unknown>> }
+      }[]
+    }>
+  } | undefined
+  if (controller === undefined) return undefined
+  return {
+    create: async input => {
+      const created = await controller.create({ cwd: input.cwd, agentPreset: input.preset })
+      return { sessionId: created.sessionId }
+    },
+    list: async input => {
+      const listed = await controller.list({})
+      return listed.items.flatMap((item): AdminSession[] => {
+        if (item.projections?.values?.agentPreset !== input.preset) return []
+        return [{ sessionId: item.sessionId, title: '技能管理员', updatedAt: item.updatedAt }]
+      })
+    },
+  }
 }
 
 /**
@@ -187,6 +225,18 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         effect(setup: () => () => void, label: string): () => void
       }
       const api = createSkillApi({ db, ledgerPath, skillsDir, builtinDir })
+      const sessionPort = adminSessionPort(ctx)
+      const admin = sessionPort === undefined ? undefined : new SkillAdminApi({
+        db, ledgerPath, skillsDir, builtinDir,
+        ...(config.skillAdminAuditDir === undefined ? {} : { auditDir: config.skillAdminAuditDir }),
+        sessions: sessionPort,
+      })
+      const requireAdmin = (): SkillAdminApi => {
+        if (admin === undefined) {
+          throw new SkillIpcError('SKILL_ADMIN_UNAVAILABLE', 503, '当前 Host 没有 sessionController，技能管理员不可用')
+        }
+        return admin
+      }
       const reply = (res: ServerResponse, status: number, body: unknown): void => {
         res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify(body))
@@ -277,6 +327,48 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         actorSessionId: required(body, 'actorSessionId'),
         url: body.url,
         ...(body.confirm === undefined ? {} : { confirm: body.confirm }),
+      }))
+      route('/cadre/skills/admin/session', async body => {
+        const cwd = typeof body.cwd === 'string' && body.cwd !== ''
+          ? body.cwd : join(homedir(), '.dsh', 'cadre-skill-admin', 'workspace')
+        mkdirSync(cwd, { recursive: true })
+        return requireAdmin().createSession({
+          projectId: required(body, 'projectId'),
+          operatorSessionId: required(body, 'operatorSessionId'),
+          cwd,
+        })
+      })
+      route('/cadre/skills/admin/sessions', body => requireAdmin().listSessions({
+        projectId: required(body, 'projectId'),
+        operatorSessionId: required(body, 'operatorSessionId'),
+      }))
+      route('/cadre/skills/admin/delete-session', body => requireAdmin().deleteSession({
+        projectId: required(body, 'projectId'),
+        operatorSessionId: required(body, 'operatorSessionId'),
+        sessionId: required(body, 'sessionId'),
+      }))
+      route('/cadre/skills/admin/plan', async body => {
+        const plan = await requireAdmin().plan({
+          projectId: required(body, 'projectId'),
+          operatorSessionId: required(body, 'operatorSessionId'),
+          ...(body.kind === 'install' || body.kind === 'update' || body.kind === 'remove' ? { kind: body.kind } : {}),
+          ...(body.url === undefined ? {} : { url: body.url }),
+          ...(body.packId === undefined ? {} : { packId: body.packId }),
+        })
+        const token = requireAdmin().tokenFor(plan.planId)
+        return { ...plan, ...(token === undefined ? {} : { confirmToken: token }) }
+      })
+      route('/cadre/skills/admin/apply', body => requireAdmin().apply({
+        projectId: required(body, 'projectId'),
+        operatorSessionId: required(body, 'operatorSessionId'),
+        planId: required(body, 'planId'),
+        token: required(body, 'token'),
+        ...(body.action === 'cancel' ? { action: 'cancel' as const } : {}),
+      }))
+      route('/cadre/skills/admin/audit', body => requireAdmin().auditFor({
+        projectId: required(body, 'projectId'),
+        operatorSessionId: required(body, 'operatorSessionId'),
+        ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
       }))
     })
   }

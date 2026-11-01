@@ -59,6 +59,29 @@ POST JSON, supervisor-only and project-scoped:
   `SKILL.md` from a public GitHub raw/tree URL over HTTPS (size/timeout bounded;
   no SkillHub/ClawHub API).
 
+## Skill administrator
+
+`cadre-skill-admin` is a hidden ordinary preset for the skills-page conversation.
+It never writes roster rows or team tools. Its backend routes are:
+
+- `/cadre/skills/admin/session` — `{projectId, operatorSessionId, cwd?}` creates
+  or resumes an ordinary session through the Host `sessionController`;
+- `/cadre/skills/admin/sessions` — lists sessions whose projection preset is
+  `cadre-skill-admin`;
+- `/cadre/skills/admin/delete-session` — removes one listed session when the Host
+  supports deletion;
+- `/cadre/skills/admin/plan` — `{url}` or `{kind:'remove'|'update', packId}`;
+  returns `planId`, hashes, target, actions and risk flags, plus a one-time
+  `confirmToken`; it never writes;
+- `/cadre/skills/admin/apply` — `{planId, token}`; revalidates the operator as a
+  supervisor and applies install/update/remove with backup, rollback and audit;
+- `/cadre/skills/admin/audit` — append-only JSONL records without page bodies or
+  secrets.
+
+Unknown/unsupported URLs return a plan with `kind: 'unsupported'` and a readable
+reason. The admin operator is authorized from the roster on every call; the
+conversation itself carries no role prompt.
+
 ## Known Limitations and Deferred Work
 
 - No settings UI yet; the IPC above is the data surface.

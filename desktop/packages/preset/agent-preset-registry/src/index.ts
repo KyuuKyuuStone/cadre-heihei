@@ -182,6 +182,7 @@ export class AgentPresetRegistry extends TypertRemoteService {
         ...(record.config.name === undefined ? {} : { name: record.config.name }),
         ...(record.config.description === undefined ? {} : { description: record.config.description }),
         ...(record.config.source === undefined ? {} : { source: record.config.source }),
+        ...(record.config.hidden === undefined ? {} : { hidden: record.config.hidden }),
         ...(record.config.order === undefined ? {} : { order: record.config.order }),
         ...(broken === undefined ? {} : { broken }),
       }
@@ -195,7 +196,7 @@ export class AgentPresetRegistry extends TypertRemoteService {
   @Remote('list')
   async remoteExportList(): Promise<AgentPresetRoster> {
     const defaultId = this.defaultId
-    return { presets: (await this.list()).map(row => ({ ...row, isDefault: row.id === defaultId })) }
+    return { presets: (await this.list()).filter(row => row.hidden !== true).map(row => ({ ...row, isDefault: row.id === defaultId })) }
   }
 
   /** Resolve an identity without starting an Agent.

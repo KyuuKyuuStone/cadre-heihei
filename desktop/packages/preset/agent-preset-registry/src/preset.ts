@@ -7,6 +7,8 @@ export interface AgentPreset {
   readonly description?: string
   /** Who ships this preset; absent means DeepSeek Harness. */
   readonly source?: 'deepseek' | 'cadre'
+  /** Keep the preset out of user-facing pickers. */
+  readonly hidden?: boolean
   readonly order?: number
   readonly broken?: string
 }

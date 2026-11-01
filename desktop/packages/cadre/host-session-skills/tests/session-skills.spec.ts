@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/index.ts'
+import { SkillAdminApi } from '../src/admin.ts'
 import { loadSkillCatalog } from '../src/catalog.ts'
 import { createSkillApi } from '../src/ipc.ts'
 
@@ -384,5 +385,84 @@ describe('session skill packs', () => {
     }
     const catalog = loadSkillCatalog(root)
     expect([...catalog.keys()]).toEqual(['alpha-find-skills', 'beta-find-skills'])
+  })
+
+  it('creates ordinary admin sessions without roster rows and applies a confirmed plan with audit', async () => {
+    const root = workspace()
+    const packs = join(root, 'installed')
+    const db = ledger(root)
+    insert(db, 's1', 'supervisor', [])
+    insert(db, 'w1', 'worker', [])
+    db.close()
+    const reader = new DatabaseSync(join(root, 'ledger.sqlite'))
+    const sessions: Array<{ sessionId: string; title: string; updatedAt: number }> = []
+    const port = {
+      create: async (input: { title: string }) => {
+        const sessionId = `admin-${String(sessions.length + 1)}`
+        sessions.push({ sessionId, title: input.title, updatedAt: 1 })
+        return { sessionId }
+      },
+      list: async () => sessions,
+      delete: async (input: { sessionId: string }) => {
+        const index = sessions.findIndex(session => session.sessionId === input.sessionId)
+        if (index >= 0) sessions.splice(index, 1)
+      },
+    }
+    const fetch = vi.fn(async (input: URL | string) => {
+      return String(input).endsWith('manifest.json')
+        ? new Response(JSON.stringify({
+          id: 'admin-pack', name: 'Admin Pack', description: 'from admin', roles: ['worker'],
+          tokenEstimate: 1, tools: [], source: 'github:o/r', license: 'MIT',
+        }), { status: 200 })
+        : new Response('# admin body', { status: 200 })
+    })
+    const admin = new SkillAdminApi({
+      db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs,
+      sessions: port, auditDir: join(root, 'audit'), fetch: fetch as never,
+    })
+    const created = await admin.createSession({ projectId: 'p1', operatorSessionId: 's1', cwd: root })
+    expect(created.sessionId).toBe('admin-1')
+    expect(reader.prepare('SELECT COUNT(*) AS count FROM members').get()).toMatchObject({ count: 2 })
+    expect(await admin.listSessions({ projectId: 'p1', operatorSessionId: 's1' })).toHaveLength(1)
+
+    const plan = await admin.plan({
+      projectId: 'p1', operatorSessionId: 's1',
+      url: 'https://raw.githubusercontent.com/o/r/main/packs/admin/SKILL.md',
+    })
+    expect(plan).toMatchObject({ kind: 'install', packId: 'admin-pack', license: 'MIT' })
+    expect(plan.contentHash).toMatch(/^[a-f0-9]{64}$/u)
+    const token = admin.tokenFor(plan.planId)
+    expect(token).toBeTruthy()
+    expect(await admin.apply({
+      projectId: 'p1', operatorSessionId: 's1', planId: plan.planId, token: token ?? '',
+    })).toMatchObject({ status: 'applied', packId: 'admin-pack' })
+    expect(readFileSync(join(packs, 'admin-pack', 'SKILL.md'), 'utf8')).toBe('# admin body')
+
+    const removePlan = await admin.plan({ projectId: 'p1', operatorSessionId: 's1', kind: 'remove', packId: 'admin-pack' })
+    const removeToken = admin.tokenFor(removePlan.planId) ?? ''
+    expect(await admin.apply({
+      projectId: 'p1', operatorSessionId: 's1', planId: removePlan.planId, token: removeToken,
+    })).toMatchObject({ status: 'applied', packId: 'admin-pack' })
+    expect(existsSync(join(packs, 'admin-pack'))).toBe(false)
+    expect(existsSync(join(packs, `admin-pack.backup-${removePlan.planId}`))).toBe(true)
+
+    const audit = admin.auditFor({ projectId: 'p1', operatorSessionId: 's1' })
+    expect(audit.at(-1)).toMatchObject({ result: 'applied', packId: 'admin-pack' })
+    expect(JSON.stringify(audit)).not.toContain('# admin body')
+
+    await expect(admin.createSession({ projectId: 'p1', operatorSessionId: 'w1', cwd: root }))
+      .rejects.toThrow(/supervisor/)
+    await expect(admin.plan({ projectId: 'p1', operatorSessionId: 'w1', url: 'https://x.test' }))
+      .rejects.toThrow(/supervisor/)
+
+    const unsupported = await admin.plan({
+      projectId: 'p1', operatorSessionId: 's1', url: 'https://example.com/README.md',
+    })
+    expect(unsupported.kind).toBe('unsupported')
+    expect(unsupported.reason).toBeTruthy()
+
+    await admin.deleteSession({ projectId: 'p1', operatorSessionId: 's1', sessionId: created.sessionId })
+    expect(await admin.listSessions({ projectId: 'p1', operatorSessionId: 's1' })).toHaveLength(0)
+    reader.close()
   })
 })
