@@ -10,6 +10,6 @@
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
-  "files": ["lib/**", "!lib/**/*.map"],
+  "files": ["lib/**", "!lib/**/*.map", "builtin-skills"],
   "license": "MIT"
 }

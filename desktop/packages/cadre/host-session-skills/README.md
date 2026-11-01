@@ -7,12 +7,18 @@ registrations before registering the new set.
 
 ## Catalog
 
-Each immediate child of `CADRE_SKILLS_DIR` (default `~/.dsh/cadre-skills`) is a
-pack with:
+Each immediate child of `CADRE_SKILLS_DIR` (default `~/.dsh/cadre-skills`) is an
+`installed` pack; `builtin-skills/` in this package is merged as read-only
+`builtin` packs. Each pack has:
 
-- `manifest.json`: `id`, `name`, `description`, `roles` (`supervisor`/`worker`),
-  `tokenEstimate`, `tools`, `source`, `license`;
+- `manifest.json`: `id`, `name`, `description`, optional
+  `descriptionI18n {zh,en}`, `roles` (`supervisor`/`worker`), `tokenEstimate`,
+  `tools`, `source`, `license`;
 - `SKILL.md`: the model-visible body.
+
+Catalog entries carry `origin` (`builtin`/`installed`); builtin packs cannot be
+overwritten or removed. A request `locale` starting with `zh` selects
+`descriptionI18n.zh`, otherwise `.en`, falling back to `description`.
 
 Role mismatches are rejected per pack. The plugin reloads the catalog on every
 pre-step, so edited pack content is hot-reloaded (the old registration is
@@ -37,7 +43,10 @@ POST JSON, supervisor-only and project-scoped:
   body and `tokenEstimate`; read-only;
 - `/cadre/skills/add` — manifest fields + `content`; kebab-case id, valid roles,
   atomic directory write, `overwrite:true` only replaces;
-- `/cadre/skills/remove` — `{packId, confirm:true}` deletes the pack directory.
+- `/cadre/skills/remove` — `{packId, confirm:true}` deletes the pack directory;
+- `/cadre/skills/install-url` — `{url, confirm?}` fetches `manifest.json` and
+  `SKILL.md` from a public GitHub raw/tree URL over HTTPS (size/timeout bounded;
+  no SkillHub/ClawHub API).
 
 ## Known Limitations and Deferred Work
 

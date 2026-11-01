@@ -7,6 +7,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { loadSkillCatalog, type SkillPack } from './catalog.ts'
 import { createSkillApi, SkillIpcError } from './ipc.ts'
@@ -14,8 +15,10 @@ import { createSkillApi, SkillIpcError } from './ipc.ts'
 export interface Config {
   /** Disable the plugin while keeping the row mounted. */
   readonly enabled?: boolean
-  /** Catalog root; defaults to `CADRE_SKILLS_DIR` or `~/.dsh/cadre-skills`. */
+  /** Installed catalog root; defaults to `CADRE_SKILLS_DIR` or `~/.dsh/cadre-skills`. */
   readonly skillsDir?: string
+  /** Read-only builtin root; defaults to `CADRE_BUILTIN_SKILLS_DIR` or the repo directory. */
+  readonly builtinDir?: string
   /** Ledger path; defaults to `CADRE_LEDGER_PATH`. */
   readonly ledgerPath?: string
 }
@@ -77,6 +80,17 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     console.error('host-session-skills: CADRE_SKILLS_DIR is empty; no skill packs registered')
     return
   }
+  const builtinDir = config.builtinDir
+    ?? process.env.CADRE_BUILTIN_SKILLS_DIR?.trim()
+    ?? fileURLToPath(new URL('../builtin-skills/', import.meta.url))
+  const mergedCatalog = (): ReadonlyMap<string, SkillPack> => {
+    const merged = new Map<string, SkillPack>()
+    for (const [id, pack] of loadSkillCatalog(builtinDir, 'builtin')) merged.set(id, pack)
+    for (const [id, pack] of loadSkillCatalog(skillsDir, 'installed')) {
+      if (!merged.has(id)) merged.set(id, pack)
+    }
+    return merged
+  }
   const db = new DatabaseSync(ledgerPath, { readOnly: true })
   db.exec('PRAGMA busy_timeout = 5000')
   const registered = new Map<string, Map<string, { dispose: () => void; content: string }>>()
@@ -107,7 +121,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     }
     let catalog: ReadonlyMap<string, SkillPack>
     try {
-      catalog = loadSkillCatalog(skillsDir)
+      catalog = mergedCatalog()
     } catch (error) {
       console.error(`host-session-skills: catalog load failed: ${String(error)}`)
       return next()
@@ -148,6 +162,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
             tools: pack.tools,
             source: pack.source,
             license: pack.license,
+            origin: pack.origin,
             plugin: 'host-session-skills',
           },
           invocation: { modelInvocable: true, userInvocable: true },
@@ -171,7 +186,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         connection: { admit(req: IncomingMessage): { readonly rejection: number } | unknown }
         effect(setup: () => () => void, label: string): () => void
       }
-      const api = createSkillApi({ db, ledgerPath, skillsDir })
+      const api = createSkillApi({ db, ledgerPath, skillsDir, builtinDir })
       const reply = (res: ServerResponse, status: number, body: unknown): void => {
         res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify(body))
@@ -204,7 +219,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
               return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
             }
             try {
-              reply(res, 200, { ok: true, result: operation(await readBody(req)) })
+              reply(res, 200, { ok: true, result: await operation(await readBody(req)) })
             } catch (error) {
               if (error instanceof SkillIpcError) return reply(res, error.status, { ok: false, code: error.code, message: error.message })
               reply(res, 500, { ok: false, code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) })
@@ -216,6 +231,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         projectId: required(body, 'projectId'),
         actorSessionId: required(body, 'actorSessionId'),
         ...(typeof body.targetSessionId === 'string' ? { targetSessionId: body.targetSessionId } : {}),
+        ...(typeof body.locale === 'string' ? { locale: body.locale } : {}),
       }))
       route('/cadre/skills/get', body => api.get({
         projectId: required(body, 'projectId'),
@@ -239,6 +255,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         id: body.id,
         name: body.name,
         description: body.description,
+        descriptionI18n: body.descriptionI18n,
         roles: body.roles,
         tokenEstimate: body.tokenEstimate,
         tools: body.tools,
@@ -252,6 +269,12 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         actorSessionId: required(body, 'actorSessionId'),
         packId: required(body, 'packId'),
         confirm: body.confirm,
+      }))
+      route('/cadre/skills/install-url', body => api.installUrl({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        url: body.url,
+        ...(body.confirm === undefined ? {} : { confirm: body.confirm }),
       }))
     })
   }

@@ -1,0 +1,14 @@
+{
+  "id": "cadre-workflow",
+  "name": "Cadre Workflow",
+  "description": "How Cadre tasks move between dispatch, delivery, review, and verification.",
+  "descriptionI18n": {
+    "zh": "Cadre 任务从派活、交付、验收到关闭的流转说明。",
+    "en": "How Cadre tasks move between dispatch, delivery, review, and verification."
+  },
+  "roles": ["supervisor", "worker"],
+  "tokenEstimate": 260,
+  "tools": [],
+  "source": "builtin:cadre-workflow",
+  "license": "MIT"
+}

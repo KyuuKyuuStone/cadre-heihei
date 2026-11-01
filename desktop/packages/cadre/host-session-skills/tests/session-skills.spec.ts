@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/index.ts'
 import { createSkillApi } from '../src/ipc.ts'
 
@@ -249,5 +249,81 @@ describe('session skill packs', () => {
     expect(() => api.set({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1', skills: ['design'] }))
       .toThrow(/schema 3 迁移/)
     db.close()
+  })
+
+  it('distinguishes builtin read-only packs from installed packs and localizes descriptions', () => {
+    const root = workspace()
+    const builtin = join(root, 'builtin')
+    const installed = join(root, 'installed')
+    pack(builtin, 'cadre-workflow', ['worker'])
+    const manifestPath = join(builtin, 'cadre-workflow', 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
+    manifest.descriptionI18n = { zh: '中文说明', en: 'English description' }
+    writeFileSync(manifestPath, JSON.stringify(manifest))
+    pack(installed, 'manual-pack', ['worker'])
+    const db = ledger(root); insert(db, 's1', 'supervisor', []); db.close()
+    const reader = new DatabaseSync(join(root, 'ledger.sqlite'))
+    const api = createSkillApi({
+      db: reader, ledgerPath: join(root, 'ledger.sqlite'),
+      skillsDir: installed, builtinDir: builtin,
+    })
+    const zh = api.catalog({ projectId: 'p1', actorSessionId: 's1', locale: 'zh-CN' })
+    expect(zh.find(item => item.id === 'cadre-workflow')).toMatchObject({
+      origin: 'builtin', description: '中文说明',
+    })
+    expect(zh.find(item => item.id === 'manual-pack')).toMatchObject({ origin: 'installed' })
+    expect(api.catalog({ projectId: 'p1', actorSessionId: 's1', locale: 'en' })
+      .find(item => item.id === 'cadre-workflow')?.description).toBe('English description')
+    expect(() => api.remove({ projectId: 'p1', actorSessionId: 's1', packId: 'cadre-workflow', confirm: true }))
+      .toThrow(/内置技能包/)
+    reader.close()
+  })
+
+  it('installs a remote raw pack, rejects invalid/oversized/duplicate URLs, and overwrites with confirm', async () => {
+    const root = workspace()
+    const packs = join(root, 'installed')
+    const db = ledger(root); insert(db, 's1', 'supervisor', []); db.close()
+    const writer = new DatabaseSync(join(root, 'ledger.sqlite'))
+    const calls: string[] = []
+    const fetch = vi.fn(async (input: URL | string) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith('manifest.json')) {
+        return new Response(JSON.stringify({
+          id: 'remote-pack', name: 'Remote', description: 'remote pack', roles: ['worker'],
+          tokenEstimate: 5, tools: [], source: 'github:o/r', license: 'MIT',
+        }), { status: 200 })
+      }
+      return new Response('# remote v1', { status: 200 })
+    })
+    const api = createSkillApi({
+      db: writer, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, fetch: fetch as never,
+    })
+    const input = {
+      projectId: 'p1', actorSessionId: 's1',
+      url: 'https://raw.githubusercontent.com/o/r/main/packs/remote/SKILL.md',
+    }
+    expect(await api.installUrl(input)).toMatchObject({ id: 'remote-pack', origin: 'installed' })
+    expect(calls.some(url => url.endsWith('manifest.json'))).toBe(true)
+    expect(readFileSync(join(packs, 'remote-pack', 'SKILL.md'), 'utf8')).toBe('# remote v1')
+    await expect(api.installUrl(input)).rejects.toThrow(/已存在/)
+    expect(await api.installUrl({ ...input, confirm: true })).toMatchObject({ id: 'remote-pack' })
+    await expect(api.installUrl({ ...input, url: 'http://raw.githubusercontent.com/o/r/main/SKILL.md' }))
+      .rejects.toThrow(/https/)
+    const big = vi.fn(async (input: URL | string) => {
+      return String(input).endsWith('manifest.json')
+        ? new Response(JSON.stringify({
+          id: 'huge', name: 'Huge', description: 'huge', roles: ['worker'], tokenEstimate: 1,
+          tools: [], source: 'x', license: 'MIT',
+        }), { status: 200 })
+        : new Response('x'.repeat(300 * 1024), { status: 200 })
+    })
+    const bigApi = createSkillApi({
+      db: writer, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, fetch: big as never,
+    })
+    await expect(bigApi.installUrl({
+      ...input, url: 'https://raw.githubusercontent.com/o/r/main/packs/huge/SKILL.md',
+    })).rejects.toThrow(/大小限制/)
+    writer.close()
   })
 })
