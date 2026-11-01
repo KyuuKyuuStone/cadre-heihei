@@ -8,14 +8,24 @@ registrations before registering the new set.
 ## Catalog
 
 Each immediate child of `CADRE_SKILLS_DIR` (default `~/.dsh/cadre-skills`) is an
-`installed` pack; `builtin-skills/` in this package is merged as read-only
-`builtin` packs. Each pack has:
+`installed` pack; `@scope/<pack>` containers are also scanned. `builtin-skills/`
+in this package is merged as read-only `builtin` packs. A pack has:
 
-- `manifest.json`: `id`, `name`, `description`, optional
-  `descriptionI18n {zh,en}`, optional `author` and credential-free https
-  `homepage`, `roles` (`supervisor`/`worker`), `tokenEstimate`, `tools`,
+- `manifest.json` (optional for SkillHub packs): `id`, `name`, `description`,
+  optional `descriptionI18n {zh,en}`, optional `author` and credential-free
+  https `homepage`, `roles` (`supervisor`/`worker`), `tokenEstimate`, `tools`,
   `source`, `license`;
 - `SKILL.md`: the model-visible body.
+
+When `manifest.json` is absent, the catalog synthesizes the pack from
+`SKILL.md` frontmatter (`name`, `slug`, `displayName`, `description`,
+optional `description_zh`/`_en`, `roles`, `author`, `homepage`, `license`).
+Missing roles default to `worker`; missing license is `unknown`; token estimate
+is `ceil(chars / 4)`. Scope packs get a scope-qualified id
+(`@indiv-guipi/find-skills` → `indiv-guipi-find-skills`), so equal slugs in
+different scopes do not collide. Invalid frontmatter is skipped with a log;
+manifest packs remain fail-loud. Builtin ids win over installed duplicates and
+duplicate installed ids keep the first pack. No generated manifest is written.
 
 Catalog entries carry `origin` (`builtin`/`installed`); builtin packs cannot be
 overwritten or removed. A request `locale` starting with `zh` selects

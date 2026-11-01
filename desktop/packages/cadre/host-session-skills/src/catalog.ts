@@ -1,7 +1,7 @@
 /** Skill pack catalog shared by the Host plugin and its tests. @module */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { basename, join } from 'node:path'
 
 /** Where a pack came from; builtin packs are read-only. */
 export type SkillOrigin = 'builtin' | 'installed'
@@ -106,13 +106,31 @@ function parsePack(directory: string, origin: SkillOrigin): SkillPack {
 
 /**
  * Scan one pack per immediate child directory, `manifest.json` + `SKILL.md`.
- * Missing directories produce an empty catalog; duplicate ids fail loud.
+ * Also scans `@scope/<pack>` containers whose pack carries only a frontmatter
+ * `SKILL.md` (SkillHub layout). Missing directories produce an empty catalog;
+ * duplicate ids keep the first pack in scan order and log a warning.
  * @param directory - catalog root.
  * @param origin - builtin or installed; copied onto every pack.
  * @returns pack id → pack.
  */
 export function loadSkillCatalog(directory: string, origin: SkillOrigin = 'installed'): ReadonlyMap<string, SkillPack> {
   const catalog = new Map<string, SkillPack>()
+  const add = (directory: string, scope: string | undefined, source: string): void => {
+    let pack: SkillPack
+    try {
+      pack = loadPack(directory, origin, scope, source)
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && (error as { code?: unknown }).code === 'ENOENT') return
+      if (existsSync(join(directory, 'manifest.json'))) throw error
+      console.warn(`host-session-skills: skipping invalid SKILL.md in ${directory}: ${String(error)}`)
+      return
+    }
+    if (catalog.has(pack.id)) {
+      console.warn(`host-session-skills: duplicate skill id ${pack.id} at ${directory}; keeping ${catalog.get(pack.id)?.path ?? ''}`)
+      return
+    }
+    catalog.set(pack.id, pack)
+  }
   let entries: string[]
   try {
     entries = readdirSync(directory)
@@ -123,15 +141,113 @@ export function loadSkillCatalog(directory: string, origin: SkillOrigin = 'insta
   for (const name of entries) {
     const path = join(directory, name)
     if (!statSync(path).isDirectory()) continue
-    let pack: SkillPack
-    try {
-      pack = parsePack(path, origin)
-    } catch (error) {
-      if (error instanceof Error && 'code' in error && (error as { code?: unknown }).code === 'ENOENT') continue
-      throw error
+    if (existsSync(join(path, 'manifest.json')) || existsSync(join(path, 'SKILL.md'))) {
+      add(path, undefined, `local:${name}`)
+      continue
     }
-    if (catalog.has(pack.id)) throw new Error(`duplicate skill pack id ${pack.id}`)
-    catalog.set(pack.id, pack)
+    if (!name.startsWith('@')) continue
+    const scope = name.slice(1)
+    let children: string[]
+    try {
+      children = readdirSync(path)
+    } catch {
+      continue
+    }
+    for (const child of children) {
+      const nested = join(path, child)
+      if (!statSync(nested).isDirectory()) continue
+      if (!existsSync(join(nested, 'SKILL.md'))) continue
+      add(nested, scope, `skillhub:${name}/${child}`)
+    }
   }
   return catalog
+}
+
+function loadPack(directory: string, origin: SkillOrigin, scope: string | undefined, source: string): SkillPack {
+  if (existsSync(join(directory, 'manifest.json'))) return parsePack(directory, origin)
+  return synthesizePack(directory, origin, scope, source)
+}
+
+/** Parse the simple YAML frontmatter SkillHub ships; nested maps are ignored. */
+function frontmatter(text: string): Record<string, string> | undefined {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(text)
+  if (match === null) return undefined
+  const fields: Record<string, string> = {}
+  const lines = (match[1] ?? '').split(/\r?\n/u)
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    const field = /^([A-Za-z][\w-]*):\s*(.*)$/u.exec(line)
+    if (field === null) continue
+    const key = (field[1] ?? '').toLowerCase()
+    let value = (field[2] ?? '').trim()
+    if (value === '>' || value === '|') {
+      const parts: string[] = []
+      while (index + 1 < lines.length && /^\s+/u.test(lines[index + 1] ?? '')) {
+        index += 1
+        parts.push((lines[index] ?? '').trim())
+      }
+      value = parts.join(value === '|' ? '\n' : ' ')
+    }
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1)
+    }
+    if (value !== '') fields[key] = value
+  }
+  return Object.keys(fields).length === 0 ? undefined : fields
+}
+
+function safeId(value: string): string {
+  const id = value.toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-+|-+$/gu, '').slice(0, 64)
+  if (id === '' || !/^[a-z0-9]/u.test(id)) throw new Error(`cannot derive a safe id from ${JSON.stringify(value)}`)
+  return id
+}
+
+function synthesizePack(directory: string, origin: SkillOrigin, scope: string | undefined, source: string): SkillPack {
+  const content = readFileSync(join(directory, 'SKILL.md'), 'utf8')
+  const fields = frontmatter(content)
+  if (fields === undefined) throw new Error('SKILL.md has no frontmatter')
+  const fallbackName = basename(directory)
+  const name = fields.displayname ?? fields.name ?? fallbackName
+  const slug = fields.slug ?? fields.name ?? fallbackName
+  const id = scope === undefined ? safeId(slug) : `${safeId(scope)}-${safeId(slug)}`
+  const description = fields.description ?? name
+  if (description.trim() === '') throw new Error('SKILL.md frontmatter description is empty')
+  const roles = (fields.roles ?? 'worker')
+    .replace(/^\[|\]$/gu, '')
+    .split(/[,\s]+/u)
+    .map(role => role.trim().toLowerCase())
+    .filter((role): role is 'supervisor' | 'worker' => role === 'supervisor' || role === 'worker')
+  const i18n = {
+    ...(fields.description_zh === undefined ? {} : { zh: fields.description_zh }),
+    ...(fields.description_en === undefined ? {} : { en: fields.description_en }),
+  }
+  let homepage: string | undefined
+  if (fields.homepage !== undefined) {
+    let parsed: URL
+    try {
+      parsed = new URL(fields.homepage)
+    } catch {
+      throw new Error('frontmatter homepage must be an https URL')
+    }
+    if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') {
+      throw new Error('frontmatter homepage must be a credential-free https URL')
+    }
+    homepage = fields.homepage
+  }
+  return {
+    id,
+    name,
+    description,
+    ...(Object.keys(i18n).length === 0 ? {} : { descriptionI18n: i18n }),
+    ...(fields.author === undefined ? {} : { author: fields.author }),
+    ...(homepage === undefined ? {} : { homepage }),
+    origin,
+    roles: roles.length === 0 ? ['worker'] : [...new Set(roles)],
+    tokenEstimate: Math.ceil(content.length / 4),
+    tools: (fields.tools ?? '').split(/[,\s]+/u).filter(tool => tool !== ''),
+    source,
+    license: fields.license ?? 'unknown',
+    path: join(directory, 'SKILL.md'),
+    content,
+  }
 }

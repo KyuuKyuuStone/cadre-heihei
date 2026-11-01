@@ -1,9 +1,10 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/index.ts'
+import { loadSkillCatalog } from '../src/catalog.ts'
 import { createSkillApi } from '../src/ipc.ts'
 
 const roots: string[] = []
@@ -263,6 +264,7 @@ describe('session skill packs', () => {
     manifest.homepage = 'https://github.com/elayadesign/ai-design-skills'
     writeFileSync(manifestPath, JSON.stringify(manifest))
     pack(installed, 'manual-pack', ['worker'])
+    pack(installed, 'cadre-workflow', ['worker'])
     const db = ledger(root); insert(db, 's1', 'supervisor', []); db.close()
     const reader = new DatabaseSync(join(root, 'ledger.sqlite'))
     const api = createSkillApi({
@@ -339,5 +341,48 @@ describe('session skill packs', () => {
       ...input, url: 'https://raw.githubusercontent.com/o/r/main/packs/huge/SKILL.md',
     })).rejects.toThrow(/大小限制/)
     writer.close()
+  })
+
+  it('scans SkillHub scope layouts and synthesizes frontmatter packs without manifest.json', () => {
+    const root = workspace()
+    const scoped = join(root, '@indiv-guipi', 'find-skills')
+    mkdirSync(scoped, { recursive: true })
+    const body = '---\nname: find-skills\nslug: find-skills\ndisplayName: 技能发现·Find Skills\ndescription: 场景驱动和关键词双模式。\nversion: "1.7.0"\n---\n# Find Skills\n\nbody\n'
+    writeFileSync(join(scoped, 'SKILL.md'), body)
+    writeFileSync(join(scoped, '_meta.json'), '{"slug":"find-skills","version":"1.7.0"}')
+    writeFileSync(join(scoped, 'README.md'), '# README\n')
+
+    const flat = join(root, 'flat-skill')
+    mkdirSync(flat, { recursive: true })
+    writeFileSync(join(flat, 'SKILL.md'), '---\nname: flat-skill\ndescription: flat\n---\n# flat\n')
+
+    const invalid = join(root, 'invalid-skill')
+    mkdirSync(invalid, { recursive: true })
+    writeFileSync(join(invalid, 'SKILL.md'), '# no frontmatter\n')
+
+    const catalog = loadSkillCatalog(root)
+    expect(catalog.get('indiv-guipi-find-skills')).toMatchObject({
+      name: '技能发现·Find Skills',
+      description: '场景驱动和关键词双模式。',
+      roles: ['worker'],
+      license: 'unknown',
+      source: 'skillhub:@indiv-guipi/find-skills',
+      tokenEstimate: Math.ceil(body.length / 4),
+      origin: 'installed',
+    })
+    expect(catalog.get('flat-skill')).toMatchObject({ name: 'flat-skill', description: 'flat' })
+    expect(catalog.has('invalid-skill')).toBe(false)
+    expect(existsSync(join(scoped, 'manifest.json'))).toBe(false)
+  })
+
+  it('derives scope-qualified ids so same slugs in different scopes do not collide', () => {
+    const root = workspace()
+    for (const scope of ['@alpha', '@beta']) {
+      const directory = join(root, scope, 'find-skills')
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(join(directory, 'SKILL.md'), '---\nname: find-skills\ndescription: shared slug\n---\n# body\n')
+    }
+    const catalog = loadSkillCatalog(root)
+    expect([...catalog.keys()]).toEqual(['alpha-find-skills', 'beta-find-skills'])
   })
 })
