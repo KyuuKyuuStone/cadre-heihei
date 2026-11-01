@@ -4,7 +4,10 @@
 
 - **真实库 schema 2→3 修复**：打包始终从当前源码重建 CJS，启动 `initCadreStore` 幂等补齐 `members.skills_json`；旧 schema 下技能 catalog/get 降级为空、set 返回可读 `SKILL_SCHEMA_OUTDATED`
 - **技能库与员工选择分层**：`~/.dsh/cadre-skills/<pack>/manifest.json + SKILL.md`；技能入口统一为「技能」；主管在员工菜单/建员工时选择技能，只对选中会话注册，默认不加载；角色不匹配拒绝；改选/内容变化 dispose 旧注册；`members.skills_json` additive（schema v3，默认 `[]`）
-- **技能 IPC**：`/cadre/skills/{catalog,get,set,preview}`，supervisor-only、项目/成员/角色校验、数组去重，只更新 `skills_json`
+- **技能 IPC**：`/cadre/skills/{catalog,get,set,preview,add,remove,install-url}`，supervisor-only、项目/成员/角色校验、数组去重，只更新 `skills_json`
+- **技能库分层**：内置技能（随包 `builtin-skills/`，只读）与手动安装（`~/.dsh/cadre-skills`）区分 `origin`；manifest 支持 `descriptionI18n{zh,en}`；新增 `cadre-team`/`cadre-workflow` 内置技能；公开 GitHub URL 安装（HTTPS/大小/超时限制）
+- **Cadre 团队模式预设**：新增 `cadre`（Cadre 团队模式），基于标准工具集但聚焦 shell/read/write/grep/测试/打包/台账，去掉无关 `tool-web`；persona 带派单四项、证据规范、单一基线、actor-target、环境与 release preflight；`source: cadre`，上游 standard/ptc/minimal/cordis 不变
+- **归属致谢**：preset source 元数据区分 `deepseek`/`cadre`，UI 可标注；内置技能注明来源
 - **手动添加/删除技能**：`/cadre/skills/add` 接收 manifest + SKILL.md 正文，kebab-case/角色/路径校验，默认不覆盖，`overwrite:true` 才替换；`/cadre/skills/remove` 需 confirm；原子目录写入
 - **工具结果 4k 落盘**：Cadre `spill-policy.maxInlineTokens` 12.5k → 4000，超出保留头尾并写 spill 文件路径，tool call/result 配对不变
 - **Token 治理**：compaction 保留尾部 50k（阈值 150k 不变）；step 级压缩 `stepPressureCheck` 默认 **true**（100k 阈值、2 个 tool 起检）；压缩发生时会增加一次摘要 LLM 调用
@@ -15,7 +18,8 @@
 
 ### 已知限制
 
-- 技能市场（ClawHub/SkillHub）未接
+- 技能市场（ClawHub/SkillHub）未接；浏览器/截图工具未内置
+- `cadre-team` 内置技能默认不自动选中，需在技能库选择
 - 删除技能包不会清理 `members.skills_json` 中的旧选择
 - 安装包未签名（SmartScreen 提示）
 - 429/外部依赖仅做有界重试并告知；step 级压缩已默认开，峰值未做真实长会话 A/B
