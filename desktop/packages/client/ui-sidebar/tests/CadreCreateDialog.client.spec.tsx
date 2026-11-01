@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { CadreCreateDialog, type CadreCreateRequest } from '../src/client/CadreCreateDialog.tsx'
+import { zh } from '../src/client/locales.ts'
 
 afterEach(() => {
   cleanup()
@@ -49,7 +50,7 @@ function mount(options: {
     closeCreate,
     createRosterEntry,
     refreshSupervisor: vi.fn(),
-    t: ((key: string) => key) as never,
+    t: ((key: keyof typeof zh) => zh[key]) as never,
   } as unknown as Props
   render(<CadreCreateDialog {...props} />)
   return { createRosterEntry, bindSession, reportIn, closeCreate }
@@ -108,6 +109,7 @@ describe('CadreCreateDialog supervisor model selection', () => {
       roster: [{ sessionId: 'sup', role: 'supervisor', displayName: '主管', state: 'available' }],
     })
     expect(await screen.findByText('测试技能')).toBeTruthy()
+    expect(screen.getByText('技能（可选）')).toBeTruthy()
     expect(screen.queryByText('主管技能')).toBeNull()
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '新员工' } })
     fireEvent.change(screen.getByLabelText('岗位职责（最多 2000 字）'), { target: { value: '负责测试' } })

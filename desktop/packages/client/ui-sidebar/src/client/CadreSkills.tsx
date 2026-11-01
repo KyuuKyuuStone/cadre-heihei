@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Checkbox, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { CadreRosterState } from './CadreSidebar.tsx'
+import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import css from './CadreSkills.module.css'
 
 type UseMenuOpenState = () => readonly [open: boolean, setOpen: (open: boolean) => void]
@@ -33,12 +33,17 @@ export interface CadreSkillsRequest {
   readonly sessionId: string
   readonly projectId: string
   readonly label: string
+  readonly role: 'supervisor' | 'worker'
   readonly token: number
 }
 
 export interface CadreSkillsInjected {
-  hooks: { roster: HostObservable<CadreRosterState>; request: HostObservable<CadreSkillsRequest | null> }
-  openSkills(sessionId: string, label: string): void
+  hooks: {
+    roster: HostObservable<CadreRosterState>
+    sessions: HostObservable<CadreSessionsState>
+    request: HostObservable<CadreSkillsRequest | null>
+  }
+  openSkills(sessionId: string, label: string, role: 'supervisor' | 'worker'): void
   closeSkills(): void
 }
 
@@ -133,17 +138,23 @@ export function CadreSkillPicker({
 }
 
 export function CadreSkillSettingsMenuItem({
-  sessionId, displayTitle, useMenuOpenState, useRoster, openSkills, t,
+  sessionId, displayTitle, useMenuOpenState, useRoster, useSessions, openSkills, t,
 }: { readonly sessionId: string; readonly displayTitle: string } & {
   readonly useMenuOpenState: UseMenuOpenState
 } & InjectFace<CadreSkillsInjected> & PropsLocale<'sidebar'>) {
   const [, setMenuOpen] = useMenuOpenState()
   const members = useRoster(state => state.members)
+  const activeSessionId = useSessions(state => Object.entries(state.byId)
+    .find(([, session]) => (session?.retainedBy?.mainView ?? 0) > 0)?.[0])
+  const actor = members.find(item => item.sessionId === activeSessionId)
   const member = members.find(item => item.sessionId === sessionId)
-  if (member?.role !== 'supervisor' || member.state === 'departed') return null
+  if (actor?.role !== 'supervisor' || member === undefined || member.state === 'departed') return null
   return (
     <button type="button" role="menuitem" className={css.menuItem}
-      onClick={() => { setMenuOpen(false); openSkills(sessionId, displayTitle) }}>
+      onClick={() => {
+        setMenuOpen(false)
+        openSkills(sessionId, displayTitle, member.role === 'supervisor' ? 'supervisor' : 'worker')
+      }}>
       {t('skills.menu')}
     </button>
   )
@@ -177,7 +188,7 @@ function SkillEditor({
     setError(null)
     try {
       const next = (await fetchSkillCatalog(request.projectId, request.sessionId, request.sessionId))
-        .filter(entry => entry.roles.includes('supervisor'))
+        .filter(entry => entry.roles.includes(request.role))
       setEntries(next)
       setSelected(next.filter(entry => entry.selected).map(entry => entry.id))
     } catch (cause) {

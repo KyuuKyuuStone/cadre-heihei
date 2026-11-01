@@ -80,6 +80,7 @@ export interface CadreRosterState {
 export interface CadreSessionSummary {
   readonly running?: boolean
   readonly updatedAt?: number
+  readonly retainedBy?: { readonly mainView?: number }
 }
 
 export interface CadreSessionsState {

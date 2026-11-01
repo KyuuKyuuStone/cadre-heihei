@@ -581,15 +581,15 @@ export function apply(ctx: ClientContext): void {
   })
   const skillsRequest = createSnapshotStore<CadreSkillsRequest | null>(null)
   let skillsToken = 0
-  const openSkills = (sessionId: string, label: string): void => {
+  const openSkills = (sessionId: string, label: string, role: 'supervisor' | 'worker'): void => {
     const projectId = projectOfSession(sessionId)
     if (projectId === undefined) return
     skillsToken += 1
-    skillsRequest.set({ sessionId, projectId, label, token: skillsToken })
+    skillsRequest.set({ sessionId, projectId, label, role, token: skillsToken })
   }
   const closeSkills = (): void => { skillsRequest.set(null) }
   const skillsInjected = (): CadreSkillsInjected => ({
-    hooks: { roster, request: skillsRequest },
+    hooks: { roster, sessions: sessionsSource, request: skillsRequest },
     openSkills,
     closeSkills,
   })
