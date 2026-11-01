@@ -12,8 +12,9 @@ Each immediate child of `CADRE_SKILLS_DIR` (default `~/.dsh/cadre-skills`) is an
 `builtin` packs. Each pack has:
 
 - `manifest.json`: `id`, `name`, `description`, optional
-  `descriptionI18n {zh,en}`, `roles` (`supervisor`/`worker`), `tokenEstimate`,
-  `tools`, `source`, `license`;
+  `descriptionI18n {zh,en}`, optional `author` and credential-free https
+  `homepage`, `roles` (`supervisor`/`worker`), `tokenEstimate`, `tools`,
+  `source`, `license`;
 - `SKILL.md`: the model-visible body.
 
 Catalog entries carry `origin` (`builtin`/`installed`); builtin packs cannot be

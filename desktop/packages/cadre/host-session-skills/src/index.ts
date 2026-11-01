@@ -256,6 +256,8 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         name: body.name,
         description: body.description,
         descriptionI18n: body.descriptionI18n,
+        author: body.author,
+        homepage: body.homepage,
         roles: body.roles,
         tokenEstimate: body.tokenEstimate,
         tools: body.tools,

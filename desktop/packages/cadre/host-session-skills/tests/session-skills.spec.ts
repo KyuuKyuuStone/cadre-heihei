@@ -259,6 +259,8 @@ describe('session skill packs', () => {
     const manifestPath = join(builtin, 'cadre-workflow', 'manifest.json')
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
     manifest.descriptionI18n = { zh: '中文说明', en: 'English description' }
+    manifest.author = 'Elaya'
+    manifest.homepage = 'https://github.com/elayadesign/ai-design-skills'
     writeFileSync(manifestPath, JSON.stringify(manifest))
     pack(installed, 'manual-pack', ['worker'])
     const db = ledger(root); insert(db, 's1', 'supervisor', []); db.close()
@@ -269,11 +271,20 @@ describe('session skill packs', () => {
     })
     const zh = api.catalog({ projectId: 'p1', actorSessionId: 's1', locale: 'zh-CN' })
     expect(zh.find(item => item.id === 'cadre-workflow')).toMatchObject({
-      origin: 'builtin', description: '中文说明',
+      origin: 'builtin', description: '中文说明', author: 'Elaya',
+      homepage: 'https://github.com/elayadesign/ai-design-skills',
     })
     expect(zh.find(item => item.id === 'manual-pack')).toMatchObject({ origin: 'installed' })
     expect(api.catalog({ projectId: 'p1', actorSessionId: 's1', locale: 'en' })
       .find(item => item.id === 'cadre-workflow')?.description).toBe('English description')
+    expect(api.preview({ projectId: 'p1', actorSessionId: 's1', packId: 'cadre-workflow' })).toMatchObject({
+      author: 'Elaya', homepage: 'https://github.com/elayadesign/ai-design-skills',
+    })
+    expect(() => api.add({
+      projectId: 'p1', actorSessionId: 's1', id: 'bad-home', name: 'bad', description: 'bad',
+      roles: ['worker'], tokenEstimate: 1, tools: [], source: 'manual', license: 'MIT',
+      content: '# bad', homepage: 'http://insecure.example',
+    })).toThrow(/https URL/)
     expect(() => api.remove({ projectId: 'p1', actorSessionId: 's1', packId: 'cadre-workflow', confirm: true }))
       .toThrow(/内置技能包/)
     reader.close()
@@ -292,6 +303,7 @@ describe('session skill packs', () => {
         return new Response(JSON.stringify({
           id: 'remote-pack', name: 'Remote', description: 'remote pack', roles: ['worker'],
           tokenEstimate: 5, tools: [], source: 'github:o/r', license: 'MIT',
+          author: 'Remote Author', homepage: 'https://github.com/o/r',
         }), { status: 200 })
       }
       return new Response('# remote v1', { status: 200 })
@@ -303,7 +315,9 @@ describe('session skill packs', () => {
       projectId: 'p1', actorSessionId: 's1',
       url: 'https://raw.githubusercontent.com/o/r/main/packs/remote/SKILL.md',
     }
-    expect(await api.installUrl(input)).toMatchObject({ id: 'remote-pack', origin: 'installed' })
+    expect(await api.installUrl(input)).toMatchObject({
+      id: 'remote-pack', origin: 'installed', author: 'Remote Author', homepage: 'https://github.com/o/r',
+    })
     expect(calls.some(url => url.endsWith('manifest.json'))).toBe(true)
     expect(readFileSync(join(packs, 'remote-pack', 'SKILL.md'), 'utf8')).toBe('# remote v1')
     await expect(api.installUrl(input)).rejects.toThrow(/已存在/)

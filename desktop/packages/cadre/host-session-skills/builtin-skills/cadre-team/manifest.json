@@ -6,9 +6,14 @@
     "zh": "Cadre 派单、证据、基线、权限、环境与发布检查清单。",
     "en": "Cadre dispatch, evidence, baseline, permissions, environment, and release checklist."
   },
-  "roles": ["supervisor", "worker"],
+  "roles": [
+    "supervisor",
+    "worker"
+  ],
   "tokenEstimate": 420,
   "tools": [],
   "source": "builtin:cadre-team",
-  "license": "MIT"
+  "license": "MIT",
+  "author": "Cadre",
+  "homepage": "https://github.com/KyuuKyuuStone/cadre-heihei"
 }

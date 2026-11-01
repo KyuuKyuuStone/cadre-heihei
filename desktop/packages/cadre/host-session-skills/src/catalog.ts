@@ -12,6 +12,10 @@ export interface SkillPack {
   readonly name: string
   readonly description: string
   readonly descriptionI18n?: { readonly zh?: string; readonly en?: string }
+  /** Optional upstream author attribution. */
+  readonly author?: string
+  /** Optional credential-free https upstream/home page. */
+  readonly homepage?: string
   readonly origin: SkillOrigin
   readonly roles: readonly ('supervisor' | 'worker')[]
   readonly tokenEstimate: number
@@ -28,6 +32,8 @@ interface Manifest {
   readonly name?: unknown
   readonly description?: unknown
   readonly descriptionI18n?: unknown
+  readonly author?: unknown
+  readonly homepage?: unknown
   readonly roles?: unknown
   readonly tokenEstimate?: unknown
   readonly tools?: unknown
@@ -66,11 +72,27 @@ function parsePack(directory: string, origin: SkillOrigin): SkillPack {
   const tokenEstimate = typeof manifest.tokenEstimate === 'number' && Number.isFinite(manifest.tokenEstimate) && manifest.tokenEstimate >= 0
     ? manifest.tokenEstimate : 0
   const i18n = descriptionI18n(manifest.descriptionI18n)
+  const author = typeof manifest.author === 'string' && manifest.author.trim() !== '' ? manifest.author.trim() : undefined
+  let homepage: string | undefined
+  if (typeof manifest.homepage === 'string' && manifest.homepage.trim() !== '') {
+    let parsed: URL
+    try {
+      parsed = new URL(manifest.homepage)
+    } catch {
+      throw new Error(`skill pack ${directory}: homepage must be an https URL`)
+    }
+    if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') {
+      throw new Error(`skill pack ${directory}: homepage must be a credential-free https URL`)
+    }
+    homepage = manifest.homepage
+  }
   return {
     id: manifest.id as string,
     name: manifest.name as string,
     description: manifest.description as string,
     ...(i18n === undefined ? {} : { descriptionI18n: i18n }),
+    ...(author === undefined ? {} : { author }),
+    ...(homepage === undefined ? {} : { homepage }),
     origin,
     roles,
     tokenEstimate,

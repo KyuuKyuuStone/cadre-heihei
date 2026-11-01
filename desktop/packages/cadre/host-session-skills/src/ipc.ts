@@ -26,6 +26,8 @@ export interface CatalogEntry {
   readonly id: string
   readonly name: string
   readonly description: string
+  readonly author?: string
+  readonly homepage?: string
   readonly origin: SkillOrigin
   readonly roles: readonly string[]
   readonly tokenEstimate: number
@@ -41,6 +43,7 @@ export interface SkillApi {
   set(input: { projectId: string; actorSessionId: string; targetSessionId: string; skills: unknown }): { skills: string[] }
   preview(input: { projectId: string; actorSessionId: string; packId: string }): {
     id: string; content: string; tokenEstimate: number; license: string
+    author?: string; homepage?: string
   }
   add(input: AddSkillInput): CatalogEntry
   remove(input: { projectId: string; actorSessionId: string; packId: string; confirm: unknown }): { removed: true }
@@ -56,6 +59,8 @@ export interface AddSkillInput {
   readonly id: unknown
   readonly name: unknown
   readonly description: unknown
+  readonly author?: unknown
+  readonly homepage?: unknown
   readonly roles: unknown
   readonly tokenEstimate: unknown
   readonly tools: unknown
@@ -73,6 +78,8 @@ interface ValidPack {
   readonly id: string
   readonly name: string
   readonly description: string
+  readonly author?: string
+  readonly homepage?: string
   readonly roles: readonly ('supervisor' | 'worker')[]
   readonly tokenEstimate: number
   readonly tools: readonly string[]
@@ -96,6 +103,27 @@ function validI18n(value: unknown): { zh?: string; en?: string } | undefined {
   return result.zh === undefined && result.en === undefined ? undefined : result
 }
 
+function optionalText(value: unknown, field: string): string | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string' || value.trim() === '') throw new SkillIpcError('SKILL_INVALID', 400, `${field} 必须是非空字符串`)
+  return value.trim()
+}
+
+function optionalHttps(value: unknown, field: string): string | undefined {
+  const text = optionalText(value, field)
+  if (text === undefined) return undefined
+  let parsed: URL
+  try {
+    parsed = new URL(text)
+  } catch {
+    throw new SkillIpcError('SKILL_INVALID', 400, `${field} 必须是 https URL`)
+  }
+  if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') {
+    throw new SkillIpcError('SKILL_INVALID', 400, `${field} 必须是无凭据的 https URL`)
+  }
+  return text
+}
+
 function validatePack(input: AddSkillInput): ValidPack {
   const id = requiredString(input.id, 'id')
   if (!KEBAB_ID.test(id) || id.length > 64) {
@@ -114,11 +142,15 @@ function validatePack(input: AddSkillInput): ValidPack {
   }
   const content = requiredString(input.content, 'content')
   const i18n = validI18n(input.descriptionI18n)
+  const author = optionalText(input.author, 'author')
+  const homepage = optionalHttps(input.homepage, 'homepage')
   return {
     id,
     name: requiredString(input.name, 'name'),
     description: requiredString(input.description, 'description'),
     ...(i18n === undefined ? {} : { descriptionI18n: i18n }),
+    ...(author === undefined ? {} : { author }),
+    ...(homepage === undefined ? {} : { homepage }),
     roles: [...new Set(roles)] as ('supervisor' | 'worker')[],
     tokenEstimate,
     tools: [...new Set(input.tools as string[])],
@@ -132,6 +164,8 @@ function entryOf(pack: SkillPack, selected = false, locale?: string): CatalogEnt
   return {
     id: pack.id, name: pack.name, description: localizedDescription(pack, locale), origin: pack.origin, roles: pack.roles,
     tokenEstimate: pack.tokenEstimate, tools: pack.tools, source: pack.source, license: pack.license, selected,
+    ...(pack.author === undefined ? {} : { author: pack.author }),
+    ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
   }
 }
 
@@ -251,7 +285,11 @@ export function createSkillApi(options: {
     preview(input) {
       requireSupervisor(db, input.projectId, input.actorSessionId)
       const pack = packOf(input.packId)
-      return { id: pack.id, content: pack.content, tokenEstimate: pack.tokenEstimate, license: pack.license }
+      return {
+        id: pack.id, content: pack.content, tokenEstimate: pack.tokenEstimate, license: pack.license,
+        ...(pack.author === undefined ? {} : { author: pack.author }),
+        ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
+      }
     },
     add(input) {
       requireSupervisor(db, input.projectId, input.actorSessionId)
@@ -274,6 +312,8 @@ export function createSkillApi(options: {
         source: pack.source,
         license: pack.license,
         ...(pack.descriptionI18n === undefined ? {} : { descriptionI18n: pack.descriptionI18n }),
+        ...(pack.author === undefined ? {} : { author: pack.author }),
+        ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
       }
       const temporary = join(skillsDir, `.${pack.id}.tmp-${randomUUID()}`)
       const backup = `${target}.old-${randomUUID()}`
@@ -337,6 +377,8 @@ export function createSkillApi(options: {
         name: manifest.name,
         description: manifest.description,
         descriptionI18n: manifest.descriptionI18n,
+        author: manifest.author,
+        homepage: manifest.homepage,
         roles: manifest.roles,
         tokenEstimate: manifest.tokenEstimate,
         tools: manifest.tools,
