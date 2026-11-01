@@ -86,6 +86,7 @@ export class SkillAdminApi {
   private readonly now: () => number
   private readonly skillsDir: string
   private readonly pending = new Map<string, PendingPlan>()
+  private readonly bindings = new Map<string, { readonly projectId: string; readonly operatorSessionId: string }>()
 
   constructor(options: {
     readonly db: DatabaseSync
@@ -110,6 +111,42 @@ export class SkillAdminApi {
     const auditDir = options.auditDir ?? join(homedir(), '.dsh', 'cadre-skill-admin')
     mkdirSync(auditDir, { recursive: true })
     this.auditFile = join(auditDir, 'audit.jsonl')
+  }
+
+  /** Bind a created ordinary session to its supervisor operator for tool calls. */
+  bindSession(input: { readonly sessionId: string; readonly projectId: string; readonly operatorSessionId: string }): void {
+    this.requireOperator(input.projectId, input.operatorSessionId)
+    this.bindings.set(input.sessionId, { projectId: input.projectId, operatorSessionId: input.operatorSessionId })
+  }
+
+  /** Catalog for a bound admin session. */
+  catalogFor(sessionId: string): ReturnType<SkillApi['catalog']> {
+    const binding = this.bindingOf(sessionId)
+    return this.api.catalog({ projectId: binding.projectId, actorSessionId: binding.operatorSessionId })
+  }
+
+  /** Detail for a bound admin session; includes the body the model may inspect. */
+  previewFor(sessionId: string, packId: string): ReturnType<SkillApi['preview']> {
+    const binding = this.bindingOf(sessionId)
+    return this.api.preview({ projectId: binding.projectId, actorSessionId: binding.operatorSessionId, packId })
+  }
+
+  /** Audit rows for a bound admin session. */
+  auditForSession(sessionId: string, limit?: number): readonly Record<string, unknown>[] {
+    const binding = this.bindingOf(sessionId)
+    return this.auditFor({ ...binding, ...(limit === undefined ? {} : { limit }) })
+  }
+
+  /** Plan for a bound admin session. */
+  async planForSession(sessionId: string, input: Omit<PlanInput, 'projectId' | 'operatorSessionId'>): Promise<SkillPlan> {
+    const binding = this.bindingOf(sessionId)
+    return this.plan({ ...binding, ...input })
+  }
+
+  /** Confirmation token for a plan created by a bound session. */
+  tokenForSession(sessionId: string, planId: string): string | undefined {
+    this.bindingOf(sessionId)
+    return this.tokenFor(planId)
   }
 
   /** Create or list ordinary admin sessions; never writes a roster row. */
@@ -307,6 +344,15 @@ export class SkillAdminApi {
 
   private requireOperator(projectId: string, operatorSessionId: string): void {
     this.api.catalog({ projectId, actorSessionId: operatorSessionId })
+  }
+
+  private bindingOf(sessionId: string): { readonly projectId: string; readonly operatorSessionId: string } {
+    const binding = this.bindings.get(sessionId)
+    if (binding === undefined) {
+      throw new SkillIpcError('SKILL_ADMIN_SESSION_UNBOUND', 403, '技能管理员会话未绑定主管')
+    }
+    this.requireOperator(binding.projectId, binding.operatorSessionId)
+    return binding
   }
 
   private audit(record: Record<string, unknown>): void {

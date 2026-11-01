@@ -45,6 +45,7 @@ interface HostContext {
   effect(setup: () => () => void): void
   inject?(dependencies: readonly string[], callback: (scope: unknown) => void): void
   get?(name: string): unknown
+  provide?(name: string, value: unknown): void
 }
 interface Membership {
   readonly role: string
@@ -237,6 +238,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         }
         return admin
       }
+      if (admin !== undefined) ctx.provide?.('skillAdmin', admin)
       const reply = (res: ServerResponse, status: number, body: unknown): void => {
         res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify(body))
@@ -332,11 +334,17 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         const cwd = typeof body.cwd === 'string' && body.cwd !== ''
           ? body.cwd : join(homedir(), '.dsh', 'cadre-skill-admin', 'workspace')
         mkdirSync(cwd, { recursive: true })
-        return requireAdmin().createSession({
+        const created = await requireAdmin().createSession({
           projectId: required(body, 'projectId'),
           operatorSessionId: required(body, 'operatorSessionId'),
           cwd,
         })
+        requireAdmin().bindSession({
+          sessionId: created.sessionId,
+          projectId: required(body, 'projectId'),
+          operatorSessionId: required(body, 'operatorSessionId'),
+        })
+        return created
       })
       route('/cadre/skills/admin/sessions', body => requireAdmin().listSessions({
         projectId: required(body, 'projectId'),

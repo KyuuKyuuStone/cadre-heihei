@@ -54,4 +54,11 @@ describe('shipped agent presets', () => {
     expect(skill).toContain('Dispatch template')
     expect(skill).toContain('Release preflight')
   })
+
+  it('mounts the skill-admin tools only in the skill-admin preset', () => {
+    const cadreApp = readFileSync(new URL('../../cadre-app/cordis.patch.yml', import.meta.url), 'utf8')
+    expect(cadreApp).toContain('id: cadre-skill-admin')
+    expect(cadreApp).toContain("name: '@deepseek-ai/dsh-host-session-skills/admin'")
+    expect(preset('cadre')).not.toContain('host-session-skills/admin')
+  })
 })

@@ -82,6 +82,15 @@ Unknown/unsupported URLs return a plan with `kind: 'unsupported'` and a readable
 reason. The admin operator is authorized from the roster on every call; the
 conversation itself carries no role prompt.
 
+### Model tools (preset-scoped)
+
+`./admin` is mounted only by the `cadre-skill-admin` preset. It registers
+`skill_catalog`, `skill_preview`, `skill_plan`, and `skill_audit`; those tools
+resolve the bound operator from the admin session and never write. `skill_plan`
+returns a one-time `confirmToken`; execution remains `POST
+/cadre/skills/admin/apply` after the user confirms in the UI. The preset mounts
+read-only fs and fetch tools only — no shell, write, team, or email tools.
+
 ## Known Limitations and Deferred Work
 
 - No settings UI yet; the IPC above is the data surface.
