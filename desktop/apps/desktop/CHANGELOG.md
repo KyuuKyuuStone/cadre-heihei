@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.2
+
+- **技能管理员（普通对话）**：技能页内嵌 `cadre-skill-admin` hidden preset，普通 Session，不写花名册/不占员工位；`skill_catalog`/`skill_preview`/`skill_plan`/`skill_audit` 四个模型工具；安装/更新/删除由用户确认后走 `admin/apply`（planId+token），带备份、回滚、审计
+- **SkillHub 格式适配**：支持 `@scope/<pack>/` 两层目录与无 `manifest.json` 的 `SKILL.md` frontmatter 合成（id/name/description/roles/tokenEstimate/source/license），scope 限定 id 避免 slug 冲突
+- **技能来源/署名**：manifest 支持 `author`/https `homepage`，catalog/preview 展示；URL 安装、来源入口、预设页底部致谢
+- **主管任务卡**：派单默认折叠、区分配色；`【Cadre 任务】` 改为 `【主管任务】`，字段不变、旧前缀兼容
+- **Cadre 团队模式**：`cadre` 预设聚焦 shell/read/write/grep/测试/打包/台账，persona 带派单四项、证据、基线、actor-target、环境与 release preflight；`cadre-team` 内置技能
+- **P0/兼容**：打包始终重建 CJS、schema 2→3 幂等迁移、技能库分层、URL 安装大小/超时限制
+
+### 已知限制
+
+- 技能管理员会话绑定保存在内存，应用重启后旧会话需重新绑定
+- 技能市场（ClawHub/SkillHub）未接；浏览器/截图工具未内置
+- `cadre-team` 内置技能默认不自动选中，需在技能库选择
+- 安装包未签名（SmartScreen 提示）；429/外部依赖仅有界重试
+
 ## 1.1.1
 
 - **真实库 schema 2→3 修复**：打包始终从当前源码重建 CJS，启动 `initCadreStore` 幂等补齐 `members.skills_json`；旧 schema 下技能 catalog/get 降级为空、set 返回可读 `SKILL_SCHEMA_OUTDATED`
