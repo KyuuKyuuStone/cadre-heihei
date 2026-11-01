@@ -180,11 +180,26 @@ export function CadreSkillSettingsMenuItem({
 } & InjectFace<CadreSkillsInjected> & PropsLocale<'sidebar'>) {
   const [, setMenuOpen] = useMenuOpenState()
   const members = useRoster(state => state.members)
-  const activeSessionId = useSessions(state => Object.entries(state.byId)
-    .find(([, session]) => (session?.retainedBy?.mainView ?? 0) > 0)?.[0])
-  const actor = members.find(item => item.sessionId === activeSessionId)
+  const activeContext = useSessions((state) => {
+    const active = Object.entries(state.byId)
+      .filter(([, session]) => (session?.retainedBy?.mainView ?? 0) > 0)
+      .map(([id]) => id)
+    const supervisor = active.find(id => members.some(item => item.sessionId === id && item.role === 'supervisor'))
+    if (supervisor !== undefined) return `supervisor:${supervisor}`
+    return active[0] === undefined ? 'none' : `active:${active[0]}`
+  })
+  // Retention order is not identity: during a navigation handoff both the old
+  // and new Session can be retained. Resolve the acting supervisor from the
+  // retained set, not from whichever id happens to come first. With no active
+  // Session (the skill/team panel is showing), a sole supervisor still owns the
+  // roster controls; an active non-roster/ordinary Session hides them.
+  const activeId = activeContext.startsWith('supervisor:') ? activeContext.slice('supervisor:'.length) : undefined
+  const soleSupervisor = members.filter(item => item.role === 'supervisor' && item.state !== 'departed')
+  const actor = activeId !== undefined
+    ? members.find(item => item.sessionId === activeId)
+    : activeContext === 'none' && soleSupervisor.length === 1 ? soleSupervisor[0] : undefined
   const member = members.find(item => item.sessionId === sessionId)
-  if (actor?.role !== 'supervisor' || member === undefined || member.state === 'departed') return null
+  if (actor === undefined || member === undefined || member.state === 'departed') return null
   return (
     <MenuItemButton
       icon={<IconAgentPresetOutlineRegular />}

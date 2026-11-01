@@ -48,29 +48,38 @@ function roster(_role: 'supervisor' | 'worker'): CadreRosterState {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Cadre skill settings', () => {
-  it('shows the employee-row entry only when the active session is a supervisor', () => {
-    const menuProps = (sessionId: string) => ({
+  it('shows the employee-row entry when a supervisor is active, even if an employee session is retained first', () => {
+    const openSkills = vi.fn()
+    const menuProps = (sessionId: string, title = '员工', retained = {
+      w1: { retainedBy: { mainView: 1 } },
+      sup: { retainedBy: { mainView: 1 } },
+    }) => ({
       sessionId,
-      displayTitle: '员工',
+      displayTitle: title,
       useMenuOpenState: () => [false, vi.fn()] as const,
       useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(roster('supervisor'))) as never,
       useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
-        selector({ byId: { sup: { retainedBy: { mainView: 1 } }, w1: { retainedBy: { mainView: 0 } } } })) as never,
-      openSkills: vi.fn(),
+        selector({ byId: retained })) as never,
+      openSkills,
       closeSkills: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreSkillSettingsMenuItem>)
     render(<CadreSkillSettingsMenuItem {...menuProps('w1')} />)
-    expect(screen.getByRole('menuitem', { name: '技能' })).toBeTruthy()
+    const entry = screen.getByRole('menuitem', { name: '技能' })
+    expect(entry).toBeTruthy()
     expect(screen.getByRole('separator')).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: '技能' }).textContent).toBe('技能')
+    expect(entry.textContent).toBe('技能')
+    fireEvent.click(entry)
+    expect(openSkills).toHaveBeenCalledWith('w1', '员工', 'worker', 'sup')
+
+    cleanup()
+    render(<CadreSkillSettingsMenuItem {...menuProps('sup', '主管')} />)
+    fireEvent.click(screen.getByRole('menuitem', { name: '技能' }))
+    expect(openSkills).toHaveBeenLastCalledWith('sup', '主管', 'supervisor', 'sup')
 
     cleanup()
     const employeeView = {
-      ...menuProps('w1'),
-      useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) => selector({ byId: {
-        sup: { retainedBy: { mainView: 0 } }, w1: { retainedBy: { mainView: 1 } },
-      } })) as never,
+      ...menuProps('w1', '员工', { w1: { retainedBy: { mainView: 1 } }, sup: { retainedBy: { mainView: 0 } } }),
     } as unknown as ComponentProps<typeof CadreSkillSettingsMenuItem>
     const hidden = render(<CadreSkillSettingsMenuItem {...employeeView} />)
     expect(hidden.container.firstChild).toBeNull()
