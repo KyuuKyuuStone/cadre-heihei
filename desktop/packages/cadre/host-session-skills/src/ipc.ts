@@ -49,11 +49,24 @@ function parseSkills(value: unknown): string[] {
   }
 }
 
+function isMissingSkillsColumn(error: unknown): boolean {
+  return error instanceof Error && /no such column:\s*skills_json/iu.test(error.message)
+}
+
 function readMember(db: DatabaseSync, projectId: string, sessionId: string): MemberRow | undefined {
-  const row = db.prepare('SELECT role, state, skills_json FROM members WHERE project_id = ? AND session_id = ? LIMIT 1')
-    .get(projectId, sessionId) as { role?: unknown; state?: unknown; skills_json?: unknown } | undefined
-  if (row === undefined) return undefined
-  return { role: String(row.role), state: String(row.state), skills: parseSkills(row.skills_json) }
+  try {
+    const row = db.prepare('SELECT role, state, skills_json FROM members WHERE project_id = ? AND session_id = ? LIMIT 1')
+      .get(projectId, sessionId) as { role?: unknown; state?: unknown; skills_json?: unknown } | undefined
+    if (row === undefined) return undefined
+    return { role: String(row.role), state: String(row.state), skills: parseSkills(row.skills_json) }
+  } catch (error) {
+    if (!isMissingSkillsColumn(error)) throw error
+    // A pre-v3 ledger under a stale bundled reader: keep roster/read paths
+    // usable and treat the selection as empty instead of returning HTTP 500.
+    const row = db.prepare('SELECT role, state FROM members WHERE project_id = ? AND session_id = ? LIMIT 1')
+      .get(projectId, sessionId) as { role?: unknown; state?: unknown } | undefined
+    return row === undefined ? undefined : { role: String(row.role), state: String(row.state), skills: [] }
+  }
 }
 
 function requireSupervisor(db: DatabaseSync, projectId: string, actorSessionId: string): MemberRow {
@@ -127,6 +140,11 @@ export function createSkillApi(options: {
       try {
         writer.prepare('UPDATE members SET skills_json = ?, updated_at = ? WHERE project_id = ? AND session_id = ?')
           .run(JSON.stringify(selected), new Date().toISOString(), input.projectId, input.targetSessionId)
+      } catch (error) {
+        if (isMissingSkillsColumn(error)) {
+          throw new SkillIpcError('SKILL_SCHEMA_OUTDATED', 409, '台账 schema 缺少 skills_json；请重启应用完成 schema 3 迁移')
+        }
+        throw error
       } finally {
         writer.close()
       }

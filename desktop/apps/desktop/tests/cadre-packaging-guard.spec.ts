@@ -57,15 +57,15 @@ function writeAsar(path: string, entries: readonly string[]): void {
 }
 
 describe('ensureCadreBundles', () => {
-  it('does nothing when both bundles exist', () => {
+  it('always rebuilds so stale gitignored bundles cannot ship', () => {
     const root = desktopRoot()
     for (const path of Object.values(cadreBundlePaths(root))) {
       mkdirSync(dirname(path), { recursive: true })
       writeFileSync(path, '// bundle', 'utf8')
     }
     let built = 0
-    expect(ensureCadreBundles(root, { build: () => { built += 1 } })).toEqual({ rebuilt: false })
-    expect(built).toBe(0)
+    expect(ensureCadreBundles(root, { build: () => { built += 1 } })).toEqual({ rebuilt: true })
+    expect(built).toBe(1)
   })
 
   it('rebuilds when either bundle is missing', () => {

@@ -53,13 +53,13 @@ function missingBundles(desktopRoot) {
  * is exactly the 0.9.3 defect.
  * @param {string} desktopRoot - absolute `desktop/` directory.
  * @param {{ build?: (desktopRoot: string) => void }} [options] - Test seam for the rebuild command.
- * @returns {{ rebuilt: boolean }} whether a build was needed.
+ * @returns {{ rebuilt: true }} whether a build was performed.
  */
 export function ensureCadreBundles(desktopRoot, options = {}) {
-  const missing = missingBundles(desktopRoot)
-  if (missing.length === 0) return { rebuilt: false }
-
-  console.log(`[cadre-bundles] missing ${missing.join(', ')}; rebuilding before packaging`)
+  // A git checkout leaves gitignored bundles from an older commit in place, so
+  // existence alone does not mean freshness. Packaging always rebuilds; the
+  // source-hash stamp gate still rejects stale bundles for ordinary builds.
+  console.log('[cadre-bundles] rebuilding CJS bundles from current sources before packaging')
   if (options.build === undefined) {
     const result = spawnSync(process.execPath, [join(desktopRoot, 'scripts', 'build-cadre-collab.mjs')], {
       cwd: desktopRoot,

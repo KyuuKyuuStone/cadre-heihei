@@ -201,4 +201,26 @@ describe('session skill packs', () => {
       .toThrow(/只有本项目在册 supervisor/)
     db.close()
   })
+
+  it('degrades to empty selections when the real ledger is still schema 2', () => {
+    const root = workspace()
+    const packs = join(root, 'packs')
+    pack(packs, 'design', ['worker'])
+    const db = new DatabaseSync(join(root, 'ledger.sqlite'))
+    db.exec(`CREATE TABLE members (
+      project_id TEXT NOT NULL, session_id TEXT NOT NULL, role TEXT NOT NULL,
+      display_name TEXT, description TEXT, state TEXT NOT NULL,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, session_id))`)
+    db.prepare(`INSERT INTO members (project_id, session_id, role, state, created_at, updated_at)
+      VALUES ('p1', 's1', 'supervisor', 'available', 'now', 'now')`).run()
+    db.prepare(`INSERT INTO members (project_id, session_id, role, state, created_at, updated_at)
+      VALUES ('p1', 'w1', 'worker', 'available', 'now', 'now')`).run()
+    const api = createSkillApi({ db, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs })
+    expect(api.get({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1' }).skills).toEqual([])
+    expect(api.catalog({ projectId: 'p1', actorSessionId: 's1' })[0]).toMatchObject({ id: 'design', selected: false })
+    expect(() => api.set({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1', skills: ['design'] }))
+      .toThrow(/schema 3 迁移/)
+    db.close()
+  })
 })
