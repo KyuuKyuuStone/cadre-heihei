@@ -90,18 +90,22 @@ it('replaces the default preset group tag with its new-task default status', () 
   expect(within(standard).queryByText(en.setDefault)).toBeNull()
   expect(within(rowFor('mine')).getByText(en.customGroup)).toBeTruthy()
 })
-it('marks Cadre and upstream presets and renders the attribution footer', () => {
+it('keeps Cadre in the built-in group, removes per-card upstream badges, and attributes at the footer', () => {
   view({ rows: [
     { id: 'cadre', name: 'Cadre', isDefault: true, source: 'cadre' },
     { id: 'standard', isDefault: false, source: 'deepseek' },
   ] })
+  const builtIn = screen.getByRole('heading', { name: en.builtInGroup }).closest('section')!
+  expect(within(builtIn).getByText('Cadre')).toBeTruthy()
   expect(within(rowFor('cadre')).getByText(en.cadreDefault)).toBeTruthy()
-  expect(within(rowFor('standard')).getByText(en.upstreamSource)).toBeTruthy()
-  const footer = screen.getByText(en.attribution).closest('footer')
-  expect(footer).not.toBeNull()
-  expect(within(footer!).getByText(en.attributionLink).getAttribute('href'))
+  expect(within(rowFor('cadre')).queryByText(en.customGroup)).toBeNull()
+  expect(within(rowFor('standard')).queryByText(/DeepSeek Harness/)).toBeNull()
+  expect(within(rowFor('cadre')).getByText('Cadre', { selector: 'span' }).getAttribute('title')).toBe('Cadre')
+  const attribution = screen.getByText(en.attribution, { exact: false }).closest('footer')
+  expect(attribution).not.toBeNull()
+  expect(within(attribution!).getByText(en.attributionLink).getAttribute('href'))
     .toBe('https://github.com/deepseek-ai/deepseek-harness')
-  expect(within(footer!).getByText(en.attributionDisclaimer)).toBeTruthy()
+  expect(attribution!.textContent).toContain(en.attributionDisclaimer)
 })
 
 it('omits an empty group instead of leaving a heading behind', () => {

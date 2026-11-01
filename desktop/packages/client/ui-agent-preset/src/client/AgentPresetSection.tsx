@@ -103,7 +103,9 @@ export function AgentPresetSection({
     <p className={css.intro}>{t('sectionIntro')}</p>
     {state.error === null ? null : <p className={css.error} role="alert">{state.error}</p>}
     {([true, false] as const).map((builtIn) => {
-      const rows = state.rows.filter(row => isBuiltInPreset(row) === builtIn
+      const belongsToBuiltIn = (row: (typeof state.rows)[number]): boolean =>
+        isBuiltInPreset(row) || row.source === 'cadre'
+      const rows = state.rows.filter(row => belongsToBuiltIn(row) === builtIn
         && (developerTools || !requiresCodingTools(row)))
       const entry = builtIn ? null : creatorButton
       if (rows.length === 0 && entry === null) return null
@@ -135,9 +137,6 @@ export function AgentPresetSection({
                     {row.source === 'cadre' && (
                       <Tag tone="solid">{t(row.isDefault ? 'cadreDefault' : 'cadreRecommended')}</Tag>
                     )}
-                    {(row.source === 'deepseek' || (builtIn && row.source === undefined)) && (
-                      <Tag tone="outline">{t('upstreamSource')}</Tag>
-                    )}
                   </span>
                   <code className={css.cardId} title={row.id}>{row.id}</code>
                 </span>
@@ -166,8 +165,7 @@ export function AgentPresetSection({
       </section>
     })}
     <footer className={css.attribution}>
-      <p>{t('attribution')} <a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noopener noreferrer">{t('attributionLink')}</a></p>
-      <p>{t('attributionDisclaimer')}</p>
+      <p>{t('attribution')} <a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noopener noreferrer">{t('attributionLink')}</a> · {t('attributionDisclaimer')}</p>
     </footer>
     {guide === null ? null : <PresetGuideDialog guide={guide.content} initialPage={guide.page} t={t} onClose={() => { setGuide(null) }} />}
     <Modal open={viewed !== null} onClose={closeViewer} closeLabel={t('close')}

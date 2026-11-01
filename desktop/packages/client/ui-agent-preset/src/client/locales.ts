@@ -35,7 +35,6 @@ export type AgentPresetSettingsKey =
   | 'createPluginMissing'
   | 'cadreRecommended'
   | 'cadreDefault'
-  | 'upstreamSource'
   | 'attribution'
   | 'attributionLink'
   | 'attributionDisclaimer'
@@ -84,7 +83,6 @@ export const en: Record<AgentPresetSettingsKey, string> = {
   createPluginMissing: 'Creator mode is not included in this configuration',
   cadreRecommended: 'Cadre recommended',
   cadreDefault: 'Cadre default',
-  upstreamSource: 'From DeepSeek Harness',
   attribution: 'Based on DeepSeek Harness (MIT).',
   attributionLink: 'DeepSeek Harness on GitHub',
   attributionDisclaimer: 'Cadre is an independent distribution and does not imply endorsement by DeepSeek.',
@@ -131,7 +129,6 @@ export const zh: Record<AgentPresetSettingsKey, string> = {
   createPluginMissing: '当前配置未提供创造模式',
   cadreRecommended: 'Cadre 推荐',
   cadreDefault: 'Cadre 默认',
-  upstreamSource: '来自 DeepSeek Harness',
   attribution: '基于 DeepSeek Harness（MIT）。',
   attributionLink: 'GitHub 上的 DeepSeek Harness',
   attributionDisclaimer: 'Cadre 是独立发行版，不代表 DeepSeek 官方，也不暗示 DeepSeek 背书。',
