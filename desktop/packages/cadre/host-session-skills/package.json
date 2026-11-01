@@ -1,0 +1,15 @@
+{
+  "name": "@deepseek-ai/dsh-host-session-skills",
+  "description": "Per-session Cadre skill packs selected from the roster",
+  "version": "1.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": ["lib/**", "!lib/**/*.map"],
+  "license": "MIT"
+}

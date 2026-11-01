@@ -19,6 +19,8 @@ export interface ProjectMembership {
   readonly role: MemberRole
   readonly state: MemberState
   readonly displayName?: string
+  /** Selected skill pack ids; absent/empty means none. */
+  readonly skills?: readonly string[]
 }
 
 export interface DeliveredMessage {

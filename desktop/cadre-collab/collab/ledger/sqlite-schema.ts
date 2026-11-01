@@ -6,7 +6,7 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS members (
   display_name TEXT,
   description  TEXT,
   state        TEXT NOT NULL,
+  skills_json  TEXT NOT NULL DEFAULT '[]',
   created_at   TEXT NOT NULL,
   updated_at   TEXT NOT NULL,
   PRIMARY KEY (project_id, session_id)
@@ -136,10 +137,14 @@ export function initSchema(db: DatabaseSync): void {
   ).run(String(SCHEMA_VERSION))
 }
 
-/** v1 → v2：messages 增加 deliverables_json（既有库原地补列）。 */
+/** v1 → v2 messages.deliverables_json; v2 → v3 members.skills_json (既有库原地补列). */
 function migrate(db: DatabaseSync): void {
-  const columns = db.prepare(`PRAGMA table_info(messages)`).all() as Array<{ name?: unknown }>
-  if (!columns.some((column) => String(column.name) === 'deliverables_json')) {
+  const messageColumns = db.prepare(`PRAGMA table_info(messages)`).all() as Array<{ name?: unknown }>
+  if (!messageColumns.some((column) => String(column.name) === 'deliverables_json')) {
     db.exec(`ALTER TABLE messages ADD COLUMN deliverables_json TEXT`)
+  }
+  const memberColumns = db.prepare(`PRAGMA table_info(members)`).all() as Array<{ name?: unknown }>
+  if (!memberColumns.some((column) => String(column.name) === 'skills_json')) {
+    db.exec(`ALTER TABLE members ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'`)
   }
 }

@@ -2514,6 +2514,9 @@ importers:
       '@deepseek-ai/dsh-host-governance':
         specifier: workspace:*
         version: link:../../cadre/host-governance
+      '@deepseek-ai/dsh-host-session-skills':
+        specifier: workspace:*
+        version: link:../../cadre/host-session-skills
       '@deepseek-ai/dsh-host-supervisor-skill':
         specifier: workspace:*
         version: link:../../cadre/host-supervisor-skill
@@ -3185,6 +3188,8 @@ importers:
       '@deepseek-ai/dsh-cadre-email-notify':
         specifier: workspace:*
         version: link:../email-notify
+
+  packages/cadre/host-session-skills: {}
 
   packages/cadre/host-supervisor-skill: {}
 

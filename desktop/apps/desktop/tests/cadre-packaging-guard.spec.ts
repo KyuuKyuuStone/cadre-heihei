@@ -118,6 +118,8 @@ describe('cadreAsarPath', () => {
     expect(patch).toMatch(/stepPressureCheck:\s*false/)
     expect(patch).toMatch(/stepPressureThresholdTokens:\s*100000/)
     expect(patch).toMatch(/stepMinToolCallsBetweenChecks:\s*2/)
+    expect(patch).toContain('- id: cadre-session-skills')
+    expect(patch).toContain('@deepseek-ai/dsh-host-session-skills')
     expect(patch).toContain('- id: spill-policy')
     expect(patch).toMatch(/maxInlineTokens:\s*4000/)
   })

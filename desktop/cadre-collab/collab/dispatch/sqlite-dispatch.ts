@@ -34,6 +34,16 @@ function text(value: unknown): string {
   return value === null || value === undefined ? '' : String(value)
 }
 
+/** Tolerant read of the additive `members.skills_json` column. */
+function parseSkills(value: unknown): string[] {
+  try {
+    const parsed: unknown = JSON.parse(text(value))
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 function numberValue(value: unknown): number {
   return Number(value ?? 0)
 }
@@ -62,14 +72,17 @@ export class SqliteCollabStore implements DispatchStorePort {
 
   addMember(membership: ProjectMembership): void {
     const at = this.now()
+    const skillsJson = membership.skills === undefined ? null : JSON.stringify(membership.skills)
     this.ledger.core.db
       .prepare(
         `INSERT INTO members (
-           project_id, session_id, role, display_name, description, state, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
+           project_id, session_id, role, display_name, description, state, skills_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, NULL, ?, COALESCE(?, '[]'), ?, ?)
          ON CONFLICT(project_id, session_id) DO UPDATE SET
            role = excluded.role, state = excluded.state,
-           display_name = excluded.display_name, updated_at = excluded.updated_at`,
+           display_name = excluded.display_name,
+           skills_json = COALESCE(?, members.skills_json),
+           updated_at = excluded.updated_at`,
       )
       .run(
         membership.projectId,
@@ -77,15 +90,17 @@ export class SqliteCollabStore implements DispatchStorePort {
         membership.role,
         membership.displayName ?? null,
         membership.state,
+        skillsJson,
         at,
         at,
+        skillsJson,
       )
   }
 
   listMembers(projectId: ProjectId): readonly ProjectMembership[] {
     const rows = this.ledger.core.db
       .prepare(
-        `SELECT project_id, session_id, role, state, display_name
+        `SELECT project_id, session_id, role, state, display_name, skills_json
          FROM members WHERE project_id = ? ORDER BY rowid ASC`,
       )
       .all(projectId) as Row[]
@@ -95,6 +110,7 @@ export class SqliteCollabStore implements DispatchStorePort {
       role: text(row.role) as ProjectMembership['role'],
       state: text(row.state) as ProjectMembership['state'],
       ...(row.display_name == null ? {} : { displayName: text(row.display_name) }),
+      ...(row.skills_json == null ? {} : { skills: parseSkills(row.skills_json) }),
     }))
   }
 
@@ -182,7 +198,7 @@ export class SqliteCollabStore implements DispatchStorePort {
       findMember: (projectId: ProjectId, sessionId: SessionId) => {
         const row = db
           .prepare(
-            `SELECT project_id, session_id, role, state, display_name
+            `SELECT project_id, session_id, role, state, display_name, skills_json
              FROM members WHERE project_id = ? AND session_id = ?`,
           )
           .get(projectId, sessionId) as Row | undefined
@@ -193,6 +209,7 @@ export class SqliteCollabStore implements DispatchStorePort {
           role: text(row.role) as ProjectMembership['role'],
           state: text(row.state) as ProjectMembership['state'],
           ...(row.display_name == null ? {} : { displayName: text(row.display_name) }),
+          ...(row.skills_json == null ? {} : { skills: parseSkills(row.skills_json) }),
         }
       },
       appendMessage: (message: MessageRecord) => {

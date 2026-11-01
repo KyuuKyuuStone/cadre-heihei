@@ -13,6 +13,8 @@
       name: '@deepseek-ai/dsh-host-write-guard'
     - id: cadre-supervisor-skill
       name: '@deepseek-ai/dsh-host-supervisor-skill'
+    - id: cadre-session-skills
+      name: '@deepseek-ai/dsh-host-session-skills'
 
 # Compaction at an absolute 150k pressure cap for Cadre employees. The row is
 # owned by the base bundle; this layer only adds the Cadre-specific threshold.
