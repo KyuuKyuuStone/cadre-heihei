@@ -98,6 +98,25 @@ describe('Cadre email settings', () => {
     expect(JSON.stringify(body)).not.toContain('apiKey"')
   })
 
+  it('shows noKey and validates recipient add/remove', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: { ...VIEW, hasKey: false } })))
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    expect(await screen.findByText('未检测到环境变量')).toBeTruthy()
+    const input = screen.getByPlaceholderText('name@example.com')
+    fireEvent.change(input, { target: { value: 'bad-address' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
+    expect(screen.getByRole('alert').textContent).toContain('收件人地址格式不正确')
+    fireEvent.change(input, { target: { value: 'second@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
+    expect(screen.getByText('second@example.com')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '移除 second@example.com' }))
+    expect(screen.queryByText('second@example.com')).toBeNull()
+  })
+
   it('rejects invalid email and still exposes test and dry-run results', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)
