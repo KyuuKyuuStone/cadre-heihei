@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { apply } from '../src/index.ts'
+import { createSkillApi } from '../src/ipc.ts'
 
 const roots: string[] = []
 const cleanups: Array<() => void> = []
@@ -163,5 +164,41 @@ describe('session skill packs', () => {
     await h.fire(a)
     expect(disposed).toEqual(['design'])
     expect(events.map(skill => skill.content)).toEqual(['# v1', '# v2'])
+  })
+
+  it('catalog/get/set/preview enforce supervisor, roles, dedupe and persistence', () => {
+    const root = workspace()
+    const packs = join(root, 'packs')
+    pack(packs, 'design', ['worker'], '# design body')
+    pack(packs, 'lead', ['supervisor'])
+    const db = ledger(root)
+    insert(db, 's1', 'supervisor', [])
+    insert(db, 'w1', 'worker', ['design'])
+    db.prepare(`UPDATE members SET description = 'keep me' WHERE session_id = 'w1'`).run()
+    const api = createSkillApi({ db, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs })
+
+    expect(api.catalog({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1' }))
+      .toMatchObject([
+        { id: 'design', selected: true, roles: ['worker'], tokenEstimate: 12 },
+        { id: 'lead', selected: false, roles: ['supervisor'] },
+      ])
+    expect(api.get({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1' }).skills).toEqual(['design'])
+    expect(api.set({
+      projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1', skills: ['design', 'design'],
+    }).skills).toEqual(['design'])
+    const row = db.prepare(`SELECT skills_json, description FROM members WHERE session_id = 'w1'`).get() as {
+      skills_json: string; description: string
+    }
+    expect(JSON.parse(row.skills_json)).toEqual(['design'])
+    expect(row.description).toBe('keep me')
+    expect(api.preview({ projectId: 'p1', actorSessionId: 's1', packId: 'design' }))
+      .toMatchObject({ id: 'design', content: '# design body', tokenEstimate: 12 })
+    expect(() => api.set({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1', skills: ['lead'] }))
+      .toThrow(/不能加载技能包 lead/)
+    expect(() => api.set({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1', skills: ['missing'] }))
+      .toThrow(/未知技能包/)
+    expect(() => api.get({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w1' }))
+      .toThrow(/只有本项目在册 supervisor/)
+    db.close()
   })
 })

@@ -7,7 +7,9 @@
 import { DatabaseSync } from 'node:sqlite'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { loadSkillCatalog, type SkillPack } from './catalog.ts'
+import { createSkillApi, SkillIpcError } from './ipc.ts'
 
 export interface Config {
   /** Disable the plugin while keeping the row mounted. */
@@ -34,6 +36,7 @@ interface RegisteredSkill {
 interface HostContext {
   on(event: string, handler: (payload: { readonly agent?: AgentLike }, next: () => Promise<unknown>) => unknown): () => void
   effect(setup: () => () => void): void
+  inject?(dependencies: readonly string[], callback: (scope: unknown) => void): void
 }
 interface Membership {
   readonly role: string
@@ -157,6 +160,80 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     if (current.size === 0) registered.delete(agent.id)
     else registered.set(agent.id, current)
     return next()
+  }
+
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['webServer', 'connection'], (scope) => {
+      const web = scope as {
+        webServer: { register(route: {
+          kind: 'exact'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+        }): () => void }
+        connection: { admit(req: IncomingMessage): { readonly rejection: number } | unknown }
+        effect(setup: () => () => void, label: string): () => void
+      }
+      const api = createSkillApi({ db, ledgerPath, skillsDir })
+      const reply = (res: ServerResponse, status: number, body: unknown): void => {
+        res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(body))
+      }
+      const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
+        const chunks: Buffer[] = []
+        let size = 0
+        for await (const chunk of req) {
+          const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk as Buffer
+          size += buffer.length
+          if (size > 16_384) throw new Error('请求体过大')
+          chunks.push(buffer)
+        }
+        const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('请求体必须是对象')
+        return parsed as Record<string, unknown>
+      }
+      const required = (body: Record<string, unknown>, name: string): string => {
+        if (typeof body[name] !== 'string' || body[name] === '') throw new SkillIpcError('SKILL_INVALID', 400, `${name} 必填`)
+        return body[name] as string
+      }
+      const route = (path: string, operation: (body: Record<string, unknown>) => unknown): void => {
+        web.effect(() => web.webServer.register({
+          kind: 'exact',
+          path,
+          handler: async (req, res) => {
+            if (req.method !== 'POST') return reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 POST' })
+            const admission = web.connection.admit(req)
+            if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
+              return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
+            }
+            try {
+              reply(res, 200, { ok: true, result: operation(await readBody(req)) })
+            } catch (error) {
+              if (error instanceof SkillIpcError) return reply(res, error.status, { ok: false, code: error.code, message: error.message })
+              reply(res, 500, { ok: false, code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) })
+            }
+          },
+        }), `host-session-skills: ${path}`)
+      }
+      route('/cadre/skills/catalog', body => api.catalog({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        ...(typeof body.targetSessionId === 'string' ? { targetSessionId: body.targetSessionId } : {}),
+      }))
+      route('/cadre/skills/get', body => api.get({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        targetSessionId: required(body, 'targetSessionId'),
+      }))
+      route('/cadre/skills/set', body => api.set({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        targetSessionId: required(body, 'targetSessionId'),
+        skills: body.skills,
+      }))
+      route('/cadre/skills/preview', body => api.preview({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        packId: required(body, 'packId'),
+      }))
+    })
   }
 
   ctx.on('agent/pre-step', listener)
