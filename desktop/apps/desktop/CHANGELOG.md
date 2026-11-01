@@ -11,6 +11,8 @@
 - **技能署名/主页链接**：manifest 支持可选 `author` 与 https `homepage`，catalog/preview 返回并在技能库展示；`ai-design` 标注 Elaya 及上游仓库，Cadre 内置技能标注 Cadre
 - **来源入口**：技能库/预设页提供上游仓库/主页链接与底部致谢
 - **预设页归属修正**：底部致谢区、Cadre 预设归入内置分组并去除多余来源徽标
+- **主管任务卡**：派单消息默认折叠为任务卡，主管/员工任务使用区分配色与标题；正文与交付要求可展开
+- **派单文案**：`【Cadre 任务】` 改为 `【主管任务】`，任务号/标题/截止/交付要求字段不变；历史卡片兼容旧前缀
 - **手动添加/删除技能**：`/cadre/skills/add` 接收 manifest + SKILL.md 正文，kebab-case/角色/路径校验，默认不覆盖，`overwrite:true` 才替换；`/cadre/skills/remove` 需 confirm；原子目录写入
 - **工具结果 4k 落盘**：Cadre `spill-policy.maxInlineTokens` 12.5k → 4000，超出保留头尾并写 spill 文件路径，tool call/result 配对不变
 - **Token 治理**：compaction 保留尾部 50k（阈值 150k 不变）；step 级压缩 `stepPressureCheck` 默认 **true**（100k 阈值、2 个 tool 起检）；压缩发生时会增加一次摘要 LLM 调用
