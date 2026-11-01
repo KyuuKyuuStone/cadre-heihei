@@ -110,11 +110,13 @@ describe('assertCadreAsarEntries', () => {
 })
 
 describe('cadreAsarPath', () => {
-  it('pins the Cadre compaction threshold and retained tail', () => {
+  it('pins the Cadre compaction threshold, retained tail, and spill cap', () => {
     const patch = readFileSync('packages/bundle/cadre-app/cordis.patch.yml', 'utf8')
     expect(patch).toContain('- id: compaction-basic')
     expect(patch).toMatch(/thresholdTokens:\s*150000/)
     expect(patch).toMatch(/retainTokens:\s*50000/)
+    expect(patch).toContain('- id: spill-policy')
+    expect(patch).toMatch(/maxInlineTokens:\s*4000/)
   })
 
   it('mirrors electron-builder output for Windows and macOS', () => {
