@@ -90,7 +90,22 @@
 }
 
 .dialog {
-  max-width: min(520px, 92vw);
+  max-width: min(560px, 92vw);
+  max-height: min(86vh, 720px);
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.footerActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  width: 100%;
 }
 
 .help {

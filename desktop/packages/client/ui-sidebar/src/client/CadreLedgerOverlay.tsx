@@ -297,160 +297,164 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
       contentClassName={css.content ?? ''}
       footer={<Button variant="outline" onClick={closeLedger}>关闭</Button>}
     >
-      <div className={css.toolbar}>
-        <Input
-          value={query}
-          placeholder="搜索任务 / 员工 / 交付物…"
-          aria-label="搜索台账"
-          onChange={(event) => { setQuery(event.target.value); setPage(1) }}
-        />
-        <Button variant="outline" size="sm" onClick={reload}>刷新</Button>
-      </div>
-
-      {stallProject?.status === 'error' && (
-        <div className={css.stallError} role="alert">
-          <span>{t('stall.card.viewError', {
-            message: stallProject.error ?? t('stall.readFailed'),
-          })}</span>
-          <Button variant="outline" size="sm" onClick={retryStall}>{t('stall.retry')}</Button>
+      <div className={css.ledgerBody}>
+        <div className={css.toolbar}>
+          <Input
+            value={query}
+            placeholder="搜索任务 / 员工 / 交付物…"
+            aria-label="搜索台账"
+            onChange={(event) => { setQuery(event.target.value); setPage(1) }}
+          />
+          <Button variant="outline" size="sm" onClick={reload}>刷新</Button>
         </div>
-      )}
-      {stallProject?.stale === true && (
-        <p className={css.hint} role="status">{t('stall.card.ledgerStale')}</p>
-      )}
 
-      <div className={css.filters} role="radiogroup" aria-label="台账筛选">
-        {FILTERS.map(item => (
-          <Button
-            key={item.id}
-            variant={filter === item.id ? 'primary' : 'outline'}
-            size="sm"
-            onClick={() => { setFilter(item.id); setPage(1) }}
-          >
-            {item.label} {counts[item.id]}
-          </Button>
-        ))}
-      </div>
-
-      {load.kind === 'loading' && <p role="status" className={css.hint}>读取台账…</p>}
-      {load.kind === 'error' && (
-        <div className={css.errorBox} role="alert">
-          <span>{load.reason}</span>
-          <span className={css.hint}>台账不可用时不展示示例数据；请检查主进程台账路径或稍后重试。</span>
-        </div>
-      )}
-      {load.kind === 'ready' && rows.length === 0 && (
-        <p role="status" className={css.hint}>这个项目部还没有台账记录。</p>
-      )}
-      {load.kind === 'ready' && rows.length > 0 && visible.length === 0 && (
-        <p role="status" className={css.hint}>没有匹配的任务；换一个筛选或关键词。</p>
-      )}
-      {pageRows.length > 0 && (
-        <div className={css.table} role="table" aria-label="项目台账">
-          <div className={css.headerRow} role="row">
-            <span role="columnheader">任务</span>
-            <span role="columnheader">归属</span>
-            <span role="columnheader">状态</span>
-            <span role="columnheader">截止</span>
-            <span role="columnheader">交付物</span>
-            <span role="columnheader">验收结果</span>
+        {stallProject?.status === 'error' && (
+          <div className={css.stallError} role="alert">
+            <span>{t('stall.card.viewError', {
+              message: stallProject.error ?? t('stall.readFailed'),
+            })}</span>
+            <Button variant="outline" size="sm" onClick={retryStall}>{t('stall.retry')}</Button>
           </div>
-          {pageRows.map((row) => {
-            const open = expanded === row.taskId
-            const overdue = isCadreTaskOverdue(row.dueAt, now)
-            const stallTask = stallTasks.get(row.taskId)
-            const lastError = stallTask?.lastError ?? null
-            const execution = stallTask === undefined ? null : executionOf(stallTask)
-            const progress = executionText(execution, t)
-            const stallText = progress !== ''
-              ? progress
-              : stallTask !== undefined
-                ? stallStateText(stallTask.stallState, stallTask.lastActivityAt, t)
-                : stallProject?.status === 'ready' ? t('stall.activityUnknown') : null
-            const stallClass = progress !== ''
-              ? css.stallNormal
-              : stallTask?.stallState === 'stalled'
-                ? css.stallStalled
-                : stallTask?.stallState === 'possibly_stalled'
-                  ? css.stallPossiblyStalled
-                  : css.stallNormal
-            return (
-              <div key={row.taskId} className={css.rowGroup} role="rowgroup">
-                <button
-                  type="button"
-                  role="row"
-                  className={overdue ? `${css.row} ${css.overdueRow}` : css.row}
-                  data-ledger-row
-                  data-overdue={overdue ? 'true' : undefined}
-                  data-stall-state={stallTask?.stallState}
-                  data-execution-state={execution?.state}
-                  aria-expanded={open}
-                  onClick={() => { setExpanded(open ? null : row.taskId) }}
-                >
-                  <span role="cell" className={css.taskCell}>
-                    <span className={css.taskTitle}>{row.title}</span>
-                    <span className={css.taskMeta}>派发 {timeText(row.updatedAt)} · {row.taskId}</span>
-                    {stallText !== null && <span className={`${css.taskStall} ${stallClass}`}>{stallText}</span>}
-                    {lastError !== null && (
-                      <span className={css.taskError} title={lastErrorTooltip(lastError, t)}
-                        data-last-error-code={lastError.code}>
-                        <span className={css.taskErrorDot} aria-hidden="true" />
-                        <span className={css.taskErrorText}>{lastErrorText(lastError, t)}</span>
-                      </span>
-                    )}
-                  </span>
-                  <span role="cell">{row.assigneeName ?? row.assigneeSessionId}（{positionText(row)}）</span>
-                  <span role="cell"><Pill>{STATUS_LABELS[row.status] ?? row.status}</Pill></span>
-                  <span role="cell" className={overdue ? css.dueOverdue : undefined}>
-                    {overdue && <span className={css.overdueLabel}>已超期</span>}
-                    {dueText(row.dueAt)}
-                  </span>
-                  <span role="cell">{deliverablesText(row)}</span>
-                  <span role="cell">{acceptanceText(row)}</span>
-                  <span className={css.chevron} aria-hidden="true">{open ? '⌄' : '›'}</span>
-                </button>
-                {open && <Timeline row={row} />}
+        )}
+        {stallProject?.stale === true && (
+          <p className={css.hint} role="status">{t('stall.card.ledgerStale')}</p>
+        )}
+
+        <div className={css.filters} role="radiogroup" aria-label="台账筛选">
+          {FILTERS.map(item => (
+            <Button
+              key={item.id}
+              variant={filter === item.id ? 'primary' : 'outline'}
+              size="sm"
+              onClick={() => { setFilter(item.id); setPage(1) }}
+            >
+              {item.label} {counts[item.id]}
+            </Button>
+          ))}
+        </div>
+
+        {load.kind === 'loading' && <p role="status" className={css.hint}>读取台账…</p>}
+        {load.kind === 'error' && (
+          <div className={css.errorBox} role="alert">
+            <span>{load.reason}</span>
+            <span className={css.hint}>台账不可用时不展示示例数据；请检查主进程台账路径或稍后重试。</span>
+          </div>
+        )}
+        {load.kind === 'ready' && rows.length === 0 && (
+          <p role="status" className={css.hint}>这个项目部还没有台账记录。</p>
+        )}
+        {load.kind === 'ready' && rows.length > 0 && visible.length === 0 && (
+          <p role="status" className={css.hint}>没有匹配的任务；换一个筛选或关键词。</p>
+        )}
+        {load.kind === 'ready' && load.elapsedMs !== undefined && (
+          <span className={css.hint}>只读查询 {String(load.elapsedMs)} ms</span>
+        )}
+        {pageRows.length > 0 && (
+          <div className={css.tableScroll} data-ledger-scroll>
+            <div className={css.table} role="table" aria-label="项目台账">
+              <div className={css.headerRow} role="row">
+                <span role="columnheader">任务</span>
+                <span role="columnheader">归属</span>
+                <span role="columnheader">状态</span>
+                <span role="columnheader">截止</span>
+                <span role="columnheader">交付物</span>
+                <span role="columnheader">验收结果</span>
               </div>
-            )
-          })}
-        </div>
-      )}
-      {visible.length > 0 && (
-        <nav className={css.pager} aria-label={t('ledger.pager.aria')}>
-          <span className={css.pageSummary}>
-            {t('ledger.page.summary', { total: visible.length, page: currentPage, pages: totalPages })}
-          </span>
-          <div className={css.pageNumbers}>
-            {ledgerPageWindow(currentPage, totalPages).map((slot, index) => slot === 'ellipsis'
-              ? <span key={`ellipsis:${index}`} className={css.pageEllipsis} aria-hidden="true">…</span>
-              : (
-                <Button
-                  key={slot}
-                  variant={slot === currentPage ? 'primary' : 'ghost'}
-                  size="sm"
-                  aria-label={t('ledger.page.goto', { page: slot })}
-                  aria-current={slot === currentPage ? 'page' : undefined}
-                  onClick={() => { setPage(slot) }}
-                >
-                  {String(slot)}
-                </Button>
-              ))}
+              {pageRows.map((row) => {
+                const open = expanded === row.taskId
+                const overdue = isCadreTaskOverdue(row.dueAt, now)
+                const stallTask = stallTasks.get(row.taskId)
+                const lastError = stallTask?.lastError ?? null
+                const execution = stallTask === undefined ? null : executionOf(stallTask)
+                const progress = executionText(execution, t)
+                const stallText = progress !== ''
+                  ? progress
+                  : stallTask !== undefined
+                    ? stallStateText(stallTask.stallState, stallTask.lastActivityAt, t)
+                    : stallProject?.status === 'ready' ? t('stall.activityUnknown') : null
+                const stallClass = progress !== ''
+                  ? css.stallNormal
+                  : stallTask?.stallState === 'stalled'
+                    ? css.stallStalled
+                    : stallTask?.stallState === 'possibly_stalled'
+                      ? css.stallPossiblyStalled
+                      : css.stallNormal
+                return (
+                  <div key={row.taskId} className={css.rowGroup} role="rowgroup">
+                    <button
+                      type="button"
+                      role="row"
+                      className={overdue ? `${css.row} ${css.overdueRow}` : css.row}
+                      data-ledger-row
+                      data-overdue={overdue ? 'true' : undefined}
+                      data-stall-state={stallTask?.stallState}
+                      data-execution-state={execution?.state}
+                      aria-expanded={open}
+                      onClick={() => { setExpanded(open ? null : row.taskId) }}
+                    >
+                      <span role="cell" className={css.taskCell}>
+                        <span className={css.taskTitle}>{row.title}</span>
+                        <span className={css.taskMeta}>派发 {timeText(row.updatedAt)} · {row.taskId}</span>
+                        {stallText !== null && <span className={`${css.taskStall} ${stallClass}`}>{stallText}</span>}
+                        {lastError !== null && (
+                          <span className={css.taskError} title={lastErrorTooltip(lastError, t)}
+                            data-last-error-code={lastError.code}>
+                            <span className={css.taskErrorDot} aria-hidden="true" />
+                            <span className={css.taskErrorText}>{lastErrorText(lastError, t)}</span>
+                          </span>
+                        )}
+                      </span>
+                      <span role="cell">{row.assigneeName ?? row.assigneeSessionId}（{positionText(row)}）</span>
+                      <span role="cell"><Pill>{STATUS_LABELS[row.status] ?? row.status}</Pill></span>
+                      <span role="cell" className={overdue ? css.dueOverdue : undefined}>
+                        {overdue && <span className={css.overdueLabel}>已超期</span>}
+                        {dueText(row.dueAt)}
+                      </span>
+                      <span role="cell">{deliverablesText(row)}</span>
+                      <span role="cell">{acceptanceText(row)}</span>
+                      <span className={css.chevron} aria-hidden="true">{open ? '⌄' : '›'}</span>
+                    </button>
+                    {open && <Timeline row={row} />}
+                  </div>
+                )
+              })}
+            </div>
           </div>
-          <div className={css.pageNav}>
-            <Button variant="outline" size="sm" disabled={currentPage <= 1}
-              onClick={() => { setPage(currentPage - 1) }}>
-              {t('ledger.page.prev')}
-            </Button>
-            <Button variant="outline" size="sm" disabled={currentPage >= totalPages}
-              onClick={() => { setPage(currentPage + 1) }}>
-              {t('ledger.page.next')}
-            </Button>
-          </div>
-        </nav>
-      )}
-      {load.kind === 'ready' && load.elapsedMs !== undefined && (
-        <span className={css.hint}>只读查询 {String(load.elapsedMs)} ms</span>
-      )}
+        )}
+        {visible.length > 0 && (
+          <nav className={css.pager} data-ledger-pager aria-label={t('ledger.pager.aria')}>
+            <span className={css.pageSummary}>
+              {t('ledger.page.summary', { total: visible.length, page: currentPage, pages: totalPages })}
+            </span>
+            <div className={css.pageNumbers}>
+              {ledgerPageWindow(currentPage, totalPages).map((slot, index) => slot === 'ellipsis'
+                ? <span key={`ellipsis:${index}`} className={css.pageEllipsis} aria-hidden="true">…</span>
+                : (
+                  <Button
+                    key={slot}
+                    variant={slot === currentPage ? 'primary' : 'ghost'}
+                    size="sm"
+                    aria-label={t('ledger.page.goto', { page: slot })}
+                    aria-current={slot === currentPage ? 'page' : undefined}
+                    onClick={() => { setPage(slot) }}
+                  >
+                    {String(slot)}
+                  </Button>
+                ))}
+            </div>
+            <div className={css.pageNav}>
+              <Button variant="outline" size="sm" disabled={currentPage <= 1}
+                onClick={() => { setPage(currentPage - 1) }}>
+                {t('ledger.page.prev')}
+              </Button>
+              <Button variant="outline" size="sm" disabled={currentPage >= totalPages}
+                onClick={() => { setPage(currentPage + 1) }}>
+                {t('ledger.page.next')}
+              </Button>
+            </div>
+          </nav>
+        )}
+      </div>
     </Modal>
   )
 }

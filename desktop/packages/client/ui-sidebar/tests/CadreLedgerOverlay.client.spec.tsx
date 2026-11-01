@@ -190,6 +190,18 @@ describe('CadreLedgerOverlay overdue state', () => {
     expect(document.querySelectorAll('[data-overdue="true"]')).toHaveLength(1)
   })
 
+  it('keeps rows in an independent scroll container and the pager outside it', async () => {
+    mount(manyRows())
+    expect(await screen.findByText('任务 0')).toBeTruthy()
+    const scroll = document.querySelector('[data-ledger-scroll]')
+    const pager = document.querySelector('[data-ledger-pager]')
+    expect(scroll).toBeTruthy()
+    expect(pager).toBeTruthy()
+    expect(scroll?.querySelector('[data-ledger-row]')).toBeTruthy()
+    expect(scroll?.contains(pager)).toBe(false)
+    expect(pager?.textContent).toContain('第 1/5 页')
+  })
+
   it('shows the ledger empty state', async () => {
     mount([])
     expect(await screen.findByText('这个项目部还没有台账记录。')).toBeTruthy()

@@ -269,9 +269,17 @@ function EmailForm({
       description={t('email.description')}
       closeLabel={t('email.close')}
       className={css.dialog ?? ''}
-      footer={<Button variant="outline" disabled={busy} onClick={onClose}>{t('email.close')}</Button>}
+      contentClassName={css.content ?? ''}
+      footer={(
+        <div className={css.footerActions} data-email-footer>
+          <Button variant="outline" disabled={busy} onClick={onClose}>{t('email.close')}</Button>
+          <Button variant="primary" disabled={busy} onClick={() => { void save() }}>{t('email.save')}</Button>
+          <Button variant="outline" disabled={busy} onClick={() => { void run('test') }}>{t('email.test')}</Button>
+          <Button variant="outline" disabled={busy} onClick={() => { void run('dry-run') }}>{t('email.dryRunAction')}</Button>
+        </div>
+      )}
     >
-      <div className={css.form}>
+      <div className={css.form} data-email-form>
         {config === null && error === null && <p className={css.hint}>{t('email.loading')}</p>}
         <Checkbox checked={enabled} disabled={busy} label={t('email.enabled')}
           onChange={setEnabled} />
@@ -315,11 +323,6 @@ function EmailForm({
         </label>
         {error !== null && <p role="alert" className={css.error}>{error}</p>}
         {notice !== null && <p role="status" className={css.notice}>{notice}</p>}
-        <div className={css.row}>
-          <Button variant="primary" disabled={busy} onClick={() => { void save() }}>{t('email.save')}</Button>
-          <Button variant="outline" disabled={busy} onClick={() => { void run('test') }}>{t('email.test')}</Button>
-          <Button variant="outline" disabled={busy} onClick={() => { void run('dry-run') }}>{t('email.dryRunAction')}</Button>
-        </div>
         <details className={css.help} data-email-help>
           <summary className={css.helpSummary}>{t('email.help.title')}</summary>
           <p>{t('email.help.from')}</p>

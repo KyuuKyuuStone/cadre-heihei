@@ -171,6 +171,25 @@ describe('Cadre email settings', () => {
       .toBe('https://cloud.tencent.com/product/ses')
   })
 
+  it('keeps save/test/run actions in the fixed footer outside the scroll area', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: VIEW })))
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    await screen.findByText('已检测到环境变量')
+    const footer = document.querySelector('[data-email-footer]')
+    const form = document.querySelector('[data-email-form]')
+    expect(footer).toBeTruthy()
+    expect(form).toBeTruthy()
+    for (const name of ['保存', '测试发送', '演练']) {
+      const button = screen.getByRole('button', { name })
+      expect(footer?.contains(button)).toBe(true)
+      expect(form?.contains(button)).toBe(false)
+    }
+  })
+
   it('rejects invalid email and still exposes test and dry-run results', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)
