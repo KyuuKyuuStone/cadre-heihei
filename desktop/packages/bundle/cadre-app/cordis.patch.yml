@@ -42,6 +42,10 @@
             name: '@deepseek-ai/dsh-time-context'
           - id: tool-fs
             name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              write: false
+              edit: false
+              readImage: false
           - id: tool-fs-search
             name: '@deepseek-ai/dsh-tool-fs-search'
           - id: tool-web
