@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-harness-dev-context",
   "description": "Model context naming the DeepSeek Harness checkout and Web GUI URL without letting either change the system prompt",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publishConfig": {
     "access": "public"
   },
