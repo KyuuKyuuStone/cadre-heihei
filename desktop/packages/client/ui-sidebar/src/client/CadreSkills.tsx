@@ -49,6 +49,7 @@ export interface CadreSkillsInjected {
     roster: HostObservable<CadreRosterState>
     sessions: HostObservable<CadreSessionsState>
     request: HostObservable<CadreSkillsRequest | null>
+    revision: HostObservable<number>
   }
   openSkills(
     sessionId: string,
@@ -57,6 +58,28 @@ export interface CadreSkillsInjected {
     actorSessionId: string,
   ): void
   closeSkills(): void
+  notifySkillsChanged?(): void
+}
+
+/**
+ * Resolve the acting supervisor from the retained Session set.
+ * @param state - Session list snapshot.
+ * @param members - roster members.
+ * @returns retained supervisor id, or undefined for employee/ordinary context.
+ */
+export function activeSupervisorId(
+  state: CadreSessionsState,
+  members: readonly { readonly sessionId: string; readonly role: string; readonly state?: string }[],
+): string | undefined {
+  const available = members.filter(item => item.state !== 'departed')
+  const active = Object.entries(state.byId)
+    .filter(([, session]) => (session?.retainedBy?.mainView ?? 0) > 0)
+    .map(([id]) => id)
+  const supervisor = active.find(id => available.some(item => item.sessionId === id && item.role === 'supervisor'))
+  if (supervisor !== undefined) return supervisor
+  if (active.length > 0) return undefined
+  const sole = available.filter(item => item.role === 'supervisor')
+  return sole.length === 1 ? sole[0]?.sessionId : undefined
 }
 
 interface SkillResponse {
@@ -180,24 +203,13 @@ export function CadreSkillSettingsMenuItem({
 } & InjectFace<CadreSkillsInjected> & PropsLocale<'sidebar'>) {
   const [, setMenuOpen] = useMenuOpenState()
   const members = useRoster(state => state.members)
-  const activeContext = useSessions((state) => {
-    const active = Object.entries(state.byId)
-      .filter(([, session]) => (session?.retainedBy?.mainView ?? 0) > 0)
-      .map(([id]) => id)
-    const supervisor = active.find(id => members.some(item => item.sessionId === id && item.role === 'supervisor'))
-    if (supervisor !== undefined) return `supervisor:${supervisor}`
-    return active[0] === undefined ? 'none' : `active:${active[0]}`
-  })
+  const activeId = useSessions(state => activeSupervisorId(state, members))
   // Retention order is not identity: during a navigation handoff both the old
   // and new Session can be retained. Resolve the acting supervisor from the
   // retained set, not from whichever id happens to come first. With no active
   // Session (the skill/team panel is showing), a sole supervisor still owns the
   // roster controls; an active non-roster/ordinary Session hides them.
-  const activeId = activeContext.startsWith('supervisor:') ? activeContext.slice('supervisor:'.length) : undefined
-  const soleSupervisor = members.filter(item => item.role === 'supervisor' && item.state !== 'departed')
-  const actor = activeId !== undefined
-    ? members.find(item => item.sessionId === activeId)
-    : activeContext === 'none' && soleSupervisor.length === 1 ? soleSupervisor[0] : undefined
+  const actor = members.find(item => item.sessionId === activeId)
   const member = members.find(item => item.sessionId === sessionId)
   if (actor === undefined || member === undefined || member.state === 'departed') return null
   return (
@@ -220,18 +232,20 @@ export function CadreSkillSettingsMenuItem({
 }
 
 export function CadreSkillSettingsDialog({
-  useRequest, closeSkills, t,
+  useRequest, closeSkills, notifySkillsChanged, t,
 }: InjectFace<CadreSkillsInjected> & PropsLocale<'sidebar'>) {
   const request = useRequest(value => value)
   if (request === null) return null
-  return <SkillEditor key={request.token} request={request} onClose={closeSkills} t={t} />
+  return <SkillEditor key={request.token} request={request} onClose={closeSkills}
+    notifySkillsChanged={notifySkillsChanged} t={t} />
 }
 
 function SkillEditor({
-  request, onClose, t,
+  request, onClose, notifySkillsChanged, t,
 }: {
   readonly request: CadreSkillsRequest
   readonly onClose: () => void
+  readonly notifySkillsChanged?: (() => void) | undefined
   readonly t: PropsLocale<'sidebar'>['t']
 }) {
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
@@ -282,6 +296,7 @@ function SkillEditor({
     setNotice(null)
     try {
       await saveMemberSkills(projectId, request.actorSessionId, request.sessionId, selected)
+      notifySkillsChanged?.()
       setNotice(t('skills.notice.saved'))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))

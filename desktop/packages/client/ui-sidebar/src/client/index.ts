@@ -33,6 +33,7 @@ import {
   type CadreSkillsInjected,
   type CadreSkillsRequest,
 } from './CadreSkills.tsx'
+import { CadreSkillHeaderChip, type CadreSkillHeaderChipInjected } from './CadreSkillHeaderChip.tsx'
 import {
   CadreSkillLibraryIcon,
   CadreSkillLibraryPage,
@@ -587,6 +588,10 @@ export function apply(ctx: ClientContext): void {
     closeEmail,
   })
   const skillsRequest = createSnapshotStore<CadreSkillsRequest | null>(null)
+  const skillsRevision = createSnapshotStore(0)
+  const notifySkillsChanged = (): void => {
+    skillsRevision.set(skillsRevision.getSnapshot() + 1)
+  }
   let skillsToken = 0
   const openSkills = (
     sessionId: string,
@@ -601,9 +606,10 @@ export function apply(ctx: ClientContext): void {
   }
   const closeSkills = (): void => { skillsRequest.set(null) }
   const skillsInjected = (): CadreSkillsInjected => ({
-    hooks: { roster, sessions: sessionsSource, request: skillsRequest },
+    hooks: { roster, sessions: sessionsSource, request: skillsRequest, revision: skillsRevision },
     openSkills,
     closeSkills,
+    notifySkillsChanged,
   })
   const openSkillAdminSession = async (sessionId: string): Promise<void> => {
     await ctx.sessions.refresh()
@@ -900,6 +906,17 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: skillsInjected,
   } as never, CadreSkillSettingsMenuItem as never))
+  ctx.slots.inject('conversation.session.header.utilities' as never, () => ctx.slots.register({
+    name: 'conversation.session.header.utilities',
+    id: 'cadre-skills-chip',
+    order: 10,
+    locale: NS,
+    inject: (): CadreSkillHeaderChipInjected => ({
+      hooks: { roster, sessions: sessionsSource, revision: skillsRevision },
+      projectOfSession,
+      openSkills,
+    }),
+  } as never, CadreSkillHeaderChip as never))
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
     name: 'sidebar.workspaces.session.menu.item',
     id: 'cadre-retire-member',

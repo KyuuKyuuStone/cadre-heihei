@@ -69,10 +69,11 @@ describe('ui-sidebar apply', () => {
     expect(hostApply).not.toThrow()
   })
 
-  it('does not register a conversation-area status strip', () => {
+  it('registers the session header chip without restoring the removed status strip', () => {
     const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
-    expect(source).not.toContain("inject('conversation.session.header.utilities'")
-    expect(source).not.toContain("inject('conversation.input.dock'")
+    expect(source).toContain("conversation.session.header.utilities")
+    expect(source).not.toContain("conversation.input.dock")
+    expect(source).not.toContain("conversation.status")
   })
 
   it('does not register the removed edit-profile menu', () => {
