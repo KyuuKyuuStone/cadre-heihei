@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-api-job-controller",
   "description": "Job Remote observation stream and the reference-counted client job-output service",
-  "version": "1.2.0",
+  "version": "1.1.1",
   "publishConfig": {
     "access": "public"
   },
