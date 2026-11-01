@@ -1,48 +1,22 @@
 # Changelog
 
-## 1.3.0
+## 1.2.0
 
 - **真实库 schema 2→3 修复**：打包始终从当前源码重建 CJS，启动 `initCadreStore` 幂等补齐 `members.skills_json`；旧 schema 下技能 catalog/get 降级为空、set 返回可读 `SKILL_SCHEMA_OUTDATED`
-- **技能改名与员工菜单**：技能入口统一为「技能」；主管可在员工菜单直接调整技能选择
+- **技能库与员工选择分层**：`~/.dsh/cadre-skills/<pack>/manifest.json + SKILL.md`；技能入口统一为「技能」；主管在员工菜单/建员工时选择技能，只对选中会话注册，默认不加载；角色不匹配拒绝；改选/内容变化 dispose 旧注册；`members.skills_json` additive（schema v3，默认 `[]`）
+- **技能 IPC**：`/cadre/skills/{catalog,get,set,preview}`，supervisor-only、项目/成员/角色校验、数组去重，只更新 `skills_json`
 - **手动添加/删除技能**：`/cadre/skills/add` 接收 manifest + SKILL.md 正文，kebab-case/角色/路径校验，默认不覆盖，`overwrite:true` 才替换；`/cadre/skills/remove` 需 confirm；原子目录写入
-- 包含 1.2.1/1.2.0 全部内容（技能包、4k spill、step 压缩默认关、响应式、邮件）
+- **工具结果 4k 落盘**：Cadre `spill-policy.maxInlineTokens` 12.5k → 4000，超出保留头尾并写 spill 文件路径，tool call/result 配对不变
+- **Token 治理**：compaction 保留尾部 50k（阈值 150k 不变）；step 级压缩 `stepPressureCheck` 默认 **false**
+- **响应式**：台账与邮件设置弹窗适配窄窗口/侧栏宽度
+- 包含 1.1.0 邮件通知（会话级 SendGrid、主管设置页/测试发送、失败不阻断）及 1.0.0 全部修复
 
 ### 已知限制
 
 - 技能市场（ClawHub/SkillHub）未接
 - 删除技能包不会清理 `members.skills_json` 中的旧选择
 - 安装包未签名（SmartScreen 提示）
-- 429/外部依赖仅做有界重试并告知
-
-## 1.2.1
-
-- **修复 1.2.0 真实库 `no such column: skills_json`**：打包会沿用 git checkout 里旧的 `lib/cadre-collab.cjs`（schema 2），启动只跑旧 reader，`members.skills_json` 迁移从未执行；现在打包前**始终**从当前源码重建两个 CJS，启动 `initCadreStore` 幂等补齐 v2→v3
-- **schema 2 优雅降级**：技能 `catalog/get` 在列缺失时返回空选择不 500；`set` 返回 `SKILL_SCHEMA_OUTDATED` 可读错误，提示重启完成迁移
-- 数据安全：迁移只 `ALTER TABLE ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'`，保留 members/任务/事件；旧版本回滚仍可读写（extra column 被忽略）
-- 包含 1.2.0 全部内容（技能包、4k spill、step 压缩默认关、响应式、邮件）
-
-### 已知限制
-
-- 1.2.0 已安装用户需安装 1.2.1 后重启，启动迁移才生效
-- `stepPressureCheck` 默认关闭
-- 技能包未内置
-- 安装包未签名；429 仅有限重试
-
-## 1.2.0
-
-- **会话级技能包**：`~/.dsh/cadre-skills/<pack>/manifest.json + SKILL.md`；创建员工/设置时可选择技能包，只对选中会话注册，默认不加载；角色不匹配拒绝；改选/内容变化 dispose 旧注册；`members.skills_json` additive（schema v3，默认 `[]`）
-- **技能 IPC**：`/cadre/skills/{catalog,get,set,preview}`，supervisor-only、项目/成员/角色校验、数组去重，只更新 `skills_json`
-- **工具结果 4k 落盘**：Cadre `spill-policy.maxInlineTokens` 12.5k → 4000，超出保留头尾并写 spill 文件路径，tool call/result 配对不变
-- **step 级压缩**：新增 `stepPressureCheck`（默认 **false**）、阈值/最小 tool 间隔；开启后按 step 检查压力，未答 tool call 跳过，失败不阻断
-- **响应式**：台账与邮件设置弹窗适配窄窗口/侧栏宽度
-- 包含 1.1.0 邮件通知（会话级 SendGrid、主管设置页/测试发送、失败不阻断）及 1.0.0 全部修复
-
-### 已知限制
-
-- `stepPressureCheck` 默认关闭；峰值未做真实长会话 A/B
-- 技能包未内置，需用户/第三方按 manifest 放入目录
-- 安装包未签名（SmartScreen 提示）
-- 429/外部依赖仅做有界重试并告知
+- 429/外部依赖仅做有界重试并告知；`stepPressureCheck` 默认关闭，峰值未做真实长会话 A/B
 
 ## 1.1.0
 
