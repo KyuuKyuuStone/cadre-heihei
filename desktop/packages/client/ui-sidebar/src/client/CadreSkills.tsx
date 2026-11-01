@@ -3,12 +3,10 @@
  * session content never passes through this file.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Checkbox, IconAgentPresetOutlineRegular, MenuItemButton, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Checkbox, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import css from './CadreSkills.module.css'
-
-type UseMenuOpenState = () => readonly [open: boolean, setOpen: (open: boolean) => void]
 
 export interface CadreSkillEntry {
   readonly id: string
@@ -193,41 +191,6 @@ export function CadreSkillPicker({
         </li>
       ))}
     </ul>
-  )
-}
-
-export function CadreSkillSettingsMenuItem({
-  sessionId, displayTitle, useMenuOpenState, useRoster, useSessions, openSkills, t,
-}: { readonly sessionId: string; readonly displayTitle: string } & {
-  readonly useMenuOpenState: UseMenuOpenState
-} & InjectFace<CadreSkillsInjected> & PropsLocale<'sidebar'>) {
-  const [, setMenuOpen] = useMenuOpenState()
-  const members = useRoster(state => state.members)
-  const activeId = useSessions(state => activeSupervisorId(state, members))
-  // Retention order is not identity: during a navigation handoff both the old
-  // and new Session can be retained. Resolve the acting supervisor from the
-  // retained set, not from whichever id happens to come first. With no active
-  // Session (the skill/team panel is showing), a sole supervisor still owns the
-  // roster controls; an active non-roster/ordinary Session hides them.
-  const actor = members.find(item => item.sessionId === activeId)
-  const member = members.find(item => item.sessionId === sessionId)
-  if (actor === undefined || member === undefined || member.state === 'departed') return null
-  return (
-    <MenuItemButton
-      icon={<IconAgentPresetOutlineRegular />}
-      separatorBefore
-      onSelect={() => {
-        setMenuOpen(false)
-        openSkills(
-          sessionId,
-          displayTitle,
-          member.role === 'supervisor' ? 'supervisor' : 'worker',
-          actor.sessionId,
-        )
-      }}
-    >
-      {t('skills.menu')}
-    </MenuItemButton>
   )
 }
 

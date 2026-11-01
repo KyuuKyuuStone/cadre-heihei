@@ -29,7 +29,6 @@ import {
 } from './CadreEmailSettings.tsx'
 import {
   CadreSkillSettingsDialog,
-  CadreSkillSettingsMenuItem,
   type CadreSkillsInjected,
   type CadreSkillsRequest,
 } from './CadreSkills.tsx'
@@ -898,14 +897,8 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
   } as never, UpdateCheckRow as never))
 
-  // Employee management stays on the Session row menu.
-  ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
-    name: 'sidebar.workspaces.session.menu.item',
-    id: 'cadre-skills',
-    order: 350,
-    locale: NS,
-    inject: skillsInjected,
-  } as never, CadreSkillSettingsMenuItem as never))
+  // Skill selection lives only in the Session header chip; the row menu no
+  // longer duplicates that entry.
   ctx.slots.inject('conversation.session.header.utilities' as never, () => ctx.slots.register({
     name: 'conversation.session.header.utilities',
     id: 'cadre-skills-chip',

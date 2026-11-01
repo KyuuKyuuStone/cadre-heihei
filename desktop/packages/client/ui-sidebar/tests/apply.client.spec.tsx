@@ -71,9 +71,10 @@ describe('ui-sidebar apply', () => {
 
   it('registers the session header chip without restoring the removed status strip', () => {
     const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
-    expect(source).toContain("conversation.session.header.utilities")
-    expect(source).not.toContain("conversation.input.dock")
-    expect(source).not.toContain("conversation.status")
+    expect(source).toContain('conversation.session.header.utilities')
+    expect(source).not.toContain('CadreSkillSettingsMenuItem')
+    expect(source).not.toContain('conversation.input.dock')
+    expect(source).not.toContain('conversation.status')
   })
 
   it('does not register the removed edit-profile menu', () => {

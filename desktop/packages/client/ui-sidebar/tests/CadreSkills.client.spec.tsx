@@ -2,8 +2,7 @@
 import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { CadreSkillSettingsDialog, CadreSkillSettingsMenuItem, type CadreSkillsRequest } from '../src/client/CadreSkills.tsx'
-import type { CadreRosterState } from '../src/client/CadreSidebar.tsx'
+import { CadreSkillSettingsDialog, type CadreSkillsRequest } from '../src/client/CadreSkills.tsx'
 import { zh } from '../src/client/locales.ts'
 
 const REQUEST: CadreSkillsRequest = { sessionId: 'w1', actorSessionId: 'sup', projectId: 'p1', label: '员工', role: 'worker', token: 1 }
@@ -34,57 +33,9 @@ function dialogProps(): ComponentProps<typeof CadreSkillSettingsDialog> {
   } as unknown as ComponentProps<typeof CadreSkillSettingsDialog>
 }
 
-function roster(_role: 'supervisor' | 'worker'): CadreRosterState {
-  return {
-    status: 'ready',
-    members: [
-      { sessionId: 'sup', role: 'supervisor', displayName: '主管', state: 'available' },
-      { sessionId: 'w1', role: 'worker', displayName: '员工', state: 'available' },
-    ],
-    error: null,
-  }
-}
-
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Cadre skill settings', () => {
-  it('shows the employee-row entry when a supervisor is active, even if an employee session is retained first', () => {
-    const openSkills = vi.fn()
-    const menuProps = (sessionId: string, title = '员工', retained = {
-      w1: { retainedBy: { mainView: 1 } },
-      sup: { retainedBy: { mainView: 1 } },
-    }) => ({
-      sessionId,
-      displayTitle: title,
-      useMenuOpenState: () => [false, vi.fn()] as const,
-      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(roster('supervisor'))) as never,
-      useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
-        selector({ byId: retained })) as never,
-      openSkills,
-      closeSkills: vi.fn(),
-      t,
-    } as unknown as ComponentProps<typeof CadreSkillSettingsMenuItem>)
-    render(<CadreSkillSettingsMenuItem {...menuProps('w1')} />)
-    const entry = screen.getByRole('menuitem', { name: '技能' })
-    expect(entry).toBeTruthy()
-    expect(screen.getByRole('separator')).toBeTruthy()
-    expect(entry.textContent).toBe('技能')
-    fireEvent.click(entry)
-    expect(openSkills).toHaveBeenCalledWith('w1', '员工', 'worker', 'sup')
-
-    cleanup()
-    render(<CadreSkillSettingsMenuItem {...menuProps('sup', '主管')} />)
-    fireEvent.click(screen.getByRole('menuitem', { name: '技能' }))
-    expect(openSkills).toHaveBeenLastCalledWith('sup', '主管', 'supervisor', 'sup')
-
-    cleanup()
-    const employeeView = {
-      ...menuProps('w1', '员工', { w1: { retainedBy: { mainView: 1 } }, sup: { retainedBy: { mainView: 0 } } }),
-    } as unknown as ComponentProps<typeof CadreSkillSettingsMenuItem>
-    const hidden = render(<CadreSkillSettingsMenuItem {...employeeView} />)
-    expect(hidden.container.firstChild).toBeNull()
-  })
-
   it('filters by role, totals tokens, previews and saves', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)
