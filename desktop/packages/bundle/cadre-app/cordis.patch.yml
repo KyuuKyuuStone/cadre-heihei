@@ -19,3 +19,7 @@
 - id: compaction-basic
   config:
     thresholdTokens: 150000
+    # Keep the retained tail small: the default ratio of the (large) model
+    # window left ~150k tokens after every compaction, so a long turn still
+    # paid hundreds of thousands of cache-read tokens per request.
+    retainTokens: 50000
