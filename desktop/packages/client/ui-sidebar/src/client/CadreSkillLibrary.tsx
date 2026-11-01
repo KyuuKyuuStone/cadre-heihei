@@ -44,6 +44,10 @@ const localizedDescription = (entry: CadreSkillEntry, t: PropsLocale<'sidebar'>[
   if (entry.id === 'ai-design' || entry.id === 'landing-page-design') return t('skills.desc.ai-design')
   return entry.description
 }
+const skillHref = (entry: CadreSkillEntry): string => {
+  const homepage = entry.homepage?.trim() ?? ''
+  return homepage !== '' ? homepage : entry.source.trim()
+}
 
 /** Sidebar icon for the global skill library. */
 export function CadreSkillLibraryIcon({ size }: PropsRuntime<'sidebar.panellist'>) {
@@ -184,8 +188,13 @@ export function CadreSkillLibraryPage({
                   <div className={css.meta}>
                     <span>{t('skills.tokenEstimate', { count: String(entry.tokenEstimate) })}</span>
                     <span>{entry.tools.join(', ') || t('skills.toolsNone')}</span>
-                    <span>{entry.source}</span>
-                    <span>{entry.license}</span>
+                    {entry.author !== undefined && entry.author.trim() !== '' && (
+                      <span>{t('skills.author', { author: entry.author })}</span>
+                    )}
+                    <span>{t('skills.licenseLabel', { license: entry.license })}</span>
+                    {/^https?:\/\//iu.test(skillHref(entry))
+                      ? <a href={skillHref(entry)} target="_blank" rel="noopener noreferrer">{t('skills.upstream')}</a>
+                      : <span>{skillHref(entry)}</span>}
                   </div>
                 </details>
                 {deletable && (

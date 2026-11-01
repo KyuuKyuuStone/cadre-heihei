@@ -7,7 +7,7 @@ import type { CadreRosterState } from '../src/client/CadreSidebar.tsx'
 import { en, zh } from '../src/client/locales.ts'
 
 const ENTRIES = [
-  { id: 'ai-design', name: 'AI Design', description: 'English landing page description', roles: ['worker'], tokenEstimate: 100, tools: ['read'], origin: 'builtin', source: 'builtin', license: 'MIT', selected: false },
+  { id: 'ai-design', name: 'AI Design', description: 'English landing page description', roles: ['worker'], tokenEstimate: 100, tools: ['read'], origin: 'builtin', source: 'builtin', author: 'Elaya', homepage: 'https://example.test/ai-design', license: 'MIT', selected: false },
   { id: 'worker-only', name: '员工技能', description: '只给员工', roles: ['worker'], tokenEstimate: 10, tools: [], origin: 'installed', source: 'local', license: 'MIT', selected: false },
 ]
 
@@ -65,7 +65,13 @@ describe('Cadre skill library', () => {
     expect(screen.getAllByRole('button', { name: '删除' })).toHaveLength(1)
     fireEvent.click(screen.getAllByText('详情')[0]!)
     expect(screen.getByText('约 100 tokens')).toBeTruthy()
-    expect(screen.getByText('builtin')).toBeTruthy()
+    expect(screen.getByText('作者：Elaya')).toBeTruthy()
+    expect(screen.getAllByText('许可：MIT').length).toBeGreaterThan(0)
+    const link = screen.getByRole('link', { name: '上游主页' })
+    expect(link.getAttribute('href')).toBe('https://example.test/ai-design')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(screen.getByText('local')).toBeTruthy()
   })
 
   it('localizes built-in descriptions in English', async () => {

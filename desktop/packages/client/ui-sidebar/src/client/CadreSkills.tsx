@@ -20,6 +20,9 @@ export interface CadreSkillEntry {
   readonly tools: readonly string[]
   readonly source: string
   readonly license: string
+  /** Optional upstream homepage and author metadata. */
+  readonly homepage?: string
+  readonly author?: string
   readonly selected: boolean
 }
 
@@ -272,6 +275,9 @@ function SkillEditor({
     }
   }
 
+  const previewEntry = preview === null ? undefined : entries.find(entry => entry.id === preview.id)
+  const previewSource = previewEntry?.homepage?.trim() || previewEntry?.source.trim() || ''
+
   return (
     <Modal
       open
@@ -297,7 +303,14 @@ function SkillEditor({
         <div className={css.preview} data-skill-preview>
           <div className={css.previewHead}>
             <strong>{preview.id}</strong>
-            <span>{t('skills.tokenEstimate', { count: String(preview.tokenEstimate) })} · {preview.license}</span>
+            <span>{t('skills.tokenEstimate', { count: String(preview.tokenEstimate) })}</span>
+            <span>{t('skills.licenseLabel', { license: preview.license })}</span>
+            {previewEntry?.author !== undefined && previewEntry.author.trim() !== '' && (
+              <span>{t('skills.author', { author: previewEntry.author })}</span>
+            )}
+            {/^https?:\/\//iu.test(previewSource)
+              ? <a href={previewSource} target="_blank" rel="noopener noreferrer">{t('skills.upstream')}</a>
+              : previewSource !== '' ? <span>{previewSource}</span> : null}
             <Button variant="ghost" size="sm" onClick={() => { setPreview(null) }}>{t('skills.closePreview')}</Button>
           </div>
           <pre className={css.previewBody}>{preview.content}</pre>

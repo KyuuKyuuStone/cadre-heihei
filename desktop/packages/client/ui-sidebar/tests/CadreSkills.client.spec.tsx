@@ -8,7 +8,7 @@ import { zh } from '../src/client/locales.ts'
 
 const REQUEST: CadreSkillsRequest = { sessionId: 'w1', actorSessionId: 'sup', projectId: 'p1', label: '员工', role: 'worker', token: 1 }
 const ENTRIES = [
-  { id: 'worker-only', name: '员工技能', description: '只给员工', roles: ['worker'], tokenEstimate: 10, tools: [], source: 's', license: 'MIT', selected: true },
+  { id: 'worker-only', name: '员工技能', description: '只给员工', roles: ['worker'], tokenEstimate: 10, tools: [], source: 's', author: '前端作者', homepage: 'https://example.test/worker', license: 'MIT', selected: true },
   { id: 'sup-only', name: '主管技能', description: '只给主管', roles: ['supervisor'], tokenEstimate: 20, tools: [], source: 's', license: 'MIT', selected: false },
 ]
 
@@ -90,6 +90,8 @@ describe('Cadre skill settings', () => {
     expect(screen.getByText(/已选技能 token 估算合计：10/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '预览' }))
     expect(await screen.findByText('# 员工技能正文')).toBeTruthy()
+    expect(screen.getByText('作者：前端作者')).toBeTruthy()
+    expect(screen.getByRole('link', { name: '上游主页' }).getAttribute('href')).toBe('https://example.test/worker')
     fireEvent.click(screen.getByRole('button', { name: '保存技能' }))
     await waitFor(() => { expect(screen.getByText('技能已保存。')).toBeTruthy() })
     const catalogCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
