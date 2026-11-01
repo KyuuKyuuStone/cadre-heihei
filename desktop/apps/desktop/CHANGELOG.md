@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.1
+
+- **修复 1.2.0 真实库 `no such column: skills_json`**：打包会沿用 git checkout 里旧的 `lib/cadre-collab.cjs`（schema 2），启动只跑旧 reader，`members.skills_json` 迁移从未执行；现在打包前**始终**从当前源码重建两个 CJS，启动 `initCadreStore` 幂等补齐 v2→v3
+- **schema 2 优雅降级**：技能 `catalog/get` 在列缺失时返回空选择不 500；`set` 返回 `SKILL_SCHEMA_OUTDATED` 可读错误，提示重启完成迁移
+- 数据安全：迁移只 `ALTER TABLE ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'`，保留 members/任务/事件；旧版本回滚仍可读写（extra column 被忽略）
+- 包含 1.2.0 全部内容（技能包、4k spill、step 压缩默认关、响应式、邮件）
+
+### 已知限制
+
+- 1.2.0 已安装用户需安装 1.2.1 后重启，启动迁移才生效
+- `stepPressureCheck` 默认关闭
+- 技能包未内置
+- 安装包未签名；429 仅有限重试
+
 ## 1.2.0
 
 - **会话级技能包**：`~/.dsh/cadre-skills/<pack>/manifest.json + SKILL.md`；创建员工/设置时可选择技能包，只对选中会话注册，默认不加载；角色不匹配拒绝；改选/内容变化 dispose 旧注册；`members.skills_json` additive（schema v3，默认 `[]`）
