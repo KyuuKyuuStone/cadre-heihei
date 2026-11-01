@@ -92,3 +92,43 @@
 .dialog {
   max-width: min(520px, 92vw);
 }
+
+.help {
+  padding-top: 8px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.helpSummary {
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.help p {
+  margin: 6px 0;
+}
+
+.helpSection {
+  margin: 8px 0;
+}
+
+.helpLinks {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+.helpLinks a {
+  color: var(--dsw-alias-state-business-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.helpNote {
+  color: var(--dsw-alias-state-warn-label);
+}

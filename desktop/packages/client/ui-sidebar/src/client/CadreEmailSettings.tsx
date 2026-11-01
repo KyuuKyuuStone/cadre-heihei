@@ -85,6 +85,28 @@ function validEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value)
 }
 
+const DEFAULT_CONFIG: CadreEmailConfigView = {
+  enabled: false,
+  from: { email: '' },
+  recipients: [],
+  apiKeyEnv: 'SENDGRID_API_KEY',
+  dryRun: false,
+  minIntervalMs: 60_000,
+  hasKey: false,
+}
+
+function isMissingConfig(message: string): boolean {
+  return /ENOENT|no such file|EMAIL_CONFIG_MISSING/iu.test(message)
+}
+
+const HELP_LINKS = {
+  sendgridSignup: 'https://signup.sendgrid.com/',
+  sendgridKeys: 'https://app.sendgrid.com/settings/api_keys',
+  sendgridSender: 'https://app.sendgrid.com/settings/sender_auth',
+  aliyun: 'https://www.aliyun.com/product/directmail',
+  tencent: 'https://cloud.tencent.com/product/ses',
+} as const
+
 /** Supervisor row-menu item; ordinary/employee sessions return null. */
 export function CadreEmailSettingsMenuItem({
   sessionId, displayTitle, useMenuOpenState, useRoster, openEmail, t,
@@ -148,7 +170,22 @@ function EmailForm({
         setMinInterval(String(next.minIntervalMs ?? 60_000))
       })
       .catch((cause: unknown) => {
-        if (alive) setError(cause instanceof Error ? cause.message : String(cause))
+        if (!alive) return
+        const message = cause instanceof Error ? cause.message : String(cause)
+        // A project without a config file is a valid first-run state, not a
+        // form error; backend may still add a dedicated missing-config code.
+        if (isMissingConfig(message)) {
+          setConfig(DEFAULT_CONFIG)
+          setEnabled(DEFAULT_CONFIG.enabled)
+          setFromEmail(DEFAULT_CONFIG.from.email)
+          setFromName(DEFAULT_CONFIG.from.name ?? '')
+          setRecipients([...DEFAULT_CONFIG.recipients])
+          setApiKeyEnv(DEFAULT_CONFIG.apiKeyEnv)
+          setDryRun(DEFAULT_CONFIG.dryRun === true)
+          setMinInterval(String(DEFAULT_CONFIG.minIntervalMs ?? 60_000))
+          return
+        }
+        setError(message)
       })
     return () => { alive = false }
   }, [request.projectId, request.sessionId])
@@ -283,6 +320,23 @@ function EmailForm({
           <Button variant="outline" disabled={busy} onClick={() => { void run('test') }}>{t('email.test')}</Button>
           <Button variant="outline" disabled={busy} onClick={() => { void run('dry-run') }}>{t('email.dryRunAction')}</Button>
         </div>
+        <details className={css.help} data-email-help>
+          <summary className={css.helpSummary}>{t('email.help.title')}</summary>
+          <p>{t('email.help.from')}</p>
+          <p>{t('email.help.recipients')}</p>
+          <p>{t('email.help.apiKey')}</p>
+          <div className={css.helpSection}>
+            <strong>{t('email.help.recommended')}</strong>
+            <ul className={css.helpLinks}>
+              <li><a href={HELP_LINKS.sendgridSignup} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridSignup')}</a></li>
+              <li><a href={HELP_LINKS.sendgridKeys} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridKeys')}</a></li>
+              <li><a href={HELP_LINKS.sendgridSender} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridSender')}</a></li>
+              <li><a href={HELP_LINKS.aliyun} target="_blank" rel="noopener noreferrer">{t('email.help.aliyun')}</a></li>
+              <li><a href={HELP_LINKS.tencent} target="_blank" rel="noopener noreferrer">{t('email.help.tencent')}</a></li>
+            </ul>
+          </div>
+          <p className={css.helpNote}>{t('email.help.domestic')}</p>
+        </details>
       </div>
     </Modal>
   )

@@ -117,6 +117,47 @@ describe('Cadre email settings', () => {
     expect(screen.queryByText('second@example.com')).toBeNull()
   })
 
+  it('does not show an error when the project has no config yet', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      ok: false,
+      code: 'EMAIL_CONFIG_INVALID',
+      message: 'ENOENT: no such file or directory',
+    })))
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    expect(await screen.findByDisplayValue('SENDGRID_API_KEY')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: '保存' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '测试发送' })).toBeTruthy()
+  })
+
+  it('expands help with official and domestic links', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: VIEW })))
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    await screen.findByText('已检测到环境变量')
+    fireEvent.click(screen.getByText('如何填写 / 推荐地址'))
+    const links = screen.getAllByRole('link')
+    expect(links).toHaveLength(5)
+    for (const link of links) {
+      expect(link.getAttribute('target')).toBe('_blank')
+      expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+    }
+    expect(screen.getByRole('link', { name: 'SendGrid API Keys' }).getAttribute('href'))
+      .toBe('https://app.sendgrid.com/settings/api_keys')
+    expect(screen.getByRole('link', { name: '阿里云邮件推送' }).getAttribute('href'))
+      .toBe('https://www.aliyun.com/product/directmail')
+    expect(screen.getByRole('link', { name: '腾讯云邮件推送 SES' }).getAttribute('href'))
+      .toBe('https://cloud.tencent.com/product/ses')
+    expect(screen.getByText(/当前版本仅支持 SendGrid HTTPS/)).toBeTruthy()
+  })
+
   it('rejects invalid email and still exposes test and dry-run results', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)
