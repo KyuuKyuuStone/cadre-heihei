@@ -75,5 +75,20 @@ export function loadEmailConfig(directory: string, projectId: string): EmailConf
     throw new Error('EMAIL_CONFIG_INVALID: project id is not a safe file name')
   }
   const path = join(directory, `${projectId}.json`)
-  return parseEmailConfig(JSON.parse(readFileSync(path, 'utf8')))
+  let raw: string
+  try {
+    raw = readFileSync(path, 'utf8')
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'ENOENT') {
+      throw error
+    }
+    throw new Error('EMAIL_CONFIG_INVALID: unable to read project config')
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('EMAIL_CONFIG_INVALID: config is not valid JSON')
+  }
+  return parseEmailConfig(parsed)
 }

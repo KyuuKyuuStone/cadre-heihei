@@ -139,11 +139,40 @@ describe('dedupe, rate limit and failures', () => {
     expect(result).toMatchObject({ ok: false, code: 'EMAIL_AUTH_FAILED' })
   })
 
-  it('IPC get returns a disabled default on first open instead of ENOENT', () => {
+  it('IPC get returns the exact disabled default on first open instead of ENOENT', () => {
     const dir = workspace()
-    expect(getEmailConfigView(dir, 'p1')).toMatchObject({
-      enabled: false, recipients: [], apiKeyEnv: 'SENDGRID_API_KEY', hasKey: false,
+    expect(getEmailConfigView(dir, 'p1')).toEqual({
+      enabled: false,
+      from: { email: '', name: '' },
+      recipients: [],
+      apiKeyEnv: 'SENDGRID_API_KEY',
+      dryRun: false,
+      minIntervalMs: 60_000,
+      hasKey: false,
+      configured: false,
     })
+  })
+
+  it('IPC set creates the directory and file on first save', () => {
+    const root = workspace()
+    const dir = join(root, 'nested', 'cadre-email')
+    const view = setEmailConfig(dir, 'p1', {
+      enabled: true, from: { email: 'a@b.com' }, recipients: ['c@d.com'], apiKeyEnv: 'SENDGRID_API_KEY',
+    }, {})
+    expect(view.configured).toBe(true)
+    expect(JSON.parse(readFileSync(join(dir, 'p1.json'), 'utf8'))).toMatchObject({ enabled: true })
+    expect(getEmailConfigView(dir, 'p1', {})).toMatchObject({ enabled: true, configured: true })
+  })
+
+  it('IPC get reports malformed JSON as a readable config error without the file path', () => {
+    const dir = workspace()
+    writeFileSync(join(dir, 'p1.json'), '{ not json')
+    expect(() => getEmailConfigView(dir, 'p1')).toThrow('EMAIL_CONFIG_INVALID: config is not valid JSON')
+    try {
+      getEmailConfigView(dir, 'p1')
+    } catch (error) {
+      expect(String(error)).not.toContain(dir)
+    }
   })
 
   it('IPC get/set never returns the secret and hasKey follows the environment', async () => {

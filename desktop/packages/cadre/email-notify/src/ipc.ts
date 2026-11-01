@@ -8,18 +8,23 @@ import { loadEmailConfig, parseEmailConfig } from './config.ts'
 import type { CadreEmailNotifier } from './notifier.ts'
 import type { EmailConfig, EmailResult } from './types.ts'
 
-/** Config + presence flag safe to send to the settings UI. */
-export type EmailConfigView = EmailConfig & { readonly hasKey: boolean }
+/** Config + presence flags safe to send to the settings UI. */
+export type EmailConfigView = EmailConfig & {
+  readonly hasKey: boolean
+  /** False until this project has saved a config file. */
+  readonly configured: boolean
+}
 
 /** First-run config shown before a project has saved one. */
 export const DEFAULT_EMAIL_CONFIG_VIEW: EmailConfigView = {
   enabled: false,
-  from: { email: '' },
+  from: { email: '', name: '' },
   recipients: [],
   apiKeyEnv: 'SENDGRID_API_KEY',
   dryRun: false,
   minIntervalMs: 60_000,
   hasKey: false,
+  configured: false,
 }
 
 /** Whether a read error means "this project has no config file yet". */
@@ -45,7 +50,7 @@ export function getEmailConfigView(
   try {
     const config = loadEmailConfig(directory, projectId)
     const hasKey = (env[config.apiKeyEnv] ?? '').trim() !== ''
-    return { ...config, hasKey }
+    return { ...config, hasKey, configured: true }
   } catch (error) {
     if (isMissingConfig(error)) return DEFAULT_EMAIL_CONFIG_VIEW
     throw error
@@ -76,7 +81,7 @@ export function setEmailConfig(
   writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`)
   renameSync(temporary, target)
   const hasKey = (env[config.apiKeyEnv] ?? '').trim() !== ''
-  return { ...config, hasKey }
+  return { ...config, hasKey, configured: true }
 }
 
 /** Test-send through the shared notifier. */
