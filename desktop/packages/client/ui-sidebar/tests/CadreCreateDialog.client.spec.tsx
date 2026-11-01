@@ -6,8 +6,13 @@ import { CadreCreateDialog, type CadreCreateRequest } from '../src/client/CadreC
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   delete (window as unknown as { cadre?: unknown }).cadre
 })
+
+function requestUrl(input: RequestInfo | URL): string {
+  return typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+}
 
 type Props = ComponentProps<typeof CadreCreateDialog>
 
@@ -44,6 +49,7 @@ function mount(options: {
     closeCreate,
     createRosterEntry,
     refreshSupervisor: vi.fn(),
+    t: ((key: string) => key) as never,
   } as unknown as Props
   render(<CadreCreateDialog {...props} />)
   return { createRosterEntry, bindSession, reportIn, closeCreate }
@@ -80,6 +86,41 @@ describe('CadreCreateDialog supervisor model selection', () => {
     })
     expect(m.bindSession).not.toHaveBeenCalled()
     expect(m.closeCreate).toHaveBeenCalledOnce()
+  })
+
+  it('selects role-filtered skills for a new employee and writes them after create', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/catalog')) {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: [
+            { id: 'worker-skill', name: '测试技能', description: '员工用', roles: ['worker'], tokenEstimate: 12, tools: [], source: 's', license: 'MIT', selected: false },
+            { id: 'sup-skill', name: '主管技能', description: '主管用', roles: ['supervisor'], tokenEstimate: 8, tools: [], source: 's', license: 'MIT', selected: false },
+          ] }),
+        } as Response
+      }
+      return { ok: true, json: async () => ({ ok: true, result: { skills: ['worker-skill'] } }) } as Response
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const m = mount({
+      request: { kind: 'worker', token: 2, workspaceId: 'ws-1', projectLabel: '项目部 A' },
+      roster: [{ sessionId: 'sup', role: 'supervisor', displayName: '主管', state: 'available' }],
+    })
+    expect(await screen.findByText('测试技能')).toBeTruthy()
+    expect(screen.queryByText('主管技能')).toBeNull()
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '新员工' } })
+    fireEvent.change(screen.getByLabelText('岗位职责（最多 2000 字）'), { target: { value: '负责测试' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '测试技能' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建员工' }))
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/set'))).toBe(true)
+    })
+    const setCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
+    expect(JSON.parse((setCall?.[1] as RequestInit).body as string)).toMatchObject({
+      targetSessionId: 's-new', skills: ['worker-skill'],
+    })
+    expect(m.createRosterEntry).toHaveBeenCalledOnce()
   })
 
   it('still refuses a second supervisor without touching the model bridge', async () => {

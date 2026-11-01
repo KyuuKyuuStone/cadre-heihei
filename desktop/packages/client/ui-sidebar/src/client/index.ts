@@ -28,6 +28,12 @@ import {
   type CadreEmailRequest,
 } from './CadreEmailSettings.tsx'
 import {
+  CadreSkillSettingsDialog,
+  CadreSkillSettingsMenuItem,
+  type CadreSkillsInjected,
+  type CadreSkillsRequest,
+} from './CadreSkills.tsx'
+import {
   CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
   type CadreProjectActionsInjected,
@@ -573,6 +579,20 @@ export function apply(ctx: ClientContext): void {
     openEmail,
     closeEmail,
   })
+  const skillsRequest = createSnapshotStore<CadreSkillsRequest | null>(null)
+  let skillsToken = 0
+  const openSkills = (sessionId: string, label: string): void => {
+    const projectId = projectOfSession(sessionId)
+    if (projectId === undefined) return
+    skillsToken += 1
+    skillsRequest.set({ sessionId, projectId, label, token: skillsToken })
+  }
+  const closeSkills = (): void => { skillsRequest.set(null) }
+  const skillsInjected = (): CadreSkillsInjected => ({
+    hooks: { roster, request: skillsRequest },
+    openSkills,
+    closeSkills,
+  })
 
   const createRosterEntry = async (input: {
     role: 'supervisor' | 'worker'
@@ -771,6 +791,9 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay', id: 'cadre-email', locale: NS, inject: emailInjected,
   } as never, CadreEmailSettingsDialog as never))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay', id: 'cadre-skills', locale: NS, inject: skillsInjected,
+  } as never, CadreSkillSettingsDialog as never))
 
   // ui-sidebar cannot reference ui-workspace's SlotMap: ui-workspace depends
   // on this package, so a reverse type import would form a project-reference
@@ -820,6 +843,13 @@ export function apply(ctx: ClientContext): void {
   } as never, UpdateCheckRow as never))
 
   // Employee management stays on the Session row menu.
+  ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
+    name: 'sidebar.workspaces.session.menu.item',
+    id: 'cadre-skills',
+    order: 350,
+    locale: NS,
+    inject: skillsInjected,
+  } as never, CadreSkillSettingsMenuItem as never))
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
     name: 'sidebar.workspaces.session.menu.item',
     id: 'cadre-retire-member',

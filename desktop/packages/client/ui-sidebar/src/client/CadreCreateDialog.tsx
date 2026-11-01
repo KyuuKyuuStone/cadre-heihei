@@ -13,12 +13,19 @@ import {
   Input,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { HostObservable, InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   loadCustomRoles, removeCustomRole, saveCustomRole,
   type CustomRole,
 } from './cadre-roster-source.ts'
 import css from './CadreCreateDialog.module.css'
+import {
+  CadreSkillPicker,
+  fetchSkillCatalog,
+  saveMemberSkills,
+  skillTokenTotal,
+  type CadreSkillEntry,
+} from './CadreSkills.tsx'
 
 const TEXT_PRIMARY = 'var(--dsw-alias-label-primary)'
 const BODY_TEXTAREA: CSSProperties = {
@@ -228,8 +235,8 @@ function errorMessage(error: unknown): string {
  * the same shell so their width and spacing stay aligned.
  */
 export function CadreCreateDialog({
-  useCreateRequest, closeCreate, createRosterEntry, refreshSupervisor,
-}: PropsRuntime<'shell.overlay'> & InjectFace<CadreCreateInjected>) {
+  useCreateRequest, closeCreate, createRosterEntry, refreshSupervisor, t,
+}: PropsRuntime<'shell.overlay'> & InjectFace<CadreCreateInjected> & PropsLocale<'sidebar'>) {
   const request = useCreateRequest(value => value)
   if (request === null) return null
   return (
@@ -239,15 +246,16 @@ export function CadreCreateDialog({
       closeCreate={closeCreate}
       createRosterEntry={createRosterEntry}
       refreshSupervisor={refreshSupervisor}
+      t={t}
     />
   )
 }
 
 function CadreCreateForm({
-  request, closeCreate, createRosterEntry, refreshSupervisor,
+  request, closeCreate, createRosterEntry, refreshSupervisor, t,
 }: {
   readonly request: CadreCreateRequest
-} & Omit<CadreCreateInjected, 'hooks' | 'useCreateRequest'>) {
+} & Omit<CadreCreateInjected, 'hooks' | 'useCreateRequest'> & PropsLocale<'sidebar'>) {
   const bridge = (): CadreCreateBridge | undefined => (window as unknown as { cadre?: CadreCreateBridge }).cadre
   const kind = request.kind
   const [supervisor, setSupervisor] = useState<RosterRow | undefined>(undefined)
@@ -265,6 +273,10 @@ function CadreCreateForm({
   const [effortId, setEffortId] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [skillEntries, setSkillEntries] = useState<readonly CadreSkillEntry[]>([])
+  const [selectedSkills, setSelectedSkills] = useState<readonly string[]>([])
+  const [skillActor, setSkillActor] = useState<string | undefined>(undefined)
+  const [skillError, setSkillError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -307,6 +319,36 @@ function CadreCreateForm({
     return () => { cancelled = true }
   }, [kind])
 
+  useEffect(() => {
+    if (kind !== 'worker' || request.workspaceId === undefined) return
+    const list = bridge()
+    const roster = list?.listRoster?.bind(list)
+    if (roster === undefined) {
+      setSkillError(t('skills.error.channel'))
+      return
+    }
+    let cancelled = false
+    void roster({ projectId: request.workspaceId }).then(async (result) => {
+      if (cancelled) return
+      const supervisor = (result?.members ?? result?.rows ?? [])
+        .find(member => member.role === 'supervisor' && member.state !== 'departed')
+      if (supervisor === undefined) {
+        setSkillError(t('skills.error.noSupervisor'))
+        return
+      }
+      setSkillActor(supervisor.sessionId)
+      try {
+        const entries = await fetchSkillCatalog(request.workspaceId as string, supervisor.sessionId)
+        setSkillEntries(entries.filter(entry => entry.roles.includes('worker')))
+      } catch (cause) {
+        setSkillError(errorMessage(cause))
+      }
+    }).catch((cause: unknown) => {
+      if (!cancelled) setSkillError(errorMessage(cause))
+    })
+    return () => { cancelled = true }
+  }, [kind, request.workspaceId])
+
   const applyTemplate = (template: RoleTemplate): void => {
     setTemplateId(template.id)
     setName(template.name)
@@ -343,6 +385,13 @@ function CadreCreateForm({
         return
       }
       let warning: string | undefined
+      if (kind === 'worker' && selectedSkills.length > 0 && skillActor !== undefined && request.workspaceId !== undefined) {
+        try {
+          await saveMemberSkills(request.workspaceId, skillActor, result.sessionId, selectedSkills)
+        } catch (cause) {
+          warning = t('skills.error.saveAfterCreate', { message: errorMessage(cause) })
+        }
+      }
       // Both roles may pick a model; an empty pick means "official default",
       // which is why create still succeeds without binding anything.
       if (providerId !== '' && modelId !== '') {
@@ -437,7 +486,7 @@ function CadreCreateForm({
               value={name}
               placeholder="主管"
               disabled={creating}
-              onChange={event => { setName(event.target.value) }}
+              onChange={(event) => { setName(event.target.value) }}
             />
             <span className={css.hint}>
               主管不选职能、不建模板；每个项目部最多一名。已有主管时需先让其离职。
@@ -521,7 +570,7 @@ function CadreCreateForm({
               value={name}
               placeholder="选模板后自动填入，可改"
               disabled={creating}
-              onChange={event => { setName(event.target.value) }}
+              onChange={(event) => { setName(event.target.value) }}
             />
             <label className={css.label} htmlFor="cadre-worker-duty">岗位职责（最多 2000 字）</label>
             <textarea
@@ -531,7 +580,7 @@ function CadreCreateForm({
               rows={5}
               maxLength={2000}
               disabled={creating}
-              onChange={event => { setDuty(event.target.value) }}
+              onChange={(event) => { setDuty(event.target.value) }}
               style={BODY_TEXTAREA}
             />
             <Checkbox
@@ -540,6 +589,25 @@ function CadreCreateForm({
               disabled={creating}
               onChange={setSaveAsCustom}
             />
+
+            <div className={css.divider} />
+            <h3 className={css.sectionTitle}>{t('skills.sectionTitle')}</h3>
+            <span className={css.hint}>{t('skills.createHint')}</span>
+            <CadreSkillPicker
+              entries={skillEntries}
+              selected={selectedSkills}
+              t={t}
+              onToggle={(id) => {
+                setSelectedSkills(current => current.includes(id)
+                  ? current.filter(item => item !== id)
+                  : [...current, id])
+              }}
+              onPreview={() => { /* preview is available in the member editor */ }}
+            />
+            <span className={css.hint}>
+              {t('skills.total', { count: String(skillTokenTotal(skillEntries, selectedSkills)) })}
+            </span>
+            {skillError !== null && <p role="alert" className={css.error}>{skillError}</p>}
 
             <div className={css.divider} />
             <ProviderModelPicker
