@@ -139,6 +139,13 @@ describe('dedupe, rate limit and failures', () => {
     expect(result).toMatchObject({ ok: false, code: 'EMAIL_AUTH_FAILED' })
   })
 
+  it('IPC get returns a disabled default on first open instead of ENOENT', () => {
+    const dir = workspace()
+    expect(getEmailConfigView(dir, 'p1')).toMatchObject({
+      enabled: false, recipients: [], apiKeyEnv: 'SENDGRID_API_KEY', hasKey: false,
+    })
+  })
+
   it('IPC get/set never returns the secret and hasKey follows the environment', async () => {
     const dir = workspace()
     const config = {

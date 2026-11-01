@@ -11,8 +11,27 @@ import type { EmailConfig, EmailResult } from './types.ts'
 /** Config + presence flag safe to send to the settings UI. */
 export type EmailConfigView = EmailConfig & { readonly hasKey: boolean }
 
+/** First-run config shown before a project has saved one. */
+export const DEFAULT_EMAIL_CONFIG_VIEW: EmailConfigView = {
+  enabled: false,
+  from: { email: '' },
+  recipients: [],
+  apiKeyEnv: 'SENDGRID_API_KEY',
+  dryRun: false,
+  minIntervalMs: 60_000,
+  hasKey: false,
+}
+
+/** Whether a read error means "this project has no config file yet". */
+function isMissingConfig(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error
+    && (error as { code?: unknown }).code === 'ENOENT'
+}
+
 /**
  * Read one project config for the settings UI.
+ * A missing file is a valid first-run state: return a disabled default instead
+ * of surfacing ENOENT to the settings dialog.
  * @param directory - private config directory.
  * @param projectId - project id.
  * @param env - environment used only to compute `hasKey`.
@@ -23,9 +42,14 @@ export function getEmailConfigView(
   projectId: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): EmailConfigView {
-  const config = loadEmailConfig(directory, projectId)
-  const hasKey = (env[config.apiKeyEnv] ?? '').trim() !== ''
-  return { ...config, hasKey }
+  try {
+    const config = loadEmailConfig(directory, projectId)
+    const hasKey = (env[config.apiKeyEnv] ?? '').trim() !== ''
+    return { ...config, hasKey }
+  } catch (error) {
+    if (isMissingConfig(error)) return DEFAULT_EMAIL_CONFIG_VIEW
+    throw error
+  }
 }
 
 /**
