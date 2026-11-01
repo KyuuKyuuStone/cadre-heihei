@@ -3,6 +3,9 @@
 ## 1.1.2
 
 - **技能管理员（普通对话）**：技能页内嵌 `cadre-skill-admin` hidden preset，普通 Session，不写花名册/不占员工位；`skill_catalog`/`skill_preview`/`skill_plan`/`skill_audit` 四个模型工具；安装/更新/删除由用户确认后走 `admin/apply`（planId+token），带备份、回滚、审计
+- **技能管理员会话修复**：`sessionController` 改为每次调用懒解析，避免插件加载顺序导致 admin 服务未挂载；创建失败返回 `SKILL_ADMIN_SESSION_FAILED`/`SKILL_ADMIN_PRESET_MISSING` 并展示具体原因
+- **会话头部技能入口**：会话 header 显示已选技能数量/chip，技能页入口收敛
+- **移除重复右键技能菜单**：删除技能行上重复的右键菜单项，保留主管成员菜单
 - **SkillHub 格式适配**：支持 `@scope/<pack>/` 两层目录与无 `manifest.json` 的 `SKILL.md` frontmatter 合成（id/name/description/roles/tokenEstimate/source/license），scope 限定 id 避免 slug 冲突
 - **技能来源/署名**：manifest 支持 `author`/https `homepage`，catalog/preview 展示；URL 安装、来源入口、预设页底部致谢
 - **主管任务卡**：派单默认折叠、区分配色；`【Cadre 任务】` 改为 `【主管任务】`，字段不变、旧前缀兼容
