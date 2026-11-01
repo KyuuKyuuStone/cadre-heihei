@@ -8,6 +8,7 @@
 - **技能库分层**：内置技能（随包 `builtin-skills/`，只读）与手动安装（`~/.dsh/cadre-skills`）区分 `origin`；manifest 支持 `descriptionI18n{zh,en}`；新增 `cadre-team`/`cadre-workflow` 内置技能；公开 GitHub URL 安装（HTTPS/大小/超时限制）
 - **Cadre 团队模式预设**：新增 `cadre`（Cadre 团队模式），基于标准工具集但聚焦 shell/read/write/grep/测试/打包/台账，去掉无关 `tool-web`；persona 带派单四项、证据规范、单一基线、actor-target、环境与 release preflight；`source: cadre`，上游 standard/ptc/minimal/cordis 不变
 - **归属致谢**：preset source 元数据区分 `deepseek`/`cadre`，UI 可标注；内置技能注明来源
+- **预设页归属修正**：底部致谢区、Cadre 预设归入内置分组并去除多余来源徽标
 - **手动添加/删除技能**：`/cadre/skills/add` 接收 manifest + SKILL.md 正文，kebab-case/角色/路径校验，默认不覆盖，`overwrite:true` 才替换；`/cadre/skills/remove` 需 confirm；原子目录写入
 - **工具结果 4k 落盘**：Cadre `spill-policy.maxInlineTokens` 12.5k → 4000，超出保留头尾并写 spill 文件路径，tool call/result 配对不变
 - **Token 治理**：compaction 保留尾部 50k（阈值 150k 不变）；step 级压缩 `stepPressureCheck` 默认 **true**（100k 阈值、2 个 tool 起检）；压缩发生时会增加一次摘要 LLM 调用
