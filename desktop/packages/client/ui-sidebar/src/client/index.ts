@@ -38,6 +38,8 @@ import {
   CadreSkillLibraryPage,
   type CadreSkillLibraryInjected,
 } from './CadreSkillLibrary.tsx'
+import { CadreSkillPlanCard, type CadreSkillPlanInjected } from './CadreSkillPlanCard.tsx'
+import { applySkillPlan, recallAdminOperator, SkillAdminError } from './CadreSkillAdmin.ts'
 import {
   CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
@@ -603,10 +605,34 @@ export function apply(ctx: ClientContext): void {
     openSkills,
     closeSkills,
   })
+  const openSkillAdminSession = async (sessionId: string): Promise<void> => {
+    await ctx.sessions.refresh()
+    workspaceNavigation.openSession(sessionId)
+  }
   const skillLibraryInjected = (): CadreSkillLibraryInjected => ({
     hooks: { roster, sessions: sessionsSource },
     projectOfSession,
+    openSkillAdminSession,
   })
+  // @ts-expect-error -- ui-tool owns the tool slot declaration; importing it statically would form a project-reference cycle.
+  ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+    name: 'tool.call.toolview',
+    key: 'skill_plan',
+    locale: NS,
+    inject: (sessionId: string): CadreSkillPlanInjected => ({
+      applyPlan: async (planId, token, action) => {
+        const operatorSessionId = recallAdminOperator(sessionId)
+        if (operatorSessionId === undefined) {
+          throw new SkillAdminError('SKILL_ADMIN_SESSION_UNBOUND', '请从技能页重新打开该技能管理员会话')
+        }
+        const projectId = projectOfSession(operatorSessionId)
+        if (projectId === undefined) {
+          throw new SkillAdminError('SKILL_ADMIN_FORBIDDEN', '当前操作主管不在项目部花名册')
+        }
+        return applySkillPlan({ projectId, operatorSessionId, planId, token, action })
+      },
+    }),
+  }, CadreSkillPlanCard as never))
 
   const createRosterEntry = async (input: {
     role: 'supervisor' | 'worker'

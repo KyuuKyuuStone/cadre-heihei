@@ -40,6 +40,7 @@ function pageProps(role: 'supervisor' | 'worker' = 'supervisor', translate = t):
     useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
       selector({ byId: { [role === 'supervisor' ? 'sup' : 'w1']: { retainedBy: { mainView: 1 } } } })) as never,
     projectOfSession: () => 'p1',
+    openSkillAdminSession: async () => {},
     t: translate,
   } as unknown as ComponentProps<typeof CadreSkillLibraryPage>
 }
@@ -51,6 +52,7 @@ describe('Cadre skill library', () => {
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(screen.getByText('只有主管可以查看和管理技能库。')).toBeTruthy()
     expect(screen.queryByPlaceholderText('GitHub 仓库、tree 或 raw SKILL.md URL')).toBeNull()
+    expect(screen.queryByRole('button', { name: '技能管理员' })).toBeNull()
     expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
   })
 
@@ -72,6 +74,47 @@ describe('Cadre skill library', () => {
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
     expect(screen.getByText('local')).toBeTruthy()
+  })
+
+  it('opens the skill administrator history and creates an ordinary admin session', async () => {
+    const openSkillAdminSession = vi.fn(async () => {})
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/admin/sessions')) return json({ ok: true, result: [] })
+      if (url.endsWith('/admin/session')) {
+        return json({ ok: true, result: { sessionId: 'admin-1', title: '技能管理员', updatedAt: Date.now() } })
+      }
+      return json({ ok: true, result: ENTRIES })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreSkillLibraryPage {...{ ...pageProps(), openSkillAdminSession }} />)
+    await screen.findByText('内置技能')
+    fireEvent.click(screen.getByRole('button', { name: '技能管理员' }))
+    expect(await screen.findByText('还没有技能管理员对话。')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '新建对话' }))
+    await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('admin-1') })
+  })
+
+  it('lists and deletes previous admin conversations by preset', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/admin/sessions')) {
+        return json({ ok: true, result: [{ sessionId: 'old-1', title: '旧对话', updatedAt: Date.now() }] })
+      }
+      if (url.endsWith('/admin/delete-session')) return json({ ok: true, result: { deleted: true } })
+      return json({ ok: true, result: ENTRIES })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreSkillLibraryPage {...pageProps()} />)
+    await screen.findByText('内置技能')
+    fireEvent.click(screen.getByRole('button', { name: '技能管理员' }))
+    expect(await screen.findByText('旧对话')).toBeTruthy()
+    fireEvent.click(screen.getAllByRole('button', { name: '删除' }).at(-1)!)
+    await waitFor(() => { expect(screen.queryByText('旧对话')).toBeNull() })
+    const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/admin/delete-session'))
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
+      projectId: 'p1', operatorSessionId: 'sup', sessionId: 'old-1',
+    })
   })
 
   it('localizes built-in descriptions in English', async () => {

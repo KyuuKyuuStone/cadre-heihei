@@ -13,11 +13,13 @@ import {
   removeSkillFromLibrary,
   type CadreSkillEntry,
 } from './CadreSkills.tsx'
+import { CadreSkillAdminDialog } from './CadreSkillAdminDialog.tsx'
 import css from './CadreSkillLibrary.module.css'
 
 export interface CadreSkillLibraryInjected {
   hooks: { roster: HostObservable<CadreRosterState>; sessions: HostObservable<CadreSessionsState> }
   projectOfSession(sessionId: string): string | undefined
+  openSkillAdminSession(sessionId: string): Promise<void>
 }
 
 interface ManualState {
@@ -63,7 +65,7 @@ export function CadreSkillLibraryIcon({ size }: PropsRuntime<'sidebar.panellist'
 
 /** Global panel listing built-in and installed skills. */
 export function CadreSkillLibraryPage({
-  useRoster, useSessions, projectOfSession, t,
+  useRoster, useSessions, projectOfSession, openSkillAdminSession, t,
 }: PropsRuntime<'main'> & InjectFace<CadreSkillLibraryInjected> & PropsLocale<'sidebar'>) {
   const members = useRoster(state => state.members)
   const activeSessionId = useSessions(state => Object.entries(state.byId)
@@ -79,6 +81,7 @@ export function CadreSkillLibraryPage({
   const [advanced, setAdvanced] = useState(false)
   const [form, setForm] = useState<ManualState>(EMPTY)
   const [tokenManual, setTokenManual] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
 
   const load = useCallback(async () => {
     if (actor?.role !== 'supervisor' || projectId === undefined) return
@@ -225,6 +228,9 @@ export function CadreSkillLibraryPage({
           <h1>{t('skills.library.title')}</h1>
           <p>{t('skills.library.description')}</p>
         </div>
+        <Button variant="outline" disabled={busy} onClick={() => { setAdminOpen(true) }}>
+          {t('skills.admin.entry')}
+        </Button>
       </header>
       <div className={css.install} data-skill-url>
         <Input value={url} placeholder={t('skills.url.placeholder')} disabled={busy}
@@ -244,6 +250,15 @@ export function CadreSkillLibraryPage({
         <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
         <p>{t('skills.sources.caution')}</p>
       </div>
+      {adminOpen && (
+        <CadreSkillAdminDialog
+          projectId={projectId}
+          operatorSessionId={actor.sessionId}
+          openSession={openSkillAdminSession}
+          onClose={() => { setAdminOpen(false) }}
+          t={t}
+        />
+      )}
       {advanced && (
         <div className={css.install} data-skill-install>
           <div className={css.fields}>
