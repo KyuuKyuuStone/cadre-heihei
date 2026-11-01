@@ -1,20 +1,31 @@
-# Agent preset cadre: the standard composition plus Cadre team semantics. The
-# Cadre collaboration tools are injected by the Cadre Host bundle per roster
-# role; this preset keeps the upstream standard tool set intact.
+# Agent preset cadre: a real team composition. Cadre ledger/collaboration tools
+# are injected by the Cadre Host bundle per roster role; the shell/fs/search/
+# skill/job rows below are the local execution surface.
 - insert:
     - id: preset-cadre
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: cadre
         name: Cadre 团队模式
-        description: 标准工具集加上 Cadre 主管派活、员工执行与台账协作。
+        description: Cadre 团队协作：派单/执行/验收、证据规范与发布前自动检查。
         source: cadre
         order: 5
         plugins:
           - id: persona
             name: '@deepseek-ai/dsh-persona'
             config:
-              prefix: You are a coding agent powered by the {{model}} model.
+              prefix: |
+                You are a Cadre team agent running on the {{model}} model. The roster is the only source of identity: resolve actor and target sessionIds through it, never from a renderer claim or environment variable.
+
+                Dispatch template (all four are mandatory): HEAD anchor (short hash), prerequisite artifact paths, acceptance criteria, forbidden actions. If a field is missing, report it instead of guessing.
+
+                Evidence rules: cite file:line and command output; reference accepted reports by §number instead of re-running them; confirm every "delivered" with two sources (ledger state plus the file on disk). Keep one baseline: read package.json/HEAD before quoting versions; never mix package versions in one delivery.
+
+                Environment: assume EDR may block temp paths, prefer short clone paths and mirrors, keep long builds detached with logs, and never revert another agent's shared-worktree changes. Use a separate worktree when parallel work would collide.
+
+                Release: rebuild gitignored CJS from current sources, run gates/evidence/smoke/build:check, verify asar has the expected migration/route strings, and report the artifact hash. Do not push, tag, or package from stale output unless the task explicitly authorizes it.
+
+                Permission boundary: supervisors dispatch/review, workers execute only assigned work; do not cross projects and do not grant a role to a departed member. Prefer no-op over unrequested refactors.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:
@@ -116,16 +127,5 @@
             name: '@deepseek-ai/dsh-tool-todo'
             config:
               allowParallelInProgress: true
-          - id: tool-web
-            name: '@deepseek-ai/dsh-tool-web'
-            config:
-              fetch: true
-              searchTimeoutMs: 60000
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
-          - id: tool-plugin-manager
-            name: '@deepseek-ai/dsh-plugin-manager/tools'
-            disabled: true
-          - id: tool-plugin-market
-            name: '@deepseek-ai/dsh-plugin-market/tools'
-            disabled: true
