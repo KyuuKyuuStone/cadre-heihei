@@ -2,17 +2,19 @@
 
 ## 1.1.3
 
-- **技能不再按主管/员工区分**：manifest `roles` 仅元数据，选中即注册；catalog 不过滤；主管/员工可用同一套技能
-- **技能安装不再要求主管**：add/remove/install-url/install-package 允许同项目在册成员；技能管理员 plan/apply 仍仅 supervisor；非成员仍 `SKILL_FORBIDDEN`
+- **技能界面重构**：技能库/每对话技能页统一为列表 + 安装入口，内置/已安装分层，安装结果直接刷新
 - **技能安装弹窗**：技能页统一为粘贴 URL / 包名安装；URL 走现有 GitHub 安装，包名走 `install-package`，高级安装仍可打开技能管理员对话
-- **包名安装（SkillHub）**：`POST /cadre/skills/install-package` 固定 WSL `skillhub install <name> --dir …`，严格包名校验、180s 超时、可读 unsupported/failure、审计；员工可通过项目主管身份安装
+- **技能安装全员可用**：add/remove/install-url/install-package 允许同项目在册成员；技能管理员 plan/apply 仍仅 supervisor；非成员仍 `SKILL_FORBIDDEN`
+- **技能不再按主管/员工区分**：manifest `roles` 仅元数据，选中即注册；catalog 不过滤；主管/员工可用同一套技能
+- **包名安装（SkillHub）**：`POST /cadre/skills/install-package` 固定 WSL `skillhub install <name> --dir …`，严格包名校验、180s 超时、可读 unsupported/failure、审计
 - **会话技能页重设计**：每对话技能页签/安装入口重新整理，成员可查看和调整本会话技能
-- **Resend 邮件提供方**：新增 `provider: sendgrid | resend`，Resend 使用 `api.resend.com/emails`、Bearer、15s 超时、已验证域名/`onboarding@resend.dev` 发件约束、重试/脱敏；设置页可选 provider
+- **SMTP 默认提供方**：`provider: smtp` 支持 QQ/163 预设（smtp.qq.com:465 / smtp.163.com:465，secure），填邮箱 + 授权码即可；auth code 只读 `QQ_EMAIL_AUTH_CODE` 等环境变量
+- **Resend 修正 / 高级提供方**：SendGrid/Resend 保留为高级；Resend 不再本地 `verifiedDomains` 拦截，改由服务端 403/422 映射 `EMAIL_FROM_NOT_VERIFIED`/`EMAIL_RECIPIENT_RESTRICTED`
 - **typecheck 修复**：修复技能安装测试与提供方设置相关的类型错误
 
 ### 已知限制
 
-- Resend 已验证域名需在后台验证后手工写入 `verifiedDomains`
+- SMTP 需要邮箱开启 SMTP 并使用授权码；QQ/163 可能触发风控/限额
 - 包名安装依赖 WSL `Ubuntu-24.04` 与 `/root/.local/bin/skillhub`
 - 安装包未签名（SmartScreen 提示）
 
