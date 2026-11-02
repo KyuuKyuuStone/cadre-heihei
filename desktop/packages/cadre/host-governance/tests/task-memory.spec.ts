@@ -100,6 +100,16 @@ describe('task memory', () => {
     expect(gate.shouldCompact('s1', { updatedAt: 't2' }, 'idle')).toBe(true)
   })
 
+  it('exposes the latest archive marker used by the compaction trigger', () => {
+    const reader = new TaskMemoryReader(seed())
+    try {
+      expect(reader.latest('p1')?.updatedAt).toBe('2026-11-02T00:00:00.000Z')
+      expect(reader.latest('missing')).toBeUndefined()
+    } finally {
+      reader.close()
+    }
+  })
+
   it('adds task_memory to an existing ledger without dropping rows', () => {
     const path = seed()
     const raw = new DatabaseSync(path)
