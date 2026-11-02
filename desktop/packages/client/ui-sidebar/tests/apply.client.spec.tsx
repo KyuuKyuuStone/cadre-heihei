@@ -69,6 +69,13 @@ describe('ui-sidebar apply', () => {
     expect(hostApply).not.toThrow()
   })
 
+  it('does not register the removed token sidebar panel', () => {
+    const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+    expect(source).not.toContain('CadreToken')
+    expect(source).not.toContain('/cadre/token/snapshot')
+    expect(source).not.toContain("id: 'cadre-token'")
+  })
+
   it('does not register or call the email settings surface', () => {
     const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
     expect(source).not.toContain('CadreEmailSettings')
