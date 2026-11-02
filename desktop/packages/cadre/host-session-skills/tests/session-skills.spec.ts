@@ -417,9 +417,14 @@ describe('session skill packs', () => {
         }), { status: 200 })
         : new Response('# admin body', { status: 200 })
     })
+    const workspacePort = {
+      create: async (path: string) => ({
+        id: 'ws-admin', path, attachSession: async () => {},
+      }),
+    }
     const admin = new SkillAdminApi({
       db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs,
-      sessions: port, auditDir: join(root, 'audit'), fetch: fetch as never,
+      sessions: port, workspace: workspacePort, auditDir: join(root, 'audit'), fetch: fetch as never,
     })
     const created = await admin.createSession({ projectId: 'p1', cwd: root })
     expect(created.sessionId).toBe('admin-1')

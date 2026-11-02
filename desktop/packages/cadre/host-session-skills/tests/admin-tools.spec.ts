@@ -71,9 +71,20 @@ describe('skill admin model tools', () => {
         }), { status: 200 })
         : new Response(`# ${id} body`, { status: 200 })
     })
+    const attached: string[] = []
+    const workspaces = new Map<string, string>()
+    const titles: string[] = []
+    const workspacePort = {
+      create: async (path: string, title?: string) => {
+        titles.push(title ?? '')
+        const id = workspaces.get(path) ?? `ws-${String(workspaces.size + 1)}`
+        workspaces.set(path, id)
+        return { id, path, attachSession: async (sessionId: string) => { attached.push(sessionId) } }
+      },
+    }
     const admin = new SkillAdminApi({
       db, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs,
-      sessions: port, auditDir: join(root, 'audit'), fetch: fetch as never,
+      sessions: port, workspace: workspacePort, auditDir: join(root, 'audit'), fetch: fetch as never,
       runPackageCommand: async args => {
         const name = args[5]!
         const parts = name.startsWith('@') ? name.split('/') : [name]
@@ -86,10 +97,15 @@ describe('skill admin model tools', () => {
     const workspaceDir = join(root, 'project', 'workspace')
     const created = await admin.createSession({ projectId: 'p1', cwd: workspaceDir })
     expect(created.cwd).toBe(workspaceDir)
+    expect(created.workspaceId).toBe('ws-1')
+    expect(attached).toContain(created.sessionId)
+    expect(titles[0]).toBe('技能管理员工作区（内部）')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM members').get()).toMatchObject({ count: 3 })
     expect(existsSync(workspaceDir)).toBe(true)
     writeFileSync(join(workspaceDir, 'keep.txt'), 'keep')
     const reused = await admin.createSession({ projectId: 'p1', cwd: workspaceDir })
     expect(reused.cwd).toBe(workspaceDir)
+    expect(reused.workspaceId).toBe('ws-1')
     expect(readFileSync(join(workspaceDir, 'keep.txt'), 'utf8')).toBe('keep')
     db.prepare(`INSERT INTO members (project_id, session_id, role, state, skills_json, created_at, updated_at)
       VALUES ('p3', 'w3', 'worker', 'available', '[]', 'now', 'now')`).run()

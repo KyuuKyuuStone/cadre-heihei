@@ -79,8 +79,10 @@ It never writes roster rows or team tools. Its backend routes are:
 
 - `/cadre/skills/admin/session` — `{projectId, cwd?}` creates an ordinary session
   through the Host `sessionController`; the workspace (default
-  `~/.dsh/cadre-skill-admin/workspace`) is created with `mkdir -p` and returned
-  as `cwd`; the session itself is the identity, no operator binding is recorded;
+  `~/.dsh/cadre-skill-admin/workspace`) is created with `mkdir -p`, registered
+  through `workspaceRegistry` as an internal `技能管理员工作区（内部）`, the
+  session is attached to it, and `{cwd, workspaceId}` are returned; the session
+  itself is the identity, no operator binding is recorded;
 - `/cadre/skills/admin/sessions` — lists sessions created for the project whose
   projection preset is `cadre-skill-admin`;
 - `/cadre/skills/admin/delete-session` — removes one listed project session when

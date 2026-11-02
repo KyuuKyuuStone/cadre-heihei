@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { loadSkillCatalog, type SkillPack } from './catalog.ts'
 import { createSkillApi, SkillIpcError } from './ipc.ts'
-import { SkillAdminApi, type AdminMessage, type AdminSession, type AdminSessionPort } from './admin.ts'
+import { SkillAdminApi, type AdminMessage, type AdminSession, type AdminSessionPort, type AdminWorkspacePort } from './admin.ts'
 import {
   appendSessionError, collectAdminDiagnostics, type AdminDiagnostics, type PresetDiagnosticsPort,
 } from './diagnostics.ts'
@@ -167,6 +167,36 @@ export function adminSessionPort(ctx: HostContext): AdminSessionPort {
 }
 
 /**
+ * Bind the Host workspace registry to the narrow admin workspace port.
+ * @param ctx - Host context that may expose `workspaceRegistry`.
+ * @returns the lazy workspace port.
+ */
+export function adminWorkspacePort(ctx: HostContext): AdminWorkspacePort {
+  const workspace = (): {
+    create(path: string, title?: string): Promise<{
+      readonly id: string
+      readonly path: string
+      attachSession(sessionId: string): Promise<void>
+    }>
+  } => {
+    const registry = ctx.get?.('workspaceRegistry') as {
+      create(path: string, title?: string): Promise<{
+        readonly id: string
+        readonly path: string
+        attachSession(sessionId: string): Promise<void>
+      }>
+    } | undefined
+    if (registry === undefined) {
+      throw new SkillIpcError('SKILL_ADMIN_WORKSPACE_UNAVAILABLE', 503, '当前 Host 没有 workspaceRegistry')
+    }
+    return registry
+  }
+  return {
+    create: (path, title) => workspace().create(path, title),
+  }
+}
+
+/**
  * Register exactly the roster-selected skill packs for each agent.
  * @param ctx - Host context with `agent/pre-step`.
  * @param config - optional disable/catalog/ledger overrides.
@@ -293,6 +323,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         db, ledgerPath, skillsDir, builtinDir,
         ...(config.skillAdminAuditDir === undefined ? {} : { auditDir: config.skillAdminAuditDir }),
         sessions: sessionPort,
+        workspace: adminWorkspacePort(ctx),
       })
       const requireAdmin = (): SkillAdminApi => admin
       ctx.provide?.('skillAdmin', admin)

@@ -20,6 +20,8 @@ export interface AdminSession {
   readonly updatedAt: number
   /** Workspace directory ensured by createSession. */
   readonly cwd?: string
+  /** Dedicated workspace id when the Host registry is available. */
+  readonly workspaceId?: string
 }
 
 /** One user/assistant message read from an admin session. */
@@ -43,6 +45,15 @@ export interface AdminSessionPort {
   delete?(input: { readonly sessionId: string }): Promise<void>
   prompt?(input: { readonly sessionId: string; readonly text: string }): Promise<void>
   messages?(input: { readonly sessionId: string; readonly afterSeq: number }): Promise<AdminMessages>
+}
+
+/** The dedicated workspace registry surface used by the admin conversation. */
+export interface AdminWorkspacePort {
+  create(path: string, title?: string): Promise<{
+    readonly id: string
+    readonly path: string
+    attachSession(sessionId: string): Promise<void>
+  }>
 }
 
 /** A previewable, non-executed install/update/remove plan. */
@@ -100,6 +111,7 @@ export interface ApplyInput {
 export class SkillAdminApi {
   private readonly api: SkillApi
   private readonly sessions: AdminSessionPort
+  private readonly workspace: AdminWorkspacePort | undefined
   private readonly auditFile: string
   private readonly now: () => number
   private readonly skillsDir: string
@@ -114,6 +126,7 @@ export class SkillAdminApi {
     readonly builtinDir?: string
     readonly fetch?: typeof globalThis.fetch
     readonly sessions: AdminSessionPort
+    readonly workspace?: AdminWorkspacePort
     readonly auditDir?: string
     readonly now?: () => number
     readonly runPackageCommand?: (args: readonly string[], timeoutMs: number) => Promise<PackageCommandResult>
@@ -128,6 +141,7 @@ export class SkillAdminApi {
       ...(options.runPackageCommand === undefined ? {} : { runPackageCommand: options.runPackageCommand }),
     })
     this.sessions = options.sessions
+    this.workspace = options.workspace
     this.now = options.now ?? Date.now
     this.skillsDir = options.skillsDir
     const auditDir = options.auditDir ?? join(homedir(), '.dsh', 'cadre-skill-admin')
@@ -235,9 +249,28 @@ export class SkillAdminApi {
       throw new SkillIpcError('SKILL_ADMIN_CWD_FAILED', 500,
         `无法创建技能管理员工作目录：${error instanceof Error ? error.message : String(error)}`)
     }
-    const created = await this.sessions.create({ preset: SKILL_ADMIN_PRESET, cwd: input.cwd, title: '技能管理员' })
+    if (this.workspace === undefined) {
+      throw new SkillIpcError('SKILL_ADMIN_WORKSPACE_UNAVAILABLE', 503, '当前 Host 没有 workspaceRegistry，无法注册技能管理员工作区')
+    }
+    let workspace
+    try {
+      workspace = await this.workspace.create(input.cwd, '技能管理员工作区（内部）')
+    } catch (error) {
+      throw new SkillIpcError('SKILL_ADMIN_WORKSPACE_FAILED', 500,
+        `无法注册技能管理员工作区：${error instanceof Error ? error.message : String(error)}`)
+    }
+    const created = await this.sessions.create({ preset: SKILL_ADMIN_PRESET, cwd: workspace.path, title: '技能管理员' })
+    try {
+      await workspace.attachSession(created.sessionId)
+    } catch (error) {
+      throw new SkillIpcError('SKILL_ADMIN_WORKSPACE_ATTACH_FAILED', 500,
+        `无法绑定技能管理员工作区：${error instanceof Error ? error.message : String(error)}`)
+    }
     this.projects.set(created.sessionId, input.projectId)
-    return { sessionId: created.sessionId, title: '技能管理员', updatedAt: this.now(), cwd: input.cwd }
+    return {
+      sessionId: created.sessionId, title: '技能管理员', updatedAt: this.now(),
+      cwd: workspace.path, workspaceId: workspace.id,
+    }
   }
 
   /** List admin sessions created for one project in this Host process. */
