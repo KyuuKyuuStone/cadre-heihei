@@ -11,6 +11,8 @@ import type { EmailSecretStore } from './secret-store.ts'
 import type { EmailAttachment, EmailConfig, EmailEvent, EmailMessage, EmailResult } from './types.ts'
 
 interface NotifierOptions {
+  /** Feature switch; disabled by default for this release. */
+  readonly enabled?: boolean
   /** Private directory holding `<projectId>.json` configs. */
   readonly configDir: string
   /** Environment lookup; defaults to `process.env`. */
@@ -95,6 +97,9 @@ export class CadreEmailNotifier {
 
   /** Render the test message without touching the network, even when dryRun is off. */
   async dryRun(projectId: string): Promise<EmailResult> {
+    if (this.#options.enabled !== true) {
+      return { ok: false, code: 'EMAIL_FEATURE_DISABLED', message: '邮件功能在本版已关闭' }
+    }
     let config: EmailConfig
     try {
       config = loadEmailConfig(this.#options.configDir, projectId)
@@ -134,6 +139,9 @@ export class CadreEmailNotifier {
     force: boolean,
     attachments?: readonly EmailAttachment[],
   ): Promise<EmailResult> {
+    if (this.#options.enabled !== true) {
+      return { ok: false, code: 'EMAIL_FEATURE_DISABLED', message: '邮件功能在本版已关闭' }
+    }
     let config: EmailConfig
     try {
       config = loadEmailConfig(this.#options.configDir, projectId)

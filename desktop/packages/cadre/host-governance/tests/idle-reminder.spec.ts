@@ -79,6 +79,17 @@ describe('idle reminder', () => {
     const disabled = make(false, true)
     disabled.handle('s1', assistant('no'))
     expect(scheduled).toBe(0)
+    const switchedOff = new IdleReminderService({
+      isSupervisor: () => true,
+      projectOf: () => 'p1',
+      policyOf: () => undefined,
+      send: async event => { sent.push(event); return { ok: true, status: 'sent' } },
+      setTimer: fn => { scheduled += 1; callback = fn; return 1 },
+      clearTimer: () => {},
+      log: () => {},
+    })
+    switchedOff.handle('s1', assistant('no switch'))
+    expect(scheduled).toBe(0)
     const worker = make(true, false)
     worker.handle('w1', assistant('no'))
     expect(scheduled).toBe(0)

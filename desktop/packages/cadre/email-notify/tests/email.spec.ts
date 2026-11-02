@@ -60,7 +60,7 @@ describe('SendGrid request', () => {
     const dir = workspace()
     writeConfig(dir)
     const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => response())
-    const notifier = new CadreEmailNotifier({ configDir: dir, env: { SENDGRID_TEST_KEY: 'SG.test' }, fetch: fetch as never })
+    const notifier = new CadreEmailNotifier({ enabled: true, configDir: dir, env: { SENDGRID_TEST_KEY: 'SG.test' }, fetch: fetch as never })
     const result = await notifier.notify({
       kind: 'task-summary', projectId: 'p1',
       tasks: [{ taskId: 't1', title: '交付登录页', assigneeName: '小明', status: 'delivered', deliverable: 'login.md' }],
@@ -95,7 +95,7 @@ describe('dedupe, rate limit and failures', () => {
     writeConfig(dir)
     const fetch = vi.fn(async () => response())
     let now = 0
-    const notifier = new CadreEmailNotifier({ configDir: dir, env: { SENDGRID_TEST_KEY: 'k' }, fetch: fetch as never, now: () => now })
+    const notifier = new CadreEmailNotifier({ enabled: true, configDir: dir, env: { SENDGRID_TEST_KEY: 'k' }, fetch: fetch as never, now: () => now })
     const summary = { kind: 'task-summary' as const, projectId: 'p1', tasks: [{ taskId: 't1', title: 'x', assigneeName: 'w', status: 'verified' as const }] }
     expect(await notifier.notify(summary)).toMatchObject({ ok: true, status: 'sent' })
     expect(await notifier.notify(summary)).toMatchObject({ ok: true, status: 'deduped' })
@@ -109,7 +109,7 @@ describe('dedupe, rate limit and failures', () => {
     const dir = workspace()
     writeConfig(dir)
     const fetch = vi.fn(async () => { throw new Error('socket failed for SG.secret') })
-    const notifier = new CadreEmailNotifier({ configDir: dir, env: { SENDGRID_TEST_KEY: 'SG.secret' }, fetch: fetch as never })
+    const notifier = new CadreEmailNotifier({ enabled: true, configDir: dir, env: { SENDGRID_TEST_KEY: 'SG.secret' }, fetch: fetch as never })
     const result = await notifier.notify({
       kind: 'escalation', projectId: 'p1', taskId: 't1', title: 'x', reason: 'y', episodeId: 'e1',
     })
@@ -122,7 +122,7 @@ describe('dedupe, rate limit and failures', () => {
     const dir = workspace()
     writeConfig(dir, { dryRun: true })
     const fetch = vi.fn(async () => response())
-    const notifier = new CadreEmailNotifier({ configDir: dir, env: {}, fetch: fetch as never })
+    const notifier = new CadreEmailNotifier({ enabled: true, configDir: dir, env: {}, fetch: fetch as never })
     const result = await notifier.notify({ kind: 'escalation', projectId: 'p1', taskId: 't', title: 'x', reason: 'y', episodeId: 'e' })
     expect(result).toMatchObject({ ok: true, status: 'dry-run' })
     expect((await notifier.testSend('p1'))).toMatchObject({ ok: true, status: 'dry-run' })
@@ -132,7 +132,7 @@ describe('dedupe, rate limit and failures', () => {
   it('reports a missing API key without leaking anything', async () => {
     const dir = workspace()
     writeConfig(dir)
-    const notifier = new CadreEmailNotifier({ configDir: dir, env: {}, fetch: vi.fn() as never })
+    const notifier = new CadreEmailNotifier({ enabled: true, configDir: dir, env: {}, fetch: vi.fn() as never })
     expect(await notifier.testSend('p1')).toMatchObject({ ok: false, code: 'EMAIL_MISSING_API_KEY' })
   })
 
@@ -307,7 +307,7 @@ describe('dedupe, rate limit and failures', () => {
     const store = new EmailSecretStore({ dir: secretDir, safeStorage })
     await store.set('p1', 'qq-secret')
     const sent: unknown[] = []
-    const notifier = new CadreEmailNotifier({
+    const notifier = new CadreEmailNotifier({ enabled: true,
       configDir, env: {}, secretStore: store,
       smtpTransport: { sendMail: async mail => { sent.push(mail); return { accepted: ['r@example.com'] } } },
     })
@@ -318,7 +318,7 @@ describe('dedupe, rate limit and failures', () => {
 
     const envDir = workspace()
     writeConfig(envDir, { provider: 'smtp', apiKeyEnv: undefined, from: { email: 'owner@qq.com' } })
-    const fallback = new CadreEmailNotifier({
+    const fallback = new CadreEmailNotifier({ enabled: true,
       configDir: envDir, env: { QQ_EMAIL_AUTH_CODE: 'env-secret' },
       smtpTransport: { sendMail: async () => ({ accepted: ['r@example.com'] }) },
     })
@@ -328,7 +328,7 @@ describe('dedupe, rate limit and failures', () => {
   })
 
   it('stays silent and structured when no project config exists', async () => {
-    const notifier = new CadreEmailNotifier({ configDir: workspace(), env: {}, fetch: vi.fn() as never })
+    const notifier = new CadreEmailNotifier({ enabled: true, configDir: workspace(), env: {}, fetch: vi.fn() as never })
     expect(await notifier.notify({
       kind: 'escalation', projectId: 'missing', taskId: 't', title: 'x', reason: 'y', episodeId: 'e',
     })).toMatchObject({ ok: false, code: 'EMAIL_CONFIG_UNAVAILABLE' })
@@ -337,7 +337,7 @@ describe('dedupe, rate limit and failures', () => {
   it('IPC dry-run/test-send delegate without exposing the key', async () => {
     const dir = workspace()
     writeConfig(dir, { dryRun: true })
-    const notifier = new CadreEmailNotifier({ configDir: dir, env: {}, fetch: vi.fn() as never })
+    const notifier = new CadreEmailNotifier({ enabled: true, configDir: dir, env: {}, fetch: vi.fn() as never })
     expect(await dryRunEmail(notifier, 'p1')).toMatchObject({ ok: true, status: 'dry-run' })
     expect(await testEmail(notifier, 'p1')).toMatchObject({ ok: true, status: 'dry-run' })
   })
@@ -412,7 +412,7 @@ describe('dedupe, rate limit and failures', () => {
     const dir = workspace()
     writeConfig(dir, { provider: 'resend', apiKeyEnv: undefined, from: { email: 'cadre@example.com' }, verifiedDomains: ['example.com'] })
     const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => response(202))
-    const notifier = new CadreEmailNotifier({ configDir: dir, env: { RESEND_API_KEY: 're_key' }, fetch: fetch as never })
+    const notifier = new CadreEmailNotifier({ enabled: true, configDir: dir, env: { RESEND_API_KEY: 're_key' }, fetch: fetch as never })
     expect(await notifier.notify({
       kind: 'escalation', projectId: 'p1', taskId: 't1', title: 'x', reason: 'y', episodeId: 'e1',
     })).toMatchObject({ ok: true, status: 'sent' })
@@ -535,7 +535,7 @@ describe('dedupe, rate limit and failures', () => {
     const dir = workspace()
     writeConfig(dir, { provider: 'smtp', apiKeyEnv: undefined, from: { email: 'owner@qq.com' } })
     const sent: unknown[] = []
-    const notifier = new CadreEmailNotifier({
+    const notifier = new CadreEmailNotifier({ enabled: true,
       configDir: dir, env: { QQ_EMAIL_AUTH_CODE: 'qq-secret' },
       smtpTransport: { sendMail: async mail => { sent.push(mail); return { accepted: ['r@example.com'] } } },
     })
@@ -543,8 +543,27 @@ describe('dedupe, rate limit and failures', () => {
       kind: 'escalation', projectId: 'p1', taskId: 't1', title: 'x', reason: 'y', episodeId: 'e1',
     })).toMatchObject({ ok: true, status: 'sent' })
     expect(sent).toHaveLength(1)
-    expect(await new CadreEmailNotifier({ configDir: dir, env: {} }).notify({
+    expect(await new CadreEmailNotifier({ enabled: true, configDir: dir, env: {} }).notify({
       kind: 'escalation', projectId: 'p1', taskId: 't2', title: 'x', reason: 'y', episodeId: 'e2',
     })).toMatchObject({ ok: false, code: 'EMAIL_MISSING_API_KEY' })
+  })
+
+  it('rejects every send when the feature switch is off and preserves config', async () => {
+    const dir = workspace()
+    writeConfig(dir, {
+      provider: 'sendgrid', apiKeyEnv: 'SENDGRID_TEST_KEY', from: { email: 'a@b.com' },
+    })
+    const before = readFileSync(join(dir, 'p1.json'), 'utf8')
+    const fetch = vi.fn(async () => response(202))
+    const notifier = new CadreEmailNotifier({
+      configDir: dir, enabled: false, env: { SENDGRID_TEST_KEY: 'SG.secret' }, fetch: fetch as never,
+    })
+    await expect(notifier.notify({
+      kind: 'escalation', projectId: 'p1', taskId: 't1', title: 'x', reason: 'y', episodeId: 'e1',
+    })).resolves.toMatchObject({ ok: false, code: 'EMAIL_FEATURE_DISABLED' })
+    await expect(notifier.testSend('p1')).resolves.toMatchObject({ ok: false, code: 'EMAIL_FEATURE_DISABLED' })
+    await expect(notifier.dryRun('p1')).resolves.toMatchObject({ ok: false, code: 'EMAIL_FEATURE_DISABLED' })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(readFileSync(join(dir, 'p1.json'), 'utf8')).toBe(before)
   })
 })

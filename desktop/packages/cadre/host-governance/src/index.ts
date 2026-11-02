@@ -44,6 +44,8 @@ export interface Config {
   readonly maxGoalRounds?: number
   /** Directory for per-project email JSON configs. */
   readonly emailConfigDir?: string
+  /** Feature switch; email sending stays off unless explicitly enabled. */
+  readonly emailEnabled?: boolean
 }
 
 interface SessionController {
@@ -240,7 +242,8 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     ?? process.env.CADRE_EMAIL_CONFIG_DIR
     ?? join(homedir(), '.dsh', 'cadre-email')
   const emailSecrets = new EmailSecretStore()
-  const emailNotifier = new CadreEmailNotifier({ configDir: emailConfigDir, secretStore: emailSecrets })
+  const emailEnabled = config.emailEnabled === true
+  const emailNotifier = new CadreEmailNotifier({ configDir: emailConfigDir, secretStore: emailSecrets, enabled: emailEnabled })
   const captureCurrentWindow = async (): Promise<Buffer | undefined> => {
     try {
       const require = createRequire(import.meta.url)
@@ -266,6 +269,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     isSupervisor: sessionId => projectOf(sessionId) !== undefined,
     projectOf,
     policyOf: projectId => {
+      if (!emailEnabled) return undefined
       try {
         const email = loadEmailConfig(emailConfigDir, projectId)
         if (!email.enabled || email.recipients.length === 0) return undefined
