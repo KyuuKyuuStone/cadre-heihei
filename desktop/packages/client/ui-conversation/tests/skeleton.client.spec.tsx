@@ -2,7 +2,7 @@
 import type { GlobalStandardProps, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createContext, useContext, type ReactNode } from 'react'
-import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionListState, SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -140,6 +140,8 @@ function mount(
     composerBlock?: { reason: string }
     /** Mutable view ledger used by registration-order regressions. */
     viewTabs?: ViewTab[]
+    /** Projected agent preset for the selected Session. */
+    agentPreset?: string
   } = {},
 ) {
   const sessionId = 'sessionId' in options ? options.sessionId : SID
@@ -165,7 +167,10 @@ function mount(
       ...listed && options.nestedSubagent === true && { [parent]: parentRow },
       ...listed && { [SID]: childRow },
     },
-    phase: 'ready', projectionsBySession: {},
+    phase: 'ready',
+    projectionsBySession: options.agentPreset === undefined
+      ? {}
+      : { [SID]: { values: { agentPreset: options.agentPreset }, state: 'ready', error: null } },
   })
   const workspaces = createSnapshotStore<WorkspaceSnapshot>(workspaceState(workspaceRows))
   const session = createSnapshotStore<SessionSnapshot>(snapshot)
@@ -571,6 +576,20 @@ describe('ConversationRoot resident composer', () => {
     act(() => { owner.onPick(wid('second')) })
     expect(b.retargetWorkspace).toHaveBeenCalledWith(wid('second'))
     expect(b.view.getByText('Selected Folder')).toBeTruthy()
+  })
+
+  it('hides the workspace chip for a cadre-skill-admin session', () => {
+    const internal = { ...workspace('internal'), title: '技能管理员工作区（内部）', sessionIds: [SID] }
+    const b = mount(sessionSnapshotOf(), [internal], undefined, { agentPreset: 'cadre-skill-admin' })
+    expect(b.view.queryByRole('button', { name: '选择项目部' })).toBeNull()
+    expect(b.view.getByRole('textbox')).toBeTruthy()
+  })
+
+  it('selects the internal workspace when an admin session has no owning row yet', async () => {
+    const internal = { ...workspace('internal'), title: '技能管理员工作区（内部）', sessionIds: [] }
+    const retarget = vi.fn(async (_workspaceId: WorkspaceId) => {})
+    mount(sessionSnapshotOf(), [internal], retarget, { agentPreset: 'cadre-skill-admin' })
+    await waitFor(() => { expect(retarget).toHaveBeenCalledWith(wid('internal')) })
   })
 
   it('keeps a rejected first prompt engaging instead of returning to the Hero', () => {

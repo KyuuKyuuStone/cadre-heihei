@@ -6,6 +6,10 @@ import type { ConversationContentProps, ConversationViewsProps, InputZone } from
 import { HeroShell, WorkspaceChip, workspaceLabel } from './EmptyHero.tsx'
 import css from './ConversationRoot.module.css'
 
+function isInternalWorkspaceTitle(title: string): boolean {
+  return /（内部）|\(internal\)/iu.test(title)
+}
+
 function ConversationSessionView({ renderSlot }: ConversationViewsProps) {
   return renderSlot('conversation.session', {})
 }
@@ -33,6 +37,9 @@ export function ConversationContent(props: ConversationContentProps) {
     sessionId === undefined ? undefined : snapshot.get(sessionId)?.pendingInteraction)
   const inputState = useInput(s => s)
   const cwd = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.cwd)
+  const agentPreset = useSessions(s => sessionId === undefined
+    ? undefined
+    : s.projectionsBySession[sessionId]?.values.agentPreset)
   const workspaces = useWorkspaces(s => s)
   // A plugin this package cannot import (ui-model-selection) says this session cannot
   // send; its reason is already localized by whoever raised it.
@@ -69,9 +76,20 @@ export function ConversationContent(props: ConversationContentProps) {
   const sessionWorkspace = sessionId === undefined
     ? undefined
     : workspaces.items.find(workspace => workspace.sessionIds.includes(sessionId))
+  const internalWorkspace = workspaces.items.find(workspace => isInternalWorkspaceTitle(workspace.title))
+  const internalSession = agentPreset === 'cadre-skill-admin'
+    || (sessionWorkspace !== undefined && isInternalWorkspaceTitle(sessionWorkspace.title))
   const pendingWorkspace = workspaces.items.find(
     workspace => workspace.workspaceId === pendingWorkspaceId,
   )
+
+  // The skill administrator lives in its own internal Workspace. If the owning
+  // row has not attached yet, select that Workspace so the composer never asks
+  // the user to pick a project for it.
+  useEffect(() => {
+    if (!internalSession || sessionWorkspace !== undefined || internalWorkspace === undefined) return
+    void selectWorkspace(internalWorkspace.workspaceId).catch(() => undefined)
+  }, [internalSession, internalWorkspace, selectWorkspace, sessionWorkspace])
 
   // Clear the pending pick once the session lands in it, or when the picked
   // workspace disappears from a ready list (deleted from the sidebar).
@@ -139,7 +157,7 @@ export function ConversationContent(props: ConversationContentProps) {
   // blank session whose workspace vanished (deleted from the sidebar). The
   // bar is ONE session-maybe slot rendered unconditionally — inert is a prop,
   // not a different tree, so the textarea DOM survives the transition.
-  const inert = sessionId === undefined || (hero && chipTitle === undefined)
+  const inert = sessionId === undefined || (!internalSession && hero && chipTitle === undefined)
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins
   // when both hold — picking a workspace is the earlier prerequisite.
@@ -164,7 +182,7 @@ export function ConversationContent(props: ConversationContentProps) {
   const composerBar = (
     <div className={clsx(css.composerStack, hero && css.composerHero)}>
       {hero && <HeroShell t={t} renderSlot={renderSlot} />}
-      {hero && heroWorkspaceRow}
+      {hero && !internalSession && heroWorkspaceRow}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
       {inputBar}
     </div>
