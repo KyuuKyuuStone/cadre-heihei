@@ -9,6 +9,8 @@ import { zh } from '../src/client/locales.ts'
 const REQUEST: CadreEmailRequest = { sessionId: 'sup', projectId: 'p1', label: '项目部 A', token: 1 }
 const VIEW = {
   enabled: true,
+  provider: 'sendgrid',
+  verifiedDomains: [],
   from: { email: 'cadre@example.com', name: 'Cadre' },
   recipients: ['owner@example.com'],
   apiKeyEnv: 'SENDGRID_KEY',
@@ -94,7 +96,7 @@ describe('Cadre email settings', () => {
     const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
     const body = JSON.parse((call?.[1] as RequestInit).body as string) as Record<string, unknown>
     expect(call?.[1]).toMatchObject({ method: 'POST' })
-    expect(body).toMatchObject({ projectId: 'p1', actorSessionId: 'sup' })
+    expect(body).toMatchObject({ projectId: 'p1', actorSessionId: 'sup', config: { provider: 'sendgrid' } })
     expect(JSON.stringify(body)).not.toContain('apiKey"')
   })
 
@@ -156,6 +158,9 @@ describe('Cadre email settings', () => {
       'SendGrid 注册',
       'SendGrid API Keys',
       'SendGrid Sender Authentication',
+      '注册 Resend',
+      'Resend API Keys',
+      'Resend 域名验证',
       '阿里云邮件推送',
       '腾讯云邮件推送 SES',
     ])
@@ -165,10 +170,69 @@ describe('Cadre email settings', () => {
     }
     expect(screen.getByRole('link', { name: 'SendGrid API Keys' }).getAttribute('href'))
       .toBe('https://app.sendgrid.com/settings/api_keys')
+    expect(screen.getByRole('link', { name: 'Resend API Keys' }).getAttribute('href'))
+      .toBe('https://resend.com/api-keys')
     expect(screen.getByRole('link', { name: '阿里云邮件推送' }).getAttribute('href'))
       .toBe('https://www.aliyun.com/product/directmail')
     expect(screen.getByRole('link', { name: '腾讯云邮件推送 SES' }).getAttribute('href'))
       .toBe('https://cloud.tencent.com/product/ses')
+  })
+
+  it('switches to Resend, prefills its key env, and saves provider/domains', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
+      return json({ ok: true, result: { ...VIEW, provider: 'resend', apiKeyEnv: 'RESEND_API_KEY', verifiedDomains: ['example.com'] } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    await screen.findByText('已检测到环境变量')
+    fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
+    expect(screen.getByDisplayValue('RESEND_API_KEY')).toBeTruthy()
+    expect(screen.getByText(/无需备案，但必须验证域名/)).toBeTruthy()
+    expect(screen.getByText(/不能填 QQ\/免费邮箱/)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('已验证域名'), { target: { value: 'example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
+    const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
+      config: { provider: 'resend', apiKeyEnv: 'RESEND_API_KEY', verifiedDomains: ['example.com'] },
+    })
+  })
+
+  it('rejects a Resend From address outside onboarding or a verified domain', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: VIEW })))
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    await screen.findByText('已检测到环境变量')
+    fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
+    const from = screen.getByDisplayValue('cadre@example.com')
+    fireEvent.change(from, { target: { value: 'cadre@qq.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(screen.getByRole('alert').textContent).toContain('不能使用 QQ 等免费邮箱')
+  })
+
+  it('maps the Resend unverified-domain error to readable copy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
+      return json({ ok: false, code: 'EMAIL_FROM_NOT_VERIFIED', message: 'not verified' })
+    }))
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    await screen.findByText('已检测到环境变量')
+    fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
+    fireEvent.change(screen.getByLabelText('已验证域名'), { target: { value: 'example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/Resend 只接受 onboarding@resend.dev/)).toBeTruthy()
   })
 
   it('keeps save/test/run actions in the fixed footer outside the scroll area', async () => {

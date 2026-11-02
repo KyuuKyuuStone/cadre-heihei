@@ -27,6 +27,17 @@
   font-size: 11px;
 }
 
+.select {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+
 .row {
   display: flex;
   align-items: center;
