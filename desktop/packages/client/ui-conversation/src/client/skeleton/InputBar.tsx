@@ -35,6 +35,7 @@ import {
   keepDraftFocus, revealDraftSelection,
 } from '../input/editor/view-binding.ts'
 import { resolveSubmitMode } from '../input/submission-policy.ts'
+import { useTypingPresence } from '../input/typing-presence.ts'
 import { attachmentErrorText, imageSizeText } from '../image-labels.ts'
 import { isImageMediaType } from '../service.ts'
 import { ContextMeter } from './ContextMeter.tsx'
@@ -74,6 +75,7 @@ export const InputBar = memo(function InputBar({
   const live = input !== undefined && keyboard !== undefined && inputActions !== undefined
   const draft = input?.draft ?? ''
   const editor = keyboard?.editor ?? null
+  useTypingPresence(sessionId, draft, editor?.getRootElement() ?? null, input?.phase)
   const attachments = useMemo(
     () => input === undefined || resolveDraftAttachments === undefined ? [] : resolveDraftAttachments(input.attachmentIds),
     [resolveDraftAttachments, input?.attachmentIds],
