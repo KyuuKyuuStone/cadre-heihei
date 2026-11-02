@@ -18,9 +18,11 @@ import {
   EmailSecretStore,
   dryRunEmail,
   getEmailConfigView,
+  loadEmailConfig,
   setEmailConfig,
   testEmail,
 } from '@deepseek-ai/dsh-cadre-email-notify'
+import { IdleReminderService } from './idle-reminder.ts'
 import { activityFrom, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
@@ -93,6 +95,7 @@ interface HostContext {
   readonly agents: AgentsLike
   readonly goals: GoalsLike
   effect(setup: () => () => void): void
+  on?(event: string, handler: (session: { readonly id: string }, event: unknown) => void): () => void
   inject?(dependencies: readonly string[], callback: (scope: unknown) => void): void
 }
 
@@ -230,6 +233,30 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     ?? join(homedir(), '.dsh', 'cadre-email')
   const emailSecrets = new EmailSecretStore()
   const emailNotifier = new CadreEmailNotifier({ configDir: emailConfigDir, secretStore: emailSecrets })
+  const idleReminder = new IdleReminderService({
+    isSupervisor: sessionId => projectOf(sessionId) !== undefined,
+    projectOf,
+    policyOf: projectId => {
+      try {
+        const email = loadEmailConfig(emailConfigDir, projectId)
+        if (!email.enabled || email.recipients.length === 0) return undefined
+        return email.idleReminder
+      } catch (error) {
+        console.error(`host-governance: idle reminder config failed: ${String(error)}`)
+        return undefined
+      }
+    },
+    send: event => emailNotifier.notify(event),
+  })
+  const disposeIdleEvents = ctx.on === undefined
+    ? undefined
+    : ctx.on('session/event', (session, event) => {
+      idleReminder.handle(session.id, event as { type?: unknown; data?: unknown })
+    })
+  ctx.effect(() => () => {
+    disposeIdleEvents?.()
+    idleReminder.dispose()
+  })
 
   const ports: StallPorts = {
     now: () => Date.now(),

@@ -41,6 +41,14 @@ export interface EmailConfig {
   readonly dryRun?: boolean
   /** Minimum gap between two sends for the same project (milliseconds). */
   readonly minIntervalMs?: number
+  /** Supervisor-session idle reminder; absent means no reminder. */
+  readonly idleReminder?: IdleReminderConfig
+}
+
+/** Idle-after-assistant reminder policy. */
+export interface IdleReminderConfig {
+  readonly enabled: boolean
+  readonly minutes: number
 }
 
 /** A task line included in a delivered/verified summary. */
@@ -52,7 +60,7 @@ export interface SummaryTask {
   readonly deliverable?: string
 }
 
-/** The two notification kinds the core supports in this release. */
+/** The notification kinds the core supports. */
 export type EmailEvent =
   | { readonly kind: 'task-summary'; readonly projectId: string; readonly tasks: readonly SummaryTask[] }
   | {
@@ -62,6 +70,15 @@ export type EmailEvent =
     readonly title: string
     readonly reason: string
     readonly episodeId: string
+  }
+  | {
+    readonly kind: 'idle-reminder'
+    readonly projectId: string
+    readonly sessionId: string
+    readonly title: string
+    readonly summary: string
+    readonly idleMinutes: number
+    readonly at: string
   }
 
 /** Rendered message before it becomes a SendGrid request. */

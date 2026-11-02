@@ -419,6 +419,22 @@ describe('dedupe, rate limit and failures', () => {
     expect(fetch.mock.calls[0]?.[0]).toBe('https://api.resend.com/emails')
   })
 
+  it('parses the idle reminder policy and renders a bounded reminder', () => {
+    const base = { enabled: true, from: { email: 'a@b.com' }, recipients: ['c@d.com'] }
+    expect(parseEmailConfig({ ...base, idleReminder: {} }).idleReminder).toEqual({ enabled: true, minutes: 10 })
+    expect(parseEmailConfig({ ...base, idleReminder: { enabled: false, minutes: 3 } }).idleReminder)
+      .toEqual({ enabled: false, minutes: 3 })
+    expect(() => parseEmailConfig({ ...base, idleReminder: { minutes: 0 } })).toThrow(/idleReminder.minutes/)
+    const message = renderEmail({
+      kind: 'idle-reminder', projectId: 'p1', sessionId: 's1', title: '发布讨论',
+      summary: 'x'.repeat(500), idleMinutes: 10, at: '2026-11-02T00:00:00.000Z',
+    }, parseEmailConfig({ ...base, idleReminder: {} }))
+    expect(message.subject).toContain('发布讨论')
+    expect(message.text).toContain('已等待：10 分钟')
+    expect(message.text).toContain('x'.repeat(300))
+    expect(message.text).not.toContain('x'.repeat(301))
+  })
+
   it('derives QQ/163 SMTP presets and the auth-code env', () => {
     const qq = parseEmailConfig({
       enabled: true, provider: 'smtp', from: { email: 'owner@qq.com', name: 'Owner' }, recipients: ['r@example.com'],

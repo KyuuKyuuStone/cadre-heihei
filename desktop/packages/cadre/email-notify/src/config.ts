@@ -109,6 +109,20 @@ export function parseEmailConfig(value: unknown): EmailConfig {
   if (authCodeRef !== undefined && (typeof authCodeRef !== 'string' || !/^smtp:[A-Za-z0-9._-]+$/u.test(authCodeRef))) {
     throw new Error('EMAIL_CONFIG_INVALID: authCodeRef must be smtp:<projectId>')
   }
+  let idleReminder: EmailConfig['idleReminder']
+  if (source.idleReminder !== undefined) {
+    if (typeof source.idleReminder !== 'object' || source.idleReminder === null || Array.isArray(source.idleReminder)) {
+      throw new Error('EMAIL_CONFIG_INVALID: idleReminder must be an object')
+    }
+    const value = source.idleReminder as Record<string, unknown>
+    const enabled = value.enabled === undefined ? true : value.enabled
+    const minutes = value.minutes === undefined ? 10 : value.minutes
+    if (typeof enabled !== 'boolean') throw new Error('EMAIL_CONFIG_INVALID: idleReminder.enabled must be boolean')
+    if (typeof minutes !== 'number' || !Number.isInteger(minutes) || minutes < 1 || minutes > 1_440) {
+      throw new Error('EMAIL_CONFIG_INVALID: idleReminder.minutes must be an integer 1-1440')
+    }
+    idleReminder = { enabled, minutes }
+  }
   return {
     enabled: source.enabled,
     provider,
@@ -118,6 +132,7 @@ export function parseEmailConfig(value: unknown): EmailConfig {
     ...(verifiedDomains === undefined ? {} : { verifiedDomains: verifiedDomains as string[] }),
     ...smtp,
     ...(authCodeRef === undefined ? {} : { authCodeRef }),
+    ...(idleReminder === undefined ? {} : { idleReminder }),
     ...(source.dryRun === true ? { dryRun: true } : {}),
     ...(minIntervalMs === undefined ? {} : { minIntervalMs }),
   }

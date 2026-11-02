@@ -39,6 +39,21 @@ export function renderEmail(event: EmailEvent, config: EmailConfig): EmailMessag
       text: [`项目：${event.projectId}`, `交付汇总：`, ...lines].join('\n'),
     }
   }
+  if (event.kind === 'idle-reminder') {
+    return {
+      to: config.recipients,
+      from: config.from,
+      subject: `[Cadre] 会话等待回复：${event.title}`,
+      text: [
+        `项目：${event.projectId}`,
+        `会话：${event.title}`,
+        `已等待：${String(event.idleMinutes)} 分钟`,
+        `助手最后回复：${event.summary.slice(0, 300)}`,
+        `时间：${event.at}`,
+        '请打开 Cadre Heihei 继续对话。',
+      ].join('\n'),
+    }
+  }
   return {
     to: config.recipients,
     from: config.from,
@@ -98,7 +113,9 @@ export class CadreEmailNotifier {
   async notify(event: EmailEvent): Promise<EmailResult> {
     const key = event.kind === 'task-summary'
       ? `summary:${event.projectId}:${event.tasks.map(task => `${task.taskId}:${task.status}`).sort().join(',')}`
-      : `escalation:${event.projectId}:${event.taskId}:${event.episodeId}`
+      : event.kind === 'idle-reminder'
+        ? `idle:${event.sessionId}:${event.at}`
+        : `escalation:${event.projectId}:${event.taskId}:${event.episodeId}`
     return this.#deliver(event.projectId, event, key, false)
   }
 
