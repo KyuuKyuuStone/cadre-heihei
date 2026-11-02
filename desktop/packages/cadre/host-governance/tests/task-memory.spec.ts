@@ -70,6 +70,9 @@ describe('task memory', () => {
         .map(task => task.taskId)).toEqual(['t-done'])
       expect(reader.search({ projectId: 'p1', actorSessionId: 'sup', query: '验收通过' })
         .map(task => task.taskId)).toEqual(['t-done'])
+      expect(reader.search({
+        projectId: 'p1', actorSessionId: 'sup', query: 't-done', includeSnippet: true,
+      })[0]?.snippet).toContain('完成内容')
       expect(reader.search({ projectId: 'p1', actorSessionId: 'sup', query: '跨项目' })).toEqual([])
       expect(reader.search({ projectId: 'p1', actorSessionId: 'w1', query: 't-other' })).toEqual([])
       expect(reader.search({ projectId: 'p2', actorSessionId: 'other', query: '跨项目' })).toHaveLength(1)

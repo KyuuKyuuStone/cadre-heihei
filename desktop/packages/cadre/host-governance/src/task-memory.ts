@@ -17,6 +17,8 @@ export interface TaskMemorySummary {
   readonly artifacts: readonly string[]
   readonly transcriptRef: string
   readonly updatedAt: string
+  /** On-demand raw task-body excerpt; omitted from default context. */
+  readonly snippet?: string
 }
 
 /** One ongoing task projection, kept brief. */
@@ -76,7 +78,7 @@ export class TaskMemoryReader {
       preview: String(row.body ?? '').replace(/\s+/gu, ' ').trim().slice(0, 200),
       assigneeSessionId: String(row.assignee_session_id),
     }))
-    const completedRows = completed.map(memoryFromRow)
+    const completedRows = completed.map(row => memoryFromRow(row))
     return {
       ongoing: ongoingRows,
       completed: completedRows,
@@ -100,7 +102,7 @@ export class TaskMemoryReader {
     const supervisor = role === 'supervisor'
     const like = `%${input.query.trim()}%`
     const rows = this.#db.prepare(`SELECT m.task_id, m.project_id, m.name, m.status, m.summary,
-        m.decisions_json, m.artifacts_json, m.transcript_ref, m.updated_at
+        m.decisions_json, m.artifacts_json, m.transcript_ref, m.updated_at, t.body
       FROM task_memory m JOIN tasks t ON t.task_id = m.task_id
       WHERE m.project_id = ? AND (? = 1 OR t.assignee_session_id = ?)
         AND (m.task_id = ? OR m.name LIKE ? OR m.summary LIKE ? OR m.decisions_json LIKE ?)
@@ -108,7 +110,7 @@ export class TaskMemoryReader {
       input.projectId, supervisor ? 1 : 0, input.actorSessionId,
       input.query.trim(), like, like, like,
     ) as Record<string, unknown>[]
-    return rows.map(memoryFromRow)
+    return rows.map(row => memoryFromRow(row, input.includeSnippet === true))
   }
 
   close(): void {
@@ -122,12 +124,13 @@ export class TaskMemoryReader {
   }
 }
 
-function memoryFromRow(row: Record<string, unknown>): TaskMemorySummary {
+function memoryFromRow(row: Record<string, unknown>, includeSnippet = false): TaskMemorySummary {
   return {
     taskId: String(row.task_id), projectId: String(row.project_id), name: String(row.name),
     status: String(row.status), summary: String(row.summary),
     decisions: parseList(row.decisions_json), artifacts: parseList(row.artifacts_json),
     transcriptRef: String(row.transcript_ref), updatedAt: String(row.updated_at),
+    ...(includeSnippet ? { snippet: String(row.body ?? '').replace(/\s+/gu, ' ').trim().slice(0, 300) } : {}),
   }
 }
 
