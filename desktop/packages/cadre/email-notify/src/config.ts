@@ -13,9 +13,17 @@ function isEmail(value: string): boolean {
 }
 
 /** Default environment variable for a provider. */
-function defaultKeyEnv(provider: 'sendgrid' | 'resend'): string {
-  return provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY'
+function defaultKeyEnv(provider: 'sendgrid' | 'resend' | 'smtp'): string | undefined {
+  if (provider === 'resend') return 'RESEND_API_KEY'
+  if (provider === 'smtp') return undefined
+  return 'SENDGRID_API_KEY'
 }
+
+/** SMTP preset hosts used by QQ Mail and 163 Mail. */
+const SMTP_PRESETS = {
+  qq: { host: 'smtp.qq.com', port: 465, secure: true },
+  '163': { host: 'smtp.163.com', port: 465, secure: true },
+} as const
 
 /**
  * Parse one project config document.
@@ -34,8 +42,8 @@ export function parseEmailConfig(value: unknown): EmailConfig {
   }
   if (typeof source.enabled !== 'boolean') throw new Error('EMAIL_CONFIG_INVALID: enabled must be boolean')
   const provider = source.provider === undefined ? 'sendgrid' : source.provider
-  if (provider !== 'sendgrid' && provider !== 'resend') {
-    throw new Error('EMAIL_CONFIG_INVALID: provider must be sendgrid or resend')
+  if (provider !== 'sendgrid' && provider !== 'resend' && provider !== 'smtp') {
+    throw new Error('EMAIL_CONFIG_INVALID: provider must be sendgrid, resend or smtp')
   }
   const from = source.from
   if (typeof from !== 'object' || from === null) throw new Error('EMAIL_CONFIG_INVALID: from is required')
@@ -66,6 +74,31 @@ export function parseEmailConfig(value: unknown): EmailConfig {
       throw new Error('EMAIL_CONFIG_INVALID: verifiedDomains must be an array of domains')
     }
   }
+  let smtp: Pick<EmailConfig, 'smtpPreset' | 'host' | 'port' | 'secure' | 'user' | 'fromName' | 'authCodeEnv'> = {}
+  if (provider === 'smtp') {
+    const rawPreset = source.smtpPreset ?? 'qq'
+    if (rawPreset !== 'qq' && rawPreset !== '163') {
+      throw new Error('EMAIL_CONFIG_INVALID: smtpPreset must be qq or 163')
+    }
+    const preset = SMTP_PRESETS[rawPreset]
+    const host = source.host ?? preset.host
+    const port = source.port ?? preset.port
+    const secure = source.secure ?? preset.secure
+    const user = source.user ?? fromRecord.email
+    const fromName = source.fromName ?? fromRecord.name
+    const authCodeEnv = source.authCodeEnv ?? 'QQ_EMAIL_AUTH_CODE'
+    if (typeof host !== 'string' || host.trim() === '') throw new Error('EMAIL_CONFIG_INVALID: host must be a non-empty string')
+    if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new Error('EMAIL_CONFIG_INVALID: port must be an integer 1-65535')
+    }
+    if (typeof secure !== 'boolean') throw new Error('EMAIL_CONFIG_INVALID: secure must be boolean')
+    if (typeof user !== 'string' || !isEmail(user)) throw new Error('EMAIL_CONFIG_INVALID: user must be an address')
+    if (fromName !== undefined && typeof fromName !== 'string') throw new Error('EMAIL_CONFIG_INVALID: fromName must be a string')
+    if (typeof authCodeEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/u.test(authCodeEnv)) {
+      throw new Error('EMAIL_CONFIG_INVALID: authCodeEnv must be an environment variable name')
+    }
+    smtp = { smtpPreset: rawPreset, host, port, secure, user, ...(fromName === undefined ? {} : { fromName }), authCodeEnv }
+  }
   const minIntervalMs = source.minIntervalMs
   if (minIntervalMs !== undefined && (typeof minIntervalMs !== 'number' || !Number.isFinite(minIntervalMs) || minIntervalMs < 0)) {
     throw new Error('EMAIL_CONFIG_INVALID: minIntervalMs must be a non-negative number')
@@ -75,8 +108,9 @@ export function parseEmailConfig(value: unknown): EmailConfig {
     provider,
     from: { email: fromRecord.email, ...(fromRecord.name === undefined ? {} : { name: fromRecord.name }) },
     recipients: recipients as string[],
-    apiKeyEnv,
+    ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     ...(verifiedDomains === undefined ? {} : { verifiedDomains: verifiedDomains as string[] }),
+    ...smtp,
     ...(source.dryRun === true ? { dryRun: true } : {}),
     ...(minIntervalMs === undefined ? {} : { minIntervalMs }),
   }

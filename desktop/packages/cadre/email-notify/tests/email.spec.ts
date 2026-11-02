@@ -7,6 +7,7 @@ import { CadreEmailNotifier, renderEmail } from '../src/notifier.ts'
 import { dryRunEmail, getEmailConfigView, setEmailConfig, testEmail } from '../src/ipc.ts'
 import { buildSendGridBody, redactSecret, sendWithSendGrid } from '../src/sendgrid.ts'
 import { buildResendBody, sendWithResend } from '../src/resend.ts'
+import { buildSmtpMail, sendWithSmtp } from '../src/smtp.ts'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -216,8 +217,8 @@ describe('dedupe, rate limit and failures', () => {
     })
     expect(resend).toMatchObject({ provider: 'resend', apiKeyEnv: 'RESEND_API_KEY' })
     expect(() => parseEmailConfig({
-      enabled: true, provider: 'smtp', from: { email: 'a@b.com' }, recipients: ['c@d.com'],
-    })).toThrow(/provider must be sendgrid or resend/)
+      enabled: true, provider: 'invalid', from: { email: 'a@b.com' }, recipients: ['c@d.com'],
+    })).toThrow(/provider must be sendgrid, resend or smtp/)
   })
 
   it('builds the Resend body and lets Resend decide domain verification', async () => {
@@ -281,5 +282,57 @@ describe('dedupe, rate limit and failures', () => {
       kind: 'escalation', projectId: 'p1', taskId: 't1', title: 'x', reason: 'y', episodeId: 'e1',
     })).toMatchObject({ ok: true, status: 'sent' })
     expect(fetch.mock.calls[0]?.[0]).toBe('https://api.resend.com/emails')
+  })
+
+  it('derives QQ/163 SMTP presets and the auth-code env', () => {
+    const qq = parseEmailConfig({
+      enabled: true, provider: 'smtp', from: { email: 'owner@qq.com', name: 'Owner' }, recipients: ['r@example.com'],
+    })
+    expect(qq).toMatchObject({
+      provider: 'smtp', smtpPreset: 'qq', host: 'smtp.qq.com', port: 465, secure: true,
+      user: 'owner@qq.com', fromName: 'Owner', authCodeEnv: 'QQ_EMAIL_AUTH_CODE',
+    })
+    const mail163 = parseEmailConfig({
+      enabled: true, provider: 'smtp', smtpPreset: '163', from: { email: 'owner@163.com' }, recipients: ['r@example.com'],
+    })
+    expect(mail163).toMatchObject({ host: 'smtp.163.com', port: 465, secure: true, user: 'owner@163.com' })
+  })
+
+  it('builds the SMTP mail and maps auth/connection/timeout failures without leaking the code', async () => {
+    const message = { to: ['r@example.com'], from: { email: 'owner@qq.com', name: 'Owner' }, subject: 's', text: 't' }
+    expect(buildSmtpMail(message, 'Cadre')).toEqual({
+      from: { name: 'Cadre', address: 'owner@qq.com' }, to: 'r@example.com', subject: 's', text: 't',
+    })
+    const sent = vi.fn(async () => ({ accepted: ['r@example.com'] }))
+    expect(await sendWithSmtp({
+      authCode: 'qq-secret', message, host: 'smtp.qq.com', port: 465, secure: true, user: 'owner@qq.com',
+      transport: { sendMail: sent },
+    })).toMatchObject({ ok: true, status: 'sent' })
+    expect(sent).toHaveBeenCalledTimes(1)
+    const fail = async (error: unknown) => sendWithSmtp({
+      authCode: 'qq-secret', message, host: 'smtp.qq.com', port: 465, secure: true, user: 'owner@qq.com',
+      transport: { sendMail: async () => { throw error } },
+    })
+    expect(await fail({ code: 'EAUTH', message: 'auth qq-secret' })).toMatchObject({ code: 'EMAIL_AUTH_FAILED' })
+    expect(await fail({ code: 'ECONNECTION', message: 'offline' })).toMatchObject({ code: 'EMAIL_CONNECTION_FAILED' })
+    expect(await fail({ code: 'ETIMEDOUT', message: 'timeout' })).toMatchObject({ code: 'EMAIL_TIMEOUT' })
+    expect(JSON.stringify(await fail({ code: 'EAUTH', message: 'auth qq-secret' }))).not.toContain('qq-secret')
+  })
+
+  it('uses SMTP and QQ_EMAIL_AUTH_CODE in the notifier', async () => {
+    const dir = workspace()
+    writeConfig(dir, { provider: 'smtp', apiKeyEnv: undefined, from: { email: 'owner@qq.com' } })
+    const sent: unknown[] = []
+    const notifier = new CadreEmailNotifier({
+      configDir: dir, env: { QQ_EMAIL_AUTH_CODE: 'qq-secret' },
+      smtpTransport: { sendMail: async mail => { sent.push(mail); return { accepted: ['r@example.com'] } } },
+    })
+    expect(await notifier.notify({
+      kind: 'escalation', projectId: 'p1', taskId: 't1', title: 'x', reason: 'y', episodeId: 'e1',
+    })).toMatchObject({ ok: true, status: 'sent' })
+    expect(sent).toHaveLength(1)
+    expect(await new CadreEmailNotifier({ configDir: dir, env: {} }).notify({
+      kind: 'escalation', projectId: 'p1', taskId: 't2', title: 'x', reason: 'y', episodeId: 'e2',
+    })).toMatchObject({ ok: false, code: 'EMAIL_MISSING_API_KEY' })
   })
 })

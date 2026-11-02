@@ -4,7 +4,10 @@
  */
 
 /** Supported email transports. */
-export type EmailProvider = 'sendgrid' | 'resend'
+export type EmailProvider = 'sendgrid' | 'resend' | 'smtp'
+
+/** SMTP provider preset. */
+export type SmtpPreset = 'qq' | '163'
 
 /** One project's email notification configuration (no secret value). */
 export interface EmailConfig {
@@ -16,8 +19,22 @@ export interface EmailConfig {
   readonly recipients: readonly string[]
   /** Environment variable name; defaults from `provider` when omitted. */
   readonly apiKeyEnv?: string
-  /** Resend domains declared verified; `onboarding@resend.dev` is always allowed. */
+  /** Resend domains; retained for old configs but no longer used for sending. */
   readonly verifiedDomains?: readonly string[]
+  /** QQ/163 SMTP preset; defaults to `qq` when provider is smtp. */
+  readonly smtpPreset?: SmtpPreset
+  /** SMTP host; preset fills it when omitted. */
+  readonly host?: string
+  /** SMTP port; preset fills it when omitted. */
+  readonly port?: number
+  /** SMTP TLS; preset fills it when omitted. */
+  readonly secure?: boolean
+  /** SMTP auth user; defaults to `from.email`. */
+  readonly user?: string
+  /** SMTP From display name override; defaults to `from.name`. */
+  readonly fromName?: string
+  /** Environment variable holding the SMTP authorization code. */
+  readonly authCodeEnv?: string
   /** When true, render but do not call the provider. */
   readonly dryRun?: boolean
   /** Minimum gap between two sends for the same project (milliseconds). */
@@ -71,4 +88,15 @@ export interface ResendRequest {
   readonly apiKey: string
   readonly message: EmailMessage
   readonly verifiedDomains: readonly string[]
+}
+
+/** One SMTP send input. */
+export interface SmtpRequest {
+  readonly authCode: string
+  readonly message: EmailMessage
+  readonly host: string
+  readonly port: number
+  readonly secure: boolean
+  readonly user: string
+  readonly fromName?: string
 }
