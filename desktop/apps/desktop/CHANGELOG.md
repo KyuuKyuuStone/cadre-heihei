@@ -2,6 +2,8 @@
 
 ## 1.1.4
 
+- **安装跳转普通对话**：技能安装不再单独弹窗/面板，点击安装进入普通技能管理员对话，由对话完成查/装/建
+- **技能管理员工作目录**：创建 admin session 时自动 `mkdir -p` 默认工作目录 `%USERPROFILE%\.dsh\cadre-skill-admin\workspace`，返回 `cwd`，已存在复用
 - **无回复汇报邮件**：主管会话 assistant 后 10 分钟（可配）无用户回复，发送「Cadre 汇报」邮件：最近回复摘要、台账任务统计（交付/验收/失败）、下一步建议、时间；附当前窗口 `capturePage()` PNG（截图失败只发正文并注明）；发送后 paused，用户新消息恢复
 - **技能页单入口**：技能页只保留一个内嵌对话入口，问/装/建都走普通 `cadre-skill-admin` 会话，AI 用 catalog/preview/install 工具自行查询和安装
 - **技能管理员去绑定**：admin session 不再绑定 supervisor/operator；消息读写/发送与 `skill_install` 按项目成员校验，worker 也可用，跨项目/非成员拒绝
