@@ -5,8 +5,9 @@
 - **技能管理员（普通对话）**：技能页内嵌 `cadre-skill-admin` hidden preset，普通 Session，不写花名册/不占员工位；`skill_catalog`/`skill_preview`/`skill_plan`/`skill_audit` 四个模型工具；安装/更新/删除由用户确认后走 `admin/apply`（planId+token），带备份、回滚、审计
 - **技能管理员会话修复**：`sessionController` 改为每次调用懒解析，避免插件加载顺序导致 admin 服务未挂载；创建失败返回 `SKILL_ADMIN_SESSION_FAILED`/`SKILL_ADMIN_PRESET_MISSING` 并展示具体原因
 - **技能管理员预设修复**：补齐 `tool-fs-search` 的 `sampleOverCapGlobResults` 必填配置，避免 preset broken；其他插件配置做审计
-- **技能库权限开放**：catalog/get 允许同项目在册成员查看自己的技能，worker 可修改自己的选择，supervisor 可查看/修改任意成员；add/remove/install-url 仍仅 supervisor
-- **会话头部技能入口**：会话 header 显示已选技能数量/chip，技能页入口收敛
+- **技能库全员可用**：catalog/get 允许同项目在册成员查看自己的技能，worker 可修改自己的选择，supervisor 可查看/修改任意成员；add/remove/install-url 仍仅 supervisor
+- **每对话技能页**：会话内新增技能页签，成员可查看/选择本会话技能；不再依赖会话头部入口
+- **移除头部技能 chip**：删除会话 header 的技能数量/chip，入口统一到每对话技能页
 - **移除重复右键技能菜单**：删除技能行上重复的右键菜单项，保留主管成员菜单
 - **SkillHub 格式适配**：支持 `@scope/<pack>/` 两层目录与无 `manifest.json` 的 `SKILL.md` frontmatter 合成（id/name/description/roles/tokenEstimate/source/license），scope 限定 id 避免 slug 冲突
 - **技能来源/署名**：manifest 支持 `author`/https `homepage`，catalog/preview 展示；URL 安装、来源入口、预设页底部致谢
