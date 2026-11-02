@@ -69,6 +69,13 @@ describe('ui-sidebar apply', () => {
     expect(hostApply).not.toThrow()
   })
 
+  it('does not register or call the email settings surface', () => {
+    const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
+    expect(source).not.toContain('CadreEmailSettings')
+    expect(source).not.toContain('cadre-email')
+    expect(source).not.toContain("'/cadre/email")
+  })
+
   it('registers the skill Conversation view without a header chip or removed status strip', () => {
     const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
     expect(source).toContain("id: 'skills'")
