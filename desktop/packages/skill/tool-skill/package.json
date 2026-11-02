@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-tool-skill",
   "description": "Model-facing skill loading tool for the DeepSeek Harness",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "publishConfig": {
     "access": "public"
   },

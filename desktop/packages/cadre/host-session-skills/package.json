@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-session-skills",
   "description": "Per-session Cadre skill packs selected from the roster",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
