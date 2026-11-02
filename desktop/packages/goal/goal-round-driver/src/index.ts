@@ -20,6 +20,12 @@ export { renderGoalRoundPrompt } from './prompt.ts'
 export const name = 'goal-round-driver'
 export const inject = ['agents', 'goals', 'sessions']
 
+/** Optional typing-presence service; absent in headless compositions. */
+interface TypingPresence {
+  isTyping(sessionId: string): boolean
+  whenIdle(sessionId: string): Promise<void>
+}
+
 /** Identity reserved before a goal continuation enters the agent inbox. */
 interface RoundIdentity {
   readonly goalId: GoalRef['id']
@@ -172,6 +178,13 @@ export function apply(ctx: Context): void {
 
     const goal = currentGoal(state)
     if (!drivable(goal)) return
+    // A user who is still typing must not lose their draft to an automatic
+    // continuation. Wait for the presence TTL or an explicit send/stop signal.
+    const presence = ctx.get('sessionPresence') as TypingPresence | undefined
+    if (presence?.isTyping(agent.session.id) === true) {
+      await presence.whenIdle(agent.session.id)
+      if (!readyToDrive(state)) return
+    }
     // A round started while descendants progress would only wait for them.
     // Every goal mutation requests a checkpoint, so passing the recheck
     // proves this goal view is still current.

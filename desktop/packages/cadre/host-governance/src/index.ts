@@ -24,6 +24,7 @@ import {
 } from '@deepseek-ai/dsh-cadre-email-notify'
 import { IdleReminderService } from './idle-reminder.ts'
 import { ClaimVerifier } from './claims.ts'
+import { SessionPresence } from './presence.ts'
 import { activityFrom, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
@@ -98,6 +99,7 @@ interface HostContext {
   readonly agents: AgentsLike
   readonly goals: GoalsLike
   effect(setup: () => () => void): void
+  provide?(name: string, value: unknown): void
   on?(event: string, handler: (session: { readonly id: string }, event: unknown) => void): () => void
   inject?(dependencies: readonly string[], callback: (scope: unknown) => void): void
 }
@@ -302,9 +304,12 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     capture: captureCurrentWindow,
     send: (event, attachments) => emailNotifier.notify(event, attachments),
   })
+  const presence = new SessionPresence()
+  ctx.provide?.('sessionPresence', presence)
   const disposeIdleEvents = ctx.on === undefined
     ? undefined
     : ctx.on('session/event', (session, event) => {
+      if ((event as { type?: unknown }).type === 'user/message') presence.mark(session.id, false)
       idleReminder.handle(session.id, event as { type?: unknown; data?: unknown })
     })
   const claims = new ClaimVerifier({
@@ -327,6 +332,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     disposeClaimEvents?.()
     idleReminder.dispose()
     claims.dispose()
+    presence.dispose()
   })
 
   const ports: StallPorts = {
@@ -668,6 +674,26 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           }
         },
       }), 'host-governance: /cadre/claims/snapshot')
+      web.effect(() => web.webServer.register({
+        kind: 'exact',
+        path: '/cadre/session/typing',
+        handler: async (req, res) => {
+          if (req.method !== 'POST') return reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 POST' })
+          const admission = web.connection.admit(req)
+          if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
+            return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
+          }
+          try {
+            const body = await readBody(req) as Record<string, unknown>
+            if (typeof body.sessionId !== 'string' || body.sessionId === '' || typeof body.typing !== 'boolean') {
+              return reply(res, 400, { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId/typing 必填' })
+            }
+            reply(res, 200, { ok: true, ...presence.mark(body.sessionId, body.typing) })
+          } catch (error) {
+            reply(res, 500, { ok: false, code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      }), 'host-governance: /cadre/session/typing')
 
       const emailRoute = (
         path: string,

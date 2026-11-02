@@ -150,6 +150,28 @@ async function waitForRequests(adapter: ScriptedAdapter, count: number): Promise
   })
 }
 
+describe('goal-round typing presence', () => {
+  it('does not start while the user is typing and resumes after idle', async () => {
+    const test = await harness([textResponse('round one')])
+    let typing = true
+    let release = (): void => {}
+    const idle = new Promise<void>(resolve => { release = resolve })
+    const whenIdle = vi.fn(() => idle)
+    test.ctx.provide('sessionPresence', {
+      isTyping: () => typing,
+      whenIdle,
+    })
+    test.ctx.goals.create(test.agent, { objective: 'wait for the user', maxGoalRounds: 1 })
+
+    await vi.waitFor(() => { expect(whenIdle).toHaveBeenCalled() })
+    expect(test.adapter.requests).toHaveLength(0)
+
+    typing = false
+    release()
+    await vi.waitFor(() => { expect(test.adapter.requests).toHaveLength(1) })
+  })
+})
+
 describe('goal-round outcome policy', () => {
   it('renders the objective, round budget, authority boundary, and completion protocol', () => {
     const goal: GoalView = {
