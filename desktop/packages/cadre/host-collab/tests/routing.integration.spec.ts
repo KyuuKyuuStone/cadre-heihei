@@ -236,12 +236,36 @@ describe('DF-011 real Cordis composition (worker ask -> supervisor -> resolve)',
 
       const first = await report()
       expect(first.status).toBe('delivered')
+      const duplicate = await report()
+      expect(duplicate.status).toBe('delivered')
+      const countMessages = (): number => {
+        const reader = new DatabaseSync(process.env.CADRE_LEDGER_PATH ?? '', { readOnly: true })
+        try {
+          return Number((reader.prepare('SELECT COUNT(*) AS count FROM messages WHERE task_id = ?')
+            .get('t1') as { count: number }).count)
+        } finally {
+          reader.close()
+        }
+      }
+      expect(countMessages()).toBe(1)
       await rework()
       const second = await report()
       expect(second.status).toBe('delivered')
+      expect(countMessages()).toBe(2)
       await rework()
       const third = await report()
       expect(third.status).toBe('delivered')
+      expect(countMessages()).toBe(3)
+
+      const keysReader = new DatabaseSync(process.env.CADRE_LEDGER_PATH ?? '', { readOnly: true })
+      try {
+        const rows = keysReader.prepare(`SELECT idempotency_key FROM messages
+          WHERE task_id = ? ORDER BY received_at`).all('t1') as { idempotency_key: string }[]
+        expect(rows.filter(row => /^report:t1:[^:]+$/u.test(row.idempotency_key))).toHaveLength(3)
+        expect(new Set(rows.map(row => row.idempotency_key)).size).toBe(3)
+      } finally {
+        keysReader.close()
+      }
 
       const reader = new DatabaseSync(process.env.CADRE_LEDGER_PATH ?? '', { readOnly: true })
       try {
@@ -253,4 +277,33 @@ describe('DF-011 real Cordis composition (worker ask -> supervisor -> resolve)',
       await ctx.fiber.dispose()
     }
   }, 15_000)
+
+  it('keeps legacy report keys while adding the cycle-scoped unique index', () => {
+    const root = mkdtempSync(join(tmpdir(), 'cadre-cycle-migrate-'))
+    roots.push(root)
+    const path = join(root, 'ledger.sqlite')
+    initCadreStore(path)
+    const db = new DatabaseSync(path)
+    try {
+      db.exec('DROP INDEX IF EXISTS idx_messages_report_cycle')
+      db.prepare(`INSERT INTO messages (message_id, project_id, task_id, direction, channel,
+        from_session_id, to_session_id, body, body_bytes, body_sha256, preview, deliverables_json,
+        idempotency_key, delivery_state, received_at, delivered_at)
+        VALUES ('legacy-1', 'p', 't', 'report', 'session', 'w', NULL, 'b', 1, 'sha', 'p', NULL,
+        'report:t', 'delivered', ?, ?), ('legacy-2', 'p', 't', 'report', 'session', 'w', NULL,
+        'b', 1, 'sha', 'p', NULL, 'report:t', 'delivered', ?, ?)`).run(AT, AT, AT, AT)
+    } finally {
+      db.close()
+    }
+    initCadreStore(path)
+    const reader = new DatabaseSync(path, { readOnly: true })
+    try {
+      expect((reader.prepare(`SELECT COUNT(*) AS count FROM messages
+        WHERE idempotency_key = 'report:t'`).get() as { count: number }).count).toBe(2)
+      expect(reader.prepare(`SELECT name FROM sqlite_master
+        WHERE type = 'index' AND name = 'idx_messages_report_cycle'`).get()).toBeTruthy()
+    } finally {
+      reader.close()
+    }
+  })
 })

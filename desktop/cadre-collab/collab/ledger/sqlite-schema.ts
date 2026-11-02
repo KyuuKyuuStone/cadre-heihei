@@ -147,4 +147,10 @@ function migrate(db: DatabaseSync): void {
   if (!memberColumns.some((column) => String(column.name) === 'skills_json')) {
     db.exec(`ALTER TABLE members ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'`)
   }
+  // New report messages carry `report:<taskId>:<cycleId>`; old `report:<taskId>`
+  // rows stay untouched. The partial index constrains only cycle-scoped keys, so
+  // legacy duplicates cannot block startup.
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_report_cycle
+    ON messages (project_id, idempotency_key)
+    WHERE idempotency_key LIKE 'report:%:%'`)
 }

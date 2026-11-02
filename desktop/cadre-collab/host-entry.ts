@@ -33,6 +33,8 @@ export type AdvanceReportResult =
     readonly to: 'delivered'
     readonly replayed: boolean
     readonly eventIds: readonly string[]
+    /** Stable id of the reporting round (latest rework event, or starting status). */
+    readonly cycleId: string
   }
   | { readonly ok: false; readonly code: string; readonly message: string }
 
@@ -74,11 +76,36 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
     const current = store.ledger.getTask(input.projectId as never, input.taskId as never)
     if (!current.ok) return { ok: false, code: current.error.code, message: current.error.message }
     const startedFrom = current.value.status
+    // Each rework round is a new reporting cycle. The latest rework event is a
+    // stable cycle id: retries of the same round (including a retry after step 1
+    // already committed) reuse it, while a later rework records a new event and
+    // therefore new keys. First-ever reports have no rework event and fall back
+    // to the starting status.
+    const cycleId = ((): string => {
+      const rework = store.ledger.core.db.prepare(`SELECT event_id FROM task_events
+        WHERE project_id = ? AND task_id = ? AND to_status = 'rework'
+        ORDER BY at DESC, rowid DESC LIMIT 1`).get(input.projectId, input.taskId) as
+        { event_id?: unknown } | undefined
+      if (typeof rework?.event_id === 'string' && rework.event_id !== '') return rework.event_id
+      // A replay after `delivered` has no new rework event. The latest delivered
+      // transition key still carries the round that produced it.
+      const delivered = store.ledger.core.db.prepare(`SELECT idempotency_key FROM task_events
+        WHERE project_id = ? AND task_id = ? AND to_status = 'delivered'
+        ORDER BY at DESC, rowid DESC LIMIT 1`).get(input.projectId, input.taskId) as
+        { idempotency_key?: unknown } | undefined
+      if (typeof delivered?.idempotency_key === 'string') {
+        const parts = delivered.idempotency_key.split(':')
+        if (parts.length >= 4 && parts[0] === 'report' && parts.at(-1) === 'delivered') {
+          return parts.slice(2, -1).join(':')
+        }
+      }
+      return startedFrom
+    })()
     // A retried report (the first attempt committed the transition but its
     // supervisor notification failed) must not fail: there is nothing left to
     // transition and the caller only needs to deliver the message again.
     if (startedFrom === 'delivered') {
-      return { ok: true, from: startedFrom, to: 'delivered', replayed: true, eventIds: [] }
+      return { ok: true, from: startedFrom, to: 'delivered', replayed: true, eventIds: [], cycleId }
     }
     const chain = chainToDelivered(startedFrom)
     if (chain === undefined) {
@@ -93,13 +120,6 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
     // already committed) reuse it, while a later rework records a new event and
     // therefore new keys. First-ever reports have no rework event and fall back
     // to the starting status.
-    const cycleId = ((): string => {
-      const row = store.ledger.core.db.prepare(`SELECT event_id FROM task_events
-        WHERE project_id = ? AND task_id = ? AND to_status = 'rework'
-        ORDER BY at DESC, rowid DESC LIMIT 1`).get(input.projectId, input.taskId) as
-        { event_id?: unknown } | undefined
-      return typeof row?.event_id === 'string' && row.event_id !== '' ? row.event_id : startedFrom
-    })()
     const eventIds: string[] = []
     let from: string = startedFrom
     for (const to of chain) {
@@ -119,7 +139,7 @@ export function advanceReportToDelivered(input: AdvanceReportInput): AdvanceRepo
       from = to
       eventIds.push(step.value.event.eventId)
     }
-    return { ok: true, from: startedFrom, to: 'delivered', replayed: false, eventIds }
+    return { ok: true, from: startedFrom, to: 'delivered', replayed: false, eventIds, cycleId }
   } finally {
     store.close()
   }

@@ -330,7 +330,14 @@ interface HostLedgerBridge {
     readonly taskId: string
     readonly actorSessionId: string
     readonly idempotencyBase: string
-  }): { readonly ok: true } | { readonly ok: false; readonly code: string; readonly message: string }
+  }): {
+    readonly ok: true
+    readonly from: string
+    readonly to: 'delivered'
+    readonly replayed: boolean
+    readonly eventIds: readonly string[]
+    readonly cycleId: string
+  } | { readonly ok: false; readonly code: string; readonly message: string }
   listTasks(input: {
     readonly databasePath: string
     readonly projectId: string
@@ -704,6 +711,17 @@ class Ledger {
         idempotencyBase: `report:${input.taskId}`,
       })
       if (!advanced.ok) throw new Error(`汇报状态迁移被拒（${advanced.code}）：${advanced.message}`)
+      const cycleKey = `report:${input.taskId}:${advanced.cycleId}`
+      if (advanced.replayed) {
+        const existing = this.db.prepare(`SELECT message_id FROM messages
+          WHERE project_id = ? AND idempotency_key = ? ORDER BY received_at DESC LIMIT 1`)
+          .get(projectId, cycleKey) as { message_id?: unknown } | undefined
+        if (typeof existing?.message_id === 'string') {
+          this.db.prepare('DELETE FROM messages WHERE message_id = ?').run(messageId)
+          return existing.message_id
+        }
+      }
+      this.db.prepare('UPDATE messages SET idempotency_key = ? WHERE message_id = ?').run(cycleKey, messageId)
       const actual = (() => {
         const reader = new DatabaseSync(this.path, { readOnly: true })
         try {
