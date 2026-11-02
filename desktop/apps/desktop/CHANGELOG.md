@@ -7,7 +7,6 @@
 - **Token 计量**：从 assistant usage 按 session/task/round 累计，提供快照/面板；跨轮 24k 自动压缩，不找用户
 - **上下文瘦身**：spill inline 降至 2k、compaction retain 20k、step 阈值 60k（总阈值仍 150k）；同轮重复工具结果自动引用第一条
 - **输入中不自动执行**：typing presence（5s TTL）阻止 goal 自动继续；用户发送/停止后恢复
-- **开工门禁与安装确认**：派活需 execution arm（10 分钟/单批）；安装缺失安全信息需 supervisor confirm
 - **1.1.4 能力保留**：安装跳转对话、免选项目内部工作区、技能单入口、install-any、SPILL/DPAPI、邮件隐藏
 
 ## 1.1.4
