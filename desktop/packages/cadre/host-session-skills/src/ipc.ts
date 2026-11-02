@@ -394,7 +394,7 @@ export function createSkillApi(options: {
       }
     },
     add(input) {
-      requireSupervisor(db, input.projectId, input.actorSessionId)
+      requireActor(db, input.projectId, input.actorSessionId)
       const pack = validatePack(input)
       const target = join(skillsDir, pack.id)
       if (builtinDir !== undefined && existsSync(join(builtinDir, pack.id))) {
@@ -440,7 +440,7 @@ export function createSkillApi(options: {
       return entryOf(saved)
     },
     remove(input) {
-      requireSupervisor(db, input.projectId, input.actorSessionId)
+      requireActor(db, input.projectId, input.actorSessionId)
       const id = requiredString(input.packId, 'packId')
       if (!KEBAB_ID.test(id) || id.length > 64) throw new SkillIpcError('SKILL_INVALID', 400, 'packId 格式非法')
       if (input.confirm !== true) throw new SkillIpcError('SKILL_INVALID', 400, '删除技能包需要 confirm:true')
@@ -459,7 +459,7 @@ export function createSkillApi(options: {
       return { removed: true }
     },
     async inspectUrl(input) {
-      requireSupervisor(db, input.projectId, input.actorSessionId)
+      requireActor(db, input.projectId, input.actorSessionId)
       const targets = rawTargets(input.url)
       let total = 0
       const manifestText = await fetchText(doFetch, targets.manifest, 64 * 1024, () => total, value => { total = value })
@@ -516,7 +516,7 @@ export function createSkillApi(options: {
       })
     },
     async installPackage(input) {
-      requireSupervisor(db, input.projectId, input.actorSessionId)
+      requireActor(db, input.projectId, input.actorSessionId)
       const name = requiredString(input.name, 'name')
       if (name.length > 128 || !PACKAGE_NAME.test(name)) {
         throw new SkillIpcError('SKILL_INVALID', 400, '包名必须是合法的 npm 包名（可带 @scope/）')

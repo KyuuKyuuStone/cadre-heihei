@@ -44,7 +44,8 @@ unselected session has zero skill tokens from this plugin.
 
 POST JSON, project-scoped. `catalog`/`get`/`set` admit registered members:
 a worker may read and update its own selection, a supervisor may target any
-member. `preview`/`add`/`remove`/`install-url` remain supervisor-only.
+member. `add`/`remove`/`install-url`/`install-package` also admit any registered
+member; `preview` and the skill-administrator conversation remain supervisor-only.
 
 - `/cadre/skills/catalog` — `{projectId, actorSessionId, targetSessionId?}` →
   catalog entries with `selected`;

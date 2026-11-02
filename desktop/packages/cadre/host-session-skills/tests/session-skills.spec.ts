@@ -467,7 +467,7 @@ describe('session skill packs', () => {
     reader.close()
   })
 
-  it('lets members view and edit their own skills while writes stay supervisor-only', () => {
+  it('lets members view/edit their own skills and install packs, while admin stays supervisor-only', async () => {
     const root = workspace()
     const packs = join(root, 'installed')
     pack(packs, 'design', ['worker'])
@@ -493,10 +493,33 @@ describe('session skill packs', () => {
       .toThrow(/supervisor/)
     expect(() => api.preview({ projectId: 'p1', actorSessionId: 'w1', packId: 'design' }))
       .toThrow(/supervisor/)
+    expect(api.add({
+      projectId: 'p1', actorSessionId: 'w1', id: 'worker-pack', name: 'Worker Pack', description: 'worker',
+      roles: ['worker'], tokenEstimate: 1, tools: [], source: 'manual', license: 'MIT', content: '# worker',
+    })).toMatchObject({ id: 'worker-pack' })
+    expect(api.remove({ projectId: 'p1', actorSessionId: 'w1', packId: 'worker-pack', confirm: true }))
+      .toEqual({ removed: true })
     expect(() => api.add({
-      projectId: 'p1', actorSessionId: 'w1', id: 'x', name: 'x', description: 'x', roles: ['worker'],
+      projectId: 'p1', actorSessionId: 'outside', id: 'x', name: 'x', description: 'x', roles: ['worker'],
       tokenEstimate: 1, tools: [], source: 'manual', license: 'MIT', content: '# x',
-    })).toThrow(/supervisor/)
+    })).toThrow(/在册成员/)
+    const fetch = vi.fn(async (input: URL | string) => String(input).endsWith('manifest.json')
+      ? new Response(JSON.stringify({
+        id: 'url-pack', name: 'URL Pack', description: 'url', roles: ['worker'],
+        tokenEstimate: 1, tools: [], source: 'github:o/r', license: 'MIT',
+      }), { status: 200 })
+      : new Response('# url', { status: 200 }))
+    const urlApi = createSkillApi({
+      db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, fetch: fetch as never,
+    })
+    await expect(urlApi.installUrl({
+      projectId: 'p1', actorSessionId: 'w1',
+      url: 'https://raw.githubusercontent.com/o/r/main/packs/url/SKILL.md',
+    })).resolves.toMatchObject({ id: 'url-pack' })
+    await expect(urlApi.installUrl({
+      projectId: 'p1', actorSessionId: 'outside',
+      url: 'https://raw.githubusercontent.com/o/r/main/packs/url/SKILL.md',
+    })).rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
     reader.close()
   })
 
@@ -521,7 +544,7 @@ describe('session skill packs', () => {
       },
     })
     await expect(success.installPackage({
-      projectId: 'p1', actorSessionId: 's1', name: '@indiv-guipi/find-skills',
+      projectId: 'p1', actorSessionId: 'w1', name: '@indiv-guipi/find-skills',
     })).resolves.toMatchObject({ name: '@indiv-guipi/find-skills', visible: true })
     expect(calls[0]).toEqual([
       '-d', 'Ubuntu-24.04', '--', '/root/.local/bin/skillhub', 'install',
@@ -545,6 +568,8 @@ describe('session skill packs', () => {
     await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'find-skills' }))
       .rejects.toMatchObject({ code: 'SKILL_INSTALL_PACKAGE_UNSUPPORTED' })
     await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 'w1', name: 'find-skills' }))
+      .rejects.toMatchObject({ code: 'SKILL_INSTALL_PACKAGE_UNSUPPORTED' })
+    await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 'outside', name: 'find-skills' }))
       .rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
     reader.close()
   })
