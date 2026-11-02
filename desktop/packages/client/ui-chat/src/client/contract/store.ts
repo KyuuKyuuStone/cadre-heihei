@@ -16,4 +16,6 @@ export interface ChatStoreState {
   turnProcesses: TurnProcessViewEntry[]
   /** Supervisor-only reserved event body visibility; default hidden. */
   internalEventsVisible: boolean
+  /** Whether this Session has shown at least one reserved internal event. */
+  hasInternalEvents: boolean
 }

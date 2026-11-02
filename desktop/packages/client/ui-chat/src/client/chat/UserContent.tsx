@@ -1,5 +1,5 @@
 /** Reusable user contents inside a caller-owned message row. */
-import { Fragment } from 'react'
+import { Fragment, useEffect } from 'react'
 import type { FactoryComponentPropsOf, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { fileExtension, FileTypeIcon, fileSizeText, JsonBlock } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatStore } from '../contract/slots.ts'
@@ -20,7 +20,7 @@ type UserContentProps = Omit<FactoryComponentPropsOf<'conversation.chat.user.con
  * @returns the content stack using the existing user-message layout.
  */
 export function UserContent({
-  content, loadImage, facts, interactive = false, ellipsis = false, renderSlot, renderFactorySlot, t, useStore,
+  content, loadImage, facts, interactive = false, ellipsis = false, renderSlot, renderFactorySlot, t, useStore, actions,
 }: UserContentProps) {
   const { text, attachments, extraBlocks, referenceLabels = EMPTY_LABELS } = content
   const compactImages = attachments.length > 1
@@ -28,6 +28,9 @@ export function UserContent({
   const showBubble = text !== '' || extraBlocks.length > 0
   const internal = isCadreInternalEvent(text)
   const internalVisible = (useStore ?? (() => false))(state => state.internalEventsVisible)
+  useEffect(() => {
+    if (internal) actions.markInternalEvent()
+  }, [actions, internal])
   if (internal && !internalVisible) {
     // The row owns its chrome; this marker lets MessageItem.module.css collapse
     // the whole row without hiding ordinary user messages.

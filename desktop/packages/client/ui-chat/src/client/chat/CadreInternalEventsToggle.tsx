@@ -7,6 +7,8 @@ export function CadreInternalEventsToggle({
   useStore, actions, t,
 }: PropsStore<ChatStore> & PropsLocale<'chat'>) {
   const visible = useStore(state => state.internalEventsVisible)
+  const hasInternalEvents = useStore(state => state.hasInternalEvents)
+  if (!hasInternalEvents && !visible) return null
   return (
     <div className={css.bar}>
       <Button

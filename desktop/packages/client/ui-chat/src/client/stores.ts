@@ -11,6 +11,7 @@ export type ChatActions = {
     open: boolean,
   ) => void
   setInternalEventsVisible: (draft: ChatStoreState, visible: boolean) => void
+  markInternalEvent: (draft: ChatStoreState) => void
 }
 
 /**
@@ -50,7 +51,7 @@ export function turnProcessOpen(
  */
 export function createChatStore(): EngineStoreHandle<ChatStoreState, ChatActions> {
   return defineStore({
-    init: (): ChatStoreState => ({ turnProcesses: [], internalEventsVisible: false }),
+    init: (): ChatStoreState => ({ turnProcesses: [], internalEventsVisible: false, hasInternalEvents: false }),
     actions: {
       setTurnProcessOpen: (draft, turn, answerStep, open) => {
         const index = draft.turnProcesses.findIndex(entry => entry.turn === turn)
@@ -59,6 +60,7 @@ export function createChatStore(): EngineStoreHandle<ChatStoreState, ChatActions
         else draft.turnProcesses[index] = next
       },
       setInternalEventsVisible: (draft, visible) => { draft.internalEventsVisible = visible },
+      markInternalEvent: (draft) => { draft.hasInternalEvents = true },
     },
   })
 }
