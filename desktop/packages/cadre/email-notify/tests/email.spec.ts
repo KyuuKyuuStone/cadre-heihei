@@ -8,6 +8,7 @@ import { dryRunEmail, getEmailConfigView, setEmailConfig, testEmail } from '../s
 import { buildSendGridBody, redactSecret, sendWithSendGrid } from '../src/sendgrid.ts'
 import { buildResendBody, sendWithResend } from '../src/resend.ts'
 import { buildSmtpMail, sendWithSmtp } from '../src/smtp.ts'
+import { PowerShellDpapi } from '../src/dpapi.ts'
 import { EmailSecretStore, SecretStoreUnavailableError } from '../src/secret-store.ts'
 
 const roots: string[] = []
@@ -219,18 +220,77 @@ describe('dedupe, rate limit and failures', () => {
     expect(store.has('p1')).toBe(false)
   })
 
-  it('fails closed when safeStorage is unavailable', async () => {
+  it('fails closed when safeStorage and DPAPI are both unavailable', async () => {
     const store = new EmailSecretStore({
       dir: workspace(),
+      platform: 'win32',
+      log: () => {},
       safeStorage: {
         isEncryptionAvailable: () => false,
         encryptString: () => Buffer.alloc(0),
         decryptString: () => '',
       },
+      dpapi: {
+        encrypt: async () => { throw new Error('dpapi unavailable') },
+        decrypt: async () => { throw new Error('dpapi unavailable') },
+      },
     })
     await expect(store.set('p1', 'qq-secret')).rejects.toMatchObject({ code: 'SECRET_STORE_UNAVAILABLE' })
     await expect(store.set('p1', '')).rejects.toThrow(/EMAIL_SECRET_EMPTY/)
     expect(SecretStoreUnavailableError).toBeTypeOf('function')
+  })
+
+  it('falls back to DPAPI when safeStorage cannot load, and redacts the secret', async () => {
+    const calls: string[] = []
+    const store = new EmailSecretStore({
+      dir: workspace(),
+      platform: 'win32',
+      log: () => {},
+      safeStorage: {
+        isEncryptionAvailable: () => false,
+        encryptString: () => Buffer.alloc(0),
+        decryptString: () => '',
+      },
+      dpapi: {
+        encrypt: async value => { calls.push(`encrypt:${value}`); return Buffer.from(`dpapi:${value}`) },
+        decrypt: async value => value.toString('utf8').replace(/^dpapi:/u, ''),
+      },
+    })
+    await store.set('p1', 'qq-secret')
+    expect(await store.read('p1')).toBe('qq-secret')
+    expect(calls).toEqual(['encrypt:qq-secret'])
+    const failing = new EmailSecretStore({
+      dir: workspace(),
+      platform: 'win32',
+      log: () => {},
+      safeStorage: {
+        isEncryptionAvailable: () => false,
+        encryptString: () => Buffer.alloc(0),
+        decryptString: () => '',
+      },
+      dpapi: {
+        encrypt: async () => { throw new Error('dpapi failed qq-secret') },
+        decrypt: async () => { throw new Error('dpapi failed qq-secret') },
+      },
+    })
+    const failure = await failing.set('p1', 'qq-secret').catch((error: unknown) => error)
+    expect(String(failure)).not.toContain('qq-secret')
+  })
+
+  it.runIf(process.platform === 'win32')('roundtrips through real Windows DPAPI', async () => {
+    const store = new EmailSecretStore({
+      dir: workspace(),
+      platform: 'win32',
+      log: () => {},
+      safeStorage: {
+        isEncryptionAvailable: () => false,
+        encryptString: () => Buffer.alloc(0),
+        decryptString: () => '',
+      },
+      dpapi: new PowerShellDpapi(),
+    })
+    await store.set('p1', 'qq-real-secret')
+    expect(await store.read('p1')).toBe('qq-real-secret')
   })
 
   it('uses the encrypted secret for SMTP and warns when falling back to the old env', async () => {
