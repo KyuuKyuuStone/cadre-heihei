@@ -72,16 +72,16 @@
     # Keep the retained tail small: the default ratio of the (large) model
     # window left ~150k tokens after every compaction, so a long turn still
     # paid hundreds of thousands of cache-read tokens per request.
-    retainTokens: 50000
+    retainTokens: 20000
     # Step-level checks are enabled for 1.1.1: long turns otherwise grow from
     # the retained tail to hundreds of thousands of tokens before the next turn.
     stepPressureCheck: true
-    stepPressureThresholdTokens: 100000
+    stepPressureThresholdTokens: 60000
     stepMinToolCallsBetweenChecks: 2
 
 # Tool results are 57% of measured prompts. The base bundle spills above 12.5k
-# estimated tokens; Cadre keeps only 4k inline (head/tail + locator) while the
+# estimated tokens; Cadre keeps only 2k inline (head/tail + locator) while the
 # full text remains recoverable from the spill file.
 - id: spill-policy
   config:
-    maxInlineTokens: 4000
+    maxInlineTokens: 2000

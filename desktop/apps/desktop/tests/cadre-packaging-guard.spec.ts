@@ -114,14 +114,14 @@ describe('cadreAsarPath', () => {
     const patch = readFileSync('packages/bundle/cadre-app/cordis.patch.yml', 'utf8')
     expect(patch).toContain('- id: compaction-basic')
     expect(patch).toMatch(/thresholdTokens:\s*150000/)
-    expect(patch).toMatch(/retainTokens:\s*50000/)
+    expect(patch).toMatch(/retainTokens:\s*20000/)
     expect(patch).toMatch(/stepPressureCheck:\s*true/)
-    expect(patch).toMatch(/stepPressureThresholdTokens:\s*100000/)
+    expect(patch).toMatch(/stepPressureThresholdTokens:\s*60000/)
     expect(patch).toMatch(/stepMinToolCallsBetweenChecks:\s*2/)
     expect(patch).toContain('- id: cadre-session-skills')
     expect(patch).toContain('@deepseek-ai/dsh-host-session-skills')
     expect(patch).toContain('- id: spill-policy')
-    expect(patch).toMatch(/maxInlineTokens:\s*4000/)
+    expect(patch).toMatch(/maxInlineTokens:\s*2000/)
   })
 
   it('mirrors electron-builder output for Windows and macOS', () => {
