@@ -16,10 +16,9 @@ type UseMenuOpenState = () => readonly [open: boolean, setOpen: (open: boolean) 
 /** One email config view; `hasKey` is derived by the Host, never a secret. */
 export interface CadreEmailConfigView {
   readonly enabled: boolean
-  readonly provider?: 'sendgrid' | 'resend' | 'smtp'
+  readonly provider?: 'smtp'
   readonly from: { readonly email: string; readonly name?: string }
   readonly recipients: readonly string[]
-  readonly apiKeyEnv?: string
   readonly smtpPreset?: 'qq' | '163'
   readonly user?: string
   readonly authCodeRef?: string
@@ -83,8 +82,6 @@ function emailErrorText(cause: unknown, t: PropsLocale<'sidebar'>['t']): string 
   const message = cause instanceof Error ? cause.message : String(cause)
   const code = /^((?:EMAIL|SECRET)_[A-Z_]+) ·/u.exec(message)?.[1]
   switch (code) {
-    case 'EMAIL_FROM_NOT_VERIFIED': return t('email.error.fromNotVerified')
-    case 'EMAIL_RECIPIENT_RESTRICTED': return t('email.error.recipientRestricted')
     case 'EMAIL_MISSING_API_KEY': return t('email.error.missingKey')
     case 'EMAIL_AUTH_FAILED': return t('email.error.authFailed')
     case 'EMAIL_TIMEOUT': return t('email.error.timeout')
@@ -101,8 +98,6 @@ function resultText(result: EmailResult, t: PropsLocale<'sidebar'>['t']): string
   if (result.ok) {
     return t('email.result.ok', { status: result.status ?? 'sent' })
   }
-  if (result.code === 'EMAIL_FROM_NOT_VERIFIED') return t('email.error.fromNotVerified')
-  if (result.code === 'EMAIL_RECIPIENT_RESTRICTED') return t('email.error.recipientRestricted')
   if (result.code === 'EMAIL_MISSING_API_KEY') return t('email.error.missingKey')
   if (result.code === 'EMAIL_TIMEOUT') return t('email.error.timeout')
   if (result.code === 'EMAIL_CONNECTION_FAILED') return t('email.error.connection')
@@ -130,16 +125,6 @@ function isMissingConfig(message: string): boolean {
   return /ENOENT|no such file|EMAIL_CONFIG_MISSING/iu.test(message)
 }
 
-const HELP_LINKS = {
-  sendgridSignup: 'https://signup.sendgrid.com/',
-  sendgridKeys: 'https://app.sendgrid.com/settings/api_keys',
-  sendgridSender: 'https://app.sendgrid.com/settings/sender_auth',
-  resendSignup: 'https://resend.com/signup',
-  resendKeys: 'https://resend.com/api-keys',
-  resendDomains: 'https://resend.com/domains',
-  aliyun: 'https://www.aliyun.com/product/directmail',
-  tencent: 'https://cloud.tencent.com/product/ses',
-} as const
 
 /** Supervisor row-menu item; ordinary/employee sessions return null. */
 export function CadreEmailSettingsMenuItem({
@@ -177,7 +162,6 @@ function EmailForm({
 }) {
   const [config, setConfig] = useState<CadreEmailConfigView | null>(null)
   const [enabled, setEnabled] = useState(false)
-  const [provider, setProvider] = useState<'sendgrid' | 'resend' | 'smtp'>('smtp')
   const [smtpPreset, setSmtpPreset] = useState<'qq' | '163'>('qq')
   const [authCode, setAuthCode] = useState('')
   const [showAuthCode, setShowAuthCode] = useState(false)
@@ -186,7 +170,6 @@ function EmailForm({
   const [fromName, setFromName] = useState('')
   const [recipients, setRecipients] = useState<string[]>([])
   const [recipient, setRecipient] = useState('')
-  const [apiKeyEnv, setApiKeyEnv] = useState('')
   const [dryRun, setDryRun] = useState(false)
   const [minInterval, setMinInterval] = useState('60000')
   const [busy, setBusy] = useState(false)
@@ -201,7 +184,6 @@ function EmailForm({
         const next = value as CadreEmailConfigView
         setConfig(next)
         setEnabled(next.enabled)
-        setProvider(next.provider ?? 'smtp')
         setSmtpPreset(next.smtpPreset ?? 'qq')
         setAuthCode('')
         setShowAuthCode(false)
@@ -210,7 +192,6 @@ function EmailForm({
         setFromEmail(next.from.email)
         setFromName(next.from.name ?? '')
         setRecipients([...next.recipients])
-        setApiKeyEnv(next.apiKeyEnv ?? (next.provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY'))
         setDryRun(next.dryRun === true)
         setMinInterval(String(next.minIntervalMs ?? 60_000))
       })
@@ -222,7 +203,6 @@ function EmailForm({
         if (isMissingConfig(message)) {
           setConfig(DEFAULT_CONFIG)
           setEnabled(DEFAULT_CONFIG.enabled)
-          setProvider(DEFAULT_CONFIG.provider ?? 'smtp')
           setSmtpPreset(DEFAULT_CONFIG.smtpPreset ?? 'qq')
           setAuthCode('')
           setShowAuthCode(false)
@@ -230,7 +210,6 @@ function EmailForm({
           setFromEmail(DEFAULT_CONFIG.from.email)
           setFromName(DEFAULT_CONFIG.from.name ?? '')
           setRecipients([...DEFAULT_CONFIG.recipients])
-          setApiKeyEnv(DEFAULT_CONFIG.apiKeyEnv ?? 'SENDGRID_API_KEY')
           setDryRun(DEFAULT_CONFIG.dryRun === true)
           setMinInterval(String(DEFAULT_CONFIG.minIntervalMs ?? 60_000))
           return
@@ -255,20 +234,10 @@ function EmailForm({
     setError(null)
   }
 
-  const changeProvider = (next: 'sendgrid' | 'resend' | 'smtp'): void => {
-    setProvider(next)
-    if (next !== 'smtp') setApiKeyEnv(next === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY')
-    setError(null)
-  }
-
   const validate = (): string | null => {
     if (!validEmail(fromEmail.trim())) return t('email.error.from')
     if (recipients.length === 0) return t('email.error.noRecipients')
-    if (provider === 'smtp') {
-      if (authCode.trim() === '' && !hasSecret) return t('email.error.authCodeRequired')
-    } else if (!/^[A-Z_][A-Z0-9_]*$/u.test(apiKeyEnv.trim())) {
-      return t('email.error.env')
-    }
+    if (authCode.trim() === '' && !hasSecret) return t('email.error.authCodeRequired')
     if (!/^\d+$/u.test(minInterval.trim())) return t('email.error.interval')
     return null
   }
@@ -284,7 +253,7 @@ function EmailForm({
     setNotice(null)
     let secretSaved = false
     try {
-      if (provider === 'smtp' && authCode.trim() !== '') {
+      if (authCode.trim() !== '') {
         const secret = await emailCall('secret', {
           projectId: request.projectId,
           actorSessionId: request.sessionId,
@@ -298,12 +267,11 @@ function EmailForm({
         actorSessionId: request.sessionId,
         config: {
           enabled,
-          provider,
+          provider: 'smtp',
           from: { email: fromEmail.trim(), ...(fromName.trim() === '' ? {} : { name: fromName.trim() }) },
           recipients,
-          ...(provider === 'smtp'
-            ? { smtpPreset, user: fromEmail.trim() }
-            : { apiKeyEnv: apiKeyEnv.trim() }),
+          smtpPreset,
+          user: fromEmail.trim(),
           dryRun,
           minIntervalMs: Number(minInterval),
         },
@@ -384,79 +352,52 @@ function EmailForm({
         {config === null && error === null && <p className={css.hint}>{t('email.loading')}</p>}
         <Checkbox checked={enabled} disabled={busy} label={t('email.enabled')}
           onChange={setEnabled} />
-        {provider === 'smtp' && (
-          <label className={css.label}>{t('email.smtpPreset')}
-            <select className={css.select} value={smtpPreset} disabled={busy}
-              onChange={(event) => { setSmtpPreset(event.target.value === '163' ? '163' : 'qq') }}>
-              <option value="qq">{t('email.smtpPreset.qq')}</option>
-              <option value="163">{t('email.smtpPreset.163')}</option>
-            </select>
-          </label>
-        )}
-        <details className={css.advanced} data-email-advanced open={provider !== 'smtp'}>
-          <summary>{t('email.advancedProvider')}</summary>
-          <label className={css.label}>{t('email.provider')}
-            <select className={css.select} value={provider} disabled={busy}
-              onChange={(event) => {
-                const value = event.target.value
-                changeProvider(value === 'resend' ? 'resend' : value === 'sendgrid' ? 'sendgrid' : 'smtp')
-              }}>
-              <option value="smtp">{t('email.provider.smtp')}</option>
-              <option value="sendgrid">{t('email.provider.sendgrid')}</option>
-              <option value="resend">{t('email.provider.resend')}</option>
-            </select>
-          </label>
-          {provider !== 'smtp' && (
-            <p className={css.hint} data-email-provider-hint>
-              {t(provider === 'resend' ? 'email.provider.resendHint' : 'email.provider.sendgridHint')}
-            </p>
-          )}
-        </details>
-        <label className={css.label}>{t(provider === 'smtp' ? 'email.smtpAddress' : 'email.fromEmail')}
+        <label className={css.label}>{t('email.smtpPreset')}
+          <select className={css.select} value={smtpPreset} disabled={busy}
+            onChange={(event) => { setSmtpPreset(event.target.value === '163' ? '163' : 'qq') }}>
+            <option value="qq">{t('email.smtpPreset.qq')}</option>
+            <option value="163">{t('email.smtpPreset.163')}</option>
+          </select>
+        </label>
+        <label className={css.label}>{t('email.smtpAddress')}
           <Input value={fromEmail} disabled={busy} onChange={(event) => { setFromEmail(event.target.value) }} />
         </label>
-        <p className={css.hint}>
-          {t(provider === 'smtp'
-            ? 'email.smtp.hint'
-            : provider === 'resend' ? 'email.from.resendHint' : 'email.from.sendgridHint')}
-        </p>
-        {provider === 'smtp' && (
-          <div className={css.label}>
-            <span>{t('email.authCode')}</span>
-            <div className={css.row}>
-              <Input type={showAuthCode ? 'text' : 'password'} value={authCode} disabled={busy}
-                placeholder={hasSecret ? t('email.authCode.savedPlaceholder') : t('email.authCode.placeholder')}
-                onChange={(event) => { setAuthCode(event.target.value) }} />
-              <Button variant="outline" size="sm" disabled={busy}
-                onClick={() => { setShowAuthCode(value => !value) }}>
-                {t(showAuthCode ? 'email.authCode.hide' : 'email.authCode.show')}
-              </Button>
-            </div>
-            <div className={css.authStatus} data-email-auth-status>
-              {hasSecret
-                ? <span className={css.hasKey}>{t('email.authCode.saved')}</span>
-                : config?.authCodeRef !== undefined
-                  ? <span className={css.noKey}>{t('email.authCode.missing')}</span>
-                  : <span className={css.hint}>{t('email.authCode.empty')}</span>}
-              {hasSecret && (
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void clearSecret() }}>
-                  {t('email.authCode.clear')}
-                </Button>
-              )}
-            </div>
-            <details className={css.help} data-email-auth-help>
-              <summary>{t('email.authCode.howTo')}</summary>
-              <ol className={css.authSteps}>
-                {(smtpPreset === 'qq' ? [
-                  t('email.authCode.qq.1'), t('email.authCode.qq.2'), t('email.authCode.qq.3'),
-                ] : [
-                  t('email.authCode.163.1'), t('email.authCode.163.2'), t('email.authCode.163.3'),
-                ]).map(step => <li key={step}>{step}</li>)}
-              </ol>
-              <p>{t('email.authCode.note')}</p>
-            </details>
+        <p className={css.hint}>{t('email.smtp.hint')}</p>
+        <div className={css.label}>
+          <span>{t('email.authCode')}</span>
+          <div className={css.row}>
+            <Input type={showAuthCode ? 'text' : 'password'} value={authCode} disabled={busy}
+              placeholder={hasSecret ? t('email.authCode.savedPlaceholder') : t('email.authCode.placeholder')}
+              onChange={(event) => { setAuthCode(event.target.value) }} />
+            <Button variant="outline" size="sm" disabled={busy}
+              onClick={() => { setShowAuthCode(value => !value) }}>
+              {t(showAuthCode ? 'email.authCode.hide' : 'email.authCode.show')}
+            </Button>
           </div>
-        )}
+          <div className={css.authStatus} data-email-auth-status>
+            {hasSecret
+              ? <span className={css.hasKey}>{t('email.authCode.saved')}</span>
+              : config?.authCodeRef !== undefined
+                ? <span className={css.noKey}>{t('email.authCode.missing')}</span>
+                : <span className={css.hint}>{t('email.authCode.empty')}</span>}
+            {hasSecret && (
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void clearSecret() }}>
+                {t('email.authCode.clear')}
+              </Button>
+            )}
+          </div>
+          <details className={css.help} data-email-auth-help>
+            <summary>{t('email.authCode.howTo')}</summary>
+            <ol className={css.authSteps}>
+              {(smtpPreset === 'qq' ? [
+                t('email.authCode.qq.1'), t('email.authCode.qq.2'), t('email.authCode.qq.3'),
+              ] : [
+                t('email.authCode.163.1'), t('email.authCode.163.2'), t('email.authCode.163.3'),
+              ]).map(step => <li key={step}>{step}</li>)}
+            </ol>
+            <p>{t('email.authCode.note')}</p>
+          </details>
+        </div>
         <label className={css.label}>{t('email.fromName')}
           <Input value={fromName} disabled={busy} onChange={(event) => { setFromName(event.target.value) }} />
         </label>
@@ -479,16 +420,6 @@ function EmailForm({
             ))}
             </ul>}
         </div>
-        {provider !== 'smtp' && (
-          <label className={css.label}>{t('email.apiKeyEnv')}
-            <Input value={apiKeyEnv} disabled={busy} onChange={(event) => { setApiKeyEnv(event.target.value) }} />
-          </label>
-        )}
-        {provider !== 'smtp' && config !== null && (
-          <span className={config.hasKey ? css.hasKey : css.noKey}>
-            {config.hasKey ? t('email.hasKey') : t('email.noKey')}
-          </span>
-        )}
         <Checkbox checked={dryRun} disabled={busy} label={t('email.dryRun')} onChange={setDryRun} />
         <label className={css.label}>{t('email.minInterval')}
           <Input type="number" min={0} value={minInterval} disabled={busy}
@@ -496,54 +427,6 @@ function EmailForm({
         </label>
         {error !== null && <p role="alert" className={css.error}>{error}</p>}
         {notice !== null && <p role="status" className={css.notice}>{notice}</p>}
-        <details className={css.help} data-email-help>
-          <summary className={css.helpSummary}>{t('email.help.title')}</summary>
-          <p>{t('email.help.from')}</p>
-          <p>{t('email.help.recipients')}</p>
-          <p>{t('email.help.apiKey')}</p>
-          <p className={css.helpSummaryLine}>{t('email.help.summary')}</p>
-          <div className={css.helpSection} data-filing-group="none">
-            <strong>{t('email.help.noFilingGroup')}</strong>
-            <p className={css.helpGroupNote}>{t('email.help.noFilingNote')}</p>
-            <ul className={css.helpLinks}>
-              <li>
-                <span className={css.badgeNoFiling}>{t('email.help.badgeNoFiling')}</span>
-                <a href={HELP_LINKS.sendgridSignup} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridSignup')}</a>
-              </li>
-              <li>
-                <span className={css.badgeNoFiling}>{t('email.help.badgeNoFiling')}</span>
-                <a href={HELP_LINKS.sendgridKeys} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridKeys')}</a>
-              </li>
-              <li>
-                <span className={css.badgeNoFiling}>{t('email.help.badgeNoFiling')}</span>
-                <a href={HELP_LINKS.sendgridSender} target="_blank" rel="noopener noreferrer">{t('email.help.sendgridSender')}</a>
-              </li>
-            </ul>
-          </div>
-          <div className={css.helpSection} data-email-resend-help>
-            <strong>{t('email.help.resendTitle')}</strong>
-            <p className={css.helpGroupNote}>{t('email.help.resendNote')}</p>
-            <ul className={css.helpLinks}>
-              <li><a href={HELP_LINKS.resendSignup} target="_blank" rel="noopener noreferrer">{t('email.help.resendSignup')}</a></li>
-              <li><a href={HELP_LINKS.resendKeys} target="_blank" rel="noopener noreferrer">{t('email.help.resendKeys')}</a></li>
-              <li><a href={HELP_LINKS.resendDomains} target="_blank" rel="noopener noreferrer">{t('email.help.resendDomains')}</a></li>
-            </ul>
-          </div>
-          <div className={css.helpSection} data-filing-group="required">
-            <strong>{t('email.help.filingGroup')}</strong>
-            <p className={css.helpGroupNote}>{t('email.help.filingNote')}</p>
-            <ul className={css.helpLinks}>
-              <li>
-                <span className={css.badgeFiling}>{t('email.help.badgeFiling')}</span>
-                <a href={HELP_LINKS.aliyun} target="_blank" rel="noopener noreferrer">{t('email.help.aliyun')}</a>
-              </li>
-              <li>
-                <span className={css.badgeFiling}>{t('email.help.badgeFiling')}</span>
-                <a href={HELP_LINKS.tencent} target="_blank" rel="noopener noreferrer">{t('email.help.tencent')}</a>
-              </li>
-            </ul>
-          </div>
-        </details>
       </div>
     </Modal>
   )

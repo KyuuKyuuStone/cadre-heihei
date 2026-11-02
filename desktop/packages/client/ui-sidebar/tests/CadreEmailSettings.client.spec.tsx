@@ -139,7 +139,7 @@ describe('Cadre email settings', () => {
     expect(screen.getByRole('button', { name: '测试发送' })).toBeTruthy()
   })
 
-  it('expands help with official and domestic links', async () => {
+  it('shows only the QQ/163 auth-code form with no provider switch or external links', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: VIEW })))
     render(<CadreEmailSettingsDialog {...({
       useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
@@ -147,38 +147,15 @@ describe('Cadre email settings', () => {
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
     await screen.findByText('授权码已保存')
-    fireEvent.click(screen.getByText('如何填写 / 推荐地址'))
-    expect(screen.getByText('想免备案就选 SendGrid。')).toBeTruthy()
-    expect(screen.getByText('无需备案 · 推荐')).toBeTruthy()
-    expect(screen.getByText('需要 ICP 备案')).toBeTruthy()
-    expect(screen.getByText(/SendGrid 当前版本可直接用/)).toBeTruthy()
-    expect(screen.getByText(/大陆节点发信域名需要 ICP 备案/)).toBeTruthy()
-    expect(screen.getByText(/当前版本未接入，仅作后续参考/)).toBeTruthy()
-    expect(screen.getAllByText('无需备案')).toHaveLength(3)
-    expect(screen.getAllByText('需备案')).toHaveLength(2)
-    const links = screen.getAllByRole('link')
-    expect(links.map(link => link.textContent)).toEqual([
-      'SendGrid 注册',
-      'SendGrid API Keys',
-      'SendGrid Sender Authentication',
-      '注册 Resend',
-      'Resend API Keys',
-      'Resend 域名验证',
-      '阿里云邮件推送',
-      '腾讯云邮件推送 SES',
-    ])
-    for (const link of links) {
-      expect(link.getAttribute('target')).toBe('_blank')
-      expect(link.getAttribute('rel')).toBe('noopener noreferrer')
-    }
-    expect(screen.getByRole('link', { name: 'SendGrid API Keys' }).getAttribute('href'))
-      .toBe('https://app.sendgrid.com/settings/api_keys')
-    expect(screen.getByRole('link', { name: 'Resend API Keys' }).getAttribute('href'))
-      .toBe('https://resend.com/api-keys')
-    expect(screen.getByRole('link', { name: '阿里云邮件推送' }).getAttribute('href'))
-      .toBe('https://www.aliyun.com/product/directmail')
-    expect(screen.getByRole('link', { name: '腾讯云邮件推送 SES' }).getAttribute('href'))
-      .toBe('https://cloud.tencent.com/product/ses')
+    expect(screen.getByLabelText('邮箱类型')).toBeTruthy()
+    expect(screen.getByPlaceholderText('已保存，留空则不修改')).toBeTruthy()
+    expect(screen.queryByLabelText('服务商')).toBeNull()
+    expect(screen.queryByText(/高级服务商/)).toBeNull()
+    expect(screen.queryByLabelText(/API Key/)).toBeNull()
+    expect(screen.queryByLabelText(/环境变量/)).toBeNull()
+    expect(screen.queryByText(/SendGrid|Resend|verifiedDomains/)).toBeNull()
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.getByText('如何获取授权码')).toBeTruthy()
   })
 
   it('saves the auth code before config, without environment variable fields', async () => {
@@ -292,75 +269,6 @@ describe('Cadre email settings', () => {
     expect(await screen.findByText(/邮件配置无效/)).toBeTruthy()
     expect(screen.getByDisplayValue('qq-secret')).toBeTruthy()
     expect(screen.getByText('授权码已保存')).toBeTruthy()
-  })
-
-  it('switches to Resend, prefills its key env, and saves provider without domains', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-      if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
-      return json({ ok: true, result: { ...VIEW, provider: 'resend', apiKeyEnv: 'RESEND_API_KEY', verifiedDomains: ['example.com'] } })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    render(<CadreEmailSettingsDialog {...({
-      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
-      closeEmail: vi.fn(),
-      t,
-    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('授权码已保存')
-    fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
-    expect(screen.getByDisplayValue('RESEND_API_KEY')).toBeTruthy()
-    expect(screen.getByText(/先在 Resend 验证域名/)).toBeTruthy()
-    expect(screen.getByText(/只能发到你的 Resend 注册邮箱/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
-    const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
-    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
-      config: { provider: 'resend', apiKeyEnv: 'RESEND_API_KEY' },
-    })
-  })
-
-  it('lets the backend decide Resend From/recipient restrictions', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: VIEW })))
-    render(<CadreEmailSettingsDialog {...({
-      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
-      closeEmail: vi.fn(),
-      t,
-    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('授权码已保存')
-    fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
-  })
-
-  it('maps the Resend unverified-domain error to readable copy', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
-      return json({ ok: false, code: 'EMAIL_FROM_NOT_VERIFIED', message: 'not verified' })
-    }))
-    render(<CadreEmailSettingsDialog {...({
-      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
-      closeEmail: vi.fn(),
-      t,
-    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('授权码已保存')
-    fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(await screen.findByText(/发件地址未通过 Resend 验证/)).toBeTruthy()
-  })
-
-  it('maps the Resend recipient-restricted error to readable copy', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
-      return json({ ok: false, code: 'EMAIL_RECIPIENT_RESTRICTED', message: 'restricted' })
-    }))
-    render(<CadreEmailSettingsDialog {...({
-      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
-      closeEmail: vi.fn(),
-      t,
-    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('授权码已保存')
-    fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(await screen.findByText(/只能发到你的 Resend 注册邮箱/)).toBeTruthy()
   })
 
   it('keeps save/test/run actions in the fixed footer outside the scroll area', async () => {
