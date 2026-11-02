@@ -158,3 +158,30 @@ function renderContext(ongoing: readonly OngoingTask[], completed: readonly Task
   }
   return lines.join('\n')
 }
+
+/**
+ * Bound a rendered memory block to an approximate token budget. Constraint
+ * lines survive; completed summaries are the first to be dropped.
+ * @param text - rendered memory block.
+ * @param maxTokens - approximate token cap (2 chars/token).
+ * @returns bounded block.
+ */
+export function capTaskMemory(text: string, maxTokens = 2_000): string {
+  const maxChars = Math.max(200, Math.floor(maxTokens * 2))
+  if (Array.from(text).length <= maxChars) return text
+  const lines = text.split('\n')
+  const kept: string[] = []
+  const preserved: string[] = []
+  for (const line of lines) {
+    if (/约束|验收|禁止/u.test(line)) preserved.push(line)
+  }
+  let used = 0
+  for (const line of lines) {
+    if (preserved.includes(line) && !kept.includes(line)) continue
+    if (used + Array.from(line).length + 1 > maxChars - 120) break
+    kept.push(line)
+    used += Array.from(line).length + 1
+  }
+  const suffix = preserved.length === 0 ? '' : `\n${preserved.slice(0, 5).join('\n')}`
+  return `${kept.join('\n')}\n[... task memory truncated; full summaries available via search ...]${suffix}`
+}

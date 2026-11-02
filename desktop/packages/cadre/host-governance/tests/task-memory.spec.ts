@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { initCadreStore } from '../../../../cadre-collab/entry.ts'
-import { TaskMemoryReader } from '../src/task-memory.ts'
+import { TaskMemoryReader, capTaskMemory } from '../src/task-memory.ts'
 
 const roots: string[] = []
 afterEach(() => {
@@ -79,6 +79,16 @@ describe('task memory', () => {
     } finally {
       reader.close()
     }
+  })
+
+  it('caps prompt memory and preserves constraints when over budget', () => {
+    const text = `【进行中任务】\n- 任务：${'x'.repeat(5_000)}\n约束：不改 schema\n验收：pnpm test`
+    const capped = capTaskMemory(text, 100)
+    expect(capped).toContain('task memory truncated')
+    expect(capped).toContain('约束：不改 schema')
+    expect(capped).toContain('验收：pnpm test')
+    expect(capTaskMemory('', 100)).toBe('')
+    expect(capTaskMemory('短记忆', 100)).toBe('短记忆')
   })
 
   it('adds task_memory to an existing ledger without dropping rows', () => {

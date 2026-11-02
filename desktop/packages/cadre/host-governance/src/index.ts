@@ -27,7 +27,7 @@ import { ClaimVerifier } from './claims.ts'
 import { SessionPresence } from './presence.ts'
 import { ExecutionArm } from './execution-arm.ts'
 import { TokenUsageLedger } from './token-usage.ts'
-import { TaskMemoryReader } from './task-memory.ts'
+import { TaskMemoryReader, capTaskMemory } from './task-memory.ts'
 import { activityFrom, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
@@ -51,6 +51,8 @@ export interface Config {
   readonly emailConfigDir?: string
   /** Feature switch; email sending stays off unless explicitly enabled. */
   readonly emailEnabled?: boolean
+  /** Approximate token cap for the automatic task-memory prompt block. */
+  readonly taskMemoryTokens?: number
 }
 
 interface SessionController {
@@ -101,6 +103,11 @@ interface HostContext {
   readonly sessionQuery?: SessionQueryLike
   readonly agents: AgentsLike
   readonly goals: GoalsLike
+  readonly systemPrompt?: {
+    context(section: {
+      name: string; order: number; text: (context: { scope?: unknown }) => string; required?: boolean
+    }): () => void
+  }
   effect(setup: () => () => void): void
   get?(name: string): unknown
   provide?(name: string, value: unknown): void
@@ -353,6 +360,28 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   ctx.provide?.('tokenUsage', tokenUsage)
   const taskMemory = new TaskMemoryReader(databasePath)
   ctx.provide?.('taskMemory', taskMemory)
+  ctx.effect(() => {
+    const disposers: (() => void)[] = []
+    if (ctx.systemPrompt !== undefined) {
+      disposers.push(ctx.systemPrompt.context({
+        name: 'cadre/task-memory', order: 850,
+        text: context => {
+          const agent = context.scope as { session?: { id?: unknown } } | undefined
+          const sessionId = typeof agent?.session?.id === 'string' ? agent.session.id : undefined
+          if (sessionId === undefined) return ''
+          const projectId = projectOf(sessionId)
+          if (projectId === undefined) return ''
+          try {
+            const memory = taskMemory.context({ projectId, actorSessionId: sessionId })
+            return capTaskMemory(memory.rendered, config.taskMemoryTokens ?? 2_000)
+          } catch {
+            return ''
+          }
+        },
+      }))
+    }
+    return () => { for (const dispose of disposers) dispose() }
+  })
   const disposeIdleEvents = ctx.on === undefined
     ? undefined
     : ctx.on('session/event', (session, event) => {
