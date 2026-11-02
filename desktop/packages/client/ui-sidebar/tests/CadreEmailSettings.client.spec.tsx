@@ -18,6 +18,7 @@ const VIEW = {
   recipients: ['owner@example.com'],
   dryRun: false,
   minIntervalMs: 60_000,
+  idleReminder: { enabled: false, minutes: 10 },
   hasKey: true,
 }
 
@@ -100,6 +101,49 @@ describe('Cadre email settings', () => {
     expect(call?.[1]).toMatchObject({ method: 'POST' })
     expect(body).toMatchObject({ projectId: 'p1', actorSessionId: 'sup', config: { provider: 'smtp', smtpPreset: 'qq' } })
     expect(JSON.stringify(body)).not.toContain('apiKey"')
+  })
+
+  it('saves the idle reminder switch and minutes, defaulting to 10', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (requestUrl(input).endsWith('/get')) {
+        return json({ ok: true, result: { ...VIEW, idleReminder: undefined } })
+      }
+      return json({ ok: true, result: VIEW })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    expect(await screen.findByDisplayValue('10')).toBeTruthy()
+    const reminder = screen.getByRole('checkbox', { name: '无回复时发汇报邮件' })
+    expect(reminder.hasAttribute('disabled')).toBe(false)
+    fireEvent.click(reminder)
+    fireEvent.change(screen.getByLabelText('无回复分钟数'), { target: { value: '25' } })
+    expect(screen.getByText(/每段未回复只发一次/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
+    const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
+      config: { idleReminder: { enabled: true, minutes: 25 } },
+    })
+  })
+
+  it('disables the idle reminder when email is off or has no recipients', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      ok: true,
+      result: { ...VIEW, enabled: false, recipients: [] },
+    })))
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    const reminder = await screen.findByRole('checkbox', { name: '无回复时发汇报邮件' })
+    expect(reminder.hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText('先启用邮件并添加收件人，才能开启无回复提醒。')).toBeTruthy()
+    expect(screen.getByLabelText('无回复分钟数').hasAttribute('disabled')).toBe(true)
   })
 
   it('shows noKey and validates recipient add/remove', async () => {

@@ -25,6 +25,7 @@ export interface CadreEmailConfigView {
   readonly hasSecret?: boolean
   readonly dryRun?: boolean
   readonly minIntervalMs?: number
+  readonly idleReminder?: { readonly enabled: boolean; readonly minutes: number }
   readonly hasKey: boolean
 }
 
@@ -118,6 +119,7 @@ const DEFAULT_CONFIG: CadreEmailConfigView = {
   smtpPreset: 'qq',
   dryRun: false,
   minIntervalMs: 60_000,
+  idleReminder: { enabled: false, minutes: 10 },
   hasKey: false,
 }
 
@@ -172,6 +174,8 @@ function EmailForm({
   const [recipient, setRecipient] = useState('')
   const [dryRun, setDryRun] = useState(false)
   const [minInterval, setMinInterval] = useState('60000')
+  const [idleEnabled, setIdleEnabled] = useState(false)
+  const [idleMinutes, setIdleMinutes] = useState('10')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -194,6 +198,8 @@ function EmailForm({
         setRecipients([...next.recipients])
         setDryRun(next.dryRun === true)
         setMinInterval(String(next.minIntervalMs ?? 60_000))
+        setIdleEnabled(next.idleReminder?.enabled === true)
+        setIdleMinutes(String(next.idleReminder?.minutes ?? 10))
       })
       .catch((cause: unknown) => {
         if (!alive) return
@@ -212,6 +218,8 @@ function EmailForm({
           setRecipients([...DEFAULT_CONFIG.recipients])
           setDryRun(DEFAULT_CONFIG.dryRun === true)
           setMinInterval(String(DEFAULT_CONFIG.minIntervalMs ?? 60_000))
+          setIdleEnabled(DEFAULT_CONFIG.idleReminder?.enabled === true)
+          setIdleMinutes(String(DEFAULT_CONFIG.idleReminder?.minutes ?? 10))
           return
         }
         setError(message)
@@ -239,6 +247,11 @@ function EmailForm({
     if (recipients.length === 0) return t('email.error.noRecipients')
     if (authCode.trim() === '' && !hasSecret) return t('email.error.authCodeRequired')
     if (!/^\d+$/u.test(minInterval.trim())) return t('email.error.interval')
+    if (idleEnabled && !/^\d+$/u.test(idleMinutes.trim())) return t('email.error.idleMinutes')
+    if (idleEnabled) {
+      const minutes = Number(idleMinutes)
+      if (minutes < 1 || minutes > 1_440) return t('email.error.idleMinutes')
+    }
     return null
   }
 
@@ -274,6 +287,10 @@ function EmailForm({
           user: fromEmail.trim(),
           dryRun,
           minIntervalMs: Number(minInterval),
+          idleReminder: {
+            enabled: idleEnabled,
+            minutes: idleMinutes.trim() === '' ? 10 : Number(idleMinutes),
+          },
         },
       }) as CadreEmailConfigView
       setConfig(result)
@@ -328,6 +345,7 @@ function EmailForm({
     }
   }
 
+  const idleReminderDisabled = !enabled || recipients.length === 0
   return (
     <Modal
       open
@@ -425,6 +443,16 @@ function EmailForm({
           <Input type="number" min={0} value={minInterval} disabled={busy}
             onChange={(event) => { setMinInterval(event.target.value) }} />
         </label>
+        <Checkbox checked={idleEnabled} disabled={busy || idleReminderDisabled}
+          label={t('email.idleReminder')} onChange={setIdleEnabled} />
+        <label className={css.label}>{t('email.idleMinutes')}
+          <Input type="number" min={1} max={1440} value={idleMinutes}
+            disabled={busy || idleReminderDisabled || !idleEnabled}
+            onChange={(event) => { setIdleMinutes(event.target.value) }} />
+        </label>
+        <p className={css.hint}>
+          {t(idleReminderDisabled ? 'email.idleReminderDisabled' : 'email.idleReminder.hint')}
+        </p>
         {error !== null && <p role="alert" className={css.error}>{error}</p>}
         {notice !== null && <p role="status" className={css.notice}>{notice}</p>}
       </div>
