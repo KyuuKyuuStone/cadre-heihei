@@ -123,7 +123,7 @@ describe('session skill packs', () => {
     expect(events.map(skill => skill.name)).toEqual(['design', 'testing'])
   })
 
-  it('rejects a pack whose roles do not match the member role', async () => {
+  it('registers a pack whose manifest roles do not match the member role', async () => {
     const root = workspace()
     const packs = join(root, 'packs')
     pack(packs, 'supervisor-only', ['supervisor'])
@@ -131,7 +131,7 @@ describe('session skill packs', () => {
     const events: FakeSkill[] = []
     const disposed: string[] = []
     await harness(root, packs).fire(agent('w1', events, disposed))
-    expect(events).toHaveLength(0)
+    expect(events.map(skill => skill.name)).toEqual(['supervisor-only'])
   })
 
   it('keeps supervisor and worker selections independent', async () => {
@@ -140,16 +140,16 @@ describe('session skill packs', () => {
     pack(packs, 'lead', ['supervisor'])
     pack(packs, 'design', ['worker'])
     const db = ledger(root)
-    insert(db, 's1', 'supervisor', ['lead'])
-    insert(db, 'w1', 'worker', ['design'])
+    insert(db, 's1', 'supervisor', ['lead', 'design'])
+    insert(db, 'w1', 'worker', ['design', 'lead'])
     db.close()
     const h = harness(root, packs)
     const supervisor: FakeSkill[] = []
     const worker: FakeSkill[] = []
     await h.fire(agent('s1', supervisor, []))
     await h.fire(agent('w1', worker, []))
-    expect(supervisor.map(skill => skill.name)).toEqual(['lead'])
-    expect(worker.map(skill => skill.name)).toEqual(['design'])
+    expect(supervisor.map(skill => skill.name).sort()).toEqual(['design', 'lead'])
+    expect(worker.map(skill => skill.name).sort()).toEqual(['design', 'lead'])
   })
 
   it('hot-reloads changed pack content and disposes the old registration', async () => {
@@ -168,7 +168,7 @@ describe('session skill packs', () => {
     expect(events.map(skill => skill.content)).toEqual(['# v1', '# v2'])
   })
 
-  it('catalog/get/set/preview enforce roles, dedupe and persistence', () => {
+  it('catalog/get/set/preview dedupe and persistence', () => {
     const root = workspace()
     const packs = join(root, 'packs')
     pack(packs, 'design', ['worker'], '# design body')
@@ -195,11 +195,11 @@ describe('session skill packs', () => {
     expect(row.description).toBe('keep me')
     expect(api.preview({ projectId: 'p1', actorSessionId: 's1', packId: 'design' }))
       .toMatchObject({ id: 'design', content: '# design body', tokenEstimate: 12 })
-    expect(() => api.set({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1', skills: ['lead'] }))
-      .toThrow(/不能加载技能包 lead/)
+    expect(api.set({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1', skills: ['lead'] }))
+      .toEqual({ skills: ['lead'] })
     expect(() => api.set({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1', skills: ['missing'] }))
       .toThrow(/未知技能包/)
-    expect(api.get({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w1' }).skills).toEqual(['design'])
+    expect(api.get({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w1' }).skills).toEqual(['lead'])
     expect(() => api.preview({ projectId: 'p1', actorSessionId: 'w1', packId: 'design' }))
       .toThrow(/只有本项目在册 supervisor/)
     db.close()

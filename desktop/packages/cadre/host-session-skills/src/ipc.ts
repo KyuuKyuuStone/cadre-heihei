@@ -356,16 +356,13 @@ export function createSkillApi(options: {
       if (input.targetSessionId !== input.actorSessionId && actor.role !== 'supervisor') {
         throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以修改其他成员的技能')
       }
-      const target = requireMember(db, input.projectId, input.targetSessionId)
+      requireMember(db, input.projectId, input.targetSessionId)
       if (!Array.isArray(input.skills) || input.skills.some(item => typeof item !== 'string')) {
         throw new SkillIpcError('SKILL_INVALID', 400, 'skills 必须是字符串数组')
       }
       const selected = [...new Set(input.skills as string[])]
       for (const id of selected) {
-        const pack = packOf(id)
-        if (!pack.roles.includes(target.role as 'supervisor' | 'worker')) {
-          throw new SkillIpcError('SKILL_ROLE_MISMATCH', 403, `角色 ${target.role} 不能加载技能包 ${id}`)
-        }
+        packOf(id)
       }
       const writer = new DatabaseSync(ledgerPath)
       try {

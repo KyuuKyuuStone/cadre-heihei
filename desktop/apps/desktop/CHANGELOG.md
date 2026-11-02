@@ -2,6 +2,7 @@
 
 ## 1.1.3
 
+- **技能不再按主管/员工区分**：manifest `roles` 仅元数据，选中即注册；catalog 不过滤；主管/员工可用同一套技能
 - **技能安装不再要求主管**：add/remove/install-url/install-package 允许同项目在册成员；技能管理员 plan/apply 仍仅 supervisor；非成员仍 `SKILL_FORBIDDEN`
 - **技能安装弹窗**：技能页统一为粘贴 URL / 包名安装；URL 走现有 GitHub 安装，包名走 `install-package`，高级安装仍可打开技能管理员对话
 - **包名安装（SkillHub）**：`POST /cadre/skills/install-package` 固定 WSL `skillhub install <name> --dir …`，严格包名校验、180s 超时、可读 unsupported/failure、审计；员工可通过项目主管身份安装

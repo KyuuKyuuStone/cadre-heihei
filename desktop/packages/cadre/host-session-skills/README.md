@@ -31,7 +31,8 @@ Catalog entries carry `origin` (`builtin`/`installed`); builtin packs cannot be
 overwritten or removed. A request `locale` starting with `zh` selects
 `descriptionI18n.zh`, otherwise `.en`, falling back to `description`.
 
-Role mismatches are rejected per pack. The plugin reloads the catalog on every
+`roles` is metadata only: any selected pack registers for a member regardless of
+supervisor/worker. The plugin reloads the catalog on every
 pre-step, so edited pack content is hot-reloaded (the old registration is
 disposed first).
 

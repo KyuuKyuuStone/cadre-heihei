@@ -187,7 +187,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     const current = registered.get(agent.id) ?? new Map<string, { dispose: () => void; content: string }>()
     for (const [id, entry] of current) {
       const pack = catalog.get(id)
-      if (pack === undefined || !selected.includes(id) || !pack.roles.includes(member.role as 'supervisor' | 'worker')) {
+      if (pack === undefined || !selected.includes(id)) {
         entry.dispose()
         current.delete(id)
       }
@@ -196,10 +196,6 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       const pack = catalog.get(id)
       if (pack === undefined) {
         console.error(`host-session-skills: unknown skill pack ${id} for agent=${agent.id}`)
-        continue
-      }
-      if (!pack.roles.includes(member.role as 'supervisor' | 'worker')) {
-        console.error(`host-session-skills: role ${member.role} cannot load skill pack ${id}`)
         continue
       }
       const existing = current.get(id)
