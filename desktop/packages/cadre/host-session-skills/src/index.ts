@@ -5,6 +5,7 @@
  * @module @deepseek-ai/dsh-host-session-skills
  */
 import { mkdirSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -12,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { loadSkillCatalog, type SkillPack } from './catalog.ts'
 import { createSkillApi, SkillIpcError } from './ipc.ts'
-import { SkillAdminApi, type AdminSession, type AdminSessionPort } from './admin.ts'
+import { SkillAdminApi, type AdminMessage, type AdminSession, type AdminSessionPort } from './admin.ts'
 import {
   appendSessionError, collectAdminDiagnostics, type AdminDiagnostics, type PresetDiagnosticsPort,
 } from './diagnostics.ts'
@@ -78,7 +79,7 @@ function membership(db: DatabaseSync, sessionId: string): Membership | undefined
  * @returns the lazy port.
  */
 export function adminSessionPort(ctx: HostContext): AdminSessionPort {
-  const controller = (): {
+  interface ControllerPort {
     create(request: { readonly cwd: string; readonly agentPreset?: string }): Promise<{ readonly sessionId: string }>
     list(request: Record<string, never>): Promise<{
       readonly items: readonly {
@@ -87,21 +88,30 @@ export function adminSessionPort(ctx: HostContext): AdminSessionPort {
         readonly projections?: { readonly values?: Readonly<Record<string, unknown>> }
       }[]
     }>
-  } => {
-    const service = ctx.get?.('sessionController') as unknown as {
-      create(request: { readonly cwd: string; readonly agentPreset?: string }): Promise<{ readonly sessionId: string }>
-      list(request: Record<string, never>): Promise<{
-        readonly items: readonly {
-          readonly sessionId: string
-          readonly updatedAt: number
-          readonly projections?: { readonly values?: Readonly<Record<string, unknown>> }
-        }[]
-      }>
-    } | undefined
+    prompt?(request: {
+      readonly requestId: string
+      readonly sessionId: string
+      readonly mode: 'queue'
+      readonly content: readonly { readonly type: 'text'; readonly text: string }[]
+    }, signal: AbortSignal): Promise<unknown>
+  }
+  const controller = (): ControllerPort => {
+    const service = ctx.get?.('sessionController') as ControllerPort | undefined
     if (service === undefined) {
       throw new SkillIpcError('SKILL_ADMIN_UNAVAILABLE', 503, '当前 Host 没有 sessionController，技能管理员不可用')
     }
     return service
+  }
+  const liveSession = (sessionId: string): { snapshotEvents?(): readonly unknown[] } | undefined => {
+    const sessions = ctx.get?.('sessions') as { get?(id: string): { snapshotEvents?(): readonly unknown[] } | undefined } | undefined
+    return sessions?.get?.(sessionId)
+  }
+  const readSession = async (sessionId: string): Promise<readonly unknown[]> => {
+    const query = ctx.get?.('sessionQuery') as {
+      readSession?(id: string): Promise<{ readonly events: readonly unknown[] }>
+    } | undefined
+    if (query?.readSession === undefined) throw new SkillIpcError('SKILL_ADMIN_UNAVAILABLE', 503, '当前 Host 无法读取会话历史')
+    return (await query.readSession(sessionId)).events
   }
   return {
     create: async input => {
@@ -114,6 +124,45 @@ export function adminSessionPort(ctx: HostContext): AdminSessionPort {
         if (item.projections?.values?.agentPreset !== input.preset) return []
         return [{ sessionId: item.sessionId, title: '技能管理员', updatedAt: item.updatedAt }]
       })
+    },
+    prompt: async input => {
+      const sessionController = controller()
+      if (sessionController.prompt === undefined) {
+        throw new SkillIpcError('SKILL_ADMIN_MESSAGE_UNSUPPORTED', 501, '当前 Host 不支持发送技能管理员消息')
+      }
+      await sessionController.prompt({
+        requestId: randomUUID(), sessionId: input.sessionId, mode: 'queue',
+        content: [{ type: 'text', text: input.text }],
+      }, AbortSignal.timeout(120_000))
+    },
+    messages: async input => {
+      const live = liveSession(input.sessionId)
+      const events = live?.snapshotEvents === undefined ? await readSession(input.sessionId) : live.snapshotEvents()
+      const messages: AdminMessage[] = []
+      for (const raw of events) {
+        if (typeof raw !== 'object' || raw === null) continue
+        const event = raw as { seq?: unknown; time?: unknown; type?: unknown; data?: unknown }
+        if (event.type !== 'user/message' && event.type !== 'assistant/message') continue
+        if (typeof event.seq !== 'number' || event.seq <= input.afterSeq) continue
+        const data = event.data
+        if (typeof data !== 'object' || data === null) continue
+        const record = data as { content?: unknown; message?: { content?: unknown } }
+        const content = Array.isArray(record.content) ? record.content : record.message?.content
+        if (!Array.isArray(content)) continue
+        const text = content.flatMap(part => {
+          if (typeof part !== 'object' || part === null) return []
+          const item = part as { type?: unknown; text?: unknown }
+          return item.type === 'text' && typeof item.text === 'string' ? [item.text] : []
+        }).join('\n')
+        if (text === '') continue
+        messages.push({
+          seq: event.seq,
+          role: event.type === 'user/message' ? 'user' : 'assistant',
+          text,
+          time: typeof event.time === 'number' ? event.time : 0,
+        })
+      }
+      return { messages, nextSeq: messages.at(-1)?.seq ?? input.afterSeq }
     },
   }
 }
@@ -431,6 +480,45 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         operatorSessionId: required(body, 'operatorSessionId'),
         sessionId: required(body, 'sessionId'),
       }))
+      route('/cadre/skills/admin/message', body => requireAdmin().sendMessage({
+        projectId: required(body, 'projectId'),
+        operatorSessionId: required(body, 'operatorSessionId'),
+        sessionId: required(body, 'sessionId'),
+        text: required(body, 'text'),
+      }))
+      web.effect(() => web.webServer.register({
+        kind: 'exact',
+        path: '/cadre/skills/admin/messages',
+        handler: async (req, res) => {
+          if (req.method !== 'GET' && req.method !== 'POST') {
+            return reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 GET/POST' })
+          }
+          const admission = web.connection.admit(req)
+          if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
+            return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
+          }
+          try {
+            const body = req.method === 'POST'
+              ? await readBody(req)
+              : Object.fromEntries(new URL(req.url ?? '/', 'http://127.0.0.1').searchParams)
+            const afterSeq = typeof body.afterSeq === 'number'
+              ? body.afterSeq
+              : typeof body.afterSeq === 'string' && /^\d+$/u.test(body.afterSeq) ? Number(body.afterSeq) : 0
+            reply(res, 200, {
+              ok: true,
+              result: await requireAdmin().messages({
+                projectId: required(body, 'projectId'),
+                operatorSessionId: required(body, 'operatorSessionId'),
+                sessionId: required(body, 'sessionId'),
+                afterSeq,
+              }),
+            })
+          } catch (error) {
+            if (error instanceof SkillIpcError) return reply(res, error.status, { ok: false, code: error.code, message: error.message })
+            reply(res, 500, { ok: false, code: 'SKILL_ADMIN_MESSAGE_FAILED', message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      }), 'host-session-skills: messages')
       route('/cadre/skills/admin/plan', async body => {
         const plan = await requireAdmin().plan({
           projectId: required(body, 'projectId'),

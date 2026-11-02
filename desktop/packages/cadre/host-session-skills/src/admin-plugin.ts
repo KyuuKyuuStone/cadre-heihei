@@ -121,6 +121,36 @@ export function apply(ctx: AdminContext): void {
   })
 
   ctx.tools.register({
+    name: 'skill_install',
+    description: 'Install one skill by package name, URL, or free text. Reuses install-package/install-url/install-any, validates strictly, and writes the audit. No plan/apply confirmation is required.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        name: { type: 'string', description: 'npm/SkillHub package name, e.g. @scope/name.' },
+        url: { type: 'string', description: 'HTTPS GitHub raw/tree or skill URL.' },
+        text: { type: 'string', description: 'Free-form instruction containing one package name or URL.' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, required: ['kind', 'target', 'result'],
+        properties: {
+          kind: { type: 'string' }, target: { type: 'string' },
+          result: { type: 'object', additionalProperties: true },
+        },
+      },
+      render: (_args, value) => text(JSON.stringify(value)),
+    },
+    async execute(args, run) {
+      return admin().installForSession(sessionOf(run), {
+        ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.url === undefined ? {} : { url: args.url }),
+        ...(args.text === undefined ? {} : { text: args.text }),
+      })
+    },
+  })
+
+  ctx.tools.register({
     name: 'skill_plan',
     description: 'Create a non-executed install/update/remove plan with source, license, hashes, target, actions, risks and expiry. The user must confirm in the UI before admin/apply runs.',
     parameters: {

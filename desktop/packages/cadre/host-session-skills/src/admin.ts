@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { createSkillApi, SkillIpcError, type SkillApi, type ValidPack } from './ipc.ts'
+import { createSkillApi, SkillIpcError, type PackageCommandResult, type SkillApi, type ValidPack } from './ipc.ts'
 
 /** The agent preset reserved for the skill administrator conversation. */
 export const SKILL_ADMIN_PRESET = 'cadre-skill-admin'
@@ -20,11 +20,27 @@ export interface AdminSession {
   readonly updatedAt: number
 }
 
+/** One user/assistant message read from an admin session. */
+export interface AdminMessage {
+  readonly seq: number
+  readonly role: 'user' | 'assistant'
+  readonly text: string
+  readonly time: number
+}
+
+/** Incremental message page for an admin session. */
+export interface AdminMessages {
+  readonly messages: readonly AdminMessage[]
+  readonly nextSeq: number
+}
+
 /** Session operations the skill admin needs; the Host supplies the real controller. */
 export interface AdminSessionPort {
   create(input: { readonly preset: string; readonly cwd: string; readonly title: string }): Promise<{ readonly sessionId: string }>
   list(input: { readonly preset: string }): Promise<readonly AdminSession[]>
   delete?(input: { readonly sessionId: string }): Promise<void>
+  prompt?(input: { readonly sessionId: string; readonly text: string }): Promise<void>
+  messages?(input: { readonly sessionId: string; readonly afterSeq: number }): Promise<AdminMessages>
 }
 
 /** A previewable, non-executed install/update/remove plan. */
@@ -97,6 +113,7 @@ export class SkillAdminApi {
     readonly sessions: AdminSessionPort
     readonly auditDir?: string
     readonly now?: () => number
+    readonly runPackageCommand?: (args: readonly string[], timeoutMs: number) => Promise<PackageCommandResult>
   }) {
     this.api = createSkillApi({
       db: options.db,
@@ -104,6 +121,7 @@ export class SkillAdminApi {
       skillsDir: options.skillsDir,
       ...(options.builtinDir === undefined ? {} : { builtinDir: options.builtinDir }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      ...(options.runPackageCommand === undefined ? {} : { runPackageCommand: options.runPackageCommand }),
     })
     this.sessions = options.sessions
     this.now = options.now ?? Date.now
@@ -141,6 +159,63 @@ export class SkillAdminApi {
   async planForSession(sessionId: string, input: Omit<PlanInput, 'projectId' | 'operatorSessionId'>): Promise<SkillPlan> {
     const binding = this.bindingOf(sessionId)
     return this.plan({ ...binding, ...input })
+  }
+
+  /** Send one user message to a bound admin session. */
+  async sendMessage(input: {
+    readonly projectId: string; readonly operatorSessionId: string; readonly sessionId: string; readonly text: string
+  }): Promise<{ readonly accepted: true }> {
+    await this.requireSession(input)
+    if (this.sessions.prompt === undefined) {
+      throw new SkillIpcError('SKILL_ADMIN_MESSAGE_UNSUPPORTED', 501, '当前 Host 不支持发送技能管理员消息')
+    }
+    const text = input.text.trim()
+    if (text === '') throw new SkillIpcError('SKILL_INVALID', 400, '消息不能为空')
+    if (text.length > 20_000) throw new SkillIpcError('SKILL_INVALID', 400, '消息不能超过 20000 字')
+    await this.sessions.prompt({ sessionId: input.sessionId, text })
+    return { accepted: true }
+  }
+
+  /** Read messages after a sequence number from a bound admin session. */
+  async messages(input: {
+    readonly projectId: string; readonly operatorSessionId: string; readonly sessionId: string; readonly afterSeq: number
+  }): Promise<AdminMessages> {
+    await this.requireSession(input)
+    if (this.sessions.messages === undefined) {
+      throw new SkillIpcError('SKILL_ADMIN_MESSAGE_UNSUPPORTED', 501, '当前 Host 不支持读取技能管理员消息')
+    }
+    return this.sessions.messages({ sessionId: input.sessionId, afterSeq: input.afterSeq })
+  }
+
+  /** Install by name/url/text from the preset tool, reusing the shared validators and audit. */
+  async installForSession(sessionId: string, input: {
+    readonly name?: unknown; readonly url?: unknown; readonly text?: unknown
+  }): Promise<{ kind: 'package' | 'url'; target: string; result: unknown }> {
+    const binding = this.bindingOf(sessionId)
+    const actorSessionId = binding.operatorSessionId
+    const provided = [input.name, input.url, input.text].filter(value => value !== undefined)
+    if (provided.length !== 1) {
+      throw new SkillIpcError('SKILL_INVALID', 400, 'name/url/text 必须且只能提供一个')
+    }
+    try {
+      const result = input.name !== undefined
+        ? { kind: 'package' as const, target: String(input.name), result: await this.api.installPackage({ projectId: binding.projectId, actorSessionId, name: input.name }) }
+        : input.url !== undefined
+          ? { kind: 'url' as const, target: String(input.url), result: await this.api.installUrl({ projectId: binding.projectId, actorSessionId, url: input.url }) }
+          : await this.api.installAny({ projectId: binding.projectId, actorSessionId, text: input.text })
+      this.audit({
+        kind: 'tool-install', operatorSessionId: binding.operatorSessionId, sessionId,
+        target: result.kind === 'package' ? result.target : result.target.slice(0, 300),
+        targetKind: result.kind, result: 'installed',
+      })
+      return result
+    } catch (error) {
+      this.audit({
+        kind: 'tool-install', operatorSessionId: binding.operatorSessionId, sessionId,
+        result: 'failed', error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+      })
+      throw error
+    }
   }
 
   /** Confirmation token for a plan created by a bound session. */
@@ -344,6 +419,20 @@ export class SkillAdminApi {
 
   private requireOperator(projectId: string, operatorSessionId: string): void {
     this.api.assertSupervisor({ projectId, actorSessionId: operatorSessionId })
+  }
+
+  private async requireSession(input: {
+    readonly projectId: string; readonly operatorSessionId: string; readonly sessionId: string
+  }): Promise<void> {
+    this.requireOperator(input.projectId, input.operatorSessionId)
+    const binding = this.bindings.get(input.sessionId)
+    if (binding === undefined) throw new SkillIpcError('SKILL_ADMIN_SESSION_UNBOUND', 403, '技能管理员会话未绑定主管')
+    if (binding.projectId !== input.projectId || binding.operatorSessionId !== input.operatorSessionId) {
+      throw new SkillIpcError('SKILL_ADMIN_SESSION_FORBIDDEN', 403, '该技能管理员会话不属于当前项目/操作者')
+    }
+    const owned = (await this.sessions.list({ preset: SKILL_ADMIN_PRESET }))
+      .some(session => session.sessionId === input.sessionId)
+    if (!owned) throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
   }
 
   private bindingOf(sessionId: string): { readonly projectId: string; readonly operatorSessionId: string } {

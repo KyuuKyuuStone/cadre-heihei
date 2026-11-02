@@ -85,6 +85,10 @@ It never writes roster rows or team tools. Its backend routes are:
 - `/cadre/skills/admin/plan` — `{url}` or `{kind:'remove'|'update', packId}`;
   returns `planId`, hashes, target, actions and risk flags, plus a one-time
   `confirmToken`; it never writes;
+- `/cadre/skills/admin/message` — `{sessionId, text}` prompts a bound admin
+  session through `sessionController`;
+- `/cadre/skills/admin/messages` — GET query or POST body with `sessionId` and
+  optional `afterSeq`; returns user/assistant text increments;
 - `/cadre/skills/admin/apply` — `{planId, token}`; revalidates the operator as a
   supervisor and applies install/update/remove with backup, rollback and audit;
 - `/cadre/skills/admin/audit` — append-only JSONL records without page bodies or
@@ -102,11 +106,14 @@ conversation itself carries no role prompt.
 ### Model tools (preset-scoped)
 
 `./admin` is mounted only by the `cadre-skill-admin` preset. It registers
-`skill_catalog`, `skill_preview`, `skill_plan`, and `skill_audit`; those tools
-resolve the bound operator from the admin session and never write. `skill_plan`
-returns a one-time `confirmToken`; execution remains `POST
-/cadre/skills/admin/apply` after the user confirms in the UI. The preset mounts
-read-only fs and fetch tools only — no shell, write, team, or email tools.
+`skill_catalog`, `skill_preview`, `skill_install`, `skill_plan`, and
+`skill_audit`; those tools resolve the bound operator from the admin session.
+`skill_install` accepts one of `name`, `url`, or `text`, reuses
+`install-package`/`install-url`/`install-any`, and writes an audit row without a
+plan/apply round trip. `skill_plan` still returns a one-time `confirmToken`;
+execution remains `POST /cadre/skills/admin/apply` after the user confirms in
+the UI. The preset mounts read-only fs and fetch tools only — no shell, write,
+team, or email tools.
 
 ## Known Limitations and Deferred Work
 
