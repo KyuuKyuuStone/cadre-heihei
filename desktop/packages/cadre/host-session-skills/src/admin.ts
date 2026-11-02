@@ -18,6 +18,8 @@ export interface AdminSession {
   readonly sessionId: string
   readonly title: string
   readonly updatedAt: number
+  /** Workspace directory ensured by createSession. */
+  readonly cwd?: string
 }
 
 /** One user/assistant message read from an admin session. */
@@ -227,9 +229,15 @@ export class SkillAdminApi {
     readonly projectId: string; readonly cwd: string
   }): Promise<AdminSession> {
     this.requireProject(input.projectId)
+    try {
+      mkdirSync(input.cwd, { recursive: true })
+    } catch (error) {
+      throw new SkillIpcError('SKILL_ADMIN_CWD_FAILED', 500,
+        `无法创建技能管理员工作目录：${error instanceof Error ? error.message : String(error)}`)
+    }
     const created = await this.sessions.create({ preset: SKILL_ADMIN_PRESET, cwd: input.cwd, title: '技能管理员' })
     this.projects.set(created.sessionId, input.projectId)
-    return { sessionId: created.sessionId, title: '技能管理员', updatedAt: this.now() }
+    return { sessionId: created.sessionId, title: '技能管理员', updatedAt: this.now(), cwd: input.cwd }
   }
 
   /** List admin sessions created for one project in this Host process. */

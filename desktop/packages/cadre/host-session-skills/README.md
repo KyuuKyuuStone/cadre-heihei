@@ -78,8 +78,9 @@ project members, while plan/apply remain supervisor-only.
 It never writes roster rows or team tools. Its backend routes are:
 
 - `/cadre/skills/admin/session` — `{projectId, cwd?}` creates an ordinary session
-  through the Host `sessionController`; the session itself is the identity, no
-  operator binding is recorded;
+  through the Host `sessionController`; the workspace (default
+  `~/.dsh/cadre-skill-admin/workspace`) is created with `mkdir -p` and returned
+  as `cwd`; the session itself is the identity, no operator binding is recorded;
 - `/cadre/skills/admin/sessions` — lists sessions created for the project whose
   projection preset is `cadre-skill-admin`;
 - `/cadre/skills/admin/delete-session` — removes one listed project session when

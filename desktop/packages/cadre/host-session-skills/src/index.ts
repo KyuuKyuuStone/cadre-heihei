@@ -4,7 +4,6 @@
  * previous registration. Unselected sessions register nothing.
  * @module @deepseek-ai/dsh-host-session-skills
  */
-import { mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { homedir } from 'node:os'
@@ -409,7 +408,6 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         try {
           const cwd = typeof body.cwd === 'string' && body.cwd !== ''
             ? body.cwd : join(homedir(), '.dsh', 'cadre-skill-admin', 'workspace')
-          mkdirSync(cwd, { recursive: true })
           const created = await requireAdmin().createSession({
             projectId: required(body, 'projectId'),
             cwd,

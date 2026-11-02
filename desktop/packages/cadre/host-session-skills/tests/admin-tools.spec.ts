@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -83,7 +83,14 @@ describe('skill admin model tools', () => {
         return { code: 0, stdout: 'installed', stderr: '' }
       },
     })
-    const created = await admin.createSession({ projectId: 'p1', cwd: root })
+    const workspaceDir = join(root, 'project', 'workspace')
+    const created = await admin.createSession({ projectId: 'p1', cwd: workspaceDir })
+    expect(created.cwd).toBe(workspaceDir)
+    expect(existsSync(workspaceDir)).toBe(true)
+    writeFileSync(join(workspaceDir, 'keep.txt'), 'keep')
+    const reused = await admin.createSession({ projectId: 'p1', cwd: workspaceDir })
+    expect(reused.cwd).toBe(workspaceDir)
+    expect(readFileSync(join(workspaceDir, 'keep.txt'), 'utf8')).toBe('keep')
     db.prepare(`INSERT INTO members (project_id, session_id, role, state, skills_json, created_at, updated_at)
       VALUES ('p3', 'w3', 'worker', 'available', '[]', 'now', 'now')`).run()
     const workerOnly = await admin.createSession({ projectId: 'p3', cwd: root })
@@ -156,6 +163,24 @@ describe('skill admin model tools', () => {
       .rejects.toThrow(/未知/)
     const unsupported = await find('skill_plan').execute({ url: 'https://example.com/README.md' }, run)
     expect(unsupported).toMatchObject({ kind: 'unsupported' })
+    db.close()
+  })
+
+  it('reports a readable failure when the workspace cannot be created', async () => {
+    const root = workspace()
+    const blocked = join(root, 'blocked')
+    writeFileSync(blocked, 'file')
+    const db = ledger(root)
+    const port: AdminSessionPort = {
+      create: async () => ({ sessionId: 'unused' }),
+      list: async () => [],
+    }
+    const admin = new SkillAdminApi({
+      db, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: join(root, 'skills'),
+      sessions: port, auditDir: join(root, 'audit'),
+    })
+    await expect(admin.createSession({ projectId: 'p1', cwd: join(blocked, 'workspace') }))
+      .rejects.toMatchObject({ code: 'SKILL_ADMIN_CWD_FAILED' })
     db.close()
   })
 
