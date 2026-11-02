@@ -557,3 +557,16 @@ button.crumb:hover {
 .embeddedBody[data-content-phase='settling'] .composerSeat {
   visibility: hidden;
 }
+
+/* 1.5.0 polish: 8px composer rhythm and 14px tabs. */
+:global(:root) { --dsh-composer-stack-gap: 8px; }
+.tab {
+  padding-bottom: 8px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}

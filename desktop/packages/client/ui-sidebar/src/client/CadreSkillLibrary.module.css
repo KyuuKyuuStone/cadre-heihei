@@ -611,3 +611,38 @@
   font-size: 12px;
   line-height: 16px;
 }
+/* 1.5.0 polish: final type/spacing pass for the library. */
+.icon { font-size: 16px; }
+.page { gap: 16px; }
+.hint,
+.sources,
+.sources p,
+.card > p,
+.details summary,
+.meta,
+.emptyState {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.cardMeta,
+.cardToken,
+.installHint,
+.installHead p,
+.installLabel {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.headerActions button,
+.installHead h2 {
+  min-height: 32px;
+}
+
+@media (max-width: 720px) {
+  .page { padding: 16px; }
+  .header { flex-direction: column; }
+  .headerActions { width: 100%; }
+  .installActions { align-items: stretch; }
+  .installActions button { width: 100%; }
+}

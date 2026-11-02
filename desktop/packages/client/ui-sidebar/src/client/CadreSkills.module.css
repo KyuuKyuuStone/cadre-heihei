@@ -188,3 +188,23 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* 1.5.0 polish: keep skill picker metadata on the 12px step. */
+.description,
+.meta,
+.total,
+.hint,
+.error,
+.notice {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.item {
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.item + .item {
+  margin-top: 8px;
+}

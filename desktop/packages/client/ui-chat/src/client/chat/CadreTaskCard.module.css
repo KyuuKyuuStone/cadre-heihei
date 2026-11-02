@@ -81,3 +81,19 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* 1.5.0 polish: card metadata uses the 12px caption step. */
+.card { gap: 8px 12px; padding: 16px; border-radius: 16px; }
+  .meta,
+  .requirements,
+  .bodyHeading {
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .title,
+  .taskTitle {
+    font-size: 14px;
+    line-height: 20px;
+  }
+.actions { gap: 8px; flex-wrap: wrap; }

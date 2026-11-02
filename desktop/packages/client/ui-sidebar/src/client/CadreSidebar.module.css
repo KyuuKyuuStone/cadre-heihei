@@ -294,3 +294,100 @@
 }
 
 
+
+/* 1.5.0 polish: 12px minimum metadata, 4/8 spacing, visible focus. */
+.projectRosterState {
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 16px;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.iconButton {
+  width: 28px;
+  height: 24px;
+  border-radius: 8px;
+}
+
+.iconButton:focus-visible,
+.projectRosterError:focus-visible,
+.menuItem:focus-visible,
+.retireOption:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+
+.supervisorBadge,
+.workerBadge,
+.departedBadge {
+  gap: 4px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sessionSubtitle {
+  gap: 8px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.plainSubtitle {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.statusDotRunning,
+.statusDotIdle,
+.statusDotStalled,
+.statusDotMaybeStalled,
+.statusDotExecution,
+.statusDotError {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-1);
+}
+
+.menuItem {
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.retireBlocker,
+.hint,
+.error {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.retireTask {
+  gap: 8px;
+  padding: 8px;
+}
+
+.retireTaskTitle {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.retireTaskId,
+.retireTaskStatus {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.retireOptions {
+  gap: 8px;
+}
+
+.retireOption {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 16px;
+}

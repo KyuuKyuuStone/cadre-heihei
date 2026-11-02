@@ -358,3 +358,34 @@
   color: var(--dsw-alias-state-error-primary);
   font-size: 12px;
 }
+
+/* 1.5.0 polish: ledger metadata to 12px, 8px rhythm, focusable rows. */
+.ledgerBody { gap: 16px; }
+.toolbar { gap: 8px; }
+.filters { gap: 8px; }
+.taskTitle { font-size: 14px; line-height: 20px; }
+.taskMeta,
+.taskStall,
+.taskError,
+.overdueLabel,
+.dueOverdue,
+.eventTime,
+.pageSummary,
+.pageEllipsis,
+.hint {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.taskErrorDot { width: 8px; height: 8px; }
+.row:focus-visible,
+.pageNav:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
+@media (max-width: 720px) {
+  .dialog { max-width: calc(100vw - 32px); }
+  .toolbar { flex-wrap: wrap; }
+  .pager { flex-wrap: wrap; gap: 8px; }
+}

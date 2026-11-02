@@ -236,3 +236,22 @@
 .modalBody textarea {
   resize: vertical;
 }
+
+/* 1.5.0 polish: readable metadata and 4/8 spacing. */
+.card { gap: 8px; padding: 16px; border-radius: 16px; }
+.header { gap: 8px; }
+.title { font-size: 14px; line-height: 20px; }
+.meta,
+.reason,
+.lastError,
+.actions,
+.time,
+.hint {
+  font-size: 12px;
+  line-height: 16px;
+}
+.actions { gap: 8px; }
+@media (max-width: 720px) {
+  .actions { flex-wrap: wrap; }
+  .actions button { flex: 1 1 auto; }
+}

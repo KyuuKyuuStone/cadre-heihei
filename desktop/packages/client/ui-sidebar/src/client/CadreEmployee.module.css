@@ -130,3 +130,45 @@
   gap: 8px;
   padding: 4px 0;
 }
+
+/* 1.5.0 polish: align the employee surfaces to the 12/14 type steps. */
+.badge {
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.label {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.hint,
+.notice,
+.error,
+.success {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.group {
+  gap: 8px;
+}
+
+.groupName {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.textarea {
+  padding: 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.textarea:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}

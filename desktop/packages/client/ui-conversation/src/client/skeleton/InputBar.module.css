@@ -421,3 +421,19 @@
 .activity { display: flex; align-items: center; flex: none; }
 .activity:empty { display: none; }
 .activityExpanded { flex: 1; min-width: 0; }
+
+/* 1.5.0 polish: composer controls use the 14/20 control step and visible focus. */
+.select {
+  height: 32px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .select { max-width: 160px; }
+}
