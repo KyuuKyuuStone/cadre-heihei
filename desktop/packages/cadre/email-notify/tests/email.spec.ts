@@ -454,6 +454,56 @@ describe('dedupe, rate limit and failures', () => {
     expect(JSON.stringify(await fail({ code: 'EAUTH', message: 'auth qq-secret' }))).not.toContain('qq-secret')
   })
 
+  it('forces IPv4, retries 465 failures on 587 STARTTLS, and keeps detailed connection codes', async () => {
+    const message = { to: ['r@example.com'], from: { email: 'owner@qq.com' }, subject: 's', text: 't' }
+    const attempts: Array<{ port: number; secure: boolean; requireTLS: boolean; family: number }> = []
+    const factory = (config: { port: number; secure: boolean; requireTLS: boolean; family: number }) => {
+      attempts.push(config)
+      return {
+        sendMail: async () => {
+          if (config.port === 465) throw Object.assign(new Error('connect ECONNECTION'), { code: 'ECONNECTION' })
+          return { accepted: ['r@example.com'] }
+        },
+      }
+    }
+    const result = await sendWithSmtp({
+      authCode: 'qq-secret', message, host: 'smtp.qq.com', port: 465, secure: true, user: 'owner@qq.com',
+      factory,
+    })
+    expect(result).toMatchObject({ ok: true, status: 'sent' })
+    expect(attempts).toEqual([
+      { host: 'smtp.qq.com', port: 465, secure: true, requireTLS: false, family: 4, auth: { user: 'owner@qq.com', pass: 'qq-secret' }, connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000 },
+      { host: 'smtp.qq.com', port: 587, secure: false, requireTLS: true, family: 4, auth: { user: 'owner@qq.com', pass: 'qq-secret' }, connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 15_000 },
+    ])
+
+    const failing = await sendWithSmtp({
+      authCode: 'qq-secret', message, host: 'smtp.qq.com', port: 465, secure: true, user: 'owner@qq.com',
+      factory: config => ({
+        sendMail: async () => {
+          throw Object.assign(new Error(config.port === 465 ? 'handshake qq-secret' : '587 also timed out'), {
+            code: 'ETIMEDOUT',
+          })
+        },
+      }),
+    })
+    expect(failing).toMatchObject({ ok: false, code: 'EMAIL_TIMEOUT' })
+    expect(failing.ok ? '' : failing.message).toContain('ETIMEDOUT')
+    expect(failing.ok ? '' : failing.message).toContain('465')
+    expect(failing.ok ? '' : failing.message).toContain('587')
+    expect(JSON.stringify(failing)).not.toContain('qq-secret')
+
+    const certificate = await sendWithSmtp({
+      authCode: 'qq-secret', message, host: 'smtp.qq.com', port: 465, secure: true, user: 'owner@qq.com',
+      factory: () => ({
+        sendMail: async () => {
+          throw Object.assign(new Error('self signed certificate'), { code: 'DEPTH_ZERO_SELF_SIGNED_CERT' })
+        },
+      }),
+    })
+    expect(certificate).toMatchObject({ ok: false, code: 'EMAIL_CONNECTION_FAILED' })
+    expect(certificate.ok ? '' : certificate.message).toContain('DEPTH_ZERO_SELF_SIGNED_CERT')
+  })
+
   it('uses SMTP and QQ_EMAIL_AUTH_CODE in the notifier', async () => {
     const dir = workspace()
     writeConfig(dir, { provider: 'smtp', apiKeyEnv: undefined, from: { email: 'owner@qq.com' } })
