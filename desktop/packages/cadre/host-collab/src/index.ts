@@ -89,12 +89,6 @@ interface DispatchArgs {
   readonly tasks: readonly DispatchItem[]
 }
 
-/** User-triggered execution arm; dispatch refuses until a project is armed. */
-interface ExecutionArmPort {
-  status(projectId: string): { readonly armed: boolean } | undefined
-  consume(projectId: string): boolean
-}
-
 interface DispatchValue {
   readonly dispatched: readonly {
     readonly taskId: string
@@ -113,7 +107,7 @@ interface DispatchValue {
 }
 
 /** Machine-readable failure kind; retryability derives from this, not from prose. */
-type DispatchFailureKind = 'missing-employee' | 'delivery-failed' | 'invalid-due-at' | 'execution-not-armed'
+type DispatchFailureKind = 'missing-employee' | 'delivery-failed' | 'invalid-due-at'
 
 interface DispatchFailure {
   readonly kind: DispatchFailureKind
@@ -1259,13 +1253,6 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   const dispatchOne = async (item: DispatchItem, dispatcher: string, projectId: string, signal: AbortSignal):
   Promise<{ ok: true; value: DispatchValue['dispatched'][number] } | { ok: false } & DispatchFailure> => {
     try {
-      const executionArm = ctx.get?.('executionArm') as ExecutionArmPort | undefined
-      if (executionArm?.status(projectId) === undefined) {
-        return {
-          ok: false, kind: 'execution-not-armed',
-          reason: 'EXECUTION_NOT_ARMED：当前是讨论状态，需用户明确点击开工后才能派活',
-        }
-      }
       if (Number.isNaN(Date.parse(item.dueAt))) {
         return { ok: false, kind: 'invalid-due-at', reason: `dueAt 不是合法时间：${item.dueAt}` }
       }
@@ -1314,7 +1301,6 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         return { ok: false, kind: 'delivery-failed', reason: `投递失败，已回滚：${error instanceof Error ? error.message : String(error)}` }
       }
       ledger.confirmDispatch(projectId, taskId, messageId)
-      executionArm.consume(projectId)
       console.log(`cadre-collab: dispatch ok task=${taskId} assignee=${assignee.sessionId} due=${item.dueAt}`)
       return {
         ok: true,
@@ -1332,7 +1318,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   /** Turn one failure into the tool-facing row, queueing retryable ones. */
   const failRow = (item: DispatchItem, dispatcher: string, projectId: string, outcome: DispatchFailure): DispatchValue['failed'][number] => {
     const { kind, reason } = outcome
-    const retryable = kind !== 'invalid-due-at' && kind !== 'execution-not-armed'
+    const retryable = kind !== 'invalid-due-at'
     const target = typeof item.employee === 'string' && item.employee !== '' ? item.employee : '(未指定员工)'
     const pendingId = retryable
       ? ledger.addPending(projectId, { dispatcher, employee: item.employee, title: item.title, body: item.body,

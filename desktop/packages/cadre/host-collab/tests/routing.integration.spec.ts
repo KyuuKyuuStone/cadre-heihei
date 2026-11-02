@@ -21,7 +21,6 @@ const SUP = 'sup-route'
 const WORKER = 'worker-route'
 const AT = '2026-11-02T08:00:00.000Z'
 const roots: string[] = []
-let executionArmed = false
 const previousLedger = process.env.CADRE_LEDGER_PATH
 
 afterEach(() => {
@@ -98,11 +97,6 @@ async function mount(timeoutMs: number): Promise<Mounted> {
   await ctx.plugin({ inject: [...remotesInject], apply: applyRemotes })
   if (source === undefined) throw new Error('remotes source missing')
   const prompts: string[] = []
-  executionArmed = false
-  ctx.provide('executionArm', {
-    status: () => executionArmed ? { armed: true } : undefined,
-    consume: () => { executionArmed = false; return true },
-  })
   const host = {
     tools: ctx.tools,
     get: (name: string) => ctx.get(name),
@@ -314,30 +308,29 @@ describe('DF-011 real Cordis composition (worker ask -> supervisor -> resolve)',
     }
   })
 
-  it('refuses dispatch until the user arms execution and consumes the arm', async () => {
+  it('dispatches without an execution arm and keeps both batches independent', async () => {
     const mounted = await mount(30 * 60_000)
     try {
       const supervisor = stubAgent(SUP)
       const worker = stubAgent(WORKER)
       mounted.ctx.agents.enter(supervisor, undefined)
       mounted.ctx.agents.enter(worker, undefined)
-      const dispatch = async (): Promise<string> => {
+      const dispatch = async (title: string): Promise<string> => {
         const result = await mounted.ctx.tools.execute({
           signal: new AbortController().signal,
-          callId: ToolCallId(`arm-${String(Math.random())}`),
+          callId: ToolCallId(`dispatch-${title}`),
           name: 'dispatch_task',
           arguments: { tasks: [{
-            employee: '小明', title: '门禁任务', body: '做', dueAt: '2026-11-03T00:00:00.000Z',
+            employee: '小明', title, body: '做', dueAt: '2026-11-03T00:00:00.000Z',
           }] },
           agent: supervisor,
         })
         const block = result.content[0]
         return block?.type === 'text' ? block.text : ''
       }
-      expect(await dispatch()).toContain('EXECUTION_NOT_ARMED')
-      executionArmed = true
-      expect(await dispatch()).toContain('已派发')
-      expect(await dispatch()).toContain('EXECUTION_NOT_ARMED')
+      expect(await dispatch('第一批')).toContain('已派发')
+      expect(await dispatch('第二批')).toContain('已派发')
+      expect(mounted.prompts).toHaveLength(2)
     } finally {
       await mounted.ctx.fiber.dispose()
     }
@@ -350,7 +343,6 @@ describe('DF-011 real Cordis composition (worker ask -> supervisor -> resolve)',
       const worker = stubAgent(WORKER)
       mounted.ctx.agents.enter(supervisor, undefined)
       mounted.ctx.agents.enter(worker, undefined)
-      executionArmed = true
       const result = await mounted.ctx.tools.execute({
         signal: new AbortController().signal,
         callId: ToolCallId('dispatch-packet'),

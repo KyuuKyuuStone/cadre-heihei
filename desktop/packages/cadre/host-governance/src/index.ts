@@ -25,7 +25,6 @@ import {
 import { IdleReminderService } from './idle-reminder.ts'
 import { ClaimVerifier } from './claims.ts'
 import { SessionPresence } from './presence.ts'
-import { ExecutionArm } from './execution-arm.ts'
 import { TokenUsageLedger } from './token-usage.ts'
 import { TaskMemoryReader, capTaskMemory } from './task-memory.ts'
 import { activityFrom, type ActivityEvent } from './activity.ts'
@@ -331,14 +330,6 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   })
   const presence = new SessionPresence()
   ctx.provide?.('sessionPresence', presence)
-  const executionArm = new ExecutionArm({
-    audit: record => {
-      appendFileSync(`${databasePath}.plugin.log`, `${JSON.stringify({
-        kind: 'execution-arm', ...record,
-      })}\n`, 'utf8')
-    },
-  })
-  ctx.provide?.('executionArm', executionArm)
   const tokenUsage = new TokenUsageLedger({
     file: `${databasePath}.token-usage.jsonl`,
     onThreshold: record => {
@@ -793,39 +784,6 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           }
         },
       }), 'host-governance: /cadre/session/typing')
-      web.effect(() => web.webServer.register({
-        kind: 'exact',
-        path: '/cadre/execution/arm',
-        handler: async (req, res) => {
-          const admission = web.connection.admit(req)
-          if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
-            return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
-          }
-          try {
-            if (req.method === 'GET') {
-              const query = new URL(req.url ?? '/', 'http://localhost').searchParams
-              const projectId = query.get('projectId')
-              const actorSessionId = query.get('actorSessionId')
-              if (projectId === null || actorSessionId === null || projectOf(actorSessionId) !== projectId) {
-                return reply(res, 403, { ok: false, code: 'PERMISSION_DENIED', message: '只有本项目成员可以查询开工状态' })
-              }
-              return reply(res, 200, { ok: true, arm: executionArm.status(projectId) ?? null })
-            }
-            if (req.method !== 'POST') return reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 GET/POST' })
-            const body = await readBody(req) as Record<string, unknown>
-            if (typeof body.projectId !== 'string' || typeof body.actorSessionId !== 'string') {
-              return reply(res, 400, { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId/actorSessionId 必填' })
-            }
-            if (projectOf(body.actorSessionId) !== body.projectId) {
-              return reply(res, 403, { ok: false, code: 'PERMISSION_DENIED', message: '只有本项目成员可以开工' })
-            }
-            const mode = body.mode === 'ttl' ? 'ttl' : 'single-batch'
-            reply(res, 200, { ok: true, arm: executionArm.arm(body.projectId, body.actorSessionId, mode) })
-          } catch (error) {
-            reply(res, 500, { ok: false, code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) })
-          }
-        },
-      }), 'host-governance: /cadre/execution/arm')
       web.effect(() => web.webServer.register({
         kind: 'exact',
         path: '/cadre/token/snapshot',
