@@ -35,8 +35,6 @@ import {
 import { CadreSkillPlanCard, type CadreSkillPlanInjected } from './CadreSkillPlanCard.tsx'
 import { applySkillPlan, SkillAdminError } from './CadreSkillAdmin.ts'
 import { CadreClaimBadge } from './CadreClaimBadge.tsx'
-import { CadreTokenButton, CadreTokenPanel } from './CadreTokenPanel.tsx'
-import type { CadreTokenInjected, CadreTokenRequest } from './CadreTokenTypes.ts'
 import { isInternalWorkspaceTitle } from './workspace-filter.ts'
 import {
   CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
@@ -570,18 +568,6 @@ export function apply(ctx: ClientContext): void {
       token: ledgerToken,
     })
   }
-  const tokenRequest = createSnapshotStore<CadreTokenRequest | null>(null)
-  let tokenSeq = 0
-  const openToken = (sessionId: string, projectId: string, label: string): void => {
-    tokenSeq += 1
-    tokenRequest.set({ sessionId, projectId, label, token: tokenSeq })
-  }
-  const closeToken = (): void => { tokenRequest.set(null) }
-  const tokenInjected = (): CadreTokenInjected => ({
-    hooks: { tokenRequest, roster },
-    openToken,
-    closeToken,
-  })
   const skillsRequest = createSnapshotStore<CadreSkillsRequest | null>(null)
   let skillsToken = 0
   const openSkills = (
@@ -835,9 +821,6 @@ export function apply(ctx: ClientContext): void {
     name: 'shell.overlay', id: 'cadre-retire', locale: NS, inject: retireInjected,
   }, CadreRetireDialog))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-    name: 'shell.overlay', id: 'cadre-token', locale: NS, inject: tokenInjected,
-  } as never, CadreTokenPanel as never))
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay', id: 'cadre-skills', locale: NS, inject: skillsInjected,
   } as never, CadreSkillSettingsDialog as never))
   ctx.slots.inject('main', () => ctx.slots.register({
@@ -879,16 +862,6 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: subtitleInjected,
   } as never, CadreSessionSubtitle as never))
-
-  // Token usage for the Session retained by the main view; supervisors may
-  // additionally query one task total. The panel reads the Host snapshot.
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
-    id: 'cadre-token',
-    order: 40,
-    locale: NS,
-    inject: () => ({ ...tokenInjected(), projectOfSession }),
-  } as never, CadreTokenButton as never))
 
   // Non-blocking GitHub release notice in the sidebar foot. The desktop bridge
   // owns the network and the preference; this component only renders.
