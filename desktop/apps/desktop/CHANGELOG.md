@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.4
+
+- **邮件设置直填授权码**：SMTP 设置页直接输入邮箱授权码，不再要求填写环境变量名；保存后写入安全存储
+- **DPAPI 安全存储**：授权码经 Electron `safeStorage`（Windows DPAPI 用户作用域）加密写入 `%APPDATA%\Cadre\secrets\email\<projectId>.bin`，配置仅保留 `authCodeRef`，get 只回 `hasKey`；不可用时返回 `SECRET_STORE_UNAVAILABLE`，不落明文
+- **删除环境变量名**：移除设置页的 `authCodeEnv` 输入；旧环境变量仍作为发送兼容回退并提示迁移
+- **其余沿用 1.1.3**：技能界面重构/页内安装/全员可装/不分角色、SMTP QQ/163 默认、Resend 修正与高级提供方
+
 ## 1.1.3
 
 - **技能界面重构**：技能库/每对话技能页统一为列表 + 安装入口，内置/已安装分层，安装结果直接刷新
