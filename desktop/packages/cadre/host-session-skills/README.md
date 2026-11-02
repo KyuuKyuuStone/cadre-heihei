@@ -115,8 +115,9 @@ itself carries no role prompt.
 `skill_catalog`, `skill_preview`, `skill_install`, `skill_plan`, and
 `skill_audit`; tools resolve the session's project from the admin session.
 `skill_install` accepts one of `name`, `url`, or `text`, reuses
-`install-package`/`install-url`/`install-any`, and writes an audit row without a
-plan/apply round trip. `skill_plan` still returns a one-time `confirmToken`;
+`install-package`/`install-url`/`install-any`, returns non-blocking `warnings`
+(`missing-license`/`missing-hash`/`unknown-source`) with `installed:true`, and
+writes an audit row without a plan/apply round trip. `skill_plan` still returns a one-time `confirmToken`;
 execution remains `POST /cadre/skills/admin/apply` after the user confirms in
 the UI. The preset mounts read-only fs and fetch tools only — no shell, write,
 team, or email tools.

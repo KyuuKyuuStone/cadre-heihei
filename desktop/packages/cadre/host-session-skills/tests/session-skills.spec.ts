@@ -559,15 +559,18 @@ describe('session skill packs', () => {
       },
     })
     const sentence = '请根据 https://skillhub.cn/install/skillhub.md，安装 @zhaopintong/multi-search-engine。'
-    await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: sentence }))
-      .resolves.toMatchObject({ kind: 'package', target: '@zhaopintong/multi-search-engine' })
+    const anyPackage = await api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: sentence })
+    expect(anyPackage).toMatchObject({ kind: 'package', target: '@zhaopintong/multi-search-engine', installed: true })
+    expect(anyPackage.warnings).toEqual(expect.arrayContaining(['missing-license', 'missing-hash']))
     expect(calls.at(-1)?.[5]).toBe('@zhaopintong/multi-search-engine')
     await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: '请安装 find-skills。' }))
-      .resolves.toMatchObject({ kind: 'package', target: 'find-skills' })
-    await expect(api.installAny({
+      .resolves.toMatchObject({ kind: 'package', target: 'find-skills', installed: true })
+    const anyUrl = await api.installAny({
       projectId: 'p1', actorSessionId: 'w1',
       text: '从 https://raw.githubusercontent.com/o/r/main/packs/url/SKILL.md 安装',
-    })).resolves.toMatchObject({ kind: 'url', target: expect.stringContaining('raw.githubusercontent.com') })
+    })
+    expect(anyUrl).toMatchObject({ kind: 'url', target: expect.stringContaining('raw.githubusercontent.com'), installed: true })
+    expect(anyUrl.warnings).toEqual(expect.arrayContaining(['missing-hash']))
     expect(fetch).toHaveBeenCalled()
     const before = calls.length
     await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: '安装 aaa-bbb 和 ccc-ddd' }))
@@ -606,12 +609,16 @@ describe('session skill packs', () => {
     })
     await expect(success.installPackage({
       projectId: 'p1', actorSessionId: 'w1', name: '@indiv-guipi/find-skills',
-    })).resolves.toMatchObject({ name: '@indiv-guipi/find-skills', visible: true })
+    })).resolves.toMatchObject({
+      name: '@indiv-guipi/find-skills', visible: true, installed: true,
+      warnings: expect.arrayContaining(['missing-license', 'missing-hash']),
+    })
     expect(calls[0]).toEqual([
       '-d', 'Ubuntu-24.04', '--', '/root/.local/bin/skillhub', 'install',
       '@indiv-guipi/find-skills', '--dir', packs,
     ])
     expect(readFileSync(join(auditDir, 'audit.jsonl'), 'utf8')).toContain('"result":"installed"')
+    expect(readFileSync(join(auditDir, 'audit.jsonl'), 'utf8')).toContain('missing-license')
     expect(readFileSync(join(auditDir, 'audit.jsonl'), 'utf8')).not.toContain('apiKey')
 
     const failing = createSkillApi({

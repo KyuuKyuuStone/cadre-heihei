@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { createSkillApi, SkillIpcError, type PackageCommandResult, type SkillApi, type ValidPack } from './ipc.ts'
+import { createSkillApi, installWarnings, SkillIpcError, type InstallWarning, type PackageCommandResult, type SkillApi, type ValidPack } from './ipc.ts'
 
 /** The agent preset reserved for the skill administrator conversation. */
 export const SKILL_ADMIN_PRESET = 'cadre-skill-admin'
@@ -204,7 +204,7 @@ export class SkillAdminApi {
   /** Install by name/url/text from the preset tool, reusing the shared validators and audit. */
   async installForSession(sessionId: string, input: {
     readonly name?: unknown; readonly url?: unknown; readonly text?: unknown
-  }): Promise<{ kind: 'package' | 'url'; target: string; result: unknown }> {
+  }): Promise<{ kind: 'package' | 'url'; target: string; installed: true; warnings: InstallWarning[]; result: unknown }> {
     const projectId = this.projectOf(sessionId)
     const actorSessionId = this.actorFor(projectId)
     const provided = [input.name, input.url, input.text].filter(value => value !== undefined)
@@ -212,15 +212,21 @@ export class SkillAdminApi {
       throw new SkillIpcError('SKILL_INVALID', 400, 'name/url/text 必须且只能提供一个')
     }
     try {
-      const result = input.name !== undefined
-        ? { kind: 'package' as const, target: String(input.name), result: await this.api.installPackage({ projectId, actorSessionId, name: input.name }) }
-        : input.url !== undefined
-          ? { kind: 'url' as const, target: String(input.url), result: await this.api.installUrl({ projectId, actorSessionId, url: input.url }) }
-          : await this.api.installAny({ projectId, actorSessionId, text: input.text })
+      let result: { kind: 'package' | 'url'; target: string; installed: true; warnings: InstallWarning[]; result: unknown }
+      if (input.name !== undefined) {
+        const installed = await this.api.installPackage({ projectId, actorSessionId, name: input.name })
+        result = { kind: 'package', target: String(input.name), installed: true, warnings: installed.warnings, result: installed }
+      } else if (input.url !== undefined) {
+        const entry = await this.api.installUrl({ projectId, actorSessionId, url: input.url })
+        result = { kind: 'url', target: String(input.url), installed: true, warnings: installWarnings(entry), result: entry }
+      } else {
+        const installed = await this.api.installAny({ projectId, actorSessionId, text: input.text })
+        result = { ...installed, installed: true }
+      }
       this.audit({
         kind: 'tool-install', sessionId,
         target: result.kind === 'package' ? result.target : result.target.slice(0, 300),
-        targetKind: result.kind, result: 'installed',
+        targetKind: result.kind, result: 'installed', warnings: result.warnings,
       })
       return result
     } catch (error) {

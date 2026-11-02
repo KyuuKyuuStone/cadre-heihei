@@ -122,7 +122,7 @@ export function apply(ctx: AdminContext): void {
 
   ctx.tools.register({
     name: 'skill_install',
-    description: 'Install one skill by package name, URL, or free text. Reuses install-package/install-url/install-any, validates strictly, and writes the audit. No plan/apply confirmation is required.',
+    description: 'Install one skill by package name, URL, or free text. Reuses install-package/install-url/install-any, validates strictly, returns non-blocking warnings for missing provenance, and writes the audit. No plan/apply confirmation is required.',
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
@@ -133,9 +133,10 @@ export function apply(ctx: AdminContext): void {
     },
     output: {
       schema: {
-        type: 'object', additionalProperties: false, required: ['kind', 'target', 'result'],
+        type: 'object', additionalProperties: false, required: ['kind', 'target', 'installed', 'warnings', 'result'],
         properties: {
-          kind: { type: 'string' }, target: { type: 'string' },
+          kind: { type: 'string' }, target: { type: 'string' }, installed: { type: 'boolean' },
+          warnings: { type: 'array', items: { type: 'string' } },
           result: { type: 'object', additionalProperties: true },
         },
       },

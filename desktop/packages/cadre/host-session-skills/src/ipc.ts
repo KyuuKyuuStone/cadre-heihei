@@ -39,6 +39,27 @@ export interface CatalogEntry {
   readonly selected: boolean
 }
 
+/** Non-blocking provenance warnings returned with a successful install. */
+export type InstallWarning = 'missing-license' | 'missing-hash' | 'unknown-source'
+
+/** Collect provenance gaps; these never block an install. */
+export function installWarnings(pack: {
+  readonly license?: string
+  readonly author?: string
+  readonly source?: string
+}): InstallWarning[] {
+  const warnings: InstallWarning[] = []
+  if (pack.license === undefined || pack.license.trim() === '' || pack.license === 'unknown') {
+    warnings.push('missing-license')
+  }
+  warnings.push('missing-hash')
+  if (pack.author === undefined || pack.author.trim() === ''
+    || pack.source === undefined || pack.source.trim() === '' || pack.source === 'unknown') {
+    warnings.push('unknown-source')
+  }
+  return warnings
+}
+
 export interface SkillApi {
   catalog(input: { projectId: string; actorSessionId: string; targetSessionId?: string; locale?: string }): CatalogEntry[]
   get(input: { projectId: string; actorSessionId: string; targetSessionId: string }): { skills: string[] }
@@ -61,12 +82,17 @@ export interface SkillApi {
   }): Promise<CatalogEntry>
   installPackage(input: {
     projectId: string; actorSessionId: string; name: unknown
-  }): Promise<{ name: string; visible: boolean; durationMs: number }>
+  }): Promise<{
+    name: string; visible: boolean; durationMs: number; installed: true; warnings: InstallWarning[]
+  }>
   installAny(input: {
     projectId: string; actorSessionId: string; text: unknown
   }): Promise<
-    | { kind: 'package'; target: string; result: { name: string; visible: boolean; durationMs: number } }
-    | { kind: 'url'; target: string; result: CatalogEntry }
+    | {
+      kind: 'package'; target: string; installed: true; warnings: InstallWarning[]
+      result: { name: string; visible: boolean; durationMs: number; installed: true; warnings: InstallWarning[] }
+    }
+    | { kind: 'url'; target: string; installed: true; warnings: InstallWarning[]; result: CatalogEntry }
   >
 }
 
@@ -606,13 +632,17 @@ export function createSkillApi(options: {
           `SkillHub 安装失败（exit ${String(result.code)}）${detail === '' ? '' : `：${detail}`}`)
       }
       const expectedId = name.startsWith('@') ? name.slice(1).replace('/', '-') : name
-      const visible = catalog().has(expectedId)
-      auditPackage({ kind: 'install-package', name, result: visible ? 'installed' : 'not-visible', durationMs })
+      const pack = catalog().get(expectedId)
+      const visible = pack !== undefined
+      const warnings = pack === undefined ? [] : installWarnings(pack)
+      auditPackage({
+        kind: 'install-package', name, result: visible ? 'installed' : 'not-visible', durationMs, warnings,
+      })
       if (!visible) {
         throw new SkillIpcError('SKILL_INSTALL_PACKAGE_FAILED', 502,
           `SkillHub 安装完成但 catalog 未发现 ${expectedId}`)
       }
-      return { name, visible, durationMs }
+      return { name, visible, durationMs, installed: true, warnings }
     },
     async installAny(input) {
       requireActor(db, input.projectId, input.actorSessionId)
@@ -625,12 +655,12 @@ export function createSkillApi(options: {
         const result = await this.installPackage({
           projectId: input.projectId, actorSessionId: input.actorSessionId, name: target.target,
         })
-        return { kind: 'package', target: target.target, result }
+        return { kind: 'package', target: target.target, installed: true, warnings: result.warnings, result }
       }
       const result = await this.installUrl({
         projectId: input.projectId, actorSessionId: input.actorSessionId, url: target.target,
       })
-      return { kind: 'url', target: target.target, result }
+      return { kind: 'url', target: target.target, installed: true, warnings: installWarnings(result), result }
     },
   }
 }
