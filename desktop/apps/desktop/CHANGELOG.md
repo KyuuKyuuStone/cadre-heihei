@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.3
+
+- **技能安装弹窗**：技能页统一为粘贴 URL / 包名安装；URL 走现有 GitHub 安装，包名走 `install-package`，高级安装仍可打开技能管理员对话
+- **包名安装（SkillHub）**：`POST /cadre/skills/install-package` 固定 WSL `skillhub install <name> --dir …`，严格包名校验、180s 超时、可读 unsupported/failure、审计；员工可通过项目主管身份安装
+- **会话技能页重设计**：每对话技能页签/安装入口重新整理，成员可查看和调整本会话技能
+- **Resend 邮件提供方**：新增 `provider: sendgrid | resend`，Resend 使用 `api.resend.com/emails`、Bearer、15s 超时、已验证域名/`onboarding@resend.dev` 发件约束、重试/脱敏；设置页可选 provider
+- **typecheck 修复**：修复技能安装测试与提供方设置相关的类型错误
+
+### 已知限制
+
+- Resend 已验证域名需在后台验证后手工写入 `verifiedDomains`
+- 包名安装依赖 WSL `Ubuntu-24.04` 与 `/root/.local/bin/skillhub`
+- 安装包未签名（SmartScreen 提示）
+
 ## 1.1.2
 
 - **技能管理员（普通对话）**：技能页内嵌 `cadre-skill-admin` hidden preset，普通 Session，不写花名册/不占员工位；`skill_catalog`/`skill_preview`/`skill_plan`/`skill_audit` 四个模型工具；安装/更新/删除由用户确认后走 `admin/apply`（planId+token），带备份、回滚、审计
