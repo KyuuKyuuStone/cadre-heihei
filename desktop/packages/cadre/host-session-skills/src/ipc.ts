@@ -3,8 +3,10 @@
  * @module
  */
 import { DatabaseSync } from 'node:sqlite'
-import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { join, dirname } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { loadSkillCatalog, localizedDescription, type SkillOrigin, type SkillPack } from './catalog.ts'
 
@@ -55,6 +57,9 @@ export interface SkillApi {
   installUrl(input: {
     projectId: string; actorSessionId: string; url: unknown; confirm?: unknown
   }): Promise<CatalogEntry>
+  installPackage(input: {
+    projectId: string; actorSessionId: string; name: unknown
+  }): Promise<{ name: string; visible: boolean; durationMs: number }>
 }
 
 export interface AddSkillInput {
@@ -76,7 +81,17 @@ export interface AddSkillInput {
 }
 
 const KEBAB_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
+const PACKAGE_NAME = /^(?:@[a-z0-9](?:[a-z0-9._-]{0,63})\/)?[a-z0-9](?:[a-z0-9._-]{0,63})$/u
 const ROLES = new Set(['supervisor', 'worker'])
+
+/** Result of one WSL SkillHub CLI invocation. */
+export interface PackageCommandResult {
+  readonly code: number | null
+  readonly stdout: string
+  readonly stderr: string
+  readonly timedOut?: boolean
+  readonly error?: string
+}
 
 export interface ValidPack {
   readonly id: string
@@ -234,6 +249,46 @@ function requireActor(db: DatabaseSync, projectId: string, sessionId: string): M
 }
 
 /**
+ * Run `wsl` with an argument array; no shell interpretation, bounded output and
+ * a hard timeout. The SkillHub path itself is a fixed argument.
+ * @param args - arguments after the `wsl` executable.
+ * @param timeoutMs - hard timeout in milliseconds.
+ * @returns process result; spawn errors are reported in `error`.
+ */
+function runWslCommand(args: readonly string[], timeoutMs: number): Promise<PackageCommandResult> {
+  return new Promise(resolve => {
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn('wsl', [...args], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (error) {
+      resolve({ code: null, stdout: '', stderr: '', error: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    let stdout = ''
+    let stderr = ''
+    let done = false
+    const finish = (result: PackageCommandResult): void => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve(result)
+    }
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      finish({ code: null, stdout: stdout.slice(0, 64 * 1024), stderr: stderr.slice(0, 64 * 1024), timedOut: true })
+    }, timeoutMs)
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (stdout.length < 64 * 1024) stdout += chunk.toString('utf8')
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderr.length < 64 * 1024) stderr += chunk.toString('utf8')
+    })
+    child.on('error', error => finish({ code: null, stdout, stderr, error: error.message }))
+    child.on('close', code => finish({ code, stdout, stderr }))
+  })
+}
+
+/**
  * Bind the read/write DB and catalog directory once; every call revalidates the
  * actor and target so a stale UI cannot write across projects.
  * @param options - read-only DB, ledger path for writes, catalog root.
@@ -246,9 +301,23 @@ export function createSkillApi(options: {
   readonly builtinDir?: string
   /** Injection seam for URL installs. */
   readonly fetch?: typeof globalThis.fetch
+  /** Injection seam for the WSL SkillHub CLI. */
+  readonly runPackageCommand?: (args: readonly string[], timeoutMs: number) => Promise<PackageCommandResult>
+  /** Audit directory; defaults to `~/.dsh/cadre-skill-admin`. */
+  readonly auditDir?: string
 }): SkillApi {
   const { db, ledgerPath, skillsDir, builtinDir } = options
   const doFetch = options.fetch ?? globalThis.fetch
+  const runPackageCommand = options.runPackageCommand ?? runWslCommand
+  const auditFile = join(options.auditDir ?? join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'cadre-skill-admin'), 'audit.jsonl')
+  const auditPackage = (record: Record<string, unknown>): void => {
+    try {
+      mkdirSync(dirname(auditFile), { recursive: true })
+      appendFileSync(auditFile, `${JSON.stringify({ time: new Date().toISOString(), ...record })}\n`, 'utf8')
+    } catch {
+      // Audit failure must not turn a successful install into a failure.
+    }
+  }
   const catalog = (): ReadonlyMap<string, SkillPack> => {
     const merged = new Map<string, SkillPack>()
     if (builtinDir !== undefined) {
@@ -445,6 +514,54 @@ export function createSkillApi(options: {
         content: pack.content,
         overwrite: input.confirm === true,
       })
+    },
+    async installPackage(input) {
+      requireSupervisor(db, input.projectId, input.actorSessionId)
+      const name = requiredString(input.name, 'name')
+      if (name.length > 128 || !PACKAGE_NAME.test(name)) {
+        throw new SkillIpcError('SKILL_INVALID', 400, '包名必须是合法的 npm 包名（可带 @scope/）')
+      }
+      const started = Date.now()
+      const args = [
+        '-d', 'Ubuntu-24.04', '--', '/root/.local/bin/skillhub', 'install', name, '--dir', skillsDir,
+      ]
+      let result: PackageCommandResult
+      try {
+        result = await runPackageCommand(args, 180_000)
+      } catch (error) {
+        const durationMs = Date.now() - started
+        auditPackage({ kind: 'install-package', name, result: 'failed', durationMs })
+        throw new SkillIpcError('SKILL_INSTALL_PACKAGE_FAILED', 502,
+          `SkillHub 安装失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+      const durationMs = Date.now() - started
+      const detail = (result.stderr || result.stdout).trim().slice(0, 500)
+      const unavailable = result.error !== undefined
+        || result.code === null
+        || result.code === 127
+        || /WSL_E_DISTRO_NOT_FOUND|No such file or directory|wsl: .*not found/i.test(`${result.error ?? ''} ${result.stderr}`)
+      if (unavailable) {
+        auditPackage({ kind: 'install-package', name, result: 'unsupported', durationMs })
+        throw new SkillIpcError('SKILL_INSTALL_PACKAGE_UNSUPPORTED', 501,
+          `SkillHub CLI 或 WSL 发行版不可用${detail === '' ? '' : `：${detail}`}`)
+      }
+      if (result.timedOut === true) {
+        auditPackage({ kind: 'install-package', name, result: 'timeout', durationMs })
+        throw new SkillIpcError('SKILL_INSTALL_PACKAGE_FAILED', 502, 'SkillHub 安装超时（180s）')
+      }
+      if (result.code !== 0) {
+        auditPackage({ kind: 'install-package', name, result: 'failed', durationMs })
+        throw new SkillIpcError('SKILL_INSTALL_PACKAGE_FAILED', 502,
+          `SkillHub 安装失败（exit ${String(result.code)}）${detail === '' ? '' : `：${detail}`}`)
+      }
+      const expectedId = name.startsWith('@') ? name.slice(1).replace('/', '-') : name
+      const visible = catalog().has(expectedId)
+      auditPackage({ kind: 'install-package', name, result: visible ? 'installed' : 'not-visible', durationMs })
+      if (!visible) {
+        throw new SkillIpcError('SKILL_INSTALL_PACKAGE_FAILED', 502,
+          `SkillHub 安装完成但 catalog 未发现 ${expectedId}`)
+      }
+      return { name, visible, durationMs }
     },
   }
 }

@@ -350,6 +350,11 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         url: body.url,
         ...(body.confirm === undefined ? {} : { confirm: body.confirm }),
       }))
+      route('/cadre/skills/install-package', body => api.installPackage({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        name: body.name,
+      }))
       route('/cadre/skills/admin/session', async body => {
         try {
           const cwd = typeof body.cwd === 'string' && body.cwd !== ''

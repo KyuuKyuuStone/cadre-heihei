@@ -59,7 +59,11 @@ member. `preview`/`add`/`remove`/`install-url` remain supervisor-only.
 - `/cadre/skills/remove` — `{packId, confirm:true}` deletes the pack directory;
 - `/cadre/skills/install-url` — `{url, confirm?}` fetches `manifest.json` and
   `SKILL.md` from a public GitHub raw/tree URL over HTTPS (size/timeout bounded;
-  no SkillHub/ClawHub API).
+  no SkillHub/ClawHub API);
+- `/cadre/skills/install-package` — `{name}` installs a SkillHub package through
+  the fixed WSL CLI (`wsl -d Ubuntu-24.04 -- /root/.local/bin/skillhub install
+  <name> --dir <skillsDir>`), 180s timeout, strict package-name validation, and
+  an audit row without secrets.
 
 ## Skill administrator
 

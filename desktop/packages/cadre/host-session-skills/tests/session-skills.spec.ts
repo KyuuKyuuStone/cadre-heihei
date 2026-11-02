@@ -499,4 +499,53 @@ describe('session skill packs', () => {
     })).toThrow(/supervisor/)
     reader.close()
   })
+
+  it('installs a SkillHub package through the fixed WSL command and audits each outcome', async () => {
+    const root = workspace()
+    const packs = join(root, 'installed')
+    const auditDir = join(root, 'audit')
+    const db = ledger(root)
+    insert(db, 's1', 'supervisor', [])
+    insert(db, 'w1', 'worker', [])
+    db.close()
+    const reader = new DatabaseSync(join(root, 'ledger.sqlite'))
+    const calls: string[][] = []
+    const success = createSkillApi({
+      db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, auditDir,
+      runPackageCommand: async args => {
+        calls.push([...args])
+        const pack = join(packs, '@indiv-guipi', 'find-skills')
+        mkdirSync(pack, { recursive: true })
+        writeFileSync(join(pack, 'SKILL.md'), '---\nname: find-skills\ndescription: find\n---\n# find\n')
+        return { code: 0, stdout: 'installed', stderr: '' }
+      },
+    })
+    await expect(success.installPackage({
+      projectId: 'p1', actorSessionId: 's1', name: '@indiv-guipi/find-skills',
+    })).resolves.toMatchObject({ name: '@indiv-guipi/find-skills', visible: true })
+    expect(calls[0]).toEqual([
+      '-d', 'Ubuntu-24.04', '--', '/root/.local/bin/skillhub', 'install',
+      '@indiv-guipi/find-skills', '--dir', packs,
+    ])
+    expect(readFileSync(join(auditDir, 'audit.jsonl'), 'utf8')).toContain('"result":"installed"')
+    expect(readFileSync(join(auditDir, 'audit.jsonl'), 'utf8')).not.toContain('apiKey')
+
+    const failing = createSkillApi({
+      db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, auditDir,
+      runPackageCommand: async () => ({ code: 1, stdout: '', stderr: 'registry denied' }),
+    })
+    await expect(failing.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'find-skills' }))
+      .rejects.toMatchObject({ code: 'SKILL_INSTALL_PACKAGE_FAILED' })
+    await expect(failing.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'bad name; rm -rf' }))
+      .rejects.toMatchObject({ code: 'SKILL_INVALID' })
+    const unsupported = createSkillApi({
+      db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, auditDir,
+      runPackageCommand: async () => ({ code: 127, stdout: '', stderr: 'WSL_E_DISTRO_NOT_FOUND' }),
+    })
+    await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'find-skills' }))
+      .rejects.toMatchObject({ code: 'SKILL_INSTALL_PACKAGE_UNSUPPORTED' })
+    await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 'w1', name: 'find-skills' }))
+      .rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
+    reader.close()
+  })
 })
