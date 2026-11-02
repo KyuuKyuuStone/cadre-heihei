@@ -2,7 +2,9 @@
 
 ## 1.1.4
 
-- **技能页普通对话**：主管可在技能页直接问「有什么技能」/「安装 @xxx」，消息进入普通 `cadre-skill-admin` 会话，AI 用 catalog/preview/install 工具自行查询和安装
+- **技能页单入口**：技能页只保留一个内嵌对话入口，问/装/建都走普通 `cadre-skill-admin` 会话，AI 用 catalog/preview/install 工具自行查询和安装
+- **技能管理员去绑定**：admin session 不再绑定 supervisor/operator；消息读写/发送与 `skill_install` 按项目成员校验，worker 也可用，跨项目/非成员拒绝
+- **SMTP IPv4/587**：nodemailer 强制 `family:4`；465 连接/超时失败自动回退 587 STARTTLS；连接/TLS 错误保留底层 code 并 redact
 - **自然语言 install-any**：自由文本中提取一个包名或 URL；SkillHub 说明 URL + 包名走包名安装，仅 URL 走 URL 安装，歧义返回 `SKILL_INSTRUCTION_UNSUPPORTED`
 - **授权码保存回退**：安装版 Host 拿不到 Electron `safeStorage` 时，自动回退 Windows DPAPI（PowerShell `ProtectedData`，密码经 stdin），仍失败才报 `SECRET_STORE_UNAVAILABLE`
 - **兼容旧密文**：secret 文件保持原始密文格式；配置仍只存 `authCodeRef`，不存/不回传授权码；日志标明 provider/失败原因，不含授权码
