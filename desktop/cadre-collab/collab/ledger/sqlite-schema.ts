@@ -126,6 +126,19 @@ CREATE TABLE IF NOT EXISTS idempotency (
   created_at        TEXT NOT NULL,
   PRIMARY KEY (project_id, idempotency_key)
 );
+
+CREATE TABLE IF NOT EXISTS task_memory (
+  task_id        TEXT PRIMARY KEY,
+  project_id     TEXT NOT NULL,
+  name           TEXT NOT NULL,
+  status         TEXT NOT NULL,
+  summary        TEXT NOT NULL,
+  decisions_json TEXT NOT NULL,
+  artifacts_json TEXT NOT NULL,
+  transcript_ref TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_memory_project ON task_memory (project_id, updated_at);
 `
 
 export function initSchema(db: DatabaseSync): void {

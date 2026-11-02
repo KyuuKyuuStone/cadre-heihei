@@ -340,6 +340,7 @@ export class SqliteLedgerCore {
         updatedAt: at,
         closedAt: at,
       }
+      this.archiveTask(superseded)
     }
 
     const row = this.db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(command.taskId) as Row
@@ -416,7 +417,39 @@ export class SqliteLedgerCore {
     })
 
     const updatedRow = this.db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(command.taskId) as Row
-    return { ok: true, value: { task: taskFromRow(updatedRow), event, replayed: false } }
+    const updatedTask = taskFromRow(updatedRow)
+    if (command.to === 'verified' || command.to === 'failed' || command.to === 'cancelled') {
+      this.archiveTask(updatedTask)
+    }
+    return { ok: true, value: { task: updatedTask, event, replayed: false } }
+  }
+
+  /**
+   * Archive one terminal task as a compact memory row. The body is summarized,
+   * not copied; decisions keep transition reasons and artifacts keep report
+   * deliverable paths. `INSERT OR IGNORE` makes replay/terminal retries idempotent.
+   */
+  private archiveTask(task: TaskRecord): void {
+    const events = this.db.prepare(`SELECT to_status, reason FROM task_events
+      WHERE project_id = ? AND task_id = ? ORDER BY at, rowid`).all(task.projectId, task.taskId) as Row[]
+    const decisions = events
+      .filter(event => event.reason !== null && event.reason !== undefined && text(event.reason) !== '')
+      .map(event => `${text(event.to_status)}：${text(event.reason).slice(0, 200)}`)
+    const report = this.db.prepare(`SELECT body, deliverables_json FROM messages
+      WHERE project_id = ? AND task_id = ? AND direction = 'report'
+      ORDER BY received_at DESC, rowid DESC LIMIT 1`).get(task.projectId, task.taskId) as Row | undefined
+    const body = text(task.body).replace(/\s+/gu, ' ').trim().slice(0, 300)
+    const latestReport = report === undefined ? '' : text(report.body).replace(/\s+/gu, ' ').trim().slice(0, 300)
+    const artifacts = report === undefined ? [] : (() => {
+      try { return JSON.parse(text(report.deliverables_json)) as unknown[] } catch { return [] }
+    })()
+    this.db.prepare(`INSERT OR IGNORE INTO task_memory
+      (task_id, project_id, name, status, summary, decisions_json, artifacts_json, transcript_ref, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      task.taskId, task.projectId, task.title, task.status,
+      `${task.title}｜${body}${latestReport === '' ? '' : `｜最后汇报：${latestReport}`}`,
+      JSON.stringify(decisions), JSON.stringify(artifacts), `task:${task.taskId}`, task.updatedAt,
+    )
   }
 
   private getTask(projectId: ProjectId, taskId: TaskId): LedgerResult<TaskRecord> {

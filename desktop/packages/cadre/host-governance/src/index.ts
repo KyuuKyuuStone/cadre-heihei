@@ -27,6 +27,7 @@ import { ClaimVerifier } from './claims.ts'
 import { SessionPresence } from './presence.ts'
 import { ExecutionArm } from './execution-arm.ts'
 import { TokenUsageLedger } from './token-usage.ts'
+import { TaskMemoryReader } from './task-memory.ts'
 import { activityFrom, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
@@ -350,6 +351,8 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     },
   })
   ctx.provide?.('tokenUsage', tokenUsage)
+  const taskMemory = new TaskMemoryReader(databasePath)
+  ctx.provide?.('taskMemory', taskMemory)
   const disposeIdleEvents = ctx.on === undefined
     ? undefined
     : ctx.on('session/event', (session, event) => {
@@ -399,6 +402,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     idleReminder.dispose()
     claims.dispose()
     presence.dispose()
+    taskMemory.close()
   })
 
   const ports: StallPorts = {
@@ -829,6 +833,48 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           }
         },
       }), 'host-governance: /cadre/token/snapshot')
+      web.effect(() => web.webServer.register({
+        kind: 'exact',
+        path: '/cadre/task-memory',
+        handler: async (req, res) => {
+          if (req.method !== 'POST') return reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 POST' })
+          const admission = web.connection.admit(req)
+          if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
+            return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
+          }
+          try {
+            const body = await readBody(req) as Record<string, unknown>
+            if (typeof body.projectId !== 'string' || typeof body.actorSessionId !== 'string'
+              || (body.mode !== 'context' && body.mode !== 'search')) {
+              return reply(res, 400, { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId/actorSessionId/mode 必填' })
+            }
+            if (projectOf(body.actorSessionId) !== body.projectId) {
+              return reply(res, 403, { ok: false, code: 'PERMISSION_DENIED', message: '只有本项目成员可以查看任务记忆' })
+            }
+            if (body.mode === 'context') {
+              return reply(res, 200, {
+                ok: true,
+                ...taskMemory.context({
+                  projectId: body.projectId, actorSessionId: body.actorSessionId,
+                  ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
+                }),
+              })
+            }
+            if (typeof body.query !== 'string' || body.query.trim() === '') {
+              return reply(res, 400, { ok: false, code: 'INVALID_ARGUMENT', message: 'search 需要 query' })
+            }
+            return reply(res, 200, {
+              ok: true,
+              memories: taskMemory.search({
+                projectId: body.projectId, actorSessionId: body.actorSessionId, query: body.query,
+                includeSnippet: body.includeSnippet === true,
+              }),
+            })
+          } catch (error) {
+            reply(res, 500, { ok: false, code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      }), 'host-governance: /cadre/task-memory')
 
       const emailRoute = (
         path: string,

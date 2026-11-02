@@ -71,6 +71,37 @@ function events(db: string, taskId: string): { from_status: string | null; to_st
   }
 }
 
+test('终态任务归档为摘要，进行中任务不归档', () => {
+  const setup = fixture()
+  try {
+    insertTask(setup.db, { taskId: 'task-memory-done', status: 'delivered', seq: 1 })
+    insertTask(setup.db, { taskId: 'task-memory-open', status: 'in_progress', seq: 2 })
+    const collab = openCadreCollab({ databasePath: setup.db, projectId: PROJECT, sessionId: SUPERVISOR })
+    try {
+      const result = collab.transition({ taskId: 'task-memory-done', to: 'verified', reason: '验收通过' }) as
+        { ok: boolean }
+      assert.equal(result.ok, true)
+    } finally {
+      collab.close()
+    }
+    const raw = new DatabaseSync(setup.db)
+    try {
+      const archived = raw.prepare(`SELECT name, status, summary, decisions_json, artifacts_json, transcript_ref
+        FROM task_memory WHERE task_id = ?`).get('task-memory-done') as Record<string, unknown> | undefined
+      assert.equal(archived?.status, 'verified')
+      assert.match(String(archived?.summary), /测试任务/u)
+      assert.match(String(archived?.decisions_json), /验收通过/u)
+      assert.equal(archived?.transcript_ref, 'task:task-memory-done')
+      assert.equal(raw.prepare('SELECT 1 AS x FROM task_memory WHERE task_id = ?')
+        .get('task-memory-open'), undefined)
+    } finally {
+      raw.close()
+    }
+  } finally {
+    setup.close()
+  }
+})
+
 test('环境变量不能把员工提升为主管：验收仍被拒', () => {
   const previous = process.env.CADRE_ROLE
   process.env.CADRE_ROLE = 'supervisor'
