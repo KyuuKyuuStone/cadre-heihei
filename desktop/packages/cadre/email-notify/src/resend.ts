@@ -20,16 +20,17 @@ export function buildResendBody(message: EmailMessage): Record<string, unknown> 
 }
 
 /**
- * Whether a Resend From address is the test sender or a declared verified domain.
- * @param email - From address.
- * @param verifiedDomains - domains configured as verified in Resend.
- * @returns true when Resend may accept this address.
+ * Map a provider rejection to a readable Cadre failure. Resend owns domain and
+ * testing-recipient verification; this only classifies its response body.
+ * @param status - HTTP status.
+ * @param detail - response body excerpt.
+ * @returns stable failure code.
  */
-export function isResendFromAllowed(email: string, verifiedDomains: readonly string[]): boolean {
-  const normalized = email.trim().toLowerCase()
-  if (normalized === 'onboarding@resend.dev') return true
-  const domain = normalized.slice(normalized.lastIndexOf('@') + 1)
-  return domain !== '' && verifiedDomains.some(item => item.toLowerCase() === domain)
+export function resendFailureCode(status: number, detail: string): string {
+  if (/recipient|testing email|own email|onboarding/i.test(detail)) return 'EMAIL_RECIPIENT_RESTRICTED'
+  if (/from|domain|verified|sender/i.test(detail)) return 'EMAIL_FROM_NOT_VERIFIED'
+  if (status === 403 || status === 422) return 'EMAIL_FROM_NOT_VERIFIED'
+  return 'EMAIL_HTTP_FAILED'
 }
 
 function retryDelay(): Promise<void> {
@@ -38,24 +39,18 @@ function retryDelay(): Promise<void> {
 
 /**
  * Send one message through Resend.
- * @param options - API key, rendered message, verified domains, optional fetch.
+ * @param options - API key, rendered message, optional legacy verified domains, fetch.
  * @returns a structured result; transport/config failures never throw.
  */
 export async function sendWithResend(options: {
   readonly apiKey: string
   readonly message: EmailMessage
-  readonly verifiedDomains: readonly string[]
+  /** Legacy field; domain validation is owned by Resend and this is ignored. */
+  readonly verifiedDomains?: readonly string[]
   readonly fetch?: typeof globalThis.fetch
 }): Promise<EmailResult> {
   const apiKey = options.apiKey.trim()
   if (apiKey === '') return { ok: false, code: 'EMAIL_MISSING_API_KEY', message: 'Resend API key is not configured' }
-  if (!isResendFromAllowed(options.message.from.email, options.verifiedDomains)) {
-    return {
-      ok: false,
-      code: 'EMAIL_FROM_NOT_VERIFIED',
-      message: `Resend 只接受已验证域名或 onboarding@resend.dev 发件；${options.message.from.email} 未在 verifiedDomains 中声明`,
-    }
-  }
   const doFetch = options.fetch ?? globalThis.fetch
   let lastFailure: EmailResult | undefined
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -87,12 +82,11 @@ export async function sendWithResend(options: {
       // The status still identifies the failure; the body is optional.
     }
     const message = redactSecret(`Resend HTTP ${String(response.status)}${detail === '' ? '' : `: ${detail.slice(0, 500)}`}`, apiKey)
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       return { ok: false, code: 'EMAIL_AUTH_FAILED', message }
     }
-    if (response.status === 422) {
-      const fromFailure = /from|domain|verified/i.test(detail)
-      return { ok: false, code: fromFailure ? 'EMAIL_FROM_NOT_VERIFIED' : 'EMAIL_HTTP_FAILED', message }
+    if (response.status === 403 || response.status === 422) {
+      return { ok: false, code: resendFailureCode(response.status, detail), message }
     }
     lastFailure = {
       ok: false,

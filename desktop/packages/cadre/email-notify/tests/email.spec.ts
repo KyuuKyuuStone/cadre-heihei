@@ -220,38 +220,52 @@ describe('dedupe, rate limit and failures', () => {
     })).toThrow(/provider must be sendgrid or resend/)
   })
 
-  it('builds the Resend body and rejects an undeclared From domain without a network call', async () => {
+  it('builds the Resend body and lets Resend decide domain verification', async () => {
     const message = { to: ['owner@example.com'], from: { email: 'cadre@example.com', name: 'Cadre' }, subject: 's', text: 't' }
     expect(buildResendBody(message)).toEqual({
       from: 'Cadre <cadre@example.com>', to: ['owner@example.com'], subject: 's', text: 't',
     })
     const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => response(202))
-    const rejected = await sendWithResend({ apiKey: 're_secret', message, verifiedDomains: [], fetch: fetch as never })
-    expect(rejected).toMatchObject({ ok: false, code: 'EMAIL_FROM_NOT_VERIFIED' })
-    expect(fetch).not.toHaveBeenCalled()
-    const allowed = await sendWithResend({ apiKey: 're_secret', message, verifiedDomains: ['example.com'], fetch: fetch as never })
-    expect(allowed).toMatchObject({ ok: true, status: 'sent' })
+    const sent = await sendWithResend({ apiKey: 're_secret', message, fetch: fetch as never })
+    expect(sent).toMatchObject({ ok: true, status: 'sent' })
+    expect(fetch).toHaveBeenCalledTimes(1)
     const [url, init] = fetch.mock.calls[0]!
     expect(url).toBe('https://api.resend.com/emails')
     expect(init?.headers).toMatchObject({ authorization: 'Bearer re_secret' })
     expect(JSON.parse(String(init?.body))).toMatchObject({ from: 'Cadre <cadre@example.com>', to: ['owner@example.com'] })
   })
 
+  it('maps provider-side from and onboarding recipient restrictions', async () => {
+    const message = { to: ['owner@example.com'], from: { email: 'cadre@example.com' }, subject: 's', text: 't' }
+    const unverified = await sendWithResend({
+      apiKey: 're_secret', message,
+      fetch: vi.fn(async () => new Response('The from domain is not verified', { status: 403 })) as never,
+    })
+    expect(unverified).toMatchObject({ ok: false, code: 'EMAIL_FROM_NOT_VERIFIED' })
+    const restricted = await sendWithResend({
+      apiKey: 're_secret',
+      message: { ...message, from: { email: 'onboarding@resend.dev' }, to: ['someone@example.com'] },
+      fetch: vi.fn(async () => new Response('You can only send testing emails to your own email address', { status: 422 })) as never,
+    })
+    expect(restricted).toMatchObject({ ok: false, code: 'EMAIL_RECIPIENT_RESTRICTED' })
+    expect(JSON.stringify(restricted)).not.toContain('re_secret')
+  })
+
   it('maps Resend auth/422 failures, retries transient errors, and redacts secrets', async () => {
     const message = { to: ['c@d.com'], from: { email: 'cadre@example.com' }, subject: 's', text: 't' }
     const auth = await sendWithResend({
-      apiKey: 're_secret', message, verifiedDomains: ['example.com'],
+      apiKey: 're_secret', message,
       fetch: vi.fn(async () => response(401)) as never,
     })
     expect(auth).toMatchObject({ ok: false, code: 'EMAIL_AUTH_FAILED' })
     const invalid = await sendWithResend({
-      apiKey: 're_secret', message, verifiedDomains: ['example.com'],
+      apiKey: 're_secret', message,
       fetch: vi.fn(async () => new Response('from domain not verified', { status: 422 })) as never,
     })
     expect(invalid).toMatchObject({ ok: false, code: 'EMAIL_FROM_NOT_VERIFIED' })
     const retry = vi.fn(async () => new Response('temporary', { status: 500 }))
     const failed = await sendWithResend({
-      apiKey: 're_secret', message, verifiedDomains: ['example.com'], fetch: retry as never,
+      apiKey: 're_secret', message, fetch: retry as never,
     })
     expect(failed).toMatchObject({ ok: false, code: 'EMAIL_HTTP_FAILED' })
     expect(retry).toHaveBeenCalledTimes(2)
