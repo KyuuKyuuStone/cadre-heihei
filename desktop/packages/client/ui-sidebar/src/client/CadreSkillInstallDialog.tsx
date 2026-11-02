@@ -7,10 +7,11 @@ import css from './CadreSkillInstallDialog.module.css'
 
 /** One paste-and-install surface; the advanced administrator conversation stays behind a link. */
 export function CadreSkillInstallDialog({
-  projectId, actorSessionId, onInstalled, openAdmin, onClose, t,
+  projectId, actorSessionId, canOpenAdmin, onInstalled, openAdmin, onClose, t,
 }: {
   readonly projectId: string
   readonly actorSessionId: string
+  readonly canOpenAdmin: boolean
   readonly onInstalled: () => Promise<void> | void
   readonly openAdmin: () => void
   readonly onClose: () => void
@@ -61,11 +62,13 @@ export function CadreSkillInstallDialog({
             {busy ? t('skills.install.busy') : t('skills.install.action')}
           </Button>
         </div>
-        <details className={css.advanced}>
-          <summary>{t('skills.install.advanced')}</summary>
-          <p>{t('skills.install.advancedHint')}</p>
-          <Button variant="ghost" size="sm" onClick={openAdmin}>{t('skills.install.openAdmin')}</Button>
-        </details>
+        {canOpenAdmin && (
+          <details className={css.advanced}>
+            <summary>{t('skills.install.advanced')}</summary>
+            <p>{t('skills.install.advancedHint')}</p>
+            <Button variant="ghost" size="sm" onClick={openAdmin}>{t('skills.install.openAdmin')}</Button>
+          </details>
+        )}
       </div>
     </Modal>
   )

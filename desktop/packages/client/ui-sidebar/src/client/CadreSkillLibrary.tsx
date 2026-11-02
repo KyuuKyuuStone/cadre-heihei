@@ -72,11 +72,6 @@ export function CadreSkillLibraryPage({
     .find(([, session]) => (session.retainedBy.mainView ?? 0) > 0)?.[0])
   const actor = members.find(member => member.sessionId === activeSessionId)
   const isSupervisor = actor?.role === 'supervisor'
-  // Installation runs as a supervisor even from an employee Session; only a
-  // project without any supervisor is unavailable.
-  const installActorId = isSupervisor
-    ? actor.sessionId
-    : members.find(member => member.role === 'supervisor' && member.state !== 'departed')?.sessionId
   const projectId = actor === undefined ? undefined : projectOfSession(actor.sessionId)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
   const [busy, setBusy] = useState(false)
@@ -93,19 +88,13 @@ export function CadreSkillLibraryPage({
     setBusy(true)
     setError(null)
     try {
-      // A worker reads their own selection; a supervisor reads the library view.
-      setEntries(await fetchSkillCatalog(
-        projectId,
-        actor.sessionId,
-        isSupervisor ? undefined : actor.sessionId,
-        navigator.language,
-      ))
+      setEntries(await fetchSkillCatalog(projectId, actor.sessionId, actor.sessionId, navigator.language))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy(false)
     }
-  }, [actor, isSupervisor, projectId])
+  }, [actor, projectId])
 
   useEffect(() => { void load() }, [load])
 
@@ -225,20 +214,15 @@ export function CadreSkillLibraryPage({
           <p>{t('skills.library.description')}</p>
         </div>
         <div className={css.headerActions}>
-          <Button variant="primary" disabled={installActorId === undefined || busy}
-            title={installActorId === undefined ? t('skills.library.noSupervisor') : undefined}
-            onClick={() => { if (installActorId !== undefined) setInstallOpen(true) }}>
+          <Button variant="primary" disabled={busy} onClick={() => { setInstallOpen(true) }}>
             {t('skills.admin.installEntry')}
           </Button>
-          {isSupervisor && (
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
-              if (!advanced) setForm({ ...EMPTY, tools: t('skills.defaultTools'), license: t('skills.defaultLicense') })
-              setAdvanced(value => !value)
-            }}>{t('skills.advanced')}</Button>
-          )}
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
+            if (!advanced) setForm({ ...EMPTY, tools: t('skills.defaultTools'), license: t('skills.defaultLicense') })
+            setAdvanced(value => !value)
+          }}>{t('skills.advanced')}</Button>
         </div>
       </header>
-      {installActorId === undefined && <p className={css.hint}>{t('skills.library.noSupervisor')}</p>}
       <div className={css.sources} data-skill-sources>
         <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
         <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
@@ -247,10 +231,11 @@ export function CadreSkillLibraryPage({
         <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
         <p>{t('skills.sources.caution')}</p>
       </div>
-      {installOpen && installActorId !== undefined && (
+      {installOpen && (
         <CadreSkillInstallDialog
           projectId={projectId}
-          actorSessionId={installActorId}
+          actorSessionId={actor.sessionId}
+          canOpenAdmin={isSupervisor}
           onInstalled={load}
           openAdmin={() => { setInstallOpen(false); setAdminOpen(true) }}
           onClose={() => { setInstallOpen(false) }}
@@ -266,7 +251,7 @@ export function CadreSkillLibraryPage({
           t={t}
         />
       )}
-      {isSupervisor && advanced && (
+      {advanced && (
         <div className={css.install} data-skill-install>
           <div className={css.fields}>
             <label>{t('skills.field.id')}<Input value={form.id} disabled={busy}
@@ -304,7 +289,7 @@ export function CadreSkillLibraryPage({
       {error !== null && <p role="alert" className={css.error}>{error}</p>}
       {notice !== null && <p role="status" className={css.notice}>{notice}</p>}
       {group(t('skills.group.builtin'), builtin, false)}
-      {group(t('skills.group.installed'), installed, isSupervisor)}
+      {group(t('skills.group.installed'), installed, true)}
     </section>
   )
 }

@@ -48,21 +48,27 @@ function pageProps(role: 'supervisor' | 'worker' = 'supervisor', translate = t):
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('Cadre skill library', () => {
-  it('lets a worker open installation through a supervisor actor but hides delete/manual management', async () => {
+  it('lets a worker install, delete, and use the manual form as themselves', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)
       if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      return json({ ok: true, result: {} })
+      return json({ ok: true, result: { removed: true } })
     })
     vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(await screen.findByText('内置技能')).toBeTruthy()
     const install = screen.getByRole('button', { name: '安装技能' })
     expect(install.hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: '删除' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '高级手动表单' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(true)
+    })
     fireEvent.click(install)
     expect(await screen.findByRole('dialog', { name: '安装技能' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '高级手动表单' })).toBeNull()
+    expect(screen.queryByText('高级：技能管理员对话')).toBeNull()
     const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
     expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
       actorSessionId: 'w1', targetSessionId: 'w1',
@@ -161,7 +167,7 @@ describe('Cadre skill library', () => {
     })
   })
 
-  it('disables installation when the project has no supervisor', async () => {
+  it('does not block installation when the project has no supervisor', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: ENTRIES })))
     const props = pageProps('worker')
     const useRoster = ((selector: (value: CadreRosterState) => unknown) => selector({
@@ -171,8 +177,28 @@ describe('Cadre skill library', () => {
     })) as never
     render(<CadreSkillLibraryPage {...{ ...props, useRoster }} />)
     await screen.findByText('内置技能')
-    expect(screen.getByRole('button', { name: '安装技能' }).hasAttribute('disabled')).toBe(true)
-    expect(screen.getByText('当前项目部没有主管，无法安装技能；请联系主管。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '安装技能' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('shows a readable prompt when the session has no project roster membership', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: ENTRIES })))
+    const props = pageProps('worker')
+    render(<CadreSkillLibraryPage {...{ ...props, projectOfSession: () => undefined }} />)
+    expect(screen.getByText('当前会话不属于任何项目部或花名册，无法管理技能。')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '安装技能' })).toBeNull()
+  })
+
+  it('requires confirmation before deleting a skill', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (requestUrl(input).endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      return json({ ok: true, result: { removed: true } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<CadreSkillLibraryPage {...pageProps()} />)
+    await screen.findByText('员工技能')
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(false)
   })
 
   it('localizes built-in descriptions in English', async () => {
