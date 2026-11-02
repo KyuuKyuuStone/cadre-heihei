@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { Config as FileSearchConfig } from '@deepseek-ai/dsh-tool-fs-search'
 import { describe, expect, it } from 'vitest'
 
 const preset = (name: string): string =>
@@ -61,5 +62,11 @@ describe('shipped agent presets', () => {
     expect(cadreApp).toContain("name: '@deepseek-ai/dsh-host-session-skills/admin'")
     expect(cadreApp).toContain('sampleOverCapGlobResults: false')
     expect(preset('cadre')).not.toContain('host-session-skills/admin')
+  })
+
+  it('satisfies the required tool-fs-search config that broke the admin preset', () => {
+    expect(FileSearchConfig({ sampleOverCapGlobResults: false })).toMatchObject({
+      sampleOverCapGlobResults: false,
+    })
   })
 })
