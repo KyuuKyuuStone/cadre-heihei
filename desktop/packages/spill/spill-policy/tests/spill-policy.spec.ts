@@ -120,6 +120,40 @@ function textOf(content: ContentBlock[]): string {
   return content.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text').map(b => b.text).join('')
 }
 
+describe('same-turn duplicate tool results', () => {
+  it('replaces a repeated tool/target/output with a duplicate reference', async () => {
+    const { ctx } = await setup({ maxInlineTokens: 64 })
+    ctx.tools.register(textTool('echo', 'same output'))
+    const first = await ctx.tools.execute(exec('echo'))
+    const second = await ctx.tools.execute(exec('echo'))
+    expect(textOf(first.content)).toBe('same output')
+    expect(textOf(second.content)).toMatch(/duplicate of .*same echo target this turn/u)
+    expect(second.isError).toBe(false)
+  })
+
+  it('does not merge the same tool for a different target', async () => {
+    const { ctx } = await setup({ maxInlineTokens: 64 })
+    ctx.tools.register(textTool('echo', 'same output'))
+    const first = await ctx.tools.execute({ ...exec('echo'), arguments: { target: 'a' } } as ToolExecution)
+    const second = await ctx.tools.execute({ ...exec('echo'), arguments: { target: 'b' } } as ToolExecution)
+    expect(textOf(first.content)).toBe('same output')
+    expect(textOf(second.content)).toBe('same output')
+  })
+
+  it('keeps failed tool output (error code) untouched', async () => {
+    const { ctx } = await setup({ maxInlineTokens: 64 })
+    ctx.tools.register(defineContentToolFixture({
+      name: 'fails', description: 'fails', parameters: {},
+      async execute(): Promise<ContentBlock[]> { throw new Error('E_PATH_DENIED') },
+    }))
+    const first = await ctx.tools.execute(exec('fails'))
+    const second = await ctx.tools.execute(exec('fails'))
+    expect(first.isError).toBe(true)
+    expect(second.isError).toBe(true)
+    expect(textOf(second.content)).toContain('E_PATH_DENIED')
+  })
+})
+
 describe('disabled mode', () => {
   it('registers no post-execute listener when maxInlineTokens is omitted', async () => {
     const { ctx, spill } = await setup({})

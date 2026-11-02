@@ -6,6 +6,7 @@
  * @module @deepseek-ai/dsh-spill-policy
  */
 import type { Context } from '@deepseek-ai/cordis'
+import { createHash } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, ImageBlock, LlmImageRequestPrice, ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -52,6 +53,12 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error(`spill-policy: maxInlineTokens must be a non-negative integer (got ${cap})`)
   }
   const maxTokens = cap
+  // Same-turn duplicate suppression is keyed per session and cleared on the
+  // next user message, so a later turn may legitimately re-read the same target.
+  const seenBySession = new Map<string, Map<string, ToolCallId>>()
+  ctx.on('session/event', (session, event) => {
+    if (event.type === 'user/message') seenBySession.delete(session.id)
+  })
 
   /** Price actual request images and their accompanying descriptor text. */
   function pricing(exec: ToolExecution, images: ImageBlock[]): (block: RetainableBlock) => number {
@@ -130,10 +137,37 @@ export function apply(ctx: Context, config: Config): void {
     }
   }
 
+  /** Replace a repeated tool result with a reference to the first call this turn. */
+  function duplicate(
+    exec: ToolExecution, content: readonly ContentBlock[],
+  ): ContentBlock[] | undefined {
+    // PTC sub-calls have their own bounded dispatch queue; collapsing them
+    // would change the log/backpressure contract.
+    if (exec.parent !== undefined || content.some(block => block.type !== 'text')) return undefined
+    const owner = (exec as SpillPolicyExec).agent?.session.header.id
+    if (owner === undefined) return undefined
+    const text = content.map(block => block.type === 'text' ? block.text : '').join('')
+    const hash = createHash('sha256').update(text).digest('hex')
+    const key = `${exec.name}:${JSON.stringify(exec.arguments)}:${hash}`
+    const seen = seenBySession.get(owner) ?? new Map<string, ToolCallId>()
+    const previous = seen.get(key)
+    if (previous !== undefined) {
+      return [{ type: 'text', text: `[duplicate of ${previous}; same ${exec.name} target this turn]` }]
+    }
+    seen.set(key, exec.callId)
+    seenBySession.set(owner, seen)
+    return undefined
+  }
+
   ctx.on('tools/post-execute', async (exec, result, next): Promise<PostToolDecision> => {
     const decision = await next()
-    if (decision.kind !== 'accept' || Object.hasOwn(decision, 'value') || exec.name === 'read') return decision
+    if (decision.kind !== 'accept' || Object.hasOwn(decision, 'value')) return decision
     const content = decision.content ?? result.content
+    if (result.isError !== true) {
+      const repeated = duplicate(exec, content)
+      if (repeated !== undefined) return { kind: 'accept', content: repeated }
+    }
+    if (exec.name === 'read') return decision
     const hasImages = content.some(block => block.type === 'image')
     // Text-only PTC bindings retain their asynchronous log-only spill path.
     if (exec.parent !== undefined && !hasImages) return decision
