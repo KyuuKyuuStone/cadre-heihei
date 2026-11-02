@@ -34,6 +34,7 @@ import {
 } from './CadreSkillLibrary.tsx'
 import { CadreSkillPlanCard, type CadreSkillPlanInjected } from './CadreSkillPlanCard.tsx'
 import { applySkillPlan, SkillAdminError } from './CadreSkillAdmin.ts'
+import { CadreClaimBadge } from './CadreClaimBadge.tsx'
 import { isInternalWorkspaceTitle } from './workspace-filter.ts'
 import {
   CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
@@ -613,6 +614,17 @@ export function apply(ctx: ClientContext): void {
       },
     }),
   }, CadreSkillPlanCard as never))
+  ctx.slots.inject('conversation.chat.assistant-actions' as never, () => ctx.slots.register({
+    name: 'conversation.chat.assistant-actions',
+    id: 'cadre-claim-badge',
+    order: 60,
+    locale: NS,
+    inject: (sessionId: string) => ({
+      projectId: projectOfSession(sessionId),
+      sessionId,
+      hooks: { roster },
+    }),
+  } as never, CadreClaimBadge as never))
 
   const createRosterEntry = async (input: {
     role: 'supervisor' | 'worker'

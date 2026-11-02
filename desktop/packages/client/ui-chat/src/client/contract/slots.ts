@@ -62,6 +62,8 @@ export interface TurnTailOwnerProps {
 /** Owner currency of finalized-assistant actions. */
 export interface AssistantActionOwnerProps {
   messageId: MessageId
+  /** Durable assistant message seq, when the closing node exposes one. */
+  seq?: number
 }
 
 /** Stable quota failure codes retained in the Session log; both raise the frame-wide notice. */
