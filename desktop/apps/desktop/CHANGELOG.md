@@ -2,6 +2,7 @@
 
 ## 1.1.4
 
+- **安全信息只警告不阻断**：缺 license/hash/未知来源时 install-package/install-any/skill_install 照常安装，返回 `installed:true` + `warnings` 并写入审计；仅非法包名/路径穿越/非 HTTPS/确认恶意等硬风险拒绝
 - **安装跳转普通对话**：技能安装不再单独弹窗/面板，点击安装进入普通技能管理员对话，由对话完成查/装/建
 - **安装对话免选项目**：打开安装对话自动创建/绑定专用内部工作区（`技能管理员工作区（内部）`），对话页隐藏项目选择 chip 并自动选中内部工作区，不弹项目选择；工作区不出现在项目部列表
 - **技能管理员工作目录**：创建 admin session 时自动 `mkdir -p` 默认工作目录 `%USERPROFILE%\.dsh\cadre-skill-admin\workspace`，返回 `cwd`/`workspaceId`，已存在复用
