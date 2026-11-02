@@ -23,6 +23,7 @@ import {
   testEmail,
 } from '@deepseek-ai/dsh-cadre-email-notify'
 import { IdleReminderService } from './idle-reminder.ts'
+import { ClaimVerifier } from './claims.ts'
 import { activityFrom, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
@@ -175,6 +176,24 @@ class LedgerReader {
     }))
   }
 
+  task(taskId: string): WatchTask | undefined {
+    const row = this.#db.prepare(`SELECT task_id, project_id, title, status, assignee_session_id,
+      dispatcher_session_id, version, updated_at, created_at
+      FROM tasks WHERE task_id = ? LIMIT 1`).get(taskId) as Record<string, unknown> | undefined
+    if (row === undefined) return undefined
+    return {
+      taskId: String(row.task_id),
+      projectId: String(row.project_id),
+      title: String(row.title),
+      status: String(row.status),
+      assigneeSessionId: String(row.assignee_session_id),
+      dispatcherSessionId: String(row.dispatcher_session_id),
+      version: Number(row.version ?? 0),
+      updatedAt: String(row.updated_at),
+      windowStartAt: Date.parse(String(row.created_at ?? row.updated_at)) || Date.now(),
+    }
+  }
+
   taskStats(projectId: string): { delivered: number; verified: number; failed: number } {
     const rows = this.#db.prepare(
       'SELECT status, COUNT(*) AS count FROM tasks WHERE project_id = ? GROUP BY status',
@@ -288,9 +307,26 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     : ctx.on('session/event', (session, event) => {
       idleReminder.handle(session.id, event as { type?: unknown; data?: unknown })
     })
+  const claims = new ClaimVerifier({
+    projectOf,
+    ledger: {
+      task: taskId => ledger.task(taskId),
+      members: projectId => ledger.members(projectId),
+    },
+    appendAudit: record => {
+      appendFileSync(`${databasePath}.plugin.log`, `${JSON.stringify(record)}\n`, 'utf8')
+    },
+  })
+  const disposeClaimEvents = ctx.on === undefined
+    ? undefined
+    : ctx.on('session/event', (session, event) => {
+      claims.handle(session.id, event as { type?: unknown; seq?: unknown; data?: unknown })
+    })
   ctx.effect(() => () => {
     disposeIdleEvents?.()
+    disposeClaimEvents?.()
     idleReminder.dispose()
+    claims.dispose()
   })
 
   const ports: StallPorts = {
@@ -609,6 +645,29 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           }
         },
       }), 'host-governance: /cadre/stall/snapshot')
+      web.effect(() => web.webServer.register({
+        kind: 'exact',
+        path: '/cadre/claims/snapshot',
+        handler: async (req, res) => {
+          if (req.method !== 'POST') return reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 POST' })
+          const admission = web.connection.admit(req)
+          if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
+            return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
+          }
+          try {
+            const body = await readBody(req) as Record<string, unknown>
+            if (typeof body.projectId !== 'string' || typeof body.actorSessionId !== 'string') {
+              return reply(res, 400, { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId/actorSessionId 必填' })
+            }
+            if (projectOf(body.actorSessionId) !== body.projectId) {
+              return reply(res, 403, { ok: false, code: 'PERMISSION_DENIED', message: '只有本项目在册 supervisor 可以查看派活核实' })
+            }
+            reply(res, 200, { claims: claims.snapshot(body.projectId) })
+          } catch (error) {
+            reply(res, 500, { ok: false, code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      }), 'host-governance: /cadre/claims/snapshot')
 
       const emailRoute = (
         path: string,
