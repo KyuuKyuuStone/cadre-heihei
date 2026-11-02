@@ -10,7 +10,6 @@ const REQUEST: CadreEmailRequest = { sessionId: 'sup', projectId: 'p1', label: '
 const VIEW = {
   enabled: true,
   provider: 'sendgrid',
-  verifiedDomains: [],
   from: { email: 'cadre@example.com', name: 'Cadre' },
   recipients: ['owner@example.com'],
   apiKeyEnv: 'SENDGRID_KEY',
@@ -178,7 +177,7 @@ describe('Cadre email settings', () => {
       .toBe('https://cloud.tencent.com/product/ses')
   })
 
-  it('switches to Resend, prefills its key env, and saves provider/domains', async () => {
+  it('switches to Resend, prefills its key env, and saves provider without domains', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
       return json({ ok: true, result: { ...VIEW, provider: 'resend', apiKeyEnv: 'RESEND_API_KEY', verifiedDomains: ['example.com'] } })
@@ -192,18 +191,17 @@ describe('Cadre email settings', () => {
     await screen.findByText('已检测到环境变量')
     fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
     expect(screen.getByDisplayValue('RESEND_API_KEY')).toBeTruthy()
-    expect(screen.getByText(/无需备案，但必须验证域名/)).toBeTruthy()
-    expect(screen.getByText(/不能填 QQ\/免费邮箱/)).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('已验证域名'), { target: { value: 'example.com' } })
+    expect(screen.getByText(/先在 Resend 验证域名/)).toBeTruthy()
+    expect(screen.getByText(/只能发到你的 Resend 注册邮箱/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
     const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
     expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
-      config: { provider: 'resend', apiKeyEnv: 'RESEND_API_KEY', verifiedDomains: ['example.com'] },
+      config: { provider: 'resend', apiKeyEnv: 'RESEND_API_KEY' },
     })
   })
 
-  it('rejects a Resend From address outside onboarding or a verified domain', async () => {
+  it('lets the backend decide Resend From/recipient restrictions', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: VIEW })))
     render(<CadreEmailSettingsDialog {...({
       useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
@@ -212,10 +210,8 @@ describe('Cadre email settings', () => {
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
     await screen.findByText('已检测到环境变量')
     fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
-    const from = screen.getByDisplayValue('cadre@example.com')
-    fireEvent.change(from, { target: { value: 'cadre@qq.com' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(screen.getByRole('alert').textContent).toContain('不能使用 QQ 等免费邮箱')
+    await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
   })
 
   it('maps the Resend unverified-domain error to readable copy', async () => {
@@ -230,9 +226,24 @@ describe('Cadre email settings', () => {
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
     await screen.findByText('已检测到环境变量')
     fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
-    fireEvent.change(screen.getByLabelText('已验证域名'), { target: { value: 'example.com' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(await screen.findByText(/Resend 只接受 onboarding@resend.dev/)).toBeTruthy()
+    expect(await screen.findByText(/发件地址未通过 Resend 验证/)).toBeTruthy()
+  })
+
+  it('maps the Resend recipient-restricted error to readable copy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
+      return json({ ok: false, code: 'EMAIL_RECIPIENT_RESTRICTED', message: 'restricted' })
+    }))
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    await screen.findByText('已检测到环境变量')
+    fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/只能发到你的 Resend 注册邮箱/)).toBeTruthy()
   })
 
   it('keeps save/test/run actions in the fixed footer outside the scroll area', async () => {

@@ -20,7 +20,6 @@ export interface CadreEmailConfigView {
   readonly from: { readonly email: string; readonly name?: string }
   readonly recipients: readonly string[]
   readonly apiKeyEnv?: string
-  readonly verifiedDomains?: readonly string[]
   readonly dryRun?: boolean
   readonly minIntervalMs?: number
   readonly hasKey: boolean
@@ -81,6 +80,7 @@ function emailErrorText(cause: unknown, t: PropsLocale<'sidebar'>['t']): string 
   const code = /^(EMAIL_[A-Z_]+) ·/u.exec(message)?.[1]
   switch (code) {
     case 'EMAIL_FROM_NOT_VERIFIED': return t('email.error.fromNotVerified')
+    case 'EMAIL_RECIPIENT_RESTRICTED': return t('email.error.recipientRestricted')
     case 'EMAIL_MISSING_API_KEY': return t('email.error.missingKey')
     case 'EMAIL_AUTH_FAILED': return t('email.error.authFailed')
     case 'EMAIL_CONFIG_INVALID': return t('email.error.configInvalid')
@@ -93,6 +93,7 @@ function resultText(result: EmailResult, t: PropsLocale<'sidebar'>['t']): string
     return t('email.result.ok', { status: result.status ?? 'sent' })
   }
   if (result.code === 'EMAIL_FROM_NOT_VERIFIED') return t('email.error.fromNotVerified')
+  if (result.code === 'EMAIL_RECIPIENT_RESTRICTED') return t('email.error.recipientRestricted')
   if (result.code === 'EMAIL_MISSING_API_KEY') return t('email.error.missingKey')
   return t('email.result.failed', { code: result.code ?? 'ERROR', message: result.message ?? '' })
 }
@@ -107,7 +108,6 @@ const DEFAULT_CONFIG: CadreEmailConfigView = {
   from: { email: '' },
   recipients: [],
   apiKeyEnv: 'SENDGRID_API_KEY',
-  verifiedDomains: [],
   dryRun: false,
   minIntervalMs: 60_000,
   hasKey: false,
@@ -170,7 +170,6 @@ function EmailForm({
   const [recipients, setRecipients] = useState<string[]>([])
   const [recipient, setRecipient] = useState('')
   const [apiKeyEnv, setApiKeyEnv] = useState('')
-  const [verifiedDomains, setVerifiedDomains] = useState('')
   const [dryRun, setDryRun] = useState(false)
   const [minInterval, setMinInterval] = useState('60000')
   const [busy, setBusy] = useState(false)
@@ -190,7 +189,6 @@ function EmailForm({
         setFromName(next.from.name ?? '')
         setRecipients([...next.recipients])
         setApiKeyEnv(next.apiKeyEnv ?? (next.provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY'))
-        setVerifiedDomains((next.verifiedDomains ?? []).join(', '))
         setDryRun(next.dryRun === true)
         setMinInterval(String(next.minIntervalMs ?? 60_000))
       })
@@ -207,7 +205,6 @@ function EmailForm({
           setFromName(DEFAULT_CONFIG.from.name ?? '')
           setRecipients([...DEFAULT_CONFIG.recipients])
           setApiKeyEnv(DEFAULT_CONFIG.apiKeyEnv ?? 'SENDGRID_API_KEY')
-          setVerifiedDomains('')
           setDryRun(DEFAULT_CONFIG.dryRun === true)
           setMinInterval(String(DEFAULT_CONFIG.minIntervalMs ?? 60_000))
           return
@@ -238,19 +235,11 @@ function EmailForm({
     setError(null)
   }
 
-  const domains = verifiedDomains.split(',').map(item => item.trim().toLowerCase()).filter(item => item !== '')
   const validate = (): string | null => {
     if (!validEmail(fromEmail.trim())) return t('email.error.from')
     if (recipients.length === 0) return t('email.error.noRecipients')
     if (!/^[A-Z_][A-Z0-9_]*$/u.test(apiKeyEnv.trim())) return t('email.error.env')
     if (!/^\d+$/u.test(minInterval.trim())) return t('email.error.interval')
-    if (provider === 'resend') {
-      const address = fromEmail.trim().toLowerCase()
-      const domain = address.split('@')[1] ?? ''
-      if (address !== 'onboarding@resend.dev' && !domains.includes(domain)) {
-        return t('email.error.fromNotVerified')
-      }
-    }
     return null
   }
 
@@ -273,7 +262,6 @@ function EmailForm({
           from: { email: fromEmail.trim(), ...(fromName.trim() === '' ? {} : { name: fromName.trim() }) },
           recipients,
           apiKeyEnv: apiKeyEnv.trim(),
-          ...(provider === 'resend' && domains.length > 0 ? { verifiedDomains: domains } : {}),
           dryRun,
           minIntervalMs: Number(minInterval),
         },
@@ -336,12 +324,6 @@ function EmailForm({
         <p className={css.hint} data-email-provider-hint>
           {t(provider === 'resend' ? 'email.provider.resendHint' : 'email.provider.sendgridHint')}
         </p>
-        {provider === 'resend' && (
-          <label className={css.label}>{t('email.verifiedDomains')}
-            <Input value={verifiedDomains} disabled={busy} placeholder={t('email.verifiedDomainsPlaceholder')}
-              onChange={(event) => { setVerifiedDomains(event.target.value) }} />
-          </label>
-        )}
         <label className={css.label}>{t('email.fromEmail')}
           <Input value={fromEmail} disabled={busy} onChange={(event) => { setFromEmail(event.target.value) }} />
         </label>
