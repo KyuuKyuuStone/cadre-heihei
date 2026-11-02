@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  TASK_PACKET_LIMITS, TOKEN_BUDGET, ambiguityAction, buildEmployeeContext, estimateTokens,
-  measureTokenBudget, normalizeTaskPacket,
+  TASK_PACKET_LIMITS, TOKEN_BUDGET, TokenBudgetController, ambiguityAction, buildEmployeeContext,
+  compactTaskPacket, estimateTokens, measureTokenBudget, normalizeTaskPacket,
 } from '../src/task-packet.ts'
 
 describe('task packet', () => {
@@ -85,5 +85,56 @@ describe('token budget', () => {
     })
     expect(quiet.warnings).toEqual([])
     expect(estimateTokens('x'.repeat(100))).toBe(50)
+  })
+
+  it('compresses once at 80%, audits once, and never creates a user decision', () => {
+    const { packet } = normalizeTaskPacket({
+      goal: 'g', constraints: ['a', 'b', 'c', 'd'], fileRefs: [{ path: 'src/a.ts', lines: '1-2', summary: 's' }],
+      acceptance: ['验收'], forbidden: ['禁止'], openQuestions: ['q1', 'q2', 'q3', 'q4'],
+    }, { title: 't', body: 'b' })
+    const audits: unknown[] = []
+    const controller = new TokenBudgetController({ audit: record => { audits.push(record) } })
+    const metric = measureTokenBudget({
+      taskId: 't1', sessionId: 's1', estimatedTokens: 100,
+      taskTotal: TOKEN_BUDGET.task * 0.8, roundTotal: 100,
+    })
+    const first = controller.evaluate(metric, packet)
+    expect(first.audit).toMatchObject({ threshold: 'task-80%', action: 'compress+continue' })
+    expect(first.packet.constraints).toHaveLength(3)
+    expect(first.packet.fileRefs).toEqual([{ path: 'src/a.ts' }])
+    expect(first.packet.acceptance).toEqual(['验收'])
+    expect(first.packet.forbidden).toEqual(['禁止'])
+    expect(audits).toHaveLength(1)
+    const repeat = controller.evaluate(metric, packet)
+    expect(repeat.repeated).toBe(true)
+    expect(audits).toHaveLength(1)
+    const quietMetric = measureTokenBudget({ taskId: 't1', sessionId: 's1', estimatedTokens: 100, taskTotal: 23_999, roundTotal: 100 })
+    expect(quietMetric.warnings).toEqual([])
+    expect(controller.evaluate(quietMetric, packet).audit).toBeUndefined()
+    expect(compactTaskPacket(packet).removed).toBeGreaterThan(0)
+  })
+
+  it('notifies internally on a severe overrun and falls back to the original packet on compact failure', () => {
+    const { packet } = normalizeTaskPacket({ goal: 'g', acceptance: ['a'] }, { title: 't', body: 'b' })
+    const audits: unknown[] = []
+    const notices: unknown[] = []
+    const severe = new TokenBudgetController({ audit: record => { audits.push(record) }, notify: record => { notices.push(record) } })
+    severe.evaluate(measureTokenBudget({
+      taskId: 't2', sessionId: 's1', estimatedTokens: 100,
+      taskTotal: TOKEN_BUDGET.task, roundTotal: 100,
+    }), packet)
+    expect(notices).toHaveLength(1)
+    expect(audits).toHaveLength(1)
+
+    const failed = new TokenBudgetController({
+      audit: record => { audits.push(record) },
+      compact: () => { throw new Error('compact failed') },
+    })
+    const fallback = failed.evaluate(measureTokenBudget({
+      taskId: 't3', sessionId: 's1', estimatedTokens: 100,
+      taskTotal: TOKEN_BUDGET.task * 0.8, roundTotal: 100,
+    }), packet)
+    expect(fallback.packet).toBe(packet)
+    expect(fallback.audit).toMatchObject({ action: 'none', reason: 'compression-failed' })
   })
 })

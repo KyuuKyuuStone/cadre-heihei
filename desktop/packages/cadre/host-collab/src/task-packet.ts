@@ -63,6 +63,105 @@ export const TOKEN_BUDGET = { task: 30_000, round: 8_000, warnRatio: 0.8 } as co
 /** Advisory warning raised at 80% of a task or round ceiling. */
 export type TokenWarning = 'task-80%' | 'round-80%'
 
+/** Internal action taken at 80%; no user-facing decision is created. */
+export type TokenAction = 'none' | 'compress+continue' | 'compress+notify'
+
+/** One internal audit row for an 80% action. */
+export interface TokenDecisionAudit {
+  readonly taskId: string
+  readonly sessionId: string
+  readonly estimatedTokens: number
+  readonly threshold: string
+  readonly action: TokenAction
+  readonly severe?: boolean
+  readonly repeated?: boolean
+  readonly reason?: string
+}
+
+/** Result of applying the automatic 80% strategy. */
+export interface TokenDecision {
+  readonly packet: TaskPacket
+  readonly audit?: TokenDecisionAudit
+  readonly repeated: boolean
+}
+
+/**
+ * Remove optional context detail while preserving goal, acceptance, forbidden
+ * and open questions. Used automatically at the 80% threshold.
+ * @param packet - Normalized packet.
+ * @returns Compacted packet plus the number of removed detail items.
+ */
+export function compactTaskPacket(packet: TaskPacket): { packet: TaskPacket; removed: number } {
+  const constraints = packet.constraints.slice(0, 3)
+  const fileRefs = packet.fileRefs.map(ref => ({ path: ref.path }))
+  const openQuestions = packet.openQuestions.slice(0, 3)
+  const removed = packet.constraints.length - constraints.length
+    + packet.openQuestions.length - openQuestions.length
+    + packet.fileRefs.reduce((count, ref) => count + (ref.lines === undefined ? 0 : 1) + (ref.summary === undefined ? 0 : 1), 0)
+  return { packet: { ...packet, constraints, fileRefs, openQuestions }, removed }
+}
+
+/**
+ * Applies the automatic 80% strategy: compress once, continue, and write one
+ * internal audit row. It never asks a user or blocks the turn.
+ */
+export class TokenBudgetController {
+  readonly #audit: (record: TokenDecisionAudit) => void
+  readonly #notify: ((record: TokenDecisionAudit) => void) | undefined
+  readonly #compact: (packet: TaskPacket) => { packet: TaskPacket; removed: number }
+  readonly #seen = new Set<string>()
+
+  constructor(options: {
+    readonly audit: (record: TokenDecisionAudit) => void
+    readonly notify?: (record: TokenDecisionAudit) => void
+    readonly compact?: (packet: TaskPacket) => { packet: TaskPacket; removed: number }
+  }) {
+    this.#audit = options.audit
+    this.#notify = options.notify
+    this.#compact = options.compact ?? compactTaskPacket
+  }
+
+  /**
+   * Decide once per task/threshold set. Unknown failures fall back to the
+   * uncompressed packet and continue.
+   * @param metric - Budget metric from {@link measureTokenBudget}.
+   * @param packet - Original normalized packet.
+   * @returns packet to use and the audit row, if any.
+   */
+  evaluate(metric: TokenMetric, packet: TaskPacket): TokenDecision {
+    if (metric.warnings.length === 0) return { packet, repeated: false }
+    const threshold = metric.warnings.join('+')
+    const key = `${metric.taskId}:${threshold}`
+    if (this.#seen.has(key)) {
+      return { packet, repeated: true, audit: { ...metric, threshold, action: 'none', repeated: true } }
+    }
+    this.#seen.add(key)
+    const severe = metric.taskTotal >= TOKEN_BUDGET.task || metric.roundTotal >= TOKEN_BUDGET.round
+    let compacted = packet
+    let removed = 0
+    try {
+      const result = this.#compact(packet)
+      compacted = result.packet
+      removed = result.removed
+    } catch {
+      const audit: TokenDecisionAudit = {
+        taskId: metric.taskId, sessionId: metric.sessionId, estimatedTokens: metric.estimatedTokens,
+        threshold, action: 'none', reason: 'compression-failed',
+      }
+      this.#audit(audit)
+      return { packet, repeated: false, audit }
+    }
+    const action: TokenAction = severe ? 'compress+notify' : 'compress+continue'
+    const audit: TokenDecisionAudit = {
+      taskId: metric.taskId, sessionId: metric.sessionId, estimatedTokens: metric.estimatedTokens,
+      threshold, action, ...(severe ? { severe: true } : {}), ...(removed === 0 ? { reason: 'no-detail' } : {}),
+    }
+    this.#audit(audit)
+    if (severe) this.#notify?.(audit)
+    return { packet: compacted, repeated: false, audit }
+  }
+}
+
 /** Ambiguity waiting policy; callers may wire reminders/escations later. */
 export const AMBIGUITY_POLICY = { remindAfterMs: 600_000, escalateAfterMs: 1_800_000 } as const
 
@@ -85,6 +184,8 @@ export interface TokenMetric {
   readonly taskId: string
   readonly sessionId: string
   readonly estimatedTokens: number
+  readonly taskTotal: number
+  readonly roundTotal: number
   readonly warnings: readonly TokenWarning[]
 }
 
@@ -187,6 +288,8 @@ export function measureTokenBudget(input: {
     taskId: input.taskId,
     sessionId: input.sessionId,
     estimatedTokens: input.estimatedTokens,
+    taskTotal,
+    roundTotal,
     warnings,
   }
 }

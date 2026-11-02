@@ -18,7 +18,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  buildEmployeeContext, estimateTokens, measureTokenBudget, normalizeTaskPacket,
+  buildEmployeeContext, estimateTokens, measureTokenBudget, normalizeTaskPacket, TokenBudgetController,
   type TaskPacketInput,
 } from './task-packet.ts'
 import { appendFileSync } from 'node:fs'
@@ -1055,6 +1055,17 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     return
   }
   const ledger = new Ledger(databasePath)
+  const tokenController = new TokenBudgetController({
+    audit: record => {
+      appendFileSync(`${databasePath}.plugin.log`, `${JSON.stringify({
+        at: new Date().toISOString(), kind: 'token-budget', ...record,
+      })}\n`, 'utf8')
+    },
+    notify: record => {
+      // Severe budget overrun is an internal signal only; it never blocks a turn.
+      console.error(`cadre-collab: token budget severe task=${record.taskId} action=${record.action}`)
+    },
+  })
   const controller = ctx.sessionController
   const questionRouter = new QuestionRouter({
     member: sessionId => ledger.member(sessionId),
@@ -1245,8 +1256,14 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         return { ok: false, kind: 'invalid-due-at', reason: `dueAt 不是合法时间：${item.dueAt}` }
       }
       const assignee = ledger.resolveAssignee(projectId, item.employee)
+      const taskId = randomUUID()
       const normalized = normalizeTaskPacket(item.packet, { title: item.title, body: item.body })
-      const context = buildEmployeeContext(normalized.packet)
+      const initialContext = buildEmployeeContext(normalized.packet)
+      const initialMetric = measureTokenBudget({
+        taskId, sessionId: assignee.sessionId, estimatedTokens: estimateTokens(initialContext),
+      })
+      const decision = tokenController.evaluate(initialMetric, normalized.packet)
+      const context = buildEmployeeContext(decision.packet)
       const fingerprint = createHash('sha256')
         .update([dispatcher, assignee.sessionId, item.title, item.body, item.dueAt, JSON.stringify(normalized.packet)].join('\n')).digest('hex')
       const idempotencyKey = `dispatch:${fingerprint}`
@@ -1260,14 +1277,10 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           estimatedTokens: 0, warnings: [],
         } }
       }
-      const taskId = randomUUID()
       const messageId = randomUUID()
       const metric = measureTokenBudget({
         taskId, sessionId: assignee.sessionId, estimatedTokens: estimateTokens(context),
       })
-      if (metric.warnings.length > 0) {
-        console.warn(`cadre-collab: token budget advisory task=${taskId} warnings=${metric.warnings.join(',')}`)
-      }
       ledger.beginDispatch(projectId, { taskId, title: item.title, body: item.body, dueAt: item.dueAt,
         dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId })
       try {
