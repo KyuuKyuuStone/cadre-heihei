@@ -7,9 +7,14 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { EmailConfig } from './types.ts'
 
-/** Reject an address that cannot be used as a SendGrid recipient. */
+/** Reject an address that cannot be used as a provider recipient. */
 function isEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value)
+}
+
+/** Default environment variable for a provider. */
+function defaultKeyEnv(provider: 'sendgrid' | 'resend'): string {
+  return provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY'
 }
 
 /**
@@ -28,6 +33,10 @@ export function parseEmailConfig(value: unknown): EmailConfig {
     throw new Error('EMAIL_SECRET_IN_CONFIG: use apiKeyEnv, never store the key in config')
   }
   if (typeof source.enabled !== 'boolean') throw new Error('EMAIL_CONFIG_INVALID: enabled must be boolean')
+  const provider = source.provider === undefined ? 'sendgrid' : source.provider
+  if (provider !== 'sendgrid' && provider !== 'resend') {
+    throw new Error('EMAIL_CONFIG_INVALID: provider must be sendgrid or resend')
+  }
   const from = source.from
   if (typeof from !== 'object' || from === null) throw new Error('EMAIL_CONFIG_INVALID: from is required')
   const fromRecord = from as Record<string, unknown>
@@ -46,8 +55,16 @@ export function parseEmailConfig(value: unknown): EmailConfig {
       throw new Error(`EMAIL_CONFIG_INVALID: recipient ${String(recipient)} is not an address`)
     }
   }
-  if (typeof source.apiKeyEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/u.test(source.apiKeyEnv)) {
+  if (source.apiKeyEnv !== undefined && (typeof source.apiKeyEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/u.test(source.apiKeyEnv))) {
     throw new Error('EMAIL_CONFIG_INVALID: apiKeyEnv must be an environment variable name')
+  }
+  const apiKeyEnv = typeof source.apiKeyEnv === 'string' ? source.apiKeyEnv : defaultKeyEnv(provider)
+  const verifiedDomains = source.verifiedDomains
+  if (verifiedDomains !== undefined) {
+    if (!Array.isArray(verifiedDomains) || verifiedDomains.some(domain =>
+      typeof domain !== 'string' || !/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/u.test(domain))) {
+      throw new Error('EMAIL_CONFIG_INVALID: verifiedDomains must be an array of domains')
+    }
   }
   const minIntervalMs = source.minIntervalMs
   if (minIntervalMs !== undefined && (typeof minIntervalMs !== 'number' || !Number.isFinite(minIntervalMs) || minIntervalMs < 0)) {
@@ -55,9 +72,11 @@ export function parseEmailConfig(value: unknown): EmailConfig {
   }
   return {
     enabled: source.enabled,
+    provider,
     from: { email: fromRecord.email, ...(fromRecord.name === undefined ? {} : { name: fromRecord.name }) },
     recipients: recipients as string[],
-    apiKeyEnv: source.apiKeyEnv,
+    apiKeyEnv,
+    ...(verifiedDomains === undefined ? {} : { verifiedDomains: verifiedDomains as string[] }),
     ...(source.dryRun === true ? { dryRun: true } : {}),
     ...(minIntervalMs === undefined ? {} : { minIntervalMs }),
   }

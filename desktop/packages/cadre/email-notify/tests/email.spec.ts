@@ -6,6 +6,7 @@ import { loadEmailConfig, parseEmailConfig } from '../src/config.ts'
 import { CadreEmailNotifier, renderEmail } from '../src/notifier.ts'
 import { dryRunEmail, getEmailConfigView, setEmailConfig, testEmail } from '../src/ipc.ts'
 import { buildSendGridBody, redactSecret, sendWithSendGrid } from '../src/sendgrid.ts'
+import { buildResendBody, sendWithResend } from '../src/resend.ts'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -143,6 +144,7 @@ describe('dedupe, rate limit and failures', () => {
     const dir = workspace()
     expect(getEmailConfigView(dir, 'p1')).toEqual({
       enabled: false,
+      provider: 'sendgrid',
       from: { email: '', name: '' },
       recipients: [],
       apiKeyEnv: 'SENDGRID_API_KEY',
@@ -202,5 +204,68 @@ describe('dedupe, rate limit and failures', () => {
     const notifier = new CadreEmailNotifier({ configDir: dir, env: {}, fetch: vi.fn() as never })
     expect(await dryRunEmail(notifier, 'p1')).toMatchObject({ ok: true, status: 'dry-run' })
     expect(await testEmail(notifier, 'p1')).toMatchObject({ ok: true, status: 'dry-run' })
+  })
+
+  it('defaults old configs to SendGrid and derives the provider env variable', () => {
+    const old = parseEmailConfig({
+      enabled: true, from: { email: 'a@b.com' }, recipients: ['c@d.com'], apiKeyEnv: 'SENDGRID_TEST_KEY',
+    })
+    expect(old).toMatchObject({ provider: 'sendgrid', apiKeyEnv: 'SENDGRID_TEST_KEY' })
+    const resend = parseEmailConfig({
+      enabled: true, provider: 'resend', from: { email: 'onboarding@resend.dev' }, recipients: ['c@d.com'],
+    })
+    expect(resend).toMatchObject({ provider: 'resend', apiKeyEnv: 'RESEND_API_KEY' })
+    expect(() => parseEmailConfig({
+      enabled: true, provider: 'smtp', from: { email: 'a@b.com' }, recipients: ['c@d.com'],
+    })).toThrow(/provider must be sendgrid or resend/)
+  })
+
+  it('builds the Resend body and rejects an undeclared From domain without a network call', async () => {
+    const message = { to: ['owner@example.com'], from: { email: 'cadre@example.com', name: 'Cadre' }, subject: 's', text: 't' }
+    expect(buildResendBody(message)).toEqual({
+      from: 'Cadre <cadre@example.com>', to: ['owner@example.com'], subject: 's', text: 't',
+    })
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => response(202))
+    const rejected = await sendWithResend({ apiKey: 're_secret', message, verifiedDomains: [], fetch: fetch as never })
+    expect(rejected).toMatchObject({ ok: false, code: 'EMAIL_FROM_NOT_VERIFIED' })
+    expect(fetch).not.toHaveBeenCalled()
+    const allowed = await sendWithResend({ apiKey: 're_secret', message, verifiedDomains: ['example.com'], fetch: fetch as never })
+    expect(allowed).toMatchObject({ ok: true, status: 'sent' })
+    const [url, init] = fetch.mock.calls[0]!
+    expect(url).toBe('https://api.resend.com/emails')
+    expect(init?.headers).toMatchObject({ authorization: 'Bearer re_secret' })
+    expect(JSON.parse(String(init?.body))).toMatchObject({ from: 'Cadre <cadre@example.com>', to: ['owner@example.com'] })
+  })
+
+  it('maps Resend auth/422 failures, retries transient errors, and redacts secrets', async () => {
+    const message = { to: ['c@d.com'], from: { email: 'cadre@example.com' }, subject: 's', text: 't' }
+    const auth = await sendWithResend({
+      apiKey: 're_secret', message, verifiedDomains: ['example.com'],
+      fetch: vi.fn(async () => response(401)) as never,
+    })
+    expect(auth).toMatchObject({ ok: false, code: 'EMAIL_AUTH_FAILED' })
+    const invalid = await sendWithResend({
+      apiKey: 're_secret', message, verifiedDomains: ['example.com'],
+      fetch: vi.fn(async () => new Response('from domain not verified', { status: 422 })) as never,
+    })
+    expect(invalid).toMatchObject({ ok: false, code: 'EMAIL_FROM_NOT_VERIFIED' })
+    const retry = vi.fn(async () => new Response('temporary', { status: 500 }))
+    const failed = await sendWithResend({
+      apiKey: 're_secret', message, verifiedDomains: ['example.com'], fetch: retry as never,
+    })
+    expect(failed).toMatchObject({ ok: false, code: 'EMAIL_HTTP_FAILED' })
+    expect(retry).toHaveBeenCalledTimes(2)
+    expect(JSON.stringify(failed)).not.toContain('re_secret')
+  })
+
+  it('uses Resend and RESEND_API_KEY in the notifier', async () => {
+    const dir = workspace()
+    writeConfig(dir, { provider: 'resend', apiKeyEnv: undefined, from: { email: 'cadre@example.com' }, verifiedDomains: ['example.com'] })
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => response(202))
+    const notifier = new CadreEmailNotifier({ configDir: dir, env: { RESEND_API_KEY: 're_key' }, fetch: fetch as never })
+    expect(await notifier.notify({
+      kind: 'escalation', projectId: 'p1', taskId: 't1', title: 'x', reason: 'y', episodeId: 'e1',
+    })).toMatchObject({ ok: true, status: 'sent' })
+    expect(fetch.mock.calls[0]?.[0]).toBe('https://api.resend.com/emails')
   })
 })

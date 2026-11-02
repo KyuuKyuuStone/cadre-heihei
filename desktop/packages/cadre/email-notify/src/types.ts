@@ -3,15 +3,22 @@
  * @module
  */
 
+/** Supported email transports. */
+export type EmailProvider = 'sendgrid' | 'resend'
+
 /** One project's email notification configuration (no secret value). */
 export interface EmailConfig {
   readonly enabled: boolean
-  /** Display name for the From header; the address comes from SendGrid. */
+  /** Transport provider; older configs default to SendGrid. */
+  readonly provider?: EmailProvider
+  /** Display name for the From header; the address comes from the provider. */
   readonly from: { readonly email: string; readonly name?: string }
   readonly recipients: readonly string[]
-  /** Environment variable that holds the SendGrid API key; never the key itself. */
-  readonly apiKeyEnv: string
-  /** When true, render but do not call SendGrid. */
+  /** Environment variable name; defaults from `provider` when omitted. */
+  readonly apiKeyEnv?: string
+  /** Resend domains declared verified; `onboarding@resend.dev` is always allowed. */
+  readonly verifiedDomains?: readonly string[]
+  /** When true, render but do not call the provider. */
   readonly dryRun?: boolean
   /** Minimum gap between two sends for the same project (milliseconds). */
   readonly minIntervalMs?: number
@@ -44,6 +51,8 @@ export interface EmailMessage {
   readonly from: { readonly email: string; readonly name?: string }
   readonly subject: string
   readonly text: string
+  /** Optional HTML alternative; omitted messages send text only. */
+  readonly html?: string
 }
 
 /** Result of one notification attempt; failures never throw into the caller. */
@@ -55,4 +64,11 @@ export type EmailResult =
 export interface SendGridRequest {
   readonly apiKey: string
   readonly message: EmailMessage
+}
+
+/** One Resend send input. */
+export interface ResendRequest {
+  readonly apiKey: string
+  readonly message: EmailMessage
+  readonly verifiedDomains: readonly string[]
 }

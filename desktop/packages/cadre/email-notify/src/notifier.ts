@@ -3,6 +3,7 @@
  * @module
  */
 import { loadEmailConfig } from './config.ts'
+import { sendWithResend } from './resend.ts'
 import { sendWithSendGrid } from './sendgrid.ts'
 import type { EmailConfig, EmailEvent, EmailMessage, EmailResult } from './types.ts'
 
@@ -111,15 +112,24 @@ export class CadreEmailNotifier {
     }
     const message = renderEmail(event, config)
     if (config.dryRun === true) return { ok: true, status: 'dry-run', message }
-    const apiKey = (this.#options.env ?? process.env)[config.apiKeyEnv]
+    const provider = config.provider ?? 'sendgrid'
+    const keyEnv = config.apiKeyEnv ?? (provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY')
+    const apiKey = (this.#options.env ?? process.env)[keyEnv]
     if (apiKey === undefined || apiKey.trim() === '') {
-      return { ok: false, code: 'EMAIL_MISSING_API_KEY', message: `环境变量 ${config.apiKeyEnv} 未设置` }
+      return { ok: false, code: 'EMAIL_MISSING_API_KEY', message: `环境变量 ${keyEnv} 未设置` }
     }
-    const result = await sendWithSendGrid({
-      apiKey,
-      message,
-      ...(this.#options.fetch === undefined ? {} : { fetch: this.#options.fetch }),
-    })
+    const result = provider === 'resend'
+      ? await sendWithResend({
+        apiKey,
+        message,
+        verifiedDomains: config.verifiedDomains ?? [],
+        ...(this.#options.fetch === undefined ? {} : { fetch: this.#options.fetch }),
+      })
+      : await sendWithSendGrid({
+        apiKey,
+        message,
+        ...(this.#options.fetch === undefined ? {} : { fetch: this.#options.fetch }),
+      })
     if (result.ok) {
       this.#sent.add(key)
       this.#lastSentAt.set(projectId, this.#now())

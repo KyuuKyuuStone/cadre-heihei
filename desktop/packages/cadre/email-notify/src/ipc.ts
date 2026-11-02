@@ -18,6 +18,7 @@ export type EmailConfigView = EmailConfig & {
 /** First-run config shown before a project has saved one. */
 export const DEFAULT_EMAIL_CONFIG_VIEW: EmailConfigView = {
   enabled: false,
+  provider: 'sendgrid',
   from: { email: '', name: '' },
   recipients: [],
   apiKeyEnv: 'SENDGRID_API_KEY',
@@ -49,7 +50,8 @@ export function getEmailConfigView(
 ): EmailConfigView {
   try {
     const config = loadEmailConfig(directory, projectId)
-    const hasKey = (env[config.apiKeyEnv] ?? '').trim() !== ''
+    const keyEnv = config.apiKeyEnv ?? (config.provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY')
+    const hasKey = (env[keyEnv] ?? '').trim() !== ''
     return { ...config, hasKey, configured: true }
   } catch (error) {
     if (isMissingConfig(error)) return DEFAULT_EMAIL_CONFIG_VIEW
@@ -80,7 +82,8 @@ export function setEmailConfig(
   const temporary = `${target}.tmp`
   writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`)
   renameSync(temporary, target)
-  const hasKey = (env[config.apiKeyEnv] ?? '').trim() !== ''
+  const keyEnv = config.apiKeyEnv ?? (config.provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY')
+  const hasKey = (env[keyEnv] ?? '').trim() !== ''
   return { ...config, hasKey, configured: true }
 }
 
