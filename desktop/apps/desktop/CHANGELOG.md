@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.5
+
+- **授权码保存回退**：安装版 Host 拿不到 Electron `safeStorage` 时，自动回退 Windows DPAPI（PowerShell `ProtectedData`，密码经 stdin），仍失败才报 `SECRET_STORE_UNAVAILABLE`
+- **兼容旧密文**：secret 文件保持原始密文格式；配置仍只存 `authCodeRef`，不存/不回传授权码
+- **诊断**：日志标明使用的 provider（safeStorage/DPAPI）及失败原因，不含授权码
+- 其余沿用 1.1.4
+
 ## 1.1.4
 
 - **邮件设置直填授权码**：SMTP 设置页直接输入邮箱授权码，不再要求填写环境变量名；保存后写入安全存储
