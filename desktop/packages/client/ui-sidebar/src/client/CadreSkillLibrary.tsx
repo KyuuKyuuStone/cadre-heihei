@@ -9,8 +9,7 @@ import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import {
   addSkillToLibrary,
   fetchSkillCatalog,
-  installSkillFromUrl,
-  installSkillPackage,
+  installSkillAny,
   removeSkillFromLibrary,
   type CadreSkillEntry,
 } from './CadreSkills.tsx'
@@ -86,6 +85,7 @@ export function CadreSkillLibraryPage({
   const [installBusy, setInstallBusy] = useState(false)
   const [installError, setInstallError] = useState<string | null>(null)
   const [installResult, setInstallResult] = useState<string | null>(null)
+  const [installUnsupported, setInstallUnsupported] = useState(false)
 
   const load = useCallback(async () => {
     if (actor === undefined || projectId === undefined) return
@@ -161,16 +161,21 @@ export function CadreSkillLibraryPage({
     setInstallBusy(true)
     setInstallError(null)
     setInstallResult(null)
+    setInstallUnsupported(false)
     try {
-      if (/^https?:\/\//iu.test(value)) {
-        await installSkillFromUrl(projectId, actor.sessionId, value, false)
-      } else {
-        await installSkillPackage(projectId, actor.sessionId, value)
-      }
-      setInstallResult(t('skills.install.done', { source: value }))
+      const result = await installSkillAny(projectId, actor.sessionId, value)
+      setInstallResult(t('skills.install.doneAny', {
+        target: result.target,
+        kind: t(result.kind === 'package' ? 'skills.install.kindPackage' : 'skills.install.kindUrl'),
+      }))
       await load()
     } catch (cause) {
-      setInstallError(cause instanceof Error ? cause.message : String(cause))
+      const message = cause instanceof Error ? cause.message : String(cause)
+      if (message.includes('SKILL_INSTRUCTION_UNSUPPORTED')) {
+        setInstallUnsupported(true)
+      } else {
+        setInstallError(message)
+      }
     } finally {
       setInstallBusy(false)
     }
@@ -274,6 +279,16 @@ export function CadreSkillLibraryPage({
         </div>
         {installError !== null && <p className={css.error} role="alert">{installError}</p>}
         {installResult !== null && <p className={css.notice} role="status">{installResult}</p>}
+        {installUnsupported && (
+          <div className={css.unsupported} role="status" data-skill-install-unsupported>
+            <p>{t('skills.install.unsupported')}</p>
+            {isSupervisor
+              ? <Button variant="outline" size="sm" onClick={() => { setAdminOpen(true) }}>
+                {t('skills.install.handToAdmin')}
+              </Button>
+              : <span>{t('skills.install.askSupervisor')}</span>}
+          </div>
+        )}
       </section>
       <div className={css.sources} data-skill-sources>
         <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>

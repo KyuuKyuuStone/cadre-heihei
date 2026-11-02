@@ -59,7 +59,8 @@ describe('Cadre skill library', () => {
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(await screen.findByText('内置技能')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '安装技能' })).toBeNull()
-    expect(screen.getByPlaceholderText(/github\.com/)).toBeTruthy()
+    expect(screen.getByLabelText('安装说明')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '安装' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '删除' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '高级手动表单' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: '打开技能管理员' })).toBeNull()
@@ -134,31 +135,73 @@ describe('Cadre skill library', () => {
     })
   })
 
-  it('installs a URL or a package name in place without opening a conversation', async () => {
+  it('sends natural language, URL, and package input to install-any', async () => {
     const openSkillAdminSession = vi.fn(async () => {})
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
       if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      if (url.endsWith('/install-url')) return json({ ok: true, result: { id: 'url-skill' } })
-      if (url.endsWith('/install-package')) return json({ ok: true, result: { name: 'pkg-skill', visible: true, durationMs: 1 } })
+      if (url.endsWith('/install-any')) {
+        const body = JSON.parse(init?.body as string) as { text: string }
+        const isUrl = /^https?:\/\//u.test(body.text)
+        return json({
+          ok: true,
+          result: {
+            kind: isUrl ? 'url' : 'package',
+            target: isUrl ? body.text : body.text.match(/@[\w-]+\/[\w-]+/u)?.[0] ?? 'find-skills',
+            result: {},
+          },
+        })
+      }
       return json({ ok: true, result: {} })
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillLibraryPage {...{ ...pageProps(), openSkillAdminSession }} />)
     await screen.findByText('内置技能')
-    const source = screen.getByPlaceholderText(/github\.com/)
+    expect(screen.getByText('想装什么？')).toBeTruthy()
+    const source = screen.getByLabelText('安装说明')
+    const sentence = '请根据 https://skillhub.cn/install/skillhub.md，安装 @acme/pkg-skill。'
+    fireEvent.change(source, { target: { value: sentence } })
+    fireEvent.click(screen.getByRole('button', { name: '安装' }))
+    expect(await screen.findByText('已安装 @acme/pkg-skill（包名）')).toBeTruthy()
     fireEvent.change(source, { target: { value: 'https://github.com/acme/skill' } })
     fireEvent.click(screen.getByRole('button', { name: '安装' }))
-    await waitFor(() => { expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/install-url'))).toBe(true) })
-    expect(await screen.findByText('已安装：https://github.com/acme/skill')).toBeTruthy()
+    expect(await screen.findByText('已安装 https://github.com/acme/skill（链接）')).toBeTruthy()
     fireEvent.change(source, { target: { value: '@acme/pkg-skill' } })
     fireEvent.click(screen.getByRole('button', { name: '安装' }))
-    await waitFor(() => { expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/install-package'))).toBe(true) })
-    expect(openSkillAdminSession).not.toHaveBeenCalled()
-    const pkgCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/install-package'))
-    expect(JSON.parse((pkgCall?.[1] as RequestInit).body as string)).toMatchObject({
-      projectId: 'p1', actorSessionId: 'sup', name: '@acme/pkg-skill',
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter(([input]) => requestUrl(input).endsWith('/install-any'))
+      expect(calls).toHaveLength(3)
+      expect(JSON.parse((calls[0]?.[1] as RequestInit).body as string)).toMatchObject({
+        projectId: 'p1', actorSessionId: 'sup', text: sentence,
+      })
     })
+    expect(openSkillAdminSession).not.toHaveBeenCalled()
+  })
+
+  it('shows the unsupported result with a hand-off entry for a supervisor', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (requestUrl(input).endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      return json({ ok: false, code: 'SKILL_INSTRUCTION_UNSUPPORTED', message: 'ambiguous request' })
+    }))
+    render(<CadreSkillLibraryPage {...pageProps()} />)
+    await screen.findByText('内置技能')
+    fireEvent.change(screen.getByLabelText('安装说明'), { target: { value: '安装 aaa-bbb 和 ccc-ddd' } })
+    fireEvent.click(screen.getByRole('button', { name: '安装' }))
+    expect(await screen.findByText('这条安装说明无法自动解析，需要人工判断。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '交给技能管理员' })).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('shows a readable error for other install failures', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (requestUrl(input).endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      return json({ ok: false, code: 'SKILL_INSTALL_PACKAGE_FAILED', message: 'download failed' })
+    }))
+    render(<CadreSkillLibraryPage {...pageProps()} />)
+    await screen.findByText('内置技能')
+    fireEvent.change(screen.getByLabelText('安装说明'), { target: { value: '@acme/pkg-skill' } })
+    fireEvent.click(screen.getByRole('button', { name: '安装' }))
+    expect(await screen.findByText(/SKILL_INSTALL_PACKAGE_FAILED/)).toBeTruthy()
   })
 
   it('does not block installation when the project has no supervisor', async () => {
@@ -171,7 +214,7 @@ describe('Cadre skill library', () => {
     })) as never
     render(<CadreSkillLibraryPage {...{ ...props, useRoster }} />)
     await screen.findByText('内置技能')
-    expect(screen.getByPlaceholderText(/github.com/)).toBeTruthy()
+    expect(screen.getByLabelText('安装说明')).toBeTruthy()
     expect(screen.getByRole('button', { name: '安装' })).toBeTruthy()
   })
 
@@ -187,7 +230,7 @@ describe('Cadre skill library', () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: [] })))
     render(<CadreSkillLibraryPage {...pageProps()} />)
     expect(await screen.findByText('还没有技能，先在上方粘贴 URL 或包名安装。')).toBeTruthy()
-    expect(screen.getByPlaceholderText(/github\.com/)).toBeTruthy()
+    expect(screen.getByLabelText('安装说明')).toBeTruthy()
   })
 
   it('requires confirmation before deleting a skill', async () => {

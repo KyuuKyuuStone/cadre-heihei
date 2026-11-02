@@ -65,7 +65,7 @@ interface SkillResponse {
 }
 
 async function skillCall(
-  method: 'catalog' | 'set' | 'preview' | 'add' | 'remove' | 'install-url' | 'install-package',
+  method: 'catalog' | 'set' | 'preview' | 'add' | 'remove' | 'install-url' | 'install-package' | 'install-any',
   body: Record<string, unknown>,
 ): Promise<unknown> {
   const response = await fetch(`/cadre/skills/${method}`, {
@@ -131,6 +131,18 @@ export async function installSkillPackage(
     visible: boolean
     durationMs: number
   }
+}
+
+export interface CadreInstallAnyResult {
+  readonly kind: 'package' | 'url'
+  readonly target: string
+  readonly result: unknown
+}
+
+export async function installSkillAny(
+  projectId: string, actorSessionId: string, text: string,
+): Promise<CadreInstallAnyResult> {
+  return await skillCall('install-any', { projectId, actorSessionId, text }) as CadreInstallAnyResult
 }
 
 export function skillTokenTotal(entries: readonly CadreSkillEntry[], selected: readonly string[]): number {
