@@ -347,6 +347,14 @@ describe('compact configuration and defaults', () => {
     expect(resolved.stepPressureThresholdTokens).toBe(40_000)
   })
 
+  it('actually compacts a conversation above the Cadre 60k threshold', async () => {
+    const compact = service({ auto: false, thresholdTokens: 60_000, retainTokens: 10_000 }, createContext(200_000))
+    const session = conversation(4, 'x'.repeat(100_000))
+    const result = await compactIfNeeded(compact, session)
+    expect(result).not.toBeNull()
+    expect(compact.calls.length).toBe(1)
+  })
+
   it('defaults summary generation to headroom and preserves explicit caps', () => {
     const target = { provider: MODEL, model: MODEL }
     expect(resolveConfig({ headroomTokens: 16_384 }).maxTokens).toBe(16_384)
