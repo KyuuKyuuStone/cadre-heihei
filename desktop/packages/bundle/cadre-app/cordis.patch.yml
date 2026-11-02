@@ -64,20 +64,20 @@
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
 
-# Compaction at an absolute 150k pressure cap for Cadre employees. The row is
+# Compaction at an absolute 60k pressure cap for Cadre employees. The row is
 # owned by the base bundle; this layer only adds the Cadre-specific threshold.
 - id: compaction-basic
   config:
-    thresholdTokens: 150000
+    thresholdTokens: 60000
     # Keep the retained tail small: the default ratio of the (large) model
     # window left ~150k tokens after every compaction, so a long turn still
     # paid hundreds of thousands of cache-read tokens per request.
-    retainTokens: 20000
-    # Step-level checks are enabled for 1.1.1: long turns otherwise grow from
-    # the retained tail to hundreds of thousands of tokens before the next turn.
+    retainTokens: 10000
+    # Step-level checks run every step so a turn crossing 40k compacts before
+    # the next model request.
     stepPressureCheck: true
-    stepPressureThresholdTokens: 60000
-    stepMinToolCallsBetweenChecks: 2
+    stepPressureThresholdTokens: 40000
+    stepMinToolCallsBetweenChecks: 0
 
 # Tool results are 57% of measured prompts. The base bundle spills above 12.5k
 # estimated tokens; Cadre keeps only 2k inline (head/tail + locator) while the
