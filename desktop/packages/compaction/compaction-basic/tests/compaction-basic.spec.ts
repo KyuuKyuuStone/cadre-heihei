@@ -336,6 +336,17 @@ describe('compact configuration and defaults', () => {
     expect(spec.thresholdRatio).toBe(0.8)
   })
 
+  it('applies the Cadre 60k pressure, 10k retain, and 40k step budgets', () => {
+    const resolved = resolveConfig({
+      thresholdTokens: 60_000, retainTokens: 10_000, stepPressureThresholdTokens: 40_000,
+    })
+    const policy = resolveTargetPolicy(resolved, { provider: MODEL, model: MODEL })
+    const spec = resolveCompactSpec(policy, 1_000_000, 32_000)
+    expect(spec.thresholdTokens).toBe(60_000)
+    expect(spec.retainTokens).toBe(10_000)
+    expect(resolved.stepPressureThresholdTokens).toBe(40_000)
+  })
+
   it('defaults summary generation to headroom and preserves explicit caps', () => {
     const target = { provider: MODEL, model: MODEL }
     expect(resolveConfig({ headroomTokens: 16_384 }).maxTokens).toBe(16_384)

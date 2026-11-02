@@ -113,6 +113,15 @@ export class TaskMemoryReader {
     return rows.map(row => memoryFromRow(row, input.includeSnippet === true))
   }
 
+  /** Latest archived memory marker for one project. */
+  latest(projectId: string): { readonly taskId: string; readonly updatedAt: string } | undefined {
+    const row = this.#db.prepare(`SELECT task_id, updated_at FROM task_memory
+      WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1`).get(projectId) as
+      { task_id?: unknown; updated_at?: string } | undefined
+    return typeof row?.task_id === 'string' && typeof row.updated_at === 'string'
+      ? { taskId: row.task_id, updatedAt: row.updated_at } : undefined
+  }
+
   close(): void {
     this.#db.close()
   }
@@ -121,6 +130,24 @@ export class TaskMemoryReader {
     const row = this.#db.prepare(`SELECT role FROM members WHERE project_id = ? AND session_id = ?`)
       .get(projectId, sessionId) as { role?: unknown } | undefined
     return typeof row?.role === 'string' ? row.role : undefined
+  }
+}
+
+/** Gate one forced compaction per new task-memory archive and idle session. */
+export class TaskMemoryCompactionGate {
+  readonly #seen = new Map<string, string>()
+
+  /**
+   * True when a new completed task has been archived and the session is idle.
+   * Marking happens only after a successful compaction, so failures retry.
+   */
+  shouldCompact(sessionId: string, latest: { readonly updatedAt: string } | undefined, status: string | undefined): boolean {
+    if (latest === undefined || status !== 'idle') return false
+    return this.#seen.get(sessionId) !== latest.updatedAt
+  }
+
+  markCompacted(sessionId: string, updatedAt: string): void {
+    this.#seen.set(sessionId, updatedAt)
   }
 }
 

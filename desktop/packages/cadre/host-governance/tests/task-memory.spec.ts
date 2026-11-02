@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { initCadreStore } from '../../../../cadre-collab/entry.ts'
-import { TaskMemoryReader, capTaskMemory } from '../src/task-memory.ts'
+import { TaskMemoryReader, TaskMemoryCompactionGate, capTaskMemory } from '../src/task-memory.ts'
 
 const roots: string[] = []
 afterEach(() => {
@@ -89,6 +89,15 @@ describe('task memory', () => {
     expect(capped).toContain('验收：pnpm test')
     expect(capTaskMemory('', 100)).toBe('')
     expect(capTaskMemory('短记忆', 100)).toBe('短记忆')
+  })
+
+  it('compacts once per new archive when the agent becomes idle', () => {
+    const gate = new TaskMemoryCompactionGate()
+    expect(gate.shouldCompact('s1', { updatedAt: 't1' }, 'idle')).toBe(true)
+    expect(gate.shouldCompact('s1', { updatedAt: 't1' }, 'running')).toBe(false)
+    gate.markCompacted('s1', 't1')
+    expect(gate.shouldCompact('s1', { updatedAt: 't1' }, 'idle')).toBe(false)
+    expect(gate.shouldCompact('s1', { updatedAt: 't2' }, 'idle')).toBe(true)
   })
 
   it('adds task_memory to an existing ledger without dropping rows', () => {

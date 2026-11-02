@@ -26,7 +26,7 @@ import { IdleReminderService } from './idle-reminder.ts'
 import { ClaimVerifier } from './claims.ts'
 import { SessionPresence } from './presence.ts'
 import { TokenUsageLedger } from './token-usage.ts'
-import { TaskMemoryReader, capTaskMemory } from './task-memory.ts'
+import { TaskMemoryReader, TaskMemoryCompactionGate, capTaskMemory } from './task-memory.ts'
 import { activityFrom, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
@@ -92,7 +92,7 @@ interface GoalsLike {
   disarm(agent: unknown): GoalViewLike
 }
 
-interface AgentLike { readonly id: string }
+interface AgentLike { readonly id: string; readonly status?: string }
 interface AgentsLike { get(id: string): AgentLike | undefined }
 
 interface HostContext {
@@ -351,6 +351,28 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   ctx.provide?.('tokenUsage', tokenUsage)
   const taskMemory = new TaskMemoryReader(databasePath)
   ctx.provide?.('taskMemory', taskMemory)
+  const memoryCompactionGate = new TaskMemoryCompactionGate()
+  const memoryCompaction = ctx.get?.('compaction') as {
+    compactNow(agent: never, signal: AbortSignal): Promise<unknown>
+  } | undefined
+  const disposeMemoryCompaction = ctx.on === undefined
+    ? undefined
+    : ctx.on('agent/status', ((payload: { readonly agent: { readonly id: string; readonly status?: string }; readonly status: string }) => {
+      const projectId = projectOf(payload.agent.id)
+      if (projectId === undefined || memoryCompaction === undefined) return
+      const latest = taskMemory.latest(projectId)
+      if (!memoryCompactionGate.shouldCompact(payload.agent.id, latest, payload.status) || latest === undefined) return
+      const agent = ctx.agents.get(payload.agent.id)
+      if (agent === undefined) return
+      // A completed task's archive is the trigger: force one compaction so the
+      // task's original messages leave the next request. Failures stay visible
+      // and do not mark the gate, so a later idle event retries.
+      void memoryCompaction.compactNow(agent as never, new AbortController().signal)
+        .then(() => { memoryCompactionGate.markCompacted(payload.agent.id, latest.updatedAt) })
+        .catch((error: unknown) => {
+          console.warn(`host-governance: completed-task compaction failed: ${String(error)}`)
+        })
+    }) as never)
   ctx.effect(() => {
     const disposers: (() => void)[] = []
     if (ctx.systemPrompt !== undefined) {
@@ -419,6 +441,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   ctx.effect(() => () => {
     disposeIdleEvents?.()
     disposeClaimEvents?.()
+    disposeMemoryCompaction?.()
     idleReminder.dispose()
     claims.dispose()
     presence.dispose()
