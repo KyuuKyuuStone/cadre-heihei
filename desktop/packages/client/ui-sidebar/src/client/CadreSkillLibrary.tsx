@@ -2,18 +2,25 @@
  * Global skill library: built-in packs are read-only; installation goes through
  * the skill-administrator conversation. Member settings only select.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import {
   addSkillToLibrary,
   fetchSkillCatalog,
-  installSkillAny,
   removeSkillFromLibrary,
   type CadreSkillEntry,
 } from './CadreSkills.tsx'
-import { CadreSkillChat } from './CadreSkillChat.tsx'
+import {
+  createSkillAdminSession,
+  listSkillAdminSessions,
+  readSkillAdminMessages,
+  sendSkillAdminMessage,
+  SkillAdminError,
+  skillAdminErrorKey,
+  type SkillAdminMessage,
+} from './CadreSkillAdmin.ts'
 import css from './CadreSkillLibrary.module.css'
 
 export interface CadreSkillLibraryInjected {
@@ -71,6 +78,7 @@ export function CadreSkillLibraryPage({
   const activeSessionId = useSessions(state => Object.entries(state.byId)
     .find(([, session]) => (session.retainedBy.mainView ?? 0) > 0)?.[0])
   const actor = members.find(member => member.sessionId === activeSessionId)
+  const actorSessionId = actor?.sessionId
   const projectId = actor === undefined ? undefined : projectOfSession(actor.sessionId)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
   const [busy, setBusy] = useState(false)
@@ -80,10 +88,13 @@ export function CadreSkillLibraryPage({
   const [form, setForm] = useState<ManualState>(EMPTY)
   const [tokenManual, setTokenManual] = useState(false)
   const [installSource, setInstallSource] = useState('')
-  const [installBusy, setInstallBusy] = useState(false)
-  const [installError, setInstallError] = useState<string | null>(null)
-  const [installResult, setInstallResult] = useState<string | null>(null)
-  const [installUnsupported, setInstallUnsupported] = useState(false)
+  const [chatSessionId, setChatSessionId] = useState<string | null>(null)
+  const [chatMessages, setChatMessages] = useState<readonly SkillAdminMessage[]>([])
+  const [chatBusy, setChatBusy] = useState(false)
+  const [chatLoading, setChatLoading] = useState(true)
+  const [chatError, setChatError] = useState<string | null>(null)
+  const chatNextSeq = useRef(0)
+  const chatEnd = useRef<HTMLDivElement | null>(null)
 
   const load = useCallback(async () => {
     if (actor === undefined || projectId === undefined) return
@@ -99,6 +110,64 @@ export function CadreSkillLibraryPage({
   }, [actor, projectId])
 
   useEffect(() => { void load() }, [load])
+
+  const chatErrorText = (cause: unknown): string => cause instanceof SkillAdminError
+    ? t(skillAdminErrorKey(cause.code) as never)
+    : cause instanceof Error ? cause.message : String(cause)
+
+  const bootChat = useCallback(async (): Promise<void> => {
+    if (projectId === undefined) return
+    setChatLoading(true)
+    setChatError(null)
+    try {
+      const sessions = await listSkillAdminSessions(projectId)
+      const existing = [...sessions]
+        .filter(session => typeof session.sessionId === 'string' && session.sessionId !== '')
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+      const chosen = existing ?? await createSkillAdminSession(projectId)
+      if (typeof chosen.sessionId !== 'string' || chosen.sessionId === '') {
+        throw new Error(t('skills.chat.errorSession'))
+      }
+      setChatSessionId(chosen.sessionId)
+    } catch (cause) {
+      setChatError(chatErrorText(cause))
+    } finally {
+      setChatLoading(false)
+    }
+  }, [projectId, t])
+
+  useEffect(() => { void bootChat() }, [bootChat])
+
+  const pollChat = useCallback(async (): Promise<void> => {
+    if (projectId === undefined || actorSessionId === undefined || chatSessionId === null) return
+    const page = await readSkillAdminMessages(projectId, actorSessionId, chatSessionId, chatNextSeq.current)
+    chatNextSeq.current = Math.max(chatNextSeq.current, page.nextSeq)
+    if (page.messages.length > 0) {
+      setChatMessages((current) => {
+        const seen = new Set(current.map(message => message.seq))
+        return [...current, ...page.messages.filter(message => !seen.has(message.seq))]
+      })
+    }
+  }, [actorSessionId, chatSessionId, projectId])
+
+  useEffect(() => {
+    if (chatSessionId === null) return
+    let alive = true
+    const tick = (): void => {
+      void pollChat().catch((cause: unknown) => {
+        if (alive) setChatError(chatErrorText(cause))
+      })
+    }
+    tick()
+    const timer = window.setInterval(tick, 1500)
+    return () => { alive = false; window.clearInterval(timer) }
+  }, [chatSessionId, pollChat, t])
+
+  useEffect(() => {
+    if (typeof chatEnd.current?.scrollIntoView === 'function') {
+      chatEnd.current.scrollIntoView({ block: 'nearest' })
+    }
+  }, [chatMessages])
 
   if (actor === undefined || projectId === undefined) {
     return (
@@ -150,32 +219,19 @@ export function CadreSkillLibraryPage({
     }
   }
 
-  const installSourceNow = async (): Promise<void> => {
+  const sendChat = async (): Promise<void> => {
     const value = installSource.trim()
-    if (value === '') {
-      setInstallError(t('skills.install.empty'))
-      return
-    }
-    setInstallBusy(true)
-    setInstallError(null)
-    setInstallResult(null)
-    setInstallUnsupported(false)
+    if (value === '' || chatSessionId === null) return
+    setChatBusy(true)
+    setChatError(null)
     try {
-      const result = await installSkillAny(projectId, actor.sessionId, value)
-      setInstallResult(t('skills.install.doneAny', {
-        target: result.target,
-        kind: t(result.kind === 'package' ? 'skills.install.kindPackage' : 'skills.install.kindUrl'),
-      }))
-      await load()
+      await sendSkillAdminMessage(projectId, actor.sessionId, chatSessionId, value)
+      setInstallSource('')
+      await pollChat()
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause)
-      if (message.includes('SKILL_INSTRUCTION_UNSUPPORTED')) {
-        setInstallUnsupported(true)
-      } else {
-        setInstallError(message)
-      }
+      setChatError(chatErrorText(cause))
     } finally {
-      setInstallBusy(false)
+      setChatBusy(false)
     }
   }
 
@@ -251,7 +307,6 @@ export function CadreSkillLibraryPage({
           }}>{t('skills.advanced')}</Button>
         </div>
       </header>
-      <CadreSkillChat projectId={projectId} actorSessionId={actor.sessionId} t={t} />
       <section className={css.installPanel} data-skill-install-inline>
         <div className={css.installHead}>
           <div>
@@ -260,25 +315,45 @@ export function CadreSkillLibraryPage({
           </div>
         </div>
         <label className={css.installLabel}>{t('skills.install.source')}
-          <textarea className={css.installTextarea} value={installSource} rows={4} disabled={installBusy}
-            placeholder={t('skills.install.placeholder')}
+          <textarea className={css.installTextarea} value={installSource} rows={4}
+            disabled={chatLoading || chatBusy || chatSessionId === null}
+            placeholder={t('skills.chat.placeholder')}
             onChange={(event) => { setInstallSource(event.target.value) }} />
         </label>
         <div className={css.installActions}>
           <span className={css.installHint}>{t('skills.install.hint')}</span>
-          <Button variant="primary" disabled={installBusy || installSource.trim() === ''}
-            onClick={() => { void installSourceNow() }}>
-            {installBusy ? t('skills.install.busy') : t('skills.install.action')}
+          <Button variant="primary"
+            disabled={chatBusy || chatLoading || chatSessionId === null || installSource.trim() === ''}
+            onClick={() => { void sendChat() }}>
+            {chatBusy ? t('skills.chat.sending') : t('skills.chat.send')}
           </Button>
         </div>
-        {installError !== null && <p className={css.error} role="alert">{installError}</p>}
-        {installResult !== null && <p className={css.notice} role="status">{installResult}</p>}
-        {installUnsupported && (
-          <div className={css.unsupported} role="status" data-skill-install-unsupported>
-            <p>{t('skills.install.unsupported')}</p>
-            <span>{t('skills.install.askSupervisor')}</span>
+        {chatError !== null && (
+          <div className={css.errorRow} role="alert">
+            <span>{chatError}</span>
+            <Button variant="ghost" size="sm" onClick={() => { void bootChat() }}>{t('skills.chat.retry')}</Button>
           </div>
         )}
+        <div className={css.chatLog} aria-live="polite" data-skill-chat-log>
+          {chatLoading && <p className={css.state}>{t('skills.chat.loading')}</p>}
+          {!chatLoading && chatMessages.length === 0 && (
+            <div className={css.chatEmpty}>
+              <p>{t('skills.chat.empty')}</p>
+              <ul>
+                <li>{t('skills.chat.exampleCatalog')}</li>
+                <li>{t('skills.chat.exampleInstall')}</li>
+                <li>{t('skills.chat.exampleSafety')}</li>
+              </ul>
+            </div>
+          )}
+          {chatMessages.slice(-8).map(message => (
+            <article key={message.seq} className={message.role === 'user' ? css.userBubble : css.assistantBubble}>
+              <span className={css.chatRole}>{t(message.role === 'user' ? 'skills.chat.you' : 'skills.chat.assistant')}</span>
+              <p>{message.text}</p>
+            </article>
+          ))}
+          <div ref={chatEnd} />
+        </div>
       </section>
       <div className={css.sources} data-skill-sources>
         <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
