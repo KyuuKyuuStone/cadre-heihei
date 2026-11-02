@@ -83,8 +83,10 @@ describe('skill admin model tools', () => {
         return { code: 0, stdout: 'installed', stderr: '' }
       },
     })
-    const created = await admin.createSession({ projectId: 'p1', operatorSessionId: 's1', cwd: root })
-    admin.bindSession({ sessionId: created.sessionId, projectId: 'p1', operatorSessionId: 's1' })
+    const created = await admin.createSession({ projectId: 'p1', cwd: root })
+    db.prepare(`INSERT INTO members (project_id, session_id, role, state, skills_json, created_at, updated_at)
+      VALUES ('p3', 'w3', 'worker', 'available', '[]', 'now', 'now')`).run()
+    const workerOnly = await admin.createSession({ projectId: 'p3', cwd: root })
 
     const registered: Registered[] = []
     apply({
@@ -120,6 +122,8 @@ describe('skill admin model tools', () => {
     await expect(find('skill_install').execute({ name: '@scope/tool-install' }, run)).resolves.toMatchObject({
       kind: 'package', target: '@scope/tool-install',
     })
+    await expect(find('skill_install').execute({ name: '@scope/worker-install' }, { agent: { id: workerOnly.sessionId } }))
+      .resolves.toMatchObject({ kind: 'package', target: '@scope/worker-install' })
     await expect(find('skill_install').execute({
       url: 'https://raw.githubusercontent.com/o/r/main/packs/tool-url/SKILL.md',
     }, run)).resolves.toMatchObject({ kind: 'url', target: expect.stringContaining('tool-url') })
@@ -131,28 +135,25 @@ describe('skill admin model tools', () => {
     expect(readFileSync(join(root, 'audit', 'audit.jsonl'), 'utf8')).toContain('tool-install')
 
     await admin.sendMessage({
-      projectId: 'p1', operatorSessionId: 's1', sessionId: created.sessionId, text: '有什么技能',
+      projectId: 'p1', actorSessionId: 'w1', sessionId: created.sessionId, text: '有什么技能',
     })
     const page = await admin.messages({
-      projectId: 'p1', operatorSessionId: 's1', sessionId: created.sessionId, afterSeq: 0,
+      projectId: 'p1', actorSessionId: 'w1', sessionId: created.sessionId, afterSeq: 0,
     })
     expect(page.messages.map(message => message.role)).toEqual(['user', 'assistant'])
     expect(page.messages[0]).toMatchObject({ role: 'user', text: '有什么技能' })
     expect(await admin.messages({
-      projectId: 'p1', operatorSessionId: 's1', sessionId: created.sessionId, afterSeq: page.messages[0]!.seq,
+      projectId: 'p1', actorSessionId: 's2', sessionId: created.sessionId, afterSeq: page.messages[0]!.seq,
     })).toMatchObject({ messages: [expect.objectContaining({ role: 'assistant' })] })
-    await expect(admin.sendMessage({
-      projectId: 'p1', operatorSessionId: 's2', sessionId: created.sessionId, text: 'x',
-    })).rejects.toMatchObject({ code: 'SKILL_ADMIN_SESSION_FORBIDDEN' })
     await expect(admin.messages({
-      projectId: 'p2', operatorSessionId: 's1', sessionId: created.sessionId, afterSeq: 0,
+      projectId: 'p2', actorSessionId: 's1', sessionId: created.sessionId, afterSeq: 0,
     })).rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
     await expect(admin.sendMessage({
-      projectId: 'p1', operatorSessionId: 'w1', sessionId: created.sessionId, text: 'x',
+      projectId: 'p1', actorSessionId: 'outside', sessionId: created.sessionId, text: 'x',
     })).rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
 
     await expect(find('skill_catalog').execute({}, { agent: { id: 'other' } }))
-      .rejects.toThrow(/未绑定/)
+      .rejects.toThrow(/未知/)
     const unsupported = await find('skill_plan').execute({ url: 'https://example.com/README.md' }, run)
     expect(unsupported).toMatchObject({ kind: 'unsupported' })
     db.close()

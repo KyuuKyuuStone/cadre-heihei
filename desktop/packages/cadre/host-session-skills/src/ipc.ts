@@ -45,6 +45,8 @@ export interface SkillApi {
   set(input: { projectId: string; actorSessionId: string; targetSessionId: string; skills: unknown }): { skills: string[] }
   /** Supervisor-only guard used by the admin conversation and diagnostics. */
   assertSupervisor(input: { projectId: string; actorSessionId: string }): void
+  /** Require an active roster member of the project. */
+  assertMember(input: { projectId: string; actorSessionId: string }): void
   preview(input: { projectId: string; actorSessionId: string; packId: string }): {
     id: string; content: string; tokenEstimate: number; license: string
     author?: string; homepage?: string
@@ -429,6 +431,9 @@ export function createSkillApi(options: {
     },
     assertSupervisor(input) {
       requireSupervisor(db, input.projectId, input.actorSessionId)
+    },
+    assertMember(input) {
+      requireActor(db, input.projectId, input.actorSessionId)
     },
     preview(input) {
       requireSupervisor(db, input.projectId, input.actorSessionId)

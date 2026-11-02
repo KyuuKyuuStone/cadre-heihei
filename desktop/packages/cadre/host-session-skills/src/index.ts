@@ -412,13 +412,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           mkdirSync(cwd, { recursive: true })
           const created = await requireAdmin().createSession({
             projectId: required(body, 'projectId'),
-            operatorSessionId: required(body, 'operatorSessionId'),
             cwd,
-          })
-          requireAdmin().bindSession({
-            sessionId: created.sessionId,
-            projectId: required(body, 'projectId'),
-            operatorSessionId: required(body, 'operatorSessionId'),
           })
           return created
         } catch (error) {
@@ -473,16 +467,15 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       }), 'host-session-skills: diag')
       route('/cadre/skills/admin/sessions', body => requireAdmin().listSessions({
         projectId: required(body, 'projectId'),
-        operatorSessionId: required(body, 'operatorSessionId'),
       }))
       route('/cadre/skills/admin/delete-session', body => requireAdmin().deleteSession({
         projectId: required(body, 'projectId'),
-        operatorSessionId: required(body, 'operatorSessionId'),
         sessionId: required(body, 'sessionId'),
       }))
       route('/cadre/skills/admin/message', body => requireAdmin().sendMessage({
         projectId: required(body, 'projectId'),
-        operatorSessionId: required(body, 'operatorSessionId'),
+        actorSessionId: typeof body.actorSessionId === 'string'
+          ? required(body, 'actorSessionId') : required(body, 'operatorSessionId'),
         sessionId: required(body, 'sessionId'),
         text: required(body, 'text'),
       }))
@@ -508,7 +501,8 @@ export function apply(ctx: HostContext, config: Config = {}): void {
               ok: true,
               result: await requireAdmin().messages({
                 projectId: required(body, 'projectId'),
-                operatorSessionId: required(body, 'operatorSessionId'),
+                actorSessionId: typeof body.actorSessionId === 'string'
+                  ? required(body, 'actorSessionId') : required(body, 'operatorSessionId'),
                 sessionId: required(body, 'sessionId'),
                 afterSeq,
               }),

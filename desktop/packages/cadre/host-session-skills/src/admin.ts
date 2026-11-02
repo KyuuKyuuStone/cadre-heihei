@@ -102,7 +102,8 @@ export class SkillAdminApi {
   private readonly now: () => number
   private readonly skillsDir: string
   private readonly pending = new Map<string, PendingPlan>()
-  private readonly bindings = new Map<string, { readonly projectId: string; readonly operatorSessionId: string }>()
+  private readonly projects = new Map<string, string>()
+  private readonly db: DatabaseSync
 
   constructor(options: {
     readonly db: DatabaseSync
@@ -115,6 +116,7 @@ export class SkillAdminApi {
     readonly now?: () => number
     readonly runPackageCommand?: (args: readonly string[], timeoutMs: number) => Promise<PackageCommandResult>
   }) {
+    this.db = options.db
     this.api = createSkillApi({
       db: options.db,
       ledgerPath: options.ledgerPath,
@@ -131,41 +133,36 @@ export class SkillAdminApi {
     this.auditFile = join(auditDir, 'audit.jsonl')
   }
 
-  /** Bind a created ordinary session to its supervisor operator for tool calls. */
-  bindSession(input: { readonly sessionId: string; readonly projectId: string; readonly operatorSessionId: string }): void {
-    this.requireOperator(input.projectId, input.operatorSessionId)
-    this.bindings.set(input.sessionId, { projectId: input.projectId, operatorSessionId: input.operatorSessionId })
-  }
-
-  /** Catalog for a bound admin session. */
+  /** Catalog for an admin session's project. */
   catalogFor(sessionId: string): ReturnType<SkillApi['catalog']> {
-    const binding = this.bindingOf(sessionId)
-    return this.api.catalog({ projectId: binding.projectId, actorSessionId: binding.operatorSessionId })
+    const projectId = this.projectOf(sessionId)
+    return this.api.catalog({ projectId, actorSessionId: this.actorFor(projectId) })
   }
 
-  /** Detail for a bound admin session; includes the body the model may inspect. */
+  /** Detail for an admin session's project; includes the body the model may inspect. */
   previewFor(sessionId: string, packId: string): ReturnType<SkillApi['preview']> {
-    const binding = this.bindingOf(sessionId)
-    return this.api.preview({ projectId: binding.projectId, actorSessionId: binding.operatorSessionId, packId })
+    const projectId = this.projectOf(sessionId)
+    return this.api.preview({ projectId, actorSessionId: this.actorFor(projectId), packId })
   }
 
-  /** Audit rows for a bound admin session. */
+  /** Audit rows for an admin session's project. */
   auditForSession(sessionId: string, limit?: number): readonly Record<string, unknown>[] {
-    const binding = this.bindingOf(sessionId)
-    return this.auditFor({ ...binding, ...(limit === undefined ? {} : { limit }) })
+    this.projectOf(sessionId)
+    return this.readAudit(limit)
   }
 
-  /** Plan for a bound admin session. */
+  /** Plan for an admin session's project. */
   async planForSession(sessionId: string, input: Omit<PlanInput, 'projectId' | 'operatorSessionId'>): Promise<SkillPlan> {
-    const binding = this.bindingOf(sessionId)
-    return this.plan({ ...binding, ...input })
+    const projectId = this.projectOf(sessionId)
+    return this.plan({ projectId, operatorSessionId: this.actorFor(projectId), ...input })
   }
 
-  /** Send one user message to a bound admin session. */
+  /** Send one user message to an admin session; any project member may call. */
   async sendMessage(input: {
-    readonly projectId: string; readonly operatorSessionId: string; readonly sessionId: string; readonly text: string
+    readonly projectId: string; readonly actorSessionId: string; readonly sessionId: string; readonly text: string
   }): Promise<{ readonly accepted: true }> {
-    await this.requireSession(input)
+    this.api.assertMember({ projectId: input.projectId, actorSessionId: input.actorSessionId })
+    await this.requireSession(input.projectId, input.sessionId)
     if (this.sessions.prompt === undefined) {
       throw new SkillIpcError('SKILL_ADMIN_MESSAGE_UNSUPPORTED', 501, '当前 Host 不支持发送技能管理员消息')
     }
@@ -176,11 +173,12 @@ export class SkillAdminApi {
     return { accepted: true }
   }
 
-  /** Read messages after a sequence number from a bound admin session. */
+  /** Read messages after a sequence number; any project member may call. */
   async messages(input: {
-    readonly projectId: string; readonly operatorSessionId: string; readonly sessionId: string; readonly afterSeq: number
+    readonly projectId: string; readonly actorSessionId: string; readonly sessionId: string; readonly afterSeq: number
   }): Promise<AdminMessages> {
-    await this.requireSession(input)
+    this.api.assertMember({ projectId: input.projectId, actorSessionId: input.actorSessionId })
+    await this.requireSession(input.projectId, input.sessionId)
     if (this.sessions.messages === undefined) {
       throw new SkillIpcError('SKILL_ADMIN_MESSAGE_UNSUPPORTED', 501, '当前 Host 不支持读取技能管理员消息')
     }
@@ -191,64 +189,66 @@ export class SkillAdminApi {
   async installForSession(sessionId: string, input: {
     readonly name?: unknown; readonly url?: unknown; readonly text?: unknown
   }): Promise<{ kind: 'package' | 'url'; target: string; result: unknown }> {
-    const binding = this.bindingOf(sessionId)
-    const actorSessionId = binding.operatorSessionId
+    const projectId = this.projectOf(sessionId)
+    const actorSessionId = this.actorFor(projectId)
     const provided = [input.name, input.url, input.text].filter(value => value !== undefined)
     if (provided.length !== 1) {
       throw new SkillIpcError('SKILL_INVALID', 400, 'name/url/text 必须且只能提供一个')
     }
     try {
       const result = input.name !== undefined
-        ? { kind: 'package' as const, target: String(input.name), result: await this.api.installPackage({ projectId: binding.projectId, actorSessionId, name: input.name }) }
+        ? { kind: 'package' as const, target: String(input.name), result: await this.api.installPackage({ projectId, actorSessionId, name: input.name }) }
         : input.url !== undefined
-          ? { kind: 'url' as const, target: String(input.url), result: await this.api.installUrl({ projectId: binding.projectId, actorSessionId, url: input.url }) }
-          : await this.api.installAny({ projectId: binding.projectId, actorSessionId, text: input.text })
+          ? { kind: 'url' as const, target: String(input.url), result: await this.api.installUrl({ projectId, actorSessionId, url: input.url }) }
+          : await this.api.installAny({ projectId, actorSessionId, text: input.text })
       this.audit({
-        kind: 'tool-install', operatorSessionId: binding.operatorSessionId, sessionId,
+        kind: 'tool-install', sessionId,
         target: result.kind === 'package' ? result.target : result.target.slice(0, 300),
         targetKind: result.kind, result: 'installed',
       })
       return result
     } catch (error) {
       this.audit({
-        kind: 'tool-install', operatorSessionId: binding.operatorSessionId, sessionId,
+        kind: 'tool-install', sessionId,
         result: 'failed', error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
       })
       throw error
     }
   }
 
-  /** Confirmation token for a plan created by a bound session. */
+  /** Confirmation token for a plan created by an admin session. */
   tokenForSession(sessionId: string, planId: string): string | undefined {
-    this.bindingOf(sessionId)
+    this.projectOf(sessionId)
     return this.tokenFor(planId)
   }
 
   /** Create or list ordinary admin sessions; never writes a roster row. */
   async createSession(input: {
-    readonly projectId: string; readonly operatorSessionId: string; readonly cwd: string
+    readonly projectId: string; readonly cwd: string
   }): Promise<AdminSession> {
-    this.requireOperator(input.projectId, input.operatorSessionId)
+    this.requireProject(input.projectId)
     const created = await this.sessions.create({ preset: SKILL_ADMIN_PRESET, cwd: input.cwd, title: '技能管理员' })
+    this.projects.set(created.sessionId, input.projectId)
     return { sessionId: created.sessionId, title: '技能管理员', updatedAt: this.now() }
   }
 
-  async listSessions(input: { readonly projectId: string; readonly operatorSessionId: string }): Promise<readonly AdminSession[]> {
-    this.requireOperator(input.projectId, input.operatorSessionId)
-    return this.sessions.list({ preset: SKILL_ADMIN_PRESET })
+  /** List admin sessions created for one project in this Host process. */
+  async listSessions(input: { readonly projectId: string }): Promise<readonly AdminSession[]> {
+    const sessions = await this.sessions.list({ preset: SKILL_ADMIN_PRESET })
+    return sessions.filter(session => this.projects.get(session.sessionId) === input.projectId)
   }
 
   async deleteSession(input: {
-    readonly projectId: string; readonly operatorSessionId: string; readonly sessionId: string
+    readonly projectId: string; readonly sessionId: string
   }): Promise<{ deleted: true }> {
-    this.requireOperator(input.projectId, input.operatorSessionId)
     if (this.sessions.delete === undefined) {
       throw new SkillIpcError('SKILL_ADMIN_DELETE_UNSUPPORTED', 501, '当前 Host 不支持删除会话')
     }
-    const owned = (await this.sessions.list({ preset: SKILL_ADMIN_PRESET }))
-      .some(session => session.sessionId === input.sessionId)
-    if (!owned) throw new SkillIpcError('SKILL_ADMIN_NOT_FOUND', 404, '未知的技能管理员会话')
+    if (this.projects.get(input.sessionId) !== input.projectId) {
+      throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
+    }
     await this.sessions.delete({ sessionId: input.sessionId })
+    this.projects.delete(input.sessionId)
     return { deleted: true }
   }
 
@@ -361,16 +361,7 @@ export class SkillAdminApi {
   /** Read the append-only audit for this operator. */
   auditFor(input: { readonly projectId: string; readonly operatorSessionId: string; readonly limit?: number }): readonly Record<string, unknown>[] {
     this.requireOperator(input.projectId, input.operatorSessionId)
-    if (!existsSync(this.auditFile)) return []
-    const lines = readFileSync(this.auditFile, 'utf8').split(/\r?\n/u).filter(line => line.trim() !== '')
-    return lines.slice(-Math.min(input.limit ?? 50, 200)).flatMap(line => {
-      try {
-        const parsed: unknown = JSON.parse(line)
-        return typeof parsed === 'object' && parsed !== null ? [parsed as Record<string, unknown>] : []
-      } catch {
-        return []
-      }
-    })
+    return this.readAudit(input.limit)
   }
 
   /** Token for a freshly created plan, exposed only to the creating operator. */
@@ -421,27 +412,48 @@ export class SkillAdminApi {
     this.api.assertSupervisor({ projectId, actorSessionId: operatorSessionId })
   }
 
-  private async requireSession(input: {
-    readonly projectId: string; readonly operatorSessionId: string; readonly sessionId: string
-  }): Promise<void> {
-    this.requireOperator(input.projectId, input.operatorSessionId)
-    const binding = this.bindings.get(input.sessionId)
-    if (binding === undefined) throw new SkillIpcError('SKILL_ADMIN_SESSION_UNBOUND', 403, '技能管理员会话未绑定主管')
-    if (binding.projectId !== input.projectId || binding.operatorSessionId !== input.operatorSessionId) {
-      throw new SkillIpcError('SKILL_ADMIN_SESSION_FORBIDDEN', 403, '该技能管理员会话不属于当前项目/操作者')
+  private requireProject(projectId: string): void {
+    const row = this.db.prepare(
+      "SELECT session_id FROM members WHERE project_id = ? AND state != 'departed' LIMIT 1",
+    ).get(projectId) as { session_id?: unknown } | undefined
+    if (row?.session_id === undefined) throw new SkillIpcError('SKILL_FORBIDDEN', 403, '本项目没有在册成员')
+  }
+
+  /** Pick a real roster member for project-scoped API calls; no supervisor requirement. */
+  private actorFor(projectId: string): string {
+    const row = this.db.prepare(
+      "SELECT session_id FROM members WHERE project_id = ? AND state != 'departed' ORDER BY CASE role WHEN 'supervisor' THEN 0 ELSE 1 END, session_id LIMIT 1",
+    ).get(projectId) as { session_id?: unknown } | undefined
+    if (typeof row?.session_id !== 'string') throw new SkillIpcError('SKILL_FORBIDDEN', 403, '本项目没有在册成员')
+    return row.session_id
+  }
+
+  private projectOf(sessionId: string): string {
+    const projectId = this.projects.get(sessionId)
+    if (projectId === undefined) throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
+    return projectId
+  }
+
+  private async requireSession(projectId: string, sessionId: string): Promise<void> {
+    if (this.projects.get(sessionId) !== projectId) {
+      throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
     }
     const owned = (await this.sessions.list({ preset: SKILL_ADMIN_PRESET }))
-      .some(session => session.sessionId === input.sessionId)
+      .some(session => session.sessionId === sessionId)
     if (!owned) throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
   }
 
-  private bindingOf(sessionId: string): { readonly projectId: string; readonly operatorSessionId: string } {
-    const binding = this.bindings.get(sessionId)
-    if (binding === undefined) {
-      throw new SkillIpcError('SKILL_ADMIN_SESSION_UNBOUND', 403, '技能管理员会话未绑定主管')
-    }
-    this.requireOperator(binding.projectId, binding.operatorSessionId)
-    return binding
+  private readAudit(limit?: number): readonly Record<string, unknown>[] {
+    if (!existsSync(this.auditFile)) return []
+    const lines = readFileSync(this.auditFile, 'utf8').split(/\r?\n/u).filter(line => line.trim() !== '')
+    return lines.slice(-Math.min(limit ?? 50, 200)).flatMap(line => {
+      try {
+        const parsed: unknown = JSON.parse(line)
+        return typeof parsed === 'object' && parsed !== null ? [parsed as Record<string, unknown>] : []
+      } catch {
+        return []
+      }
+    })
   }
 
   private audit(record: Record<string, unknown>): void {

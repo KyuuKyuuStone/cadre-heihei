@@ -421,10 +421,10 @@ describe('session skill packs', () => {
       db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs,
       sessions: port, auditDir: join(root, 'audit'), fetch: fetch as never,
     })
-    const created = await admin.createSession({ projectId: 'p1', operatorSessionId: 's1', cwd: root })
+    const created = await admin.createSession({ projectId: 'p1', cwd: root })
     expect(created.sessionId).toBe('admin-1')
     expect(reader.prepare('SELECT COUNT(*) AS count FROM members').get()).toMatchObject({ count: 2 })
-    expect(await admin.listSessions({ projectId: 'p1', operatorSessionId: 's1' })).toHaveLength(1)
+    expect(await admin.listSessions({ projectId: 'p1' })).toHaveLength(1)
 
     const plan = await admin.plan({
       projectId: 'p1', operatorSessionId: 's1',
@@ -451,8 +451,8 @@ describe('session skill packs', () => {
     expect(audit.at(-1)).toMatchObject({ result: 'applied', packId: 'admin-pack' })
     expect(JSON.stringify(audit)).not.toContain('# admin body')
 
-    await expect(admin.createSession({ projectId: 'p1', operatorSessionId: 'w1', cwd: root }))
-      .rejects.toThrow(/supervisor/)
+    const workerSession = await admin.createSession({ projectId: 'p1', cwd: root })
+    expect(workerSession.sessionId).toBe('admin-2')
     await expect(admin.plan({ projectId: 'p1', operatorSessionId: 'w1', url: 'https://x.test' }))
       .rejects.toThrow(/supervisor/)
 
@@ -462,8 +462,8 @@ describe('session skill packs', () => {
     expect(unsupported.kind).toBe('unsupported')
     expect(unsupported.reason).toBeTruthy()
 
-    await admin.deleteSession({ projectId: 'p1', operatorSessionId: 's1', sessionId: created.sessionId })
-    expect(await admin.listSessions({ projectId: 'p1', operatorSessionId: 's1' })).toHaveLength(0)
+    await admin.deleteSession({ projectId: 'p1', sessionId: created.sessionId })
+    expect(await admin.listSessions({ projectId: 'p1' })).toHaveLength(1)
     reader.close()
   })
 

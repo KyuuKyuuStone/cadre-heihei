@@ -46,7 +46,8 @@ unselected session has zero skill tokens from this plugin.
 POST JSON, project-scoped. `catalog`/`get`/`set` admit registered members:
 a worker may read and update its own selection, a supervisor may target any
 member. `add`/`remove`/`install-url`/`install-package` also admit any registered
-member; `preview` and the skill-administrator conversation remain supervisor-only.
+member; `preview` remains supervisor-only; admin message/read/install admit
+project members, while plan/apply remain supervisor-only.
 
 - `/cadre/skills/catalog` — `{projectId, actorSessionId, targetSessionId?}` →
   catalog entries with `selected`;
@@ -76,19 +77,21 @@ member; `preview` and the skill-administrator conversation remain supervisor-onl
 `cadre-skill-admin` is a hidden ordinary preset for the skills-page conversation.
 It never writes roster rows or team tools. Its backend routes are:
 
-- `/cadre/skills/admin/session` — `{projectId, operatorSessionId, cwd?}` creates
-  or resumes an ordinary session through the Host `sessionController`;
-- `/cadre/skills/admin/sessions` — lists sessions whose projection preset is
-  `cadre-skill-admin`;
-- `/cadre/skills/admin/delete-session` — removes one listed session when the Host
-  supports deletion;
+- `/cadre/skills/admin/session` — `{projectId, cwd?}` creates an ordinary session
+  through the Host `sessionController`; the session itself is the identity, no
+  operator binding is recorded;
+- `/cadre/skills/admin/sessions` — lists sessions created for the project whose
+  projection preset is `cadre-skill-admin`;
+- `/cadre/skills/admin/delete-session` — removes one listed project session when
+  the Host supports deletion;
 - `/cadre/skills/admin/plan` — `{url}` or `{kind:'remove'|'update', packId}`;
   returns `planId`, hashes, target, actions and risk flags, plus a one-time
   `confirmToken`; it never writes;
-- `/cadre/skills/admin/message` — `{sessionId, text}` prompts a bound admin
-  session through `sessionController`;
-- `/cadre/skills/admin/messages` — GET query or POST body with `sessionId` and
-  optional `afterSeq`; returns user/assistant text increments;
+- `/cadre/skills/admin/message` — `{projectId, actorSessionId, sessionId, text}`
+  prompts an admin session; any active project member may send;
+- `/cadre/skills/admin/messages` — GET query or POST body with `projectId`,
+  `actorSessionId`, `sessionId`, and optional `afterSeq`; returns user/assistant
+  text increments;
 - `/cadre/skills/admin/apply` — `{planId, token}`; revalidates the operator as a
   supervisor and applies install/update/remove with backup, rollback and audit;
 - `/cadre/skills/admin/audit` — append-only JSONL records without page bodies or
@@ -100,14 +103,14 @@ It never writes roster rows or team tools. Its backend routes are:
   `~/.dsh/cadre-skill-admin/session-error.log`.
 
 Unknown/unsupported URLs return a plan with `kind: 'unsupported'` and a readable
-reason. The admin operator is authorized from the roster on every call; the
-conversation itself carries no role prompt.
+reason. Admin message/read/install are project-member scoped; the conversation
+itself carries no role prompt.
 
 ### Model tools (preset-scoped)
 
 `./admin` is mounted only by the `cadre-skill-admin` preset. It registers
 `skill_catalog`, `skill_preview`, `skill_install`, `skill_plan`, and
-`skill_audit`; those tools resolve the bound operator from the admin session.
+`skill_audit`; tools resolve the session's project from the admin session.
 `skill_install` accepts one of `name`, `url`, or `text`, reuses
 `install-package`/`install-url`/`install-any`, and writes an audit row without a
 plan/apply round trip. `skill_plan` still returns a one-time `confirmToken`;
