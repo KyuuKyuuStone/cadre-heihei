@@ -6,6 +6,18 @@ export interface SkillAdminSession {
   readonly updatedAt: number
 }
 
+export interface SkillAdminMessage {
+  readonly seq: number
+  readonly role: 'user' | 'assistant'
+  readonly text: string
+  readonly time: number
+}
+
+export interface SkillAdminMessages {
+  readonly messages: readonly SkillAdminMessage[]
+  readonly nextSeq: number
+}
+
 export interface SkillPlan {
   readonly planId: string
   readonly kind: 'install' | 'update' | 'remove' | 'unsupported'
@@ -84,6 +96,20 @@ export function deleteSkillAdminSession(projectId: string, operatorSessionId: st
   return adminCall('delete-session', { projectId, operatorSessionId, sessionId })
 }
 
+/** Send one supervisor message to the admin conversation. */
+export function sendSkillAdminMessage(
+  projectId: string, operatorSessionId: string, sessionId: string, text: string,
+): Promise<{ accepted: true }> {
+  return adminCall('message', { projectId, operatorSessionId, sessionId, text })
+}
+
+/** Read admin messages after a sequence number. */
+export function readSkillAdminMessages(
+  projectId: string, operatorSessionId: string, sessionId: string, afterSeq: number,
+): Promise<SkillAdminMessages> {
+  return adminCall('messages', { projectId, operatorSessionId, sessionId, afterSeq })
+}
+
 /** Apply or cancel one confirmed plan. */
 export function applySkillPlan(input: {
   readonly projectId: string
@@ -144,6 +170,7 @@ export function skillAdminErrorKey(code: string): string {
     case 'SKILL_ADMIN_UNAVAILABLE': return 'skills.admin.error.unavailable'
     case 'SKILL_ADMIN_SESSION_FAILED': return 'skills.admin.error.session'
     case 'SKILL_ADMIN_PRESET_MISSING': return 'skills.admin.error.preset'
+    case 'SKILL_ADMIN_MESSAGE_UNSUPPORTED': return 'skills.admin.error.messageUnsupported'
     default: return 'skills.admin.error.generic'
   }
 }
