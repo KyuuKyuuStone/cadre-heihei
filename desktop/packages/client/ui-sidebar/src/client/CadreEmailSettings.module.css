@@ -191,3 +191,20 @@
 .badgeFiling {
   color: var(--dsw-alias-state-warn-label);
 }
+
+.advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.advanced summary {
+  cursor: pointer;
+  color: var(--dsw-alias-label-tertiary);
+}

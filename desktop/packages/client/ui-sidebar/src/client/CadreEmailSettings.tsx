@@ -16,10 +16,13 @@ type UseMenuOpenState = () => readonly [open: boolean, setOpen: (open: boolean) 
 /** One email config view; `hasKey` is derived by the Host, never a secret. */
 export interface CadreEmailConfigView {
   readonly enabled: boolean
-  readonly provider?: 'sendgrid' | 'resend'
+  readonly provider?: 'sendgrid' | 'resend' | 'smtp'
   readonly from: { readonly email: string; readonly name?: string }
   readonly recipients: readonly string[]
   readonly apiKeyEnv?: string
+  readonly smtpPreset?: 'qq' | '163'
+  readonly user?: string
+  readonly authCodeEnv?: string
   readonly dryRun?: boolean
   readonly minIntervalMs?: number
   readonly hasKey: boolean
@@ -83,6 +86,9 @@ function emailErrorText(cause: unknown, t: PropsLocale<'sidebar'>['t']): string 
     case 'EMAIL_RECIPIENT_RESTRICTED': return t('email.error.recipientRestricted')
     case 'EMAIL_MISSING_API_KEY': return t('email.error.missingKey')
     case 'EMAIL_AUTH_FAILED': return t('email.error.authFailed')
+    case 'EMAIL_TIMEOUT': return t('email.error.timeout')
+    case 'EMAIL_CONNECTION_FAILED': return t('email.error.connection')
+    case 'EMAIL_SMTP_FAILED': return t('email.error.smtp')
     case 'EMAIL_CONFIG_INVALID': return t('email.error.configInvalid')
     default: return message
   }
@@ -95,6 +101,9 @@ function resultText(result: EmailResult, t: PropsLocale<'sidebar'>['t']): string
   if (result.code === 'EMAIL_FROM_NOT_VERIFIED') return t('email.error.fromNotVerified')
   if (result.code === 'EMAIL_RECIPIENT_RESTRICTED') return t('email.error.recipientRestricted')
   if (result.code === 'EMAIL_MISSING_API_KEY') return t('email.error.missingKey')
+  if (result.code === 'EMAIL_TIMEOUT') return t('email.error.timeout')
+  if (result.code === 'EMAIL_CONNECTION_FAILED') return t('email.error.connection')
+  if (result.code === 'EMAIL_SMTP_FAILED') return t('email.error.smtp')
   return t('email.result.failed', { code: result.code ?? 'ERROR', message: result.message ?? '' })
 }
 
@@ -104,10 +113,11 @@ function validEmail(value: string): boolean {
 
 const DEFAULT_CONFIG: CadreEmailConfigView = {
   enabled: false,
-  provider: 'sendgrid',
+  provider: 'smtp',
   from: { email: '' },
   recipients: [],
-  apiKeyEnv: 'SENDGRID_API_KEY',
+  smtpPreset: 'qq',
+  authCodeEnv: 'QQ_EMAIL_AUTH_CODE',
   dryRun: false,
   minIntervalMs: 60_000,
   hasKey: false,
@@ -164,7 +174,9 @@ function EmailForm({
 }) {
   const [config, setConfig] = useState<CadreEmailConfigView | null>(null)
   const [enabled, setEnabled] = useState(false)
-  const [provider, setProvider] = useState<'sendgrid' | 'resend'>('sendgrid')
+  const [provider, setProvider] = useState<'sendgrid' | 'resend' | 'smtp'>('smtp')
+  const [smtpPreset, setSmtpPreset] = useState<'qq' | '163'>('qq')
+  const [authCodeEnv, setAuthCodeEnv] = useState('QQ_EMAIL_AUTH_CODE')
   const [fromEmail, setFromEmail] = useState('')
   const [fromName, setFromName] = useState('')
   const [recipients, setRecipients] = useState<string[]>([])
@@ -184,7 +196,9 @@ function EmailForm({
         const next = value as CadreEmailConfigView
         setConfig(next)
         setEnabled(next.enabled)
-        setProvider(next.provider ?? 'sendgrid')
+        setProvider(next.provider ?? 'smtp')
+        setSmtpPreset(next.smtpPreset ?? 'qq')
+        setAuthCodeEnv(next.authCodeEnv ?? 'QQ_EMAIL_AUTH_CODE')
         setFromEmail(next.from.email)
         setFromName(next.from.name ?? '')
         setRecipients([...next.recipients])
@@ -200,7 +214,9 @@ function EmailForm({
         if (isMissingConfig(message)) {
           setConfig(DEFAULT_CONFIG)
           setEnabled(DEFAULT_CONFIG.enabled)
-          setProvider(DEFAULT_CONFIG.provider ?? 'sendgrid')
+          setProvider(DEFAULT_CONFIG.provider ?? 'smtp')
+          setSmtpPreset(DEFAULT_CONFIG.smtpPreset ?? 'qq')
+          setAuthCodeEnv(DEFAULT_CONFIG.authCodeEnv ?? 'QQ_EMAIL_AUTH_CODE')
           setFromEmail(DEFAULT_CONFIG.from.email)
           setFromName(DEFAULT_CONFIG.from.name ?? '')
           setRecipients([...DEFAULT_CONFIG.recipients])
@@ -229,16 +245,31 @@ function EmailForm({
     setError(null)
   }
 
-  const changeProvider = (next: 'sendgrid' | 'resend'): void => {
+  const changeProvider = (next: 'sendgrid' | 'resend' | 'smtp'): void => {
     setProvider(next)
-    setApiKeyEnv(next === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY')
+    if (next === 'smtp') {
+      if (!/^[A-Z_][A-Z0-9_]*$/u.test(authCodeEnv.trim())) setAuthCodeEnv('QQ_EMAIL_AUTH_CODE')
+    } else {
+      setApiKeyEnv(next === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY')
+    }
     setError(null)
+  }
+
+  const changePreset = (next: 'qq' | '163'): void => {
+    setSmtpPreset(next)
+    if (authCodeEnv.trim() === '' || authCodeEnv === 'QQ_EMAIL_AUTH_CODE' || authCodeEnv === 'SMTP_163_AUTH_CODE') {
+      setAuthCodeEnv(next === 'qq' ? 'QQ_EMAIL_AUTH_CODE' : 'SMTP_163_AUTH_CODE')
+    }
   }
 
   const validate = (): string | null => {
     if (!validEmail(fromEmail.trim())) return t('email.error.from')
     if (recipients.length === 0) return t('email.error.noRecipients')
-    if (!/^[A-Z_][A-Z0-9_]*$/u.test(apiKeyEnv.trim())) return t('email.error.env')
+    if (provider === 'smtp') {
+      if (!/^[A-Z_][A-Z0-9_]*$/u.test(authCodeEnv.trim())) return t('email.error.authCodeEnv')
+    } else if (!/^[A-Z_][A-Z0-9_]*$/u.test(apiKeyEnv.trim())) {
+      return t('email.error.env')
+    }
     if (!/^\d+$/u.test(minInterval.trim())) return t('email.error.interval')
     return null
   }
@@ -261,7 +292,13 @@ function EmailForm({
           provider,
           from: { email: fromEmail.trim(), ...(fromName.trim() === '' ? {} : { name: fromName.trim() }) },
           recipients,
-          apiKeyEnv: apiKeyEnv.trim(),
+          ...(provider === 'smtp'
+            ? {
+              smtpPreset,
+              user: fromEmail.trim(),
+              authCodeEnv: authCodeEnv.trim(),
+            }
+            : { apiKeyEnv: apiKeyEnv.trim() }),
           dryRun,
           minIntervalMs: Number(minInterval),
         },
@@ -314,20 +351,48 @@ function EmailForm({
         {config === null && error === null && <p className={css.hint}>{t('email.loading')}</p>}
         <Checkbox checked={enabled} disabled={busy} label={t('email.enabled')}
           onChange={setEnabled} />
-        <label className={css.label}>{t('email.provider')}
-          <select className={css.select} value={provider} disabled={busy}
-            onChange={(event) => { changeProvider(event.target.value === 'resend' ? 'resend' : 'sendgrid') }}>
-            <option value="sendgrid">{t('email.provider.sendgrid')}</option>
-            <option value="resend">{t('email.provider.resend')}</option>
-          </select>
-        </label>
-        <p className={css.hint} data-email-provider-hint>
-          {t(provider === 'resend' ? 'email.provider.resendHint' : 'email.provider.sendgridHint')}
-        </p>
-        <label className={css.label}>{t('email.fromEmail')}
+        {provider === 'smtp' && (
+          <label className={css.label}>{t('email.smtpPreset')}
+            <select className={css.select} value={smtpPreset} disabled={busy}
+              onChange={(event) => { changePreset(event.target.value === '163' ? '163' : 'qq') }}>
+              <option value="qq">{t('email.smtpPreset.qq')}</option>
+              <option value="163">{t('email.smtpPreset.163')}</option>
+            </select>
+          </label>
+        )}
+        <details className={css.advanced} data-email-advanced open={provider !== 'smtp'}>
+          <summary>{t('email.advancedProvider')}</summary>
+          <label className={css.label}>{t('email.provider')}
+            <select className={css.select} value={provider} disabled={busy}
+              onChange={(event) => {
+                const value = event.target.value
+                changeProvider(value === 'resend' ? 'resend' : value === 'sendgrid' ? 'sendgrid' : 'smtp')
+              }}>
+              <option value="smtp">{t('email.provider.smtp')}</option>
+              <option value="sendgrid">{t('email.provider.sendgrid')}</option>
+              <option value="resend">{t('email.provider.resend')}</option>
+            </select>
+          </label>
+          {provider !== 'smtp' && (
+            <p className={css.hint} data-email-provider-hint>
+              {t(provider === 'resend' ? 'email.provider.resendHint' : 'email.provider.sendgridHint')}
+            </p>
+          )}
+        </details>
+        <label className={css.label}>{t(provider === 'smtp' ? 'email.smtpAddress' : 'email.fromEmail')}
           <Input value={fromEmail} disabled={busy} onChange={(event) => { setFromEmail(event.target.value) }} />
         </label>
-        <p className={css.hint}>{t(provider === 'resend' ? 'email.from.resendHint' : 'email.from.sendgridHint')}</p>
+        <p className={css.hint}>
+          {t(provider === 'smtp'
+            ? 'email.smtp.hint'
+            : provider === 'resend' ? 'email.from.resendHint' : 'email.from.sendgridHint')}
+        </p>
+        {provider === 'smtp' && (
+          <label className={css.label}>{t('email.authCodeEnv')}
+            <Input value={authCodeEnv} disabled={busy}
+              onChange={(event) => { setAuthCodeEnv(event.target.value) }} />
+          </label>
+        )}
         <label className={css.label}>{t('email.fromName')}
           <Input value={fromName} disabled={busy} onChange={(event) => { setFromName(event.target.value) }} />
         </label>
@@ -350,9 +415,11 @@ function EmailForm({
             ))}
             </ul>}
         </div>
-        <label className={css.label}>{t('email.apiKeyEnv')}
-          <Input value={apiKeyEnv} disabled={busy} onChange={(event) => { setApiKeyEnv(event.target.value) }} />
-        </label>
+        {provider !== 'smtp' && (
+          <label className={css.label}>{t('email.apiKeyEnv')}
+            <Input value={apiKeyEnv} disabled={busy} onChange={(event) => { setApiKeyEnv(event.target.value) }} />
+          </label>
+        )}
         {config !== null && (
           <span className={config.hasKey ? css.hasKey : css.noKey}>
             {config.hasKey ? t('email.hasKey') : t('email.noKey')}

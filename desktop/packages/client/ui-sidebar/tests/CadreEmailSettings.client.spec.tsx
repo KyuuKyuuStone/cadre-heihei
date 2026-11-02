@@ -9,10 +9,12 @@ import { zh } from '../src/client/locales.ts'
 const REQUEST: CadreEmailRequest = { sessionId: 'sup', projectId: 'p1', label: '项目部 A', token: 1 }
 const VIEW = {
   enabled: true,
-  provider: 'sendgrid',
+  provider: 'smtp',
+  smtpPreset: 'qq',
+  user: 'cadre@example.com',
+  authCodeEnv: 'QQ_EMAIL_AUTH_CODE',
   from: { email: 'cadre@example.com', name: 'Cadre' },
   recipients: ['owner@example.com'],
-  apiKeyEnv: 'SENDGRID_KEY',
   dryRun: false,
   minIntervalMs: 60_000,
   hasKey: true,
@@ -95,7 +97,7 @@ describe('Cadre email settings', () => {
     const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
     const body = JSON.parse((call?.[1] as RequestInit).body as string) as Record<string, unknown>
     expect(call?.[1]).toMatchObject({ method: 'POST' })
-    expect(body).toMatchObject({ projectId: 'p1', actorSessionId: 'sup', config: { provider: 'sendgrid' } })
+    expect(body).toMatchObject({ projectId: 'p1', actorSessionId: 'sup', config: { provider: 'smtp', smtpPreset: 'qq' } })
     expect(JSON.stringify(body)).not.toContain('apiKey"')
   })
 
@@ -129,7 +131,7 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    expect(await screen.findByDisplayValue('SENDGRID_API_KEY')).toBeTruthy()
+    expect(await screen.findByDisplayValue('QQ_EMAIL_AUTH_CODE')).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByRole('button', { name: '保存' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '测试发送' })).toBeTruthy()
@@ -175,6 +177,37 @@ describe('Cadre email settings', () => {
       .toBe('https://www.aliyun.com/product/directmail')
     expect(screen.getByRole('link', { name: '腾讯云邮件推送 SES' }).getAttribute('href'))
       .toBe('https://cloud.tencent.com/product/ses')
+  })
+
+  it('defaults to QQ SMTP, switches preset, and saves the simple fields', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
+      return json({ ok: true, result: VIEW })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    await screen.findByDisplayValue('QQ_EMAIL_AUTH_CODE')
+    expect(screen.getByText(/QQ\/163 需在邮箱设置中开启 SMTP/)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('邮箱类型'), { target: { value: '163' } })
+    expect(screen.getByDisplayValue('SMTP_163_AUTH_CODE')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
+    const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
+    const body = JSON.parse((call?.[1] as RequestInit).body as string) as { config: Record<string, unknown> }
+    expect(body.config).toMatchObject({
+      provider: 'smtp',
+      smtpPreset: '163',
+      user: 'cadre@example.com',
+      authCodeEnv: 'SMTP_163_AUTH_CODE',
+      from: { email: 'cadre@example.com', name: 'Cadre' },
+      recipients: ['owner@example.com'],
+    })
+    expect(body.config).not.toHaveProperty('verifiedDomains')
+    expect(body.config).not.toHaveProperty('apiKeyEnv')
   })
 
   it('switches to Resend, prefills its key env, and saves provider without domains', async () => {
