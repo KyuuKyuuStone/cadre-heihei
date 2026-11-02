@@ -68,21 +68,21 @@ describe('Cadre skill tab', () => {
     })
   })
 
-  it('lets a supervisor switch the target member and save for them', async () => {
+  it('uses the current Session for a supervisor too, without a member switcher', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-      if (requestUrl(input).endsWith('/set')) return json({ ok: true, result: { skills: ['worker-skill'] } })
+      if (requestUrl(input).endsWith('/set')) return json({ ok: true, result: { skills: [] } })
       return json({ ok: true, result: ENTRIES })
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillTab {...props('sup')} />)
     expect(await screen.findByText('主管技能')).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('编辑成员'), { target: { value: 'w1' } })
-    expect(await screen.findByText('员工技能')).toBeTruthy()
+    expect(screen.queryByLabelText('编辑成员')).toBeNull()
+    expect(screen.queryByRole('combobox')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '保存技能' }))
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
       expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
-        actorSessionId: 'sup', targetSessionId: 'w1',
+        actorSessionId: 'sup', targetSessionId: 'sup',
       })
     })
   })

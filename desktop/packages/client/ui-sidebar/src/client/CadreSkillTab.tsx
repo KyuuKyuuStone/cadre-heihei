@@ -30,22 +30,18 @@ export function CadreSkillTab({ sessionId, useRoster, projectOfSession, t }: Ski
   const projectId = projectOfSession(sessionId)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
   const [selected, setSelected] = useState<readonly string[]>([])
-  const [targetId, setTargetId] = useState(sessionId)
   const [preview, setPreview] = useState<CadreSkillPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const isSupervisor = member?.role === 'supervisor'
-  const target = members.find(item => item.sessionId === targetId && item.state !== 'departed') ?? member
-  const targetSessionId = target?.sessionId ?? sessionId
 
   const load = useCallback(async (): Promise<void> => {
-    if (member === undefined || projectId === undefined || target === undefined) return
+    if (member === undefined || projectId === undefined) return
     setBusy(true)
     setError(null)
     try {
-      const next = (await fetchSkillCatalog(projectId, sessionId, targetSessionId, navigator.language))
-        .filter(entry => entry.roles.includes(target.role))
+      const next = (await fetchSkillCatalog(projectId, sessionId, sessionId, navigator.language))
+        .filter(entry => entry.roles.includes(member.role))
       setEntries(next)
       setSelected(next.filter(entry => entry.selected).map(entry => entry.id))
     } catch (cause) {
@@ -53,7 +49,7 @@ export function CadreSkillTab({ sessionId, useRoster, projectOfSession, t }: Ski
     } finally {
       setBusy(false)
     }
-  }, [member, projectId, sessionId, target, targetSessionId])
+  }, [member, projectId, sessionId])
 
   useEffect(() => { void load() }, [load])
 
@@ -66,7 +62,7 @@ export function CadreSkillTab({ sessionId, useRoster, projectOfSession, t }: Ski
     setError(null)
     setNotice(null)
     try {
-      await saveMemberSkills(projectId, sessionId, targetSessionId, selected)
+      await saveMemberSkills(projectId, sessionId, sessionId, selected)
       setNotice(t('skills.tab.saved'))
       await load()
     } catch (cause) {
@@ -81,17 +77,6 @@ export function CadreSkillTab({ sessionId, useRoster, projectOfSession, t }: Ski
         <div>
           <h1>{t('skills.tab.title')}</h1>
           <p>{t('skills.tab.description')}</p>
-          {isSupervisor && (
-            <label className={css.target}>
-              <span>{t('skills.tab.target')}</span>
-              <select value={targetSessionId} disabled={busy}
-                onChange={(event) => { setTargetId(event.target.value) }}>
-                {members.filter(item => item.state !== 'departed').map(item => (
-                  <option key={item.sessionId} value={item.sessionId}>{item.displayName}</option>
-                ))}
-              </select>
-            </label>
-          )}
         </div>
         <span className={css.count}>{t('skills.tab.count', { count: String(selected.length) })}</span>
       </header>

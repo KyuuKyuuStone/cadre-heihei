@@ -81,14 +81,6 @@
   display: flex;
   justify-content: flex-end;
 }
-.target {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-}
 
 .cards {
   display: grid;
