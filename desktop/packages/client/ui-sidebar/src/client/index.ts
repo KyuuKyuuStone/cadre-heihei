@@ -40,6 +40,7 @@ import {
 } from './CadreSkillLibrary.tsx'
 import { CadreSkillPlanCard, type CadreSkillPlanInjected } from './CadreSkillPlanCard.tsx'
 import { applySkillPlan, SkillAdminError } from './CadreSkillAdmin.ts'
+import { isInternalWorkspaceTitle } from './workspace-filter.ts'
 import {
   CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
@@ -174,7 +175,7 @@ export function apply(ctx: ClientContext): void {
 
   /** Every project the sidebar can address: one per official Workspace. */
   const projectItems = (): ReturnType<typeof ctx.workspaces.list.getSnapshot>['items'] =>
-    ctx.workspaces.list.getSnapshot().items
+    ctx.workspaces.list.getSnapshot().items.filter(item => !isInternalWorkspaceTitle(item.title))
 
   // Employee profile store (name/description edits go through the same upsert
   // write; the row menu owns the dialog). Employees, like the roster, are
@@ -605,7 +606,7 @@ export function apply(ctx: ClientContext): void {
     openSkills,
     closeSkills,
   })
-  const openSkillAdminSession = async (sessionId: string): Promise<void> => {
+  const openSkillAdminSession = async (sessionId: string, _workspaceId?: string): Promise<void> => {
     await ctx.sessions.refresh()
     workspaceNavigation.openSession(sessionId)
   }
@@ -884,7 +885,7 @@ export function apply(ctx: ClientContext): void {
 
   // General settings: one switch, default on. The row hides itself when the
   // desktop bridge is absent (for example in a plain web shell).
-  ctx.slots.inject('settings.general.item' as never, () => ctx.slots.register({
+  ctx.slots.inject('settings.general.item', () => ctx.slots.register({
     name: 'settings.general.item',
     id: 'cadre-update-check',
     order: 95,

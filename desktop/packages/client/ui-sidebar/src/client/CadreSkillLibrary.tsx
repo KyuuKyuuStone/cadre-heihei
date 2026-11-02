@@ -18,7 +18,7 @@ import css from './CadreSkillLibrary.module.css'
 export interface CadreSkillLibraryInjected {
   hooks: { roster: HostObservable<CadreRosterState>; sessions: HostObservable<CadreSessionsState> }
   projectOfSession(sessionId: string): string | undefined
-  openSkillAdminSession(sessionId: string): Promise<void>
+  openSkillAdminSession(sessionId: string, workspaceId?: string): Promise<void>
 }
 
 interface ManualState {
@@ -155,7 +155,11 @@ export function CadreSkillLibraryPage({
         .filter(session => typeof session.sessionId === 'string' && session.sessionId !== '')
         .sort((a, b) => b.updatedAt - a.updatedAt)[0]
       const chosen = existing ?? await createSkillAdminSession(projectId)
-      await openSkillAdminSession(chosen.sessionId)
+      if (chosen.workspaceId === undefined) {
+        await openSkillAdminSession(chosen.sessionId)
+      } else {
+        await openSkillAdminSession(chosen.sessionId, chosen.workspaceId)
+      }
     } catch (cause) {
       setOpenError(cause instanceof SkillAdminError
         ? t(skillAdminErrorKey(cause.code) as never)

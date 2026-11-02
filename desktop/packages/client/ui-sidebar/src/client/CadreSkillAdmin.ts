@@ -4,6 +4,7 @@ export interface SkillAdminSession {
   readonly sessionId: string
   readonly title: string
   readonly updatedAt: number
+  readonly workspaceId?: string
 }
 
 export interface SkillAdminMessage {

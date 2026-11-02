@@ -54,7 +54,7 @@ describe('Cadre skill library', () => {
       const url = requestUrl(input)
       if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
       if (url.endsWith('/admin/sessions')) return json({ ok: true, result: [] })
-      if (url.endsWith('/admin/session')) return json({ ok: true, result: { sessionId: 'chat-1', title: '技能管理员', updatedAt: 1 } })
+      if (url.endsWith('/admin/session')) return json({ ok: true, result: { sessionId: 'chat-1', title: '技能管理员', updatedAt: 1, workspaceId: 'ws-1' } })
       return json({ ok: true, result: { removed: true } })
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -64,7 +64,7 @@ describe('Cadre skill library', () => {
     expect(screen.queryByLabelText('安装说明')).toBeNull()
     expect(screen.queryByText('技能助手')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '打开安装对话' }))
-    await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('chat-1') })
+    await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('chat-1', 'ws-1') })
     expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/admin/session'))).toBe(true)
     expect(screen.getByRole('button', { name: '删除' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
@@ -135,7 +135,7 @@ describe('Cadre skill library', () => {
       if (requestUrl(input).endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
       if (requestUrl(input).endsWith('/admin/sessions')) return json({ ok: true, result: [] })
       if (requestUrl(input).endsWith('/admin/session')) {
-        return json({ ok: true, result: { sessionId: 'chat-1', title: '技能管理员', updatedAt: 1 } })
+        return json({ ok: true, result: { sessionId: 'chat-1', title: '技能管理员', updatedAt: 1, workspaceId: 'ws-1' } })
       }
       return json({ ok: true, result: {} })
     }))
@@ -148,7 +148,7 @@ describe('Cadre skill library', () => {
     render(<CadreSkillLibraryPage {...{ ...props, useRoster, openSkillAdminSession }} />)
     await screen.findByText('内置技能')
     fireEvent.click(screen.getByRole('button', { name: '打开安装对话' }))
-    await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('chat-1') })
+    await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('chat-1', 'ws-1') })
   })
 
   it('shows a readable prompt when the session has no project roster membership', async () => {
