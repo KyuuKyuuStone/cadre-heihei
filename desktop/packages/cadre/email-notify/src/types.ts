@@ -60,6 +60,20 @@ export interface SummaryTask {
   readonly deliverable?: string
 }
 
+/** Counts used by the idle report. */
+export interface IdleTaskStats {
+  readonly delivered: number
+  readonly verified: number
+  readonly failed: number
+}
+
+/** One outbound attachment (screenshot or small file). */
+export interface EmailAttachment {
+  readonly filename: string
+  readonly content: Buffer
+  readonly contentType?: string
+}
+
 /** The notification kinds the core supports. */
 export type EmailEvent =
   | { readonly kind: 'task-summary'; readonly projectId: string; readonly tasks: readonly SummaryTask[] }
@@ -79,6 +93,8 @@ export type EmailEvent =
     readonly summary: string
     readonly idleMinutes: number
     readonly at: string
+    readonly taskStats: IdleTaskStats
+    readonly screenshotFailed: boolean
   }
 
 /** Rendered message before it becomes a SendGrid request. */
@@ -89,6 +105,8 @@ export interface EmailMessage {
   readonly text: string
   /** Optional HTML alternative; omitted messages send text only. */
   readonly html?: string
+  /** Attachments; SMTP sends them, other transports currently ignore them. */
+  readonly attachments?: readonly EmailAttachment[]
 }
 
 /** Result of one notification attempt; failures never throw into the caller. */

@@ -1,15 +1,17 @@
 /**
- * Supervisor-session idle reminder. After an assistant message, wait the
- * configured minutes; a user message cancels it. One reminder per idle segment.
+ * Supervisor-session idle report. After an assistant message, wait the
+ * configured minutes; a user message cancels it. One report per idle segment.
  * @module
  */
-import type { EmailEvent, EmailResult } from '@deepseek-ai/dsh-cadre-email-notify'
+import type { EmailAttachment, EmailEvent, EmailResult, IdleTaskStats } from '@deepseek-ai/dsh-cadre-email-notify'
 
 /** Idle policy read from the project's email config. */
 export interface IdleReminderPolicy {
   readonly enabled: boolean
   readonly minutes: number
 }
+
+const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024
 
 interface SessionEventLike {
   readonly type?: unknown
@@ -21,6 +23,7 @@ interface IdleState {
   readonly summary: string
   timer: unknown
   sent: boolean
+  paused: boolean
 }
 
 type TimerHandle = unknown
@@ -30,7 +33,9 @@ export class IdleReminderService {
   readonly #isSupervisor: (sessionId: string) => boolean
   readonly #projectOf: (sessionId: string) => string | undefined
   readonly #policyOf: (projectId: string) => IdleReminderPolicy | undefined
-  readonly #send: (event: EmailEvent) => Promise<EmailResult>
+  readonly #statsOf: (projectId: string) => IdleTaskStats
+  readonly #capture: (() => Promise<Buffer | undefined>) | undefined
+  readonly #send: (event: EmailEvent, attachments?: readonly EmailAttachment[]) => Promise<EmailResult>
   readonly #now: () => number
   readonly #setTimer: (callback: () => void, ms: number) => TimerHandle
   readonly #clearTimer: (handle: TimerHandle) => void
@@ -42,7 +47,9 @@ export class IdleReminderService {
     readonly isSupervisor: (sessionId: string) => boolean
     readonly projectOf: (sessionId: string) => string | undefined
     readonly policyOf: (projectId: string) => IdleReminderPolicy | undefined
-    readonly send: (event: EmailEvent) => Promise<EmailResult>
+    readonly statsOf?: (projectId: string) => IdleTaskStats
+    readonly capture?: () => Promise<Buffer | undefined>
+    readonly send: (event: EmailEvent, attachments?: readonly EmailAttachment[]) => Promise<EmailResult>
     readonly now?: () => number
     readonly setTimer?: (callback: () => void, ms: number) => TimerHandle
     readonly clearTimer?: (handle: TimerHandle) => void
@@ -51,6 +58,8 @@ export class IdleReminderService {
     this.#isSupervisor = options.isSupervisor
     this.#projectOf = options.projectOf
     this.#policyOf = options.policyOf
+    this.#statsOf = options.statsOf ?? (() => ({ delivered: 0, verified: 0, failed: 0 }))
+    this.#capture = options.capture
     this.#send = options.send
     this.#now = options.now ?? Date.now
     this.#setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms))
@@ -82,14 +91,19 @@ export class IdleReminderService {
     const title = this.#titles.get(sessionId) ?? `会话 ${sessionId.slice(0, 8)}`
     const summary = this.#summaryOf(event)
     if (existing?.sent === true) {
-      this.#states.set(sessionId, { ...existing, title, summary })
+      this.#states.set(sessionId, { ...existing, title, summary, paused: true })
       return
     }
     if (existing !== undefined) this.#clearTimer(existing.timer)
-    const state: IdleState = { title, summary, timer: undefined, sent: false }
+    const state: IdleState = { title, summary, timer: undefined, sent: false, paused: false }
     state.timer = this.#setTimer(() => { void this.#fire(sessionId, projectId, policy, state) }, policy.minutes * 60_000)
     this.#states.set(sessionId, state)
     this.#log(`[idle-reminder] armed session=${sessionId} minutes=${String(policy.minutes)}`)
+  }
+
+  /** Whether the last report paused this session until a user message. */
+  isPaused(sessionId: string): boolean {
+    return this.#states.get(sessionId)?.paused === true
   }
 
   /** Cancel all pending reminders. */
@@ -102,6 +116,20 @@ export class IdleReminderService {
     if (state.sent || this.#states.get(sessionId) !== state) return
     state.sent = true
     state.timer = undefined
+    let screenshotFailed = true
+    let attachments: readonly EmailAttachment[] | undefined
+    if (this.#capture !== undefined) {
+      try {
+        const png = await this.#capture()
+        if (png !== undefined && png.length > 0) {
+          if (png.length > MAX_SCREENSHOT_BYTES) throw new Error('screenshot exceeds 10MB')
+          attachments = [{ filename: `cadre-report-${sessionId.slice(0, 8)}.png`, content: png, contentType: 'image/png' }]
+          screenshotFailed = false
+        }
+      } catch (error) {
+        this.#log(`[idle-reminder] screenshot failed session=${sessionId}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
     const event: EmailEvent = {
       kind: 'idle-reminder',
       projectId,
@@ -110,11 +138,15 @@ export class IdleReminderService {
       summary: state.summary,
       idleMinutes: policy.minutes,
       at: new Date(this.#now()).toISOString(),
+      taskStats: this.#statsOf(projectId),
+      screenshotFailed,
     }
     try {
-      const result = await this.#send(event)
-      this.#log(`[idle-reminder] sent session=${sessionId} status=${result.ok ? result.status : result.code}`)
+      const result = await this.#send(event, attachments)
+      state.paused = true
+      this.#log(`[idle-reminder] sent session=${sessionId} status=${result.ok ? result.status : result.code} screenshot=${String(!screenshotFailed)}`)
     } catch (error) {
+      state.paused = true
       this.#log(`[idle-reminder] send failed session=${sessionId}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }

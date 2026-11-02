@@ -14,6 +14,11 @@ export interface SmtpMail {
   readonly subject: string
   readonly text: string
   readonly html?: string
+  readonly attachments?: {
+    readonly filename: string
+    readonly content: Buffer
+    readonly contentType?: string
+  }[]
 }
 
 /** Injection seam for tests; the default uses Nodemailer. */
@@ -47,6 +52,13 @@ export function buildSmtpMail(message: EmailMessage, fromName: string | undefine
     subject: message.subject,
     text: message.text,
     ...(message.html === undefined ? {} : { html: message.html }),
+    ...(message.attachments === undefined ? {} : {
+      attachments: message.attachments.map(attachment => ({
+        filename: attachment.filename,
+        content: attachment.content,
+        ...(attachment.contentType === undefined ? {} : { contentType: attachment.contentType }),
+      })),
+    }),
   }
 }
 

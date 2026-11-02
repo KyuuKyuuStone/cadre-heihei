@@ -14,11 +14,18 @@ describe('idle reminder', () => {
     let callback: (() => void) | undefined
     let delay = 0
     const sent: EmailEvent[] = []
+    const attachmentsSeen: unknown[] = []
     const service = new IdleReminderService({
       isSupervisor: () => true,
       projectOf: () => 'p1',
       policyOf: () => ({ enabled: true, minutes: 10 }),
-      send: async event => { sent.push(event); return { ok: true, status: 'sent' } },
+      statsOf: () => ({ delivered: 2, verified: 1, failed: 1 }),
+      capture: async () => Buffer.from('png-bytes'),
+      send: async (event, attachments) => {
+        sent.push(event)
+        attachmentsSeen.push(attachments)
+        return { ok: true, status: 'sent' }
+      },
       now: () => now,
       setTimer: (fn, ms) => { callback = fn; delay = ms; return 1 },
       clearTimer: () => { callback = undefined },
@@ -31,15 +38,22 @@ describe('idle reminder', () => {
     callback?.()
     await new Promise(resolve => { setImmediate(resolve) })
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toMatchObject({ kind: 'idle-reminder', projectId: 'p1', title: '发布讨论', idleMinutes: 10 })
+    expect(sent[0]).toMatchObject({
+      kind: 'idle-reminder', projectId: 'p1', title: '发布讨论', idleMinutes: 10,
+      taskStats: { delivered: 2, verified: 1, failed: 1 }, screenshotFailed: false,
+    })
     expect((sent[0] as { summary: string }).summary).toHaveLength(300)
+    expect(attachmentsSeen[0]).toEqual([expect.objectContaining({ filename: 'cadre-report-s1.png', contentType: 'image/png' })])
+    expect(service.isPaused('s1')).toBe(true)
 
     service.handle('s1', assistant('second without user'))
     callback?.()
     await new Promise(resolve => { setImmediate(resolve) })
     expect(sent).toHaveLength(1)
+    expect(service.isPaused('s1')).toBe(true)
 
     service.handle('s1', user)
+    expect(service.isPaused('s1')).toBe(false)
     service.handle('s1', assistant('next reply'))
     expect(delay).toBe(600_000)
     now += 600_000
@@ -57,7 +71,7 @@ describe('idle reminder', () => {
       isSupervisor: () => supervisor,
       projectOf: () => 'p1',
       policyOf: () => ({ enabled, minutes: 10 }),
-      send: async event => { sent.push(event); return { ok: true, status: 'sent' } },
+      send: async (event, _attachments) => { sent.push(event); return { ok: true, status: 'sent' } },
       setTimer: fn => { scheduled += 1; callback = fn; return 1 },
       clearTimer: () => { callback = undefined },
       log: () => {},
@@ -75,5 +89,30 @@ describe('idle reminder', () => {
     pending?.()
     await new Promise(resolve => { setImmediate(resolve) })
     expect(sent).toHaveLength(0)
+  })
+
+  it('sends the report body with screenshotFailed when capture fails', async () => {
+    let callback: (() => void) | undefined
+    const sent: EmailEvent[] = []
+    let attachmentsSeen: unknown
+    const service = new IdleReminderService({
+      isSupervisor: () => true,
+      projectOf: () => 'p1',
+      policyOf: () => ({ enabled: true, minutes: 10 }),
+      capture: async () => { throw new Error('capture unavailable') },
+      send: async (event, attachments) => {
+        sent.push(event)
+        attachmentsSeen = attachments
+        return { ok: true, status: 'sent' }
+      },
+      setTimer: fn => { callback = fn; return 1 },
+      clearTimer: () => {},
+      log: () => {},
+    })
+    service.handle('s1', assistant('done'))
+    callback?.()
+    await new Promise(resolve => { setImmediate(resolve) })
+    expect(attachmentsSeen).toBeUndefined()
+    expect(sent[0]).toMatchObject({ kind: 'idle-reminder', screenshotFailed: true })
   })
 })

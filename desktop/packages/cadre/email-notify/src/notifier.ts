@@ -8,7 +8,7 @@ import { sendWithSendGrid } from './sendgrid.ts'
 import { sendWithSmtp } from './smtp.ts'
 import type { SmtpTransport } from './smtp.ts'
 import type { EmailSecretStore } from './secret-store.ts'
-import type { EmailConfig, EmailEvent, EmailMessage, EmailResult } from './types.ts'
+import type { EmailAttachment, EmailConfig, EmailEvent, EmailMessage, EmailResult } from './types.ts'
 
 interface NotifierOptions {
   /** Private directory holding `<projectId>.json` configs. */
@@ -26,7 +26,7 @@ interface NotifierOptions {
 }
 
 /** Render the subject/text for a supported event. */
-export function renderEmail(event: EmailEvent, config: EmailConfig): EmailMessage {
+export function renderEmail(event: EmailEvent, config: EmailConfig, attachments?: readonly EmailAttachment[]): EmailMessage {
   if (event.kind === 'task-summary') {
     const delivered = event.tasks.filter(task => task.status === 'delivered').length
     const verified = event.tasks.filter(task => task.status === 'verified').length
@@ -40,18 +40,25 @@ export function renderEmail(event: EmailEvent, config: EmailConfig): EmailMessag
     }
   }
   if (event.kind === 'idle-reminder') {
+    const stats = event.taskStats
+    const next = stats.failed > 0
+      ? '先处理失败任务，再决定是否继续等待。'
+      : stats.delivered > 0 ? '请验收已交付任务，或回复继续安排。' : '请回复确认是否继续。'
     return {
       to: config.recipients,
       from: config.from,
-      subject: `[Cadre] 会话等待回复：${event.title}`,
+      subject: `Cadre 汇报：${event.title}`,
       text: [
         `项目：${event.projectId}`,
         `会话：${event.title}`,
-        `已等待：${String(event.idleMinutes)} 分钟`,
-        `助手最后回复：${event.summary.slice(0, 300)}`,
-        `时间：${event.at}`,
+        `本次做了什么：${event.summary.slice(0, 300)}`,
+        `任务状态：交付 ${String(stats.delivered)} / 验收 ${String(stats.verified)} / 失败 ${String(stats.failed)}`,
+        `时间：${event.at}（已等待 ${String(event.idleMinutes)} 分钟）`,
+        `下一步建议：${next}`,
+        ...(event.screenshotFailed ? ['截图失败：未能附加当前窗口截图。'] : []),
         '请打开 Cadre Heihei 继续对话。',
       ].join('\n'),
+      ...(attachments === undefined ? {} : { attachments }),
     }
   }
   return {
@@ -107,19 +114,26 @@ export class CadreEmailNotifier {
 
   /**
    * Trigger one notification. Never throws and never blocks the caller's flow.
-   * @param event - delivered/verified summary or user-decision escalation.
+   * @param event - delivered/verified summary, escalation, or idle report.
+   * @param attachments - optional attachments for the rendered message.
    * @returns structured result.
    */
-  async notify(event: EmailEvent): Promise<EmailResult> {
+  async notify(event: EmailEvent, attachments?: readonly EmailAttachment[]): Promise<EmailResult> {
     const key = event.kind === 'task-summary'
       ? `summary:${event.projectId}:${event.tasks.map(task => `${task.taskId}:${task.status}`).sort().join(',')}`
       : event.kind === 'idle-reminder'
         ? `idle:${event.sessionId}:${event.at}`
         : `escalation:${event.projectId}:${event.taskId}:${event.episodeId}`
-    return this.#deliver(event.projectId, event, key, false)
+    return this.#deliver(event.projectId, event, key, false, attachments)
   }
 
-  async #deliver(projectId: string, event: EmailEvent, key: string, force: boolean): Promise<EmailResult> {
+  async #deliver(
+    projectId: string,
+    event: EmailEvent,
+    key: string,
+    force: boolean,
+    attachments?: readonly EmailAttachment[],
+  ): Promise<EmailResult> {
     let config: EmailConfig
     try {
       config = loadEmailConfig(this.#options.configDir, projectId)
@@ -134,7 +148,7 @@ export class CadreEmailNotifier {
         return { ok: true, status: 'rate-limited' }
       }
     }
-    const message = renderEmail(event, config)
+    const message = renderEmail(event, config, attachments)
     if (config.dryRun === true) return { ok: true, status: 'dry-run', message }
     const provider = config.provider ?? 'sendgrid'
     let apiKey: string | undefined

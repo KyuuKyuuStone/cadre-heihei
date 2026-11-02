@@ -428,11 +428,18 @@ describe('dedupe, rate limit and failures', () => {
     const message = renderEmail({
       kind: 'idle-reminder', projectId: 'p1', sessionId: 's1', title: '发布讨论',
       summary: 'x'.repeat(500), idleMinutes: 10, at: '2026-11-02T00:00:00.000Z',
+      taskStats: { delivered: 2, verified: 1, failed: 1 }, screenshotFailed: false,
     }, parseEmailConfig({ ...base, idleReminder: {} }))
     expect(message.subject).toContain('发布讨论')
-    expect(message.text).toContain('已等待：10 分钟')
+    expect(message.text).toContain('已等待 10 分钟')
     expect(message.text).toContain('x'.repeat(300))
     expect(message.text).not.toContain('x'.repeat(301))
+    const failed = renderEmail({
+      kind: 'idle-reminder', projectId: 'p1', sessionId: 's1', title: '发布讨论',
+      summary: 'done', idleMinutes: 10, at: '2026-11-02T00:00:00.000Z',
+      taskStats: { delivered: 0, verified: 0, failed: 1 }, screenshotFailed: true,
+    }, parseEmailConfig({ ...base, idleReminder: {} }))
+    expect(failed.text).toContain('截图失败')
   })
 
   it('derives QQ/163 SMTP presets and the auth-code env', () => {
@@ -453,6 +460,10 @@ describe('dedupe, rate limit and failures', () => {
     const message = { to: ['r@example.com'], from: { email: 'owner@qq.com', name: 'Owner' }, subject: 's', text: 't' }
     expect(buildSmtpMail(message, 'Cadre')).toEqual({
       from: { name: 'Cadre', address: 'owner@qq.com' }, to: 'r@example.com', subject: 's', text: 't',
+    })
+    const attachment = { filename: 'shot.png', content: Buffer.from('png'), contentType: 'image/png' }
+    expect(buildSmtpMail({ ...message, attachments: [attachment] }, 'Cadre')).toMatchObject({
+      attachments: [attachment],
     })
     const sent = vi.fn(async () => ({ accepted: ['r@example.com'] }))
     expect(await sendWithSmtp({

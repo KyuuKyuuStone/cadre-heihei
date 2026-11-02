@@ -173,6 +173,14 @@ class LedgerReader {
     }))
   }
 
+  taskStats(projectId: string): { delivered: number; verified: number; failed: number } {
+    const rows = this.#db.prepare(
+      'SELECT status, COUNT(*) AS count FROM tasks WHERE project_id = ? GROUP BY status',
+    ).all(projectId) as { status?: unknown; count?: unknown }[]
+    const count = (status: string): number => Number(rows.find(row => row.status === status)?.count ?? 0)
+    return { delivered: count('delivered'), verified: count('verified'), failed: count('failed') }
+  }
+
   lastTaskEventAt(taskId: string): number | undefined {
     const row = this.#db.prepare('SELECT MAX(at) AS at FROM task_events WHERE task_id = ?')
       .get(taskId) as { at?: unknown } | undefined
@@ -233,6 +241,27 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     ?? join(homedir(), '.dsh', 'cadre-email')
   const emailSecrets = new EmailSecretStore()
   const emailNotifier = new CadreEmailNotifier({ configDir: emailConfigDir, secretStore: emailSecrets })
+  const captureCurrentWindow = async (): Promise<Buffer | undefined> => {
+    try {
+      const require = createRequire(import.meta.url)
+      const electron = require('electron') as {
+        BrowserWindow?: {
+          getFocusedWindow?(): { capturePage(): Promise<{ isEmpty(): boolean; toPNG(): Buffer }> } | null
+          getAllWindows?(): readonly { isDestroyed?(): boolean; capturePage(): Promise<{ isEmpty(): boolean; toPNG(): Buffer }> }[]
+        }
+      }
+      const windows = electron.BrowserWindow
+      if (windows === undefined) return undefined
+      const focused = windows.getFocusedWindow?.()
+      const win = focused ?? windows.getAllWindows?.().find(candidate => candidate.isDestroyed?.() !== true)
+      if (win === undefined || win === null) return undefined
+      const image = await win.capturePage()
+      return image.isEmpty() ? undefined : image.toPNG()
+    } catch (error) {
+      console.error(`host-governance: window capture failed: ${String(error)}`)
+      return undefined
+    }
+  }
   const idleReminder = new IdleReminderService({
     isSupervisor: sessionId => projectOf(sessionId) !== undefined,
     projectOf,
@@ -246,7 +275,9 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         return undefined
       }
     },
-    send: event => emailNotifier.notify(event),
+    statsOf: projectId => ledger.taskStats(projectId),
+    capture: captureCurrentWindow,
+    send: (event, attachments) => emailNotifier.notify(event, attachments),
   })
   const disposeIdleEvents = ctx.on === undefined
     ? undefined
