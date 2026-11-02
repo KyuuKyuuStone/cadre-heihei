@@ -168,7 +168,7 @@ describe('session skill packs', () => {
     expect(events.map(skill => skill.content)).toEqual(['# v1', '# v2'])
   })
 
-  it('catalog/get/set/preview enforce supervisor, roles, dedupe and persistence', () => {
+  it('catalog/get/set/preview enforce roles, dedupe and persistence', () => {
     const root = workspace()
     const packs = join(root, 'packs')
     pack(packs, 'design', ['worker'], '# design body')
@@ -199,7 +199,8 @@ describe('session skill packs', () => {
       .toThrow(/不能加载技能包 lead/)
     expect(() => api.set({ projectId: 'p1', actorSessionId: 's1', targetSessionId: 'w1', skills: ['missing'] }))
       .toThrow(/未知技能包/)
-    expect(() => api.get({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w1' }))
+    expect(api.get({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w1' }).skills).toEqual(['design'])
+    expect(() => api.preview({ projectId: 'p1', actorSessionId: 'w1', packId: 'design' }))
       .toThrow(/只有本项目在册 supervisor/)
     db.close()
   })
@@ -463,6 +464,39 @@ describe('session skill packs', () => {
 
     await admin.deleteSession({ projectId: 'p1', operatorSessionId: 's1', sessionId: created.sessionId })
     expect(await admin.listSessions({ projectId: 'p1', operatorSessionId: 's1' })).toHaveLength(0)
+    reader.close()
+  })
+
+  it('lets members view and edit their own skills while writes stay supervisor-only', () => {
+    const root = workspace()
+    const packs = join(root, 'installed')
+    pack(packs, 'design', ['worker'])
+    const db = ledger(root)
+    insert(db, 's1', 'supervisor', [])
+    insert(db, 'w1', 'worker', [])
+    insert(db, 'w2', 'worker', [])
+    db.close()
+    const reader = new DatabaseSync(join(root, 'ledger.sqlite'))
+    const api = createSkillApi({
+      db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs,
+    })
+    expect(api.catalog({ projectId: 'p1', actorSessionId: 'w1' })).toEqual([
+      expect.objectContaining({ id: 'design', selected: false }),
+    ])
+    expect(api.set({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w1', skills: ['design'] }))
+      .toEqual({ skills: ['design'] })
+    expect(api.get({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w1' }))
+      .toEqual({ skills: ['design'] })
+    expect(() => api.get({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w2' }))
+      .toThrow(/supervisor/)
+    expect(() => api.set({ projectId: 'p1', actorSessionId: 'w1', targetSessionId: 'w2', skills: [] }))
+      .toThrow(/supervisor/)
+    expect(() => api.preview({ projectId: 'p1', actorSessionId: 'w1', packId: 'design' }))
+      .toThrow(/supervisor/)
+    expect(() => api.add({
+      projectId: 'p1', actorSessionId: 'w1', id: 'x', name: 'x', description: 'x', roles: ['worker'],
+      tokenEstimate: 1, tools: [], source: 'manual', license: 'MIT', content: '# x',
+    })).toThrow(/supervisor/)
     reader.close()
   })
 })

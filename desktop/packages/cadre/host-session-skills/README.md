@@ -42,7 +42,9 @@ unselected session has zero skill tokens from this plugin.
 
 ## Settings IPC
 
-POST JSON, supervisor-only and project-scoped:
+POST JSON, project-scoped. `catalog`/`get`/`set` admit registered members:
+a worker may read and update its own selection, a supervisor may target any
+member. `preview`/`add`/`remove`/`install-url` remain supervisor-only.
 
 - `/cadre/skills/catalog` — `{projectId, actorSessionId, targetSessionId?}` →
   catalog entries with `selected`;

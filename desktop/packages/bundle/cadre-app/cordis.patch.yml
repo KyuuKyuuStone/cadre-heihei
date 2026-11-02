@@ -50,6 +50,8 @@
               readImage: false
           - id: tool-fs-search
             name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
           - id: tool-web
             name: '@deepseek-ai/dsh-tool-web'
             config:

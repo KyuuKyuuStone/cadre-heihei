@@ -408,7 +408,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
             const body = req.method === 'POST'
               ? await readBody(req)
               : Object.fromEntries(new URL(req.url ?? '/', 'http://127.0.0.1').searchParams)
-            api.catalog({ projectId: required(body, 'projectId'), actorSessionId: required(body, 'operatorSessionId') })
+            api.assertSupervisor({ projectId: required(body, 'projectId'), actorSessionId: required(body, 'operatorSessionId') })
             reply(res, 200, { ok: true, result: await diagnostics() })
           } catch (error) {
             if (error instanceof SkillIpcError) return reply(res, error.status, { ok: false, code: error.code, message: error.message })

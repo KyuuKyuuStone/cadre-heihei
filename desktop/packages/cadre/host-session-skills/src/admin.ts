@@ -343,7 +343,7 @@ export class SkillAdminApi {
   }
 
   private requireOperator(projectId: string, operatorSessionId: string): void {
-    this.api.catalog({ projectId, actorSessionId: operatorSessionId })
+    this.api.assertSupervisor({ projectId, actorSessionId: operatorSessionId })
   }
 
   private bindingOf(sessionId: string): { readonly projectId: string; readonly operatorSessionId: string } {

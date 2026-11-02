@@ -41,6 +41,8 @@ export interface SkillApi {
   catalog(input: { projectId: string; actorSessionId: string; targetSessionId?: string; locale?: string }): CatalogEntry[]
   get(input: { projectId: string; actorSessionId: string; targetSessionId: string }): { skills: string[] }
   set(input: { projectId: string; actorSessionId: string; targetSessionId: string; skills: unknown }): { skills: string[] }
+  /** Supervisor-only guard used by the admin conversation and diagnostics. */
+  assertSupervisor(input: { projectId: string; actorSessionId: string }): void
   preview(input: { projectId: string; actorSessionId: string; packId: string }): {
     id: string; content: string; tokenEstimate: number; license: string
     author?: string; homepage?: string
@@ -217,8 +219,18 @@ function requireSupervisor(db: DatabaseSync, projectId: string, actorSessionId: 
 
 function requireMember(db: DatabaseSync, projectId: string, sessionId: string): MemberRow {
   const member = readMember(db, projectId, sessionId)
-  if (member === undefined) throw new SkillIpcError('SKILL_MEMBER_NOT_FOUND', 404, '目标成员不在本项目')
+  if (member === undefined || member.state === 'departed') {
+    throw new SkillIpcError('SKILL_MEMBER_NOT_FOUND', 404, '目标成员不在本项目')
+  }
   return member
+}
+
+function requireActor(db: DatabaseSync, projectId: string, sessionId: string): MemberRow {
+  const actor = readMember(db, projectId, sessionId)
+  if (actor === undefined || actor.state === 'departed') {
+    throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有本项目在册成员可以查看或修改技能')
+  }
+  return actor
 }
 
 /**
@@ -255,17 +267,26 @@ export function createSkillApi(options: {
 
   return {
     catalog(input) {
-      requireSupervisor(db, input.projectId, input.actorSessionId)
+      const actor = requireActor(db, input.projectId, input.actorSessionId)
       const target = input.targetSessionId ?? input.actorSessionId
+      if (target !== input.actorSessionId && actor.role !== 'supervisor') {
+        throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以查看其他成员的技能')
+      }
       const selected = new Set(requireMember(db, input.projectId, target).skills)
       return [...catalog().values()].map(pack => entryOf(pack, selected.has(pack.id), input.locale))
     },
     get(input) {
-      requireSupervisor(db, input.projectId, input.actorSessionId)
+      const actor = requireActor(db, input.projectId, input.actorSessionId)
+      if (input.targetSessionId !== input.actorSessionId && actor.role !== 'supervisor') {
+        throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以查看其他成员的技能')
+      }
       return { skills: [...requireMember(db, input.projectId, input.targetSessionId).skills] }
     },
     set(input) {
-      requireSupervisor(db, input.projectId, input.actorSessionId)
+      const actor = requireActor(db, input.projectId, input.actorSessionId)
+      if (input.targetSessionId !== input.actorSessionId && actor.role !== 'supervisor') {
+        throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以修改其他成员的技能')
+      }
       const target = requireMember(db, input.projectId, input.targetSessionId)
       if (!Array.isArray(input.skills) || input.skills.some(item => typeof item !== 'string')) {
         throw new SkillIpcError('SKILL_INVALID', 400, 'skills 必须是字符串数组')
@@ -290,6 +311,9 @@ export function createSkillApi(options: {
         writer.close()
       }
       return { skills: selected }
+    },
+    assertSupervisor(input) {
+      requireSupervisor(db, input.projectId, input.actorSessionId)
     },
     preview(input) {
       requireSupervisor(db, input.projectId, input.actorSessionId)

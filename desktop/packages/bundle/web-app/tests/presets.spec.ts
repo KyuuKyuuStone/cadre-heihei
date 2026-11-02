@@ -59,6 +59,7 @@ describe('shipped agent presets', () => {
     const cadreApp = readFileSync(new URL('../../cadre-app/cordis.patch.yml', import.meta.url), 'utf8')
     expect(cadreApp).toContain('id: cadre-skill-admin')
     expect(cadreApp).toContain("name: '@deepseek-ai/dsh-host-session-skills/admin'")
+    expect(cadreApp).toContain('sampleOverCapGlobResults: false')
     expect(preset('cadre')).not.toContain('host-session-skills/admin')
   })
 })
