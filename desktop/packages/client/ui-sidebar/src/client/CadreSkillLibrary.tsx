@@ -9,11 +9,12 @@ import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import {
   addSkillToLibrary,
   fetchSkillCatalog,
+  installSkillFromUrl,
+  installSkillPackage,
   removeSkillFromLibrary,
   type CadreSkillEntry,
 } from './CadreSkills.tsx'
 import { CadreSkillAdminDialog } from './CadreSkillAdminDialog.tsx'
-import { CadreSkillInstallDialog } from './CadreSkillInstallDialog.tsx'
 import css from './CadreSkillLibrary.module.css'
 
 export interface CadreSkillLibraryInjected {
@@ -81,7 +82,10 @@ export function CadreSkillLibraryPage({
   const [form, setForm] = useState<ManualState>(EMPTY)
   const [tokenManual, setTokenManual] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
-  const [installOpen, setInstallOpen] = useState(false)
+  const [installSource, setInstallSource] = useState('')
+  const [installBusy, setInstallBusy] = useState(false)
+  const [installError, setInstallError] = useState<string | null>(null)
+  const [installResult, setInstallResult] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (actor === undefined || projectId === undefined) return
@@ -145,6 +149,30 @@ export function CadreSkillLibraryPage({
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const installSourceNow = async (): Promise<void> => {
+    const value = installSource.trim()
+    if (value === '') {
+      setInstallError(t('skills.install.empty'))
+      return
+    }
+    setInstallBusy(true)
+    setInstallError(null)
+    setInstallResult(null)
+    try {
+      if (/^https?:\/\//iu.test(value)) {
+        await installSkillFromUrl(projectId, actor.sessionId, value, false)
+      } else {
+        await installSkillPackage(projectId, actor.sessionId, value)
+      }
+      setInstallResult(t('skills.install.done', { source: value }))
+      await load()
+    } catch (cause) {
+      setInstallError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setInstallBusy(false)
     }
   }
 
@@ -214,15 +242,39 @@ export function CadreSkillLibraryPage({
           <p>{t('skills.library.description')}</p>
         </div>
         <div className={css.headerActions}>
-          <Button variant="primary" disabled={busy} onClick={() => { setInstallOpen(true) }}>
-            {t('skills.admin.installEntry')}
-          </Button>
           <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
             if (!advanced) setForm({ ...EMPTY, tools: t('skills.defaultTools'), license: t('skills.defaultLicense') })
             setAdvanced(value => !value)
           }}>{t('skills.advanced')}</Button>
         </div>
       </header>
+      <section className={css.installPanel} data-skill-install-inline>
+        <div className={css.installHead}>
+          <div>
+            <h2>{t('skills.install.panelTitle')}</h2>
+            <p>{t('skills.install.panelDescription')}</p>
+          </div>
+          {isSupervisor && (
+            <Button variant="ghost" size="sm" onClick={() => { setAdminOpen(true) }}>
+              {t('skills.install.openAdmin')}
+            </Button>
+          )}
+        </div>
+        <label className={css.installLabel}>{t('skills.install.source')}
+          <textarea className={css.installTextarea} value={installSource} rows={4} disabled={installBusy}
+            placeholder={t('skills.install.placeholder')}
+            onChange={(event) => { setInstallSource(event.target.value) }} />
+        </label>
+        <div className={css.installActions}>
+          <span className={css.installHint}>{t('skills.install.hint')}</span>
+          <Button variant="primary" disabled={installBusy || installSource.trim() === ''}
+            onClick={() => { void installSourceNow() }}>
+            {installBusy ? t('skills.install.busy') : t('skills.install.action')}
+          </Button>
+        </div>
+        {installError !== null && <p className={css.error} role="alert">{installError}</p>}
+        {installResult !== null && <p className={css.notice} role="status">{installResult}</p>}
+      </section>
       <div className={css.sources} data-skill-sources>
         <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
         <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
@@ -231,17 +283,6 @@ export function CadreSkillLibraryPage({
         <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
         <p>{t('skills.sources.caution')}</p>
       </div>
-      {installOpen && (
-        <CadreSkillInstallDialog
-          projectId={projectId}
-          actorSessionId={actor.sessionId}
-          canOpenAdmin={isSupervisor}
-          onInstalled={load}
-          openAdmin={() => { setInstallOpen(false); setAdminOpen(true) }}
-          onClose={() => { setInstallOpen(false) }}
-          t={t}
-        />
-      )}
       {isSupervisor && adminOpen && (
         <CadreSkillAdminDialog
           projectId={projectId}
@@ -288,8 +329,11 @@ export function CadreSkillLibraryPage({
       )}
       {error !== null && <p role="alert" className={css.error}>{error}</p>}
       {notice !== null && <p role="status" className={css.notice}>{notice}</p>}
-      {group(t('skills.group.builtin'), builtin, false)}
-      {group(t('skills.group.installed'), installed, true)}
+      {entries.length === 0 && (
+        <p className={css.emptyState}>{t(busy ? 'skills.library.loading' : 'skills.library.empty')}</p>
+      )}
+      {entries.length > 0 && group(t('skills.group.builtin'), builtin, false)}
+      {entries.length > 0 && group(t('skills.group.installed'), installed, true)}
     </section>
   )
 }

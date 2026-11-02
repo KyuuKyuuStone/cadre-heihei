@@ -58,17 +58,15 @@ describe('Cadre skill library', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(await screen.findByText('内置技能')).toBeTruthy()
-    const install = screen.getByRole('button', { name: '安装技能' })
-    expect(install.hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByRole('button', { name: '安装技能' })).toBeNull()
+    expect(screen.getByPlaceholderText(/github\.com/)).toBeTruthy()
     expect(screen.getByRole('button', { name: '删除' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '高级手动表单' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '打开技能管理员' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(true)
     })
-    fireEvent.click(install)
-    expect(await screen.findByRole('dialog', { name: '安装技能' })).toBeTruthy()
-    expect(screen.queryByText('高级：技能管理员对话')).toBeNull()
     const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
     expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
       actorSessionId: 'w1', targetSessionId: 'w1',
@@ -108,8 +106,6 @@ describe('Cadre skill library', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillLibraryPage {...{ ...pageProps(), openSkillAdminSession }} />)
     await screen.findByText('内置技能')
-    fireEvent.click(screen.getByRole('button', { name: '安装技能' }))
-    fireEvent.click(screen.getByText('高级：技能管理员对话'))
     fireEvent.click(screen.getByRole('button', { name: '打开技能管理员' }))
     expect(await screen.findByText('还没有技能管理员对话。')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '新建对话' }))
@@ -128,8 +124,6 @@ describe('Cadre skill library', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillLibraryPage {...pageProps()} />)
     await screen.findByText('内置技能')
-    fireEvent.click(screen.getByRole('button', { name: '安装技能' }))
-    fireEvent.click(screen.getByText('高级：技能管理员对话'))
     fireEvent.click(screen.getByRole('button', { name: '打开技能管理员' }))
     expect(await screen.findByText('旧对话')).toBeTruthy()
     fireEvent.click(screen.getAllByRole('button', { name: '删除' }).at(-1)!)
@@ -152,11 +146,11 @@ describe('Cadre skill library', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillLibraryPage {...{ ...pageProps(), openSkillAdminSession }} />)
     await screen.findByText('内置技能')
-    fireEvent.click(screen.getByRole('button', { name: '安装技能' }))
     const source = screen.getByPlaceholderText(/github\.com/)
     fireEvent.change(source, { target: { value: 'https://github.com/acme/skill' } })
     fireEvent.click(screen.getByRole('button', { name: '安装' }))
     await waitFor(() => { expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/install-url'))).toBe(true) })
+    expect(await screen.findByText('已安装：https://github.com/acme/skill')).toBeTruthy()
     fireEvent.change(source, { target: { value: '@acme/pkg-skill' } })
     fireEvent.click(screen.getByRole('button', { name: '安装' }))
     await waitFor(() => { expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/install-package'))).toBe(true) })
@@ -177,7 +171,8 @@ describe('Cadre skill library', () => {
     })) as never
     render(<CadreSkillLibraryPage {...{ ...props, useRoster }} />)
     await screen.findByText('内置技能')
-    expect(screen.getByRole('button', { name: '安装技能' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByPlaceholderText(/github.com/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '安装' })).toBeTruthy()
   })
 
   it('shows a readable prompt when the session has no project roster membership', async () => {
@@ -186,6 +181,13 @@ describe('Cadre skill library', () => {
     render(<CadreSkillLibraryPage {...{ ...props, projectOfSession: () => undefined }} />)
     expect(screen.getByText('当前会话不属于任何项目部或花名册，无法管理技能。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '安装技能' })).toBeNull()
+  })
+
+  it('shows an inline empty state when the library has no skills', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: [] })))
+    render(<CadreSkillLibraryPage {...pageProps()} />)
+    expect(await screen.findByText('还没有技能，先在上方粘贴 URL 或包名安装。')).toBeTruthy()
+    expect(screen.getByPlaceholderText(/github\.com/)).toBeTruthy()
   })
 
   it('requires confirmation before deleting a skill', async () => {
@@ -218,7 +220,6 @@ describe('Cadre skill library', () => {
     render(<CadreSkillLibraryPage {...pageProps()} />)
     await screen.findByText('员工技能')
     expect(screen.queryByPlaceholderText(/SKILL\.md URL/)).toBeNull()
-    expect(screen.queryByRole('button', { name: '安装' })).toBeNull()
     expect(screen.queryByText('同名技能已存在时覆盖')).toBeNull()
     const sources = document.querySelector('[data-skill-sources]')
     expect(sources).not.toBeNull()
@@ -248,8 +249,6 @@ describe('Cadre skill library', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillLibraryPage {...pageProps()} />)
     await screen.findByText('员工技能')
-    fireEvent.click(screen.getByRole('button', { name: '安装技能' }))
-    fireEvent.click(screen.getByText('高级：技能管理员对话'))
     fireEvent.click(screen.getByRole('button', { name: '打开技能管理员' }))
     expect(await screen.findByText('技能管理员当前不可用：Host 未接入会话服务。')).toBeTruthy()
   })
