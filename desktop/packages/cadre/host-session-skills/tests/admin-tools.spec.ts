@@ -25,7 +25,8 @@ function ledger(root: string): DatabaseSync {
     PRIMARY KEY (project_id, session_id))`)
   db.prepare(`INSERT INTO members (project_id, session_id, role, state, skills_json, created_at, updated_at)
     VALUES ('p1', 's1', 'supervisor', 'available', '[]', 'now', 'now'),
-           ('p1', 's2', 'supervisor', 'available', '[]', 'now', 'now')`).run()
+           ('p1', 's2', 'supervisor', 'available', '[]', 'now', 'now'),
+           ('p1', 'w1', 'worker', 'available', '[]', 'now', 'now')`).run()
   return db
 }
 
@@ -145,6 +146,9 @@ describe('skill admin model tools', () => {
     })).rejects.toMatchObject({ code: 'SKILL_ADMIN_SESSION_FORBIDDEN' })
     await expect(admin.messages({
       projectId: 'p2', operatorSessionId: 's1', sessionId: created.sessionId, afterSeq: 0,
+    })).rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
+    await expect(admin.sendMessage({
+      projectId: 'p1', operatorSessionId: 'w1', sessionId: created.sessionId, text: 'x',
     })).rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
 
     await expect(find('skill_catalog').execute({}, { agent: { id: 'other' } }))
