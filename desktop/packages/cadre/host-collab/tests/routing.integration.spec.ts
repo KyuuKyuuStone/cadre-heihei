@@ -306,4 +306,38 @@ describe('DF-011 real Cordis composition (worker ask -> supervisor -> resolve)',
       reader.close()
     }
   })
+
+  it('injects the packet context into the employee prompt without supervisor history', async () => {
+    const mounted = await mount(30 * 60_000)
+    try {
+      const supervisor = stubAgent(SUP)
+      const worker = stubAgent(WORKER)
+      mounted.ctx.agents.enter(supervisor, undefined)
+      mounted.ctx.agents.enter(worker, undefined)
+      const result = await mounted.ctx.tools.execute({
+        signal: new AbortController().signal,
+        callId: ToolCallId('dispatch-packet'),
+        name: 'dispatch_task',
+        arguments: {
+          tasks: [{
+            employee: '小明', title: '导出报表', body: '生成 CSV', dueAt: '2026-11-03T00:00:00.000Z',
+            packet: {
+              goal: '导出本月报表', constraints: ['不改 schema'], fileRefs: [{ path: 'src/report.ts', lines: '1-20' }],
+              acceptance: ['CSV 可打开'], forbidden: ['不 push'], openQuestions: ['无'],
+            },
+          }],
+        },
+        agent: supervisor,
+      })
+      expect(result.content[0]).toMatchObject({ type: 'text' })
+      const prompt = mounted.prompts.at(-1) ?? ''
+      expect(prompt).toContain('【员工任务包】')
+      expect(prompt).toContain('目标：导出本月报表')
+      expect(prompt).toContain('验收：CSV 可打开')
+      expect(prompt).toContain('先向主管提问')
+      expect(prompt).not.toContain('主管完整历史原文')
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  }, 15_000)
 })

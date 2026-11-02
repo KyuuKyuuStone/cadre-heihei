@@ -17,6 +17,10 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
+import {
+  buildEmployeeContext, estimateTokens, measureTokenBudget, normalizeTaskPacket,
+  type TaskPacketInput,
+} from './task-packet.ts'
 import { appendFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
@@ -77,6 +81,7 @@ interface DispatchItem {
   readonly title: string
   readonly body: string
   readonly dueAt: string
+  readonly packet?: TaskPacketInput
 }
 
 interface DispatchArgs {
@@ -89,6 +94,8 @@ interface DispatchValue {
     readonly assigneeName: string
     readonly role: string
     readonly dueAt: string
+    readonly estimatedTokens: number
+    readonly warnings: readonly string[]
   }[]
   readonly failed: readonly {
     readonly target: string
@@ -110,12 +117,14 @@ interface DispatchFailure {
 const DISPATCHED_SCHEMA = {
   type: 'array',
   items: {
-    type: 'object', additionalProperties: false, required: ['taskId', 'assigneeName', 'role', 'dueAt'],
+    type: 'object', additionalProperties: false, required: ['taskId', 'assigneeName', 'role', 'dueAt', 'estimatedTokens', 'warnings'],
     properties: {
       taskId: { type: 'string' },
       assigneeName: { type: 'string' },
       role: { type: 'string' },
       dueAt: { type: 'string' },
+      estimatedTokens: { type: 'number' },
+      warnings: { type: 'array', items: { type: 'string' } },
     },
   },
 } as const
@@ -1236,18 +1245,29 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         return { ok: false, kind: 'invalid-due-at', reason: `dueAt 不是合法时间：${item.dueAt}` }
       }
       const assignee = ledger.resolveAssignee(projectId, item.employee)
+      const normalized = normalizeTaskPacket(item.packet, { title: item.title, body: item.body })
+      const context = buildEmployeeContext(normalized.packet)
       const fingerprint = createHash('sha256')
-        .update([dispatcher, assignee.sessionId, item.title, item.body, item.dueAt].join('\n')).digest('hex')
+        .update([dispatcher, assignee.sessionId, item.title, item.body, item.dueAt, JSON.stringify(normalized.packet)].join('\n')).digest('hex')
       const idempotencyKey = `dispatch:${fingerprint}`
       const replay = ledger.db.prepare(`SELECT ledger_result_json FROM idempotency
         WHERE project_id = ? AND idempotency_key = ?`).get(projectId, idempotencyKey) as
         { ledger_result_json?: string } | undefined
       if (replay?.ledger_result_json !== undefined) {
         const prior = JSON.parse(replay.ledger_result_json) as { taskId: string }
-        return { ok: true, value: { taskId: prior.taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt } }
+        return { ok: true, value: {
+          taskId: prior.taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt,
+          estimatedTokens: 0, warnings: [],
+        } }
       }
       const taskId = randomUUID()
       const messageId = randomUUID()
+      const metric = measureTokenBudget({
+        taskId, sessionId: assignee.sessionId, estimatedTokens: estimateTokens(context),
+      })
+      if (metric.warnings.length > 0) {
+        console.warn(`cadre-collab: token budget advisory task=${taskId} warnings=${metric.warnings.join(',')}`)
+      }
       ledger.beginDispatch(projectId, { taskId, title: item.title, body: item.body, dueAt: item.dueAt,
         dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId })
       try {
@@ -1255,7 +1275,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           requestId: requestId(), sessionId: assignee.sessionId, mode: 'queue',
           content: [text([
             '【主管任务】', `任务号：${taskId}`, `标题：${item.title}`,
-            `截止：${item.dueAt}`, '', '交付要求：', item.body, '',
+            `截止：${item.dueAt}`, '', context, '',
             `完成后调用 report_task 工具回报（taskId=${taskId}，summary 写结论，deliverables 列交付物路径）。`,
           ].join('\n'))],
         }, signal)
@@ -1268,7 +1288,13 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       }
       ledger.confirmDispatch(projectId, taskId, messageId)
       console.log(`cadre-collab: dispatch ok task=${taskId} assignee=${assignee.sessionId} due=${item.dueAt}`)
-      return { ok: true, value: { taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt } }
+      return {
+        ok: true,
+        value: {
+          taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt,
+          estimatedTokens: metric.estimatedTokens, warnings: metric.warnings,
+        },
+      }
     } catch (error) {
       if (signal.aborted) throw error
       return { ok: false, kind: 'missing-employee', reason: error instanceof Error ? error.message : String(error) }
@@ -1323,6 +1349,26 @@ export function apply(ctx: HostContext, config: Config = {}): void {
               title: { type: 'string', description: 'Short task title.' },
               body: { type: 'string', description: 'Delivery requirements the employee must satisfy.' },
               dueAt: { type: 'string', description: 'Deadline as ISO-8601 timestamp; required.' },
+              packet: {
+                type: 'object', additionalProperties: false,
+                description: 'Six-field TaskPacket; missing goal/acceptance fall back to title/body.',
+                properties: {
+                  goal: { type: 'string', description: 'One-sentence goal and completion definition.' },
+                  constraints: { type: 'array', items: { type: 'string' } },
+                  fileRefs: {
+                    type: 'array',
+                    items: {
+                      type: 'object', additionalProperties: false, required: ['path'],
+                      properties: {
+                        path: { type: 'string' }, lines: { type: 'string' }, summary: { type: 'string' },
+                      },
+                    },
+                  },
+                  acceptance: { type: 'array', items: { type: 'string' } },
+                  forbidden: { type: 'array', items: { type: 'string' } },
+                  openQuestions: { type: 'array', items: { type: 'string' } },
+                },
+              },
             },
           },
         },
