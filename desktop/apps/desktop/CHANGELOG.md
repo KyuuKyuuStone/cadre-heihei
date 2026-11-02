@@ -2,9 +2,11 @@
 
 ## 1.1.4
 
+- **技能页普通对话**：主管可在技能页直接问「有什么技能」/「安装 @xxx」，消息进入普通 `cadre-skill-admin` 会话，AI 用 catalog/preview/install 工具自行查询和安装
+- **自然语言 install-any**：自由文本中提取一个包名或 URL；SkillHub 说明 URL + 包名走包名安装，仅 URL 走 URL 安装，歧义返回 `SKILL_INSTRUCTION_UNSUPPORTED`
 - **授权码保存回退**：安装版 Host 拿不到 Electron `safeStorage` 时，自动回退 Windows DPAPI（PowerShell `ProtectedData`，密码经 stdin），仍失败才报 `SECRET_STORE_UNAVAILABLE`
 - **兼容旧密文**：secret 文件保持原始密文格式；配置仍只存 `authCodeRef`，不存/不回传授权码；日志标明 provider/失败原因，不含授权码
-- **邮件设置直填授权码**：SMTP 设置页直接输入邮箱授权码，不再要求填写环境变量名；保存后写入安全存储
+- **邮件设置仅授权码**：SMTP 设置页只保留邮箱授权码直填，移除服务商/环境变量名等复杂配置；保存后写入安全存储
 - **DPAPI 安全存储**：授权码经 Electron `safeStorage`（Windows DPAPI 用户作用域）加密写入 `%APPDATA%\Cadre\secrets\email\<projectId>.bin`，配置仅保留 `authCodeRef`，get 只回 `hasKey`；不落明文
 - **删除环境变量名**：移除设置页的 `authCodeEnv` 输入；旧环境变量仍作为发送兼容回退并提示迁移
 - **其余沿用 1.1.3**：技能界面重构/页内安装/全员可装/不分角色、SMTP QQ/163 默认、Resend 修正与高级提供方
