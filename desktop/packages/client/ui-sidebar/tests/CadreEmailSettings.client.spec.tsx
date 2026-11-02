@@ -12,7 +12,8 @@ const VIEW = {
   provider: 'smtp',
   smtpPreset: 'qq',
   user: 'cadre@example.com',
-  authCodeEnv: 'QQ_EMAIL_AUTH_CODE',
+  authCodeRef: 'smtp:p1',
+  hasSecret: true,
   from: { email: 'cadre@example.com', name: 'Cadre' },
   recipients: ['owner@example.com'],
   dryRun: false,
@@ -91,7 +92,7 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    expect(await screen.findByText('已检测到环境变量')).toBeTruthy()
+    expect(await screen.findByText('授权码已保存')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
     const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
@@ -102,13 +103,13 @@ describe('Cadre email settings', () => {
   })
 
   it('shows noKey and validates recipient add/remove', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: { ...VIEW, hasKey: false } })))
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: { ...VIEW, hasKey: false, hasSecret: false } })))
     render(<CadreEmailSettingsDialog {...({
       useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    expect(await screen.findByText('未检测到环境变量')).toBeTruthy()
+    expect(await screen.findByText(/未检测到授权码/)).toBeTruthy()
     const input = screen.getByPlaceholderText('name@example.com')
     fireEvent.change(input, { target: { value: 'bad-address' } })
     fireEvent.click(screen.getByRole('button', { name: '添加' }))
@@ -131,7 +132,8 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    expect(await screen.findByDisplayValue('QQ_EMAIL_AUTH_CODE')).toBeTruthy()
+    expect(await screen.findByText('未填写授权码')).toBeTruthy()
+    expect(screen.getByPlaceholderText('粘贴邮箱授权码（不是登录密码）')).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByRole('button', { name: '保存' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '测试发送' })).toBeTruthy()
@@ -144,7 +146,7 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('已检测到环境变量')
+    await screen.findByText('授权码已保存')
     fireEvent.click(screen.getByText('如何填写 / 推荐地址'))
     expect(screen.getByText('想免备案就选 SendGrid。')).toBeTruthy()
     expect(screen.getByText('无需备案 · 推荐')).toBeTruthy()
@@ -179,9 +181,11 @@ describe('Cadre email settings', () => {
       .toBe('https://cloud.tencent.com/product/ses')
   })
 
-  it('defaults to QQ SMTP, switches preset, and saves the simple fields', async () => {
+  it('saves the auth code before config, without environment variable fields', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-      if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
+      const url = requestUrl(input)
+      if (url.endsWith('/get')) return json({ ok: true, result: { ...VIEW, hasSecret: false, hasKey: false } })
+      if (url.endsWith('/secret')) return json({ ok: true, result: { hasKey: true } })
       return json({ ok: true, result: VIEW })
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -190,24 +194,104 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByDisplayValue('QQ_EMAIL_AUTH_CODE')
+    expect(await screen.findByText(/未检测到授权码/)).toBeTruthy()
+    expect(screen.queryByLabelText(/环境变量/)).toBeNull()
     expect(screen.getByText(/QQ\/163 需在邮箱设置中开启 SMTP/)).toBeTruthy()
+    expect(screen.getByText('如何获取授权码')).toBeTruthy()
     fireEvent.change(screen.getByLabelText('邮箱类型'), { target: { value: '163' } })
-    expect(screen.getByDisplayValue('SMTP_163_AUTH_CODE')).toBeTruthy()
+    const auth = screen.getByPlaceholderText('粘贴邮箱授权码（不是登录密码）')
+    fireEvent.change(auth, { target: { value: 'qq-secret' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
-    const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/set'))
-    const body = JSON.parse((call?.[1] as RequestInit).body as string) as { config: Record<string, unknown> }
+    const secretIndex = fetchMock.mock.calls.findIndex(([input]) => requestUrl(input).endsWith('/secret'))
+    const setIndex = fetchMock.mock.calls.findIndex(([input]) => requestUrl(input).endsWith('/set'))
+    expect(secretIndex).toBeGreaterThan(-1)
+    expect(setIndex).toBeGreaterThan(secretIndex)
+    const secretBody = JSON.parse((fetchMock.mock.calls[secretIndex]?.[1] as RequestInit).body as string) as { authCode?: string }
+    expect(secretBody).toMatchObject({ projectId: 'p1', actorSessionId: 'sup', authCode: 'qq-secret' })
+    const setCall = fetchMock.mock.calls[setIndex]
+    const body = JSON.parse((setCall?.[1] as RequestInit).body as string) as { config: Record<string, unknown> }
     expect(body.config).toMatchObject({
       provider: 'smtp',
       smtpPreset: '163',
       user: 'cadre@example.com',
-      authCodeEnv: 'SMTP_163_AUTH_CODE',
       from: { email: 'cadre@example.com', name: 'Cadre' },
       recipients: ['owner@example.com'],
     })
+    expect(body.config).not.toHaveProperty('authCodeEnv')
+    expect(body.config).not.toHaveProperty('authCode')
     expect(body.config).not.toHaveProperty('verifiedDomains')
     expect(body.config).not.toHaveProperty('apiKeyEnv')
+  })
+
+  it('shows and hides the auth code, and can clear the saved value', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (requestUrl(input).endsWith('/get')) return json({ ok: true, result: VIEW })
+      return json({ ok: true, result: { hasKey: false } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    const auth = await screen.findByPlaceholderText('已保存，留空则不修改')
+    expect(auth.getAttribute('type')).toBe('password')
+    fireEvent.click(screen.getByRole('button', { name: '显示' }))
+    expect(screen.getByPlaceholderText('已保存，留空则不修改').getAttribute('type')).toBe('text')
+    fireEvent.click(screen.getByRole('button', { name: '清除授权码' }))
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/secret'))
+      expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
+        projectId: 'p1', actorSessionId: 'sup', action: 'clear',
+      })
+    })
+    expect(await screen.findByText(/未检测到授权码/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '清除授权码' })).toBeNull()
+  })
+
+  it('keeps the typed auth code when secure storage is unavailable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/get')) return json({ ok: true, result: { ...VIEW, hasSecret: false, hasKey: false } })
+      if (url.endsWith('/secret')) {
+        return json({ ok: false, code: 'SECRET_STORE_UNAVAILABLE', message: 'dpapi failed' })
+      }
+      return json({ ok: true, result: VIEW })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    const auth = await screen.findByPlaceholderText('粘贴邮箱授权码（不是登录密码）')
+    fireEvent.change(auth, { target: { value: 'qq-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/系统安全存储不可用/)).toBeTruthy()
+    expect(screen.getByDisplayValue('qq-secret')).toBeTruthy()
+    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/set'))).toBe(false)
+  })
+
+  it('keeps the typed auth code when config saving fails after the secret write', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/get')) return json({ ok: true, result: { ...VIEW, hasSecret: false, hasKey: false } })
+      if (url.endsWith('/secret')) return json({ ok: true, result: { hasKey: true } })
+      return json({ ok: false, code: 'EMAIL_CONFIG_INVALID', message: 'bad config' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreEmailSettingsDialog {...({
+      useRequest: (selector: (value: CadreEmailRequest) => unknown) => selector(REQUEST),
+      closeEmail: vi.fn(),
+      t,
+    } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
+    const auth = await screen.findByPlaceholderText('粘贴邮箱授权码（不是登录密码）')
+    fireEvent.change(auth, { target: { value: 'qq-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/邮件配置无效/)).toBeTruthy()
+    expect(screen.getByDisplayValue('qq-secret')).toBeTruthy()
+    expect(screen.getByText('授权码已保存')).toBeTruthy()
   })
 
   it('switches to Resend, prefills its key env, and saves provider without domains', async () => {
@@ -221,7 +305,7 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('已检测到环境变量')
+    await screen.findByText('授权码已保存')
     fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
     expect(screen.getByDisplayValue('RESEND_API_KEY')).toBeTruthy()
     expect(screen.getByText(/先在 Resend 验证域名/)).toBeTruthy()
@@ -241,7 +325,7 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('已检测到环境变量')
+    await screen.findByText('授权码已保存')
     fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => { expect(screen.getByText('邮件通知设置已保存。')).toBeTruthy() })
@@ -257,7 +341,7 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('已检测到环境变量')
+    await screen.findByText('授权码已保存')
     fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText(/发件地址未通过 Resend 验证/)).toBeTruthy()
@@ -273,7 +357,7 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('已检测到环境变量')
+    await screen.findByText('授权码已保存')
     fireEvent.change(screen.getByLabelText('服务商'), { target: { value: 'resend' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText(/只能发到你的 Resend 注册邮箱/)).toBeTruthy()
@@ -286,7 +370,7 @@ describe('Cadre email settings', () => {
       closeEmail: vi.fn(),
       t,
     } as unknown as ComponentProps<typeof CadreEmailSettingsDialog>)} />)
-    await screen.findByText('已检测到环境变量')
+    await screen.findByText('授权码已保存')
     const footer = document.querySelector('[data-email-footer]')
     const form = document.querySelector('[data-email-form]')
     expect(footer).toBeTruthy()

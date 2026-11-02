@@ -22,7 +22,8 @@ export interface CadreEmailConfigView {
   readonly apiKeyEnv?: string
   readonly smtpPreset?: 'qq' | '163'
   readonly user?: string
-  readonly authCodeEnv?: string
+  readonly authCodeRef?: string
+  readonly hasSecret?: boolean
   readonly dryRun?: boolean
   readonly minIntervalMs?: number
   readonly hasKey: boolean
@@ -61,7 +62,7 @@ interface EmailResult {
 }
 
 async function emailCall(
-  method: 'get' | 'set' | 'test' | 'dry-run',
+  method: 'get' | 'set' | 'test' | 'dry-run' | 'secret',
   body: Record<string, unknown>,
 ): Promise<unknown> {
   const response = await fetch(`/cadre/email/${method}`, {
@@ -80,7 +81,7 @@ async function emailCall(
 
 function emailErrorText(cause: unknown, t: PropsLocale<'sidebar'>['t']): string {
   const message = cause instanceof Error ? cause.message : String(cause)
-  const code = /^(EMAIL_[A-Z_]+) ·/u.exec(message)?.[1]
+  const code = /^((?:EMAIL|SECRET)_[A-Z_]+) ·/u.exec(message)?.[1]
   switch (code) {
     case 'EMAIL_FROM_NOT_VERIFIED': return t('email.error.fromNotVerified')
     case 'EMAIL_RECIPIENT_RESTRICTED': return t('email.error.recipientRestricted')
@@ -90,6 +91,8 @@ function emailErrorText(cause: unknown, t: PropsLocale<'sidebar'>['t']): string 
     case 'EMAIL_CONNECTION_FAILED': return t('email.error.connection')
     case 'EMAIL_SMTP_FAILED': return t('email.error.smtp')
     case 'EMAIL_CONFIG_INVALID': return t('email.error.configInvalid')
+    case 'SECRET_STORE_UNAVAILABLE': return t('email.error.secretStore')
+    case 'EMAIL_SECRET_EMPTY': return t('email.error.authCodeRequired')
     default: return message
   }
 }
@@ -104,6 +107,7 @@ function resultText(result: EmailResult, t: PropsLocale<'sidebar'>['t']): string
   if (result.code === 'EMAIL_TIMEOUT') return t('email.error.timeout')
   if (result.code === 'EMAIL_CONNECTION_FAILED') return t('email.error.connection')
   if (result.code === 'EMAIL_SMTP_FAILED') return t('email.error.smtp')
+  if (result.code === 'SECRET_STORE_UNAVAILABLE') return t('email.error.secretStore')
   return t('email.result.failed', { code: result.code ?? 'ERROR', message: result.message ?? '' })
 }
 
@@ -117,7 +121,6 @@ const DEFAULT_CONFIG: CadreEmailConfigView = {
   from: { email: '' },
   recipients: [],
   smtpPreset: 'qq',
-  authCodeEnv: 'QQ_EMAIL_AUTH_CODE',
   dryRun: false,
   minIntervalMs: 60_000,
   hasKey: false,
@@ -176,7 +179,9 @@ function EmailForm({
   const [enabled, setEnabled] = useState(false)
   const [provider, setProvider] = useState<'sendgrid' | 'resend' | 'smtp'>('smtp')
   const [smtpPreset, setSmtpPreset] = useState<'qq' | '163'>('qq')
-  const [authCodeEnv, setAuthCodeEnv] = useState('QQ_EMAIL_AUTH_CODE')
+  const [authCode, setAuthCode] = useState('')
+  const [showAuthCode, setShowAuthCode] = useState(false)
+  const [hasSecret, setHasSecret] = useState(false)
   const [fromEmail, setFromEmail] = useState('')
   const [fromName, setFromName] = useState('')
   const [recipients, setRecipients] = useState<string[]>([])
@@ -198,7 +203,10 @@ function EmailForm({
         setEnabled(next.enabled)
         setProvider(next.provider ?? 'smtp')
         setSmtpPreset(next.smtpPreset ?? 'qq')
-        setAuthCodeEnv(next.authCodeEnv ?? 'QQ_EMAIL_AUTH_CODE')
+        setAuthCode('')
+        setShowAuthCode(false)
+        setHasSecret(next.hasSecret === true
+          || (next.authCodeRef !== undefined && next.hasKey))
         setFromEmail(next.from.email)
         setFromName(next.from.name ?? '')
         setRecipients([...next.recipients])
@@ -216,7 +224,9 @@ function EmailForm({
           setEnabled(DEFAULT_CONFIG.enabled)
           setProvider(DEFAULT_CONFIG.provider ?? 'smtp')
           setSmtpPreset(DEFAULT_CONFIG.smtpPreset ?? 'qq')
-          setAuthCodeEnv(DEFAULT_CONFIG.authCodeEnv ?? 'QQ_EMAIL_AUTH_CODE')
+          setAuthCode('')
+          setShowAuthCode(false)
+          setHasSecret(false)
           setFromEmail(DEFAULT_CONFIG.from.email)
           setFromName(DEFAULT_CONFIG.from.name ?? '')
           setRecipients([...DEFAULT_CONFIG.recipients])
@@ -247,26 +257,15 @@ function EmailForm({
 
   const changeProvider = (next: 'sendgrid' | 'resend' | 'smtp'): void => {
     setProvider(next)
-    if (next === 'smtp') {
-      if (!/^[A-Z_][A-Z0-9_]*$/u.test(authCodeEnv.trim())) setAuthCodeEnv('QQ_EMAIL_AUTH_CODE')
-    } else {
-      setApiKeyEnv(next === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY')
-    }
+    if (next !== 'smtp') setApiKeyEnv(next === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY')
     setError(null)
-  }
-
-  const changePreset = (next: 'qq' | '163'): void => {
-    setSmtpPreset(next)
-    if (authCodeEnv.trim() === '' || authCodeEnv === 'QQ_EMAIL_AUTH_CODE' || authCodeEnv === 'SMTP_163_AUTH_CODE') {
-      setAuthCodeEnv(next === 'qq' ? 'QQ_EMAIL_AUTH_CODE' : 'SMTP_163_AUTH_CODE')
-    }
   }
 
   const validate = (): string | null => {
     if (!validEmail(fromEmail.trim())) return t('email.error.from')
     if (recipients.length === 0) return t('email.error.noRecipients')
     if (provider === 'smtp') {
-      if (!/^[A-Z_][A-Z0-9_]*$/u.test(authCodeEnv.trim())) return t('email.error.authCodeEnv')
+      if (authCode.trim() === '' && !hasSecret) return t('email.error.authCodeRequired')
     } else if (!/^[A-Z_][A-Z0-9_]*$/u.test(apiKeyEnv.trim())) {
       return t('email.error.env')
     }
@@ -283,7 +282,17 @@ function EmailForm({
     setBusy(true)
     setError(null)
     setNotice(null)
+    let secretSaved = false
     try {
+      if (provider === 'smtp' && authCode.trim() !== '') {
+        const secret = await emailCall('secret', {
+          projectId: request.projectId,
+          actorSessionId: request.sessionId,
+          authCode: authCode.trim(),
+        }) as { hasKey?: boolean }
+        secretSaved = secret.hasKey !== false
+        setHasSecret(secretSaved)
+      }
       const result = await emailCall('set', {
         projectId: request.projectId,
         actorSessionId: request.sessionId,
@@ -293,18 +302,40 @@ function EmailForm({
           from: { email: fromEmail.trim(), ...(fromName.trim() === '' ? {} : { name: fromName.trim() }) },
           recipients,
           ...(provider === 'smtp'
-            ? {
-              smtpPreset,
-              user: fromEmail.trim(),
-              authCodeEnv: authCodeEnv.trim(),
-            }
+            ? { smtpPreset, user: fromEmail.trim() }
             : { apiKeyEnv: apiKeyEnv.trim() }),
           dryRun,
           minIntervalMs: Number(minInterval),
         },
       }) as CadreEmailConfigView
       setConfig(result)
+      if (secretSaved) {
+        setAuthCode('')
+        setShowAuthCode(false)
+        setHasSecret(true)
+      }
       setNotice(t('email.notice.saved'))
+    } catch (cause) {
+      if (secretSaved) setHasSecret(true)
+      setError(emailErrorText(cause, t))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clearSecret = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      await emailCall('secret', {
+        projectId: request.projectId,
+        actorSessionId: request.sessionId,
+        action: 'clear',
+      })
+      setHasSecret(false)
+      setAuthCode('')
+      setNotice(t('email.notice.secretCleared'))
     } catch (cause) {
       setError(emailErrorText(cause, t))
     } finally {
@@ -341,7 +372,9 @@ function EmailForm({
       footer={(
         <div className={css.footerActions} data-email-footer>
           <Button variant="outline" disabled={busy} onClick={onClose}>{t('email.close')}</Button>
-          <Button variant="primary" disabled={busy} onClick={() => { void save() }}>{t('email.save')}</Button>
+          <Button variant="primary" disabled={busy} onClick={() => { void save() }}>
+            {busy ? t('email.saving') : t('email.save')}
+          </Button>
           <Button variant="outline" disabled={busy} onClick={() => { void run('test') }}>{t('email.test')}</Button>
           <Button variant="outline" disabled={busy} onClick={() => { void run('dry-run') }}>{t('email.dryRunAction')}</Button>
         </div>
@@ -354,7 +387,7 @@ function EmailForm({
         {provider === 'smtp' && (
           <label className={css.label}>{t('email.smtpPreset')}
             <select className={css.select} value={smtpPreset} disabled={busy}
-              onChange={(event) => { changePreset(event.target.value === '163' ? '163' : 'qq') }}>
+              onChange={(event) => { setSmtpPreset(event.target.value === '163' ? '163' : 'qq') }}>
               <option value="qq">{t('email.smtpPreset.qq')}</option>
               <option value="163">{t('email.smtpPreset.163')}</option>
             </select>
@@ -388,10 +421,41 @@ function EmailForm({
             : provider === 'resend' ? 'email.from.resendHint' : 'email.from.sendgridHint')}
         </p>
         {provider === 'smtp' && (
-          <label className={css.label}>{t('email.authCodeEnv')}
-            <Input value={authCodeEnv} disabled={busy}
-              onChange={(event) => { setAuthCodeEnv(event.target.value) }} />
-          </label>
+          <div className={css.label}>
+            <span>{t('email.authCode')}</span>
+            <div className={css.row}>
+              <Input type={showAuthCode ? 'text' : 'password'} value={authCode} disabled={busy}
+                placeholder={hasSecret ? t('email.authCode.savedPlaceholder') : t('email.authCode.placeholder')}
+                onChange={(event) => { setAuthCode(event.target.value) }} />
+              <Button variant="outline" size="sm" disabled={busy}
+                onClick={() => { setShowAuthCode(value => !value) }}>
+                {t(showAuthCode ? 'email.authCode.hide' : 'email.authCode.show')}
+              </Button>
+            </div>
+            <div className={css.authStatus} data-email-auth-status>
+              {hasSecret
+                ? <span className={css.hasKey}>{t('email.authCode.saved')}</span>
+                : config?.authCodeRef !== undefined
+                  ? <span className={css.noKey}>{t('email.authCode.missing')}</span>
+                  : <span className={css.hint}>{t('email.authCode.empty')}</span>}
+              {hasSecret && (
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void clearSecret() }}>
+                  {t('email.authCode.clear')}
+                </Button>
+              )}
+            </div>
+            <details className={css.help} data-email-auth-help>
+              <summary>{t('email.authCode.howTo')}</summary>
+              <ol className={css.authSteps}>
+                {(smtpPreset === 'qq' ? [
+                  t('email.authCode.qq.1'), t('email.authCode.qq.2'), t('email.authCode.qq.3'),
+                ] : [
+                  t('email.authCode.163.1'), t('email.authCode.163.2'), t('email.authCode.163.3'),
+                ]).map(step => <li key={step}>{step}</li>)}
+              </ol>
+              <p>{t('email.authCode.note')}</p>
+            </details>
+          </div>
         )}
         <label className={css.label}>{t('email.fromName')}
           <Input value={fromName} disabled={busy} onChange={(event) => { setFromName(event.target.value) }} />
@@ -420,7 +484,7 @@ function EmailForm({
             <Input value={apiKeyEnv} disabled={busy} onChange={(event) => { setApiKeyEnv(event.target.value) }} />
           </label>
         )}
-        {config !== null && (
+        {provider !== 'smtp' && config !== null && (
           <span className={config.hasKey ? css.hasKey : css.noKey}>
             {config.hasKey ? t('email.hasKey') : t('email.noKey')}
           </span>
