@@ -65,7 +65,11 @@ member; `preview` and the skill-administrator conversation remain supervisor-onl
 - `/cadre/skills/install-package` — `{name}` installs a SkillHub package through
   the fixed WSL CLI (`wsl -d Ubuntu-24.04 -- /root/.local/bin/skillhub install
   <name> --dir <skillsDir>`), 180s timeout, strict package-name validation, and
-  an audit row without secrets.
+  an audit row without secrets;
+- `/cadre/skills/install-any` — `{text}` extracts one strict package name or
+  URL from free text; a SkillHub instruction URL plus a package routes to
+  `install-package`, a lone URL to `install-url`, and multiple/ambiguous
+  candidates fail with `SKILL_INSTRUCTION_UNSUPPORTED`.
 
 ## Skill administrator
 

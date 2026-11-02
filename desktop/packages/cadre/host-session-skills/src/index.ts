@@ -351,6 +351,11 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         actorSessionId: required(body, 'actorSessionId'),
         name: body.name,
       }))
+      route('/cadre/skills/install-any', body => api.installAny({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        text: body.text,
+      }))
       route('/cadre/skills/admin/session', async body => {
         try {
           const cwd = typeof body.cwd === 'string' && body.cwd !== ''

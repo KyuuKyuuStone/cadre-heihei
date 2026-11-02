@@ -60,6 +60,12 @@ export interface SkillApi {
   installPackage(input: {
     projectId: string; actorSessionId: string; name: unknown
   }): Promise<{ name: string; visible: boolean; durationMs: number }>
+  installAny(input: {
+    projectId: string; actorSessionId: string; text: unknown
+  }): Promise<
+    | { kind: 'package'; target: string; result: { name: string; visible: boolean; durationMs: number } }
+    | { kind: 'url'; target: string; result: CatalogEntry }
+  >
 }
 
 export interface AddSkillInput {
@@ -82,7 +88,50 @@ export interface AddSkillInput {
 
 const KEBAB_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const PACKAGE_NAME = /^(?:@[a-z0-9](?:[a-z0-9._-]{0,63})\/)?[a-z0-9](?:[a-z0-9._-]{0,63})$/u
+const SCOPED_PACKAGE = /(^|[^A-Za-z0-9._\/@-])(@[a-z0-9][a-z0-9._-]{0,63}\/[a-z0-9][a-z0-9._-]{0,63})(?![A-Za-z0-9._\/@-])/gi
+const KEBAB_PACKAGE = /(^|[^A-Za-z0-9._\/@-])([a-z0-9]+(?:-[a-z0-9]+)+)(?![A-Za-z0-9._\/@-])/gi
+const URL_TOKEN = /https?:\/\/[^\s，。；、）)】"'<>]+/giu
 const ROLES = new Set(['supervisor', 'worker'])
+
+/** Trim sentence punctuation that commonly follows a pasted URL. */
+function trimUrl(value: string): string {
+  return value.replace(/[.,;:!?、，。；：！？]+$/u, '')
+}
+
+/** Whether a URL is SkillHub's install instruction page. */
+function isInstructionUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (url.hostname === 'skillhub.cn' || url.hostname.endsWith('.skillhub.cn'))
+      && url.pathname === '/install/skillhub.md'
+  } catch {
+    return false
+  }
+}
+
+/** Extract one unambiguous package or URL target from free text. */
+function parseInstallInstruction(text: string): { kind: 'package'; target: string } | { kind: 'url'; target: string } {
+  const urls = [...new Set([...text.matchAll(URL_TOKEN)].map(match => trimUrl(match[0])))]
+  const withoutUrls = text.replace(URL_TOKEN, ' ')
+  const packages = new Set<string>()
+  for (const match of withoutUrls.matchAll(SCOPED_PACKAGE)) packages.add(match[2]!)
+  for (const match of withoutUrls.matchAll(KEBAB_PACKAGE)) packages.add(match[2]!)
+  const validPackages = [...packages].filter(name => name.length <= 128 && PACKAGE_NAME.test(name))
+  if (validPackages.length > 1 || urls.length > 1) {
+    throw new SkillIpcError('SKILL_INSTRUCTION_UNSUPPORTED', 400,
+      '输入里有多个安装候选，无法安全判断；请把具体包名或 URL 交给技能管理员')
+  }
+  if (validPackages.length === 1) {
+    if (urls.length === 0 || (urls.length === 1 && isInstructionUrl(urls[0]!))) {
+      return { kind: 'package', target: validPackages[0]! }
+    }
+    throw new SkillIpcError('SKILL_INSTRUCTION_UNSUPPORTED', 400,
+      '输入同时包含包名和未知 URL，无法安全判断；请把具体包名或 URL 交给技能管理员')
+  }
+  if (urls.length === 1) return { kind: 'url', target: urls[0]! }
+  throw new SkillIpcError('SKILL_INSTRUCTION_UNSUPPORTED', 400,
+    '无法从输入判断安装目标；请把具体包名或 URL 交给技能管理员')
+}
 
 /** Result of one WSL SkillHub CLI invocation. */
 export interface PackageCommandResult {
@@ -559,6 +608,24 @@ export function createSkillApi(options: {
           `SkillHub 安装完成但 catalog 未发现 ${expectedId}`)
       }
       return { name, visible, durationMs }
+    },
+    async installAny(input) {
+      requireActor(db, input.projectId, input.actorSessionId)
+      const text = requiredString(input.text, 'text')
+      if (text.length > 4000) {
+        throw new SkillIpcError('SKILL_INVALID', 400, '安装说明不能超过 4000 字')
+      }
+      const target = parseInstallInstruction(text)
+      if (target.kind === 'package') {
+        const result = await this.installPackage({
+          projectId: input.projectId, actorSessionId: input.actorSessionId, name: target.target,
+        })
+        return { kind: 'package', target: target.target, result }
+      }
+      const result = await this.installUrl({
+        projectId: input.projectId, actorSessionId: input.actorSessionId, url: target.target,
+      })
+      return { kind: 'url', target: target.target, result }
     },
   }
 }

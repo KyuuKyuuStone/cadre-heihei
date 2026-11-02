@@ -523,6 +523,62 @@ describe('session skill packs', () => {
     reader.close()
   })
 
+  it('routes free-form install text to one validated package or URL', async () => {
+    const root = workspace()
+    const packs = join(root, 'installed')
+    const db = ledger(root)
+    insert(db, 's1', 'supervisor', [])
+    insert(db, 'w1', 'worker', [])
+    db.close()
+    const reader = new DatabaseSync(join(root, 'ledger.sqlite'))
+    const calls: string[][] = []
+    const install = async (name: string): Promise<void> => {
+      const parts = name.startsWith('@') ? name.split('/') : [name]
+      const dir = join(packs, ...parts)
+      mkdirSync(dir, { recursive: true })
+      const id = parts.at(-1)!
+      writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${id}\ndescription: test\n---\n# ${id}\n`)
+    }
+    const fetch = vi.fn(async (input: URL | string) => String(input).endsWith('manifest.json')
+      ? new Response(JSON.stringify({
+        id: 'url-any', name: 'URL Any', description: 'url', roles: ['worker'],
+        tokenEstimate: 1, tools: [], source: 'github:o/r', license: 'MIT',
+      }), { status: 200 })
+      : new Response('# url-any', { status: 200 }))
+    const api = createSkillApi({
+      db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, fetch: fetch as never,
+      runPackageCommand: async args => {
+        calls.push([...args])
+        await install(args[5]!)
+        return { code: 0, stdout: 'installed', stderr: '' }
+      },
+    })
+    const sentence = '请根据 https://skillhub.cn/install/skillhub.md，安装 @zhaopintong/multi-search-engine。'
+    await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: sentence }))
+      .resolves.toMatchObject({ kind: 'package', target: '@zhaopintong/multi-search-engine' })
+    expect(calls.at(-1)?.[5]).toBe('@zhaopintong/multi-search-engine')
+    await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: '请安装 find-skills。' }))
+      .resolves.toMatchObject({ kind: 'package', target: 'find-skills' })
+    await expect(api.installAny({
+      projectId: 'p1', actorSessionId: 'w1',
+      text: '从 https://raw.githubusercontent.com/o/r/main/packs/url/SKILL.md 安装',
+    })).resolves.toMatchObject({ kind: 'url', target: expect.stringContaining('raw.githubusercontent.com') })
+    expect(fetch).toHaveBeenCalled()
+    const before = calls.length
+    await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: '安装 aaa-bbb 和 ccc-ddd' }))
+      .rejects.toMatchObject({ code: 'SKILL_INSTRUCTION_UNSUPPORTED' })
+    await expect(api.installAny({
+      projectId: 'p1', actorSessionId: 'w1',
+      text: '安装 @scope/pkg 和 https://example.com/not-an-instruction',
+    })).rejects.toMatchObject({ code: 'SKILL_INSTRUCTION_UNSUPPORTED' })
+    await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: '请安装这个技能' }))
+      .rejects.toMatchObject({ code: 'SKILL_INSTRUCTION_UNSUPPORTED' })
+    await expect(api.installAny({ projectId: 'p1', actorSessionId: 'outside', text: '安装 find-skills' }))
+      .rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
+    expect(calls).toHaveLength(before)
+    reader.close()
+  })
+
   it('installs a SkillHub package through the fixed WSL command and audits each outcome', async () => {
     const root = workspace()
     const packs = join(root, 'installed')
