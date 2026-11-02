@@ -4,7 +4,7 @@
 
 - **任务包与员工上下文**：派活支持六字段 TaskPacket（目标/约束/文件引用/验收/禁止/未决），员工只拿任务包+必要引用+最近一轮，不注入主管完整历史
 - **任务记忆**：新增 `task_memory`（终态任务摘要/决策/产物/transcript 指针），主管看全项目、员工只看自己；系统 prompt 自动注入进行中任务+最近完成摘要，2k 上限
-- **Token 计量**：从 assistant usage 按 session/task/round 累计，提供快照/面板；跨轮 24k 自动压缩，不找用户
+- **Token 计量**：从 assistant usage 按 session/task/round 累计，提供快照（Token 面板即将移除）；跨轮 24k 自动压缩，不找用户
 - **上下文瘦身**：spill inline 降至 2k、compaction retain 20k、step 阈值 60k（总阈值仍 150k）；同轮重复工具结果自动引用第一条
 - **输入中不自动执行**：typing presence（5s TTL）阻止 goal 自动继续；用户发送/停止后恢复
 - **1.1.4 能力保留**：安装跳转对话、免选项目内部工作区、技能单入口、install-any、SPILL/DPAPI、邮件隐藏
