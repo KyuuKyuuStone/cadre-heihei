@@ -1,10 +1,9 @@
 /** Per-conversation skill selection page, opened from the Conversation view tabs. */
 import { useCallback, useEffect, useState } from 'react'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Checkbox } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreRosterState } from './CadreSidebar.tsx'
 import {
-  CadreSkillPicker,
   fetchSkillCatalog,
   previewSkill,
   saveMemberSkills,
@@ -97,15 +96,36 @@ export function CadreSkillTab({ sessionId, useRoster, projectOfSession, t }: Ski
         <span className={css.count}>{t('skills.tab.count', { count: String(selected.length) })}</span>
       </header>
       <p className={css.total}>{t('skills.total', { count: String(skillTokenTotal(entries, selected)) })}</p>
-      <CadreSkillPicker entries={entries} selected={selected} t={t}
-        onToggle={(id) => {
-          setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])
-        }}
-        onPreview={(id) => {
-          void previewSkill(projectId, sessionId, id).then(setPreview, (cause: unknown) => {
-            setError(cause instanceof Error ? cause.message : String(cause))
-          })
-        }} />
+      {entries.length === 0
+        ? <div className={css.empty} data-skill-tab-empty><span aria-hidden="true">✦</span><p>{t('skills.empty')}</p></div>
+        : <ul className={css.cards}>
+          {entries.map((entry) => {
+            const checked = selected.includes(entry.id)
+            return (
+              <li key={entry.id} className={checked ? `${css.card} ${css.cardSelected}` : css.card} data-skill-card>
+                <div className={css.cardHead}>
+                  <Checkbox checked={checked} label={entry.name}
+                    onChange={() => {
+                      setSelected(current => current.includes(entry.id)
+                        ? current.filter(item => item !== entry.id)
+                        : [...current, entry.id])
+                    }} />
+                  <span className={css.cardToken}>{t('skills.tokenEstimate', { count: String(entry.tokenEstimate) })}</span>
+                </div>
+                <p className={css.cardDescription}>{entry.description}</p>
+                <div className={css.cardMeta}>
+                  <span>{entry.license}</span>
+                  {entry.origin === 'builtin' && <span>{t('skills.group.builtin')}</span>}
+                  <Button variant="ghost" size="sm" onClick={() => {
+                    void previewSkill(projectId, sessionId, entry.id).then(setPreview, (cause: unknown) => {
+                      setError(cause instanceof Error ? cause.message : String(cause))
+                    })
+                  }}>{t('skills.preview')}</Button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>}
       {preview !== null && (
         <div className={css.preview} data-skill-tab-preview>
           <div className={css.previewHead}>

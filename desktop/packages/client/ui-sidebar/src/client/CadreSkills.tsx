@@ -65,7 +65,7 @@ interface SkillResponse {
 }
 
 async function skillCall(
-  method: 'catalog' | 'set' | 'preview' | 'add' | 'remove' | 'install-url',
+  method: 'catalog' | 'set' | 'preview' | 'add' | 'remove' | 'install-url' | 'install-package',
   body: Record<string, unknown>,
 ): Promise<unknown> {
   const response = await fetch(`/cadre/skills/${method}`, {
@@ -121,6 +121,16 @@ export async function installSkillFromUrl(
   projectId: string, actorSessionId: string, url: string, confirm: boolean,
 ): Promise<void> {
   await skillCall('install-url', { projectId, actorSessionId, url, confirm })
+}
+
+export async function installSkillPackage(
+  projectId: string, actorSessionId: string, name: string,
+): Promise<{ name: string; visible: boolean; durationMs: number }> {
+  return await skillCall('install-package', { projectId, actorSessionId, name }) as {
+    name: string
+    visible: boolean
+    durationMs: number
+  }
 }
 
 export function skillTokenTotal(entries: readonly CadreSkillEntry[], selected: readonly string[]): number {

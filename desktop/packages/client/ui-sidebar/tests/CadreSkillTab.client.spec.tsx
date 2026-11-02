@@ -56,6 +56,8 @@ describe('Cadre skill tab', () => {
     render(<CadreSkillTab {...props('w1')} />)
     expect(await screen.findByText('员工技能')).toBeTruthy()
     expect(screen.getByText('已选 1')).toBeTruthy()
+    expect(document.querySelectorAll('[data-skill-card]')).toHaveLength(1)
+    expect(screen.getByText('约 10 tokens')).toBeTruthy()
     fireEvent.click(screen.getByRole('checkbox', { name: '员工技能' }))
     fireEvent.click(screen.getByRole('button', { name: '保存技能' }))
     expect(await screen.findByText('本会话技能已保存。')).toBeTruthy()
@@ -83,6 +85,13 @@ describe('Cadre skill tab', () => {
         actorSessionId: 'sup', targetSessionId: 'w1',
       })
     })
+  })
+
+  it('shows the empty state when no skill is available', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: [] })))
+    render(<CadreSkillTab {...props('w1')} />)
+    expect(await screen.findByText('还没有可用的技能。')).toBeTruthy()
+    expect(document.querySelector('[data-skill-tab-empty]')).toBeTruthy()
   })
 
   it('renders nothing for an ordinary Session', () => {

@@ -13,6 +13,7 @@ import {
   type CadreSkillEntry,
 } from './CadreSkills.tsx'
 import { CadreSkillAdminDialog } from './CadreSkillAdminDialog.tsx'
+import { CadreSkillInstallDialog } from './CadreSkillInstallDialog.tsx'
 import css from './CadreSkillLibrary.module.css'
 
 export interface CadreSkillLibraryInjected {
@@ -71,6 +72,11 @@ export function CadreSkillLibraryPage({
     .find(([, session]) => (session.retainedBy.mainView ?? 0) > 0)?.[0])
   const actor = members.find(member => member.sessionId === activeSessionId)
   const isSupervisor = actor?.role === 'supervisor'
+  // Installation runs as a supervisor even from an employee Session; only a
+  // project without any supervisor is unavailable.
+  const installActorId = isSupervisor
+    ? actor.sessionId
+    : members.find(member => member.role === 'supervisor' && member.state !== 'departed')?.sessionId
   const projectId = actor === undefined ? undefined : projectOfSession(actor.sessionId)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
   const [busy, setBusy] = useState(false)
@@ -80,6 +86,7 @@ export function CadreSkillLibraryPage({
   const [form, setForm] = useState<ManualState>(EMPTY)
   const [tokenManual, setTokenManual] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [installOpen, setInstallOpen] = useState(false)
 
   const load = useCallback(async () => {
     if (actor === undefined || projectId === undefined) return
@@ -218,9 +225,9 @@ export function CadreSkillLibraryPage({
           <p>{t('skills.library.description')}</p>
         </div>
         <div className={css.headerActions}>
-          <Button variant="primary" disabled={!isSupervisor || busy}
-            title={isSupervisor ? undefined : t('skills.library.installSupervisorOnly')}
-            onClick={() => { if (isSupervisor) setAdminOpen(true) }}>
+          <Button variant="primary" disabled={installActorId === undefined || busy}
+            title={installActorId === undefined ? t('skills.library.noSupervisor') : undefined}
+            onClick={() => { if (installActorId !== undefined) setInstallOpen(true) }}>
             {t('skills.admin.installEntry')}
           </Button>
           {isSupervisor && (
@@ -231,7 +238,7 @@ export function CadreSkillLibraryPage({
           )}
         </div>
       </header>
-      {!isSupervisor && <p className={css.hint}>{t('skills.library.installSupervisorOnly')}</p>}
+      {installActorId === undefined && <p className={css.hint}>{t('skills.library.noSupervisor')}</p>}
       <div className={css.sources} data-skill-sources>
         <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
         <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
@@ -240,6 +247,16 @@ export function CadreSkillLibraryPage({
         <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
         <p>{t('skills.sources.caution')}</p>
       </div>
+      {installOpen && installActorId !== undefined && (
+        <CadreSkillInstallDialog
+          projectId={projectId}
+          actorSessionId={installActorId}
+          onInstalled={load}
+          openAdmin={() => { setInstallOpen(false); setAdminOpen(true) }}
+          onClose={() => { setInstallOpen(false) }}
+          t={t}
+        />
+      )}
       {isSupervisor && adminOpen && (
         <CadreSkillAdminDialog
           projectId={projectId}
