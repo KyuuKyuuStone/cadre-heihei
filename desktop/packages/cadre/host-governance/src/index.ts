@@ -26,6 +26,7 @@ import { IdleReminderService } from './idle-reminder.ts'
 import { ClaimVerifier } from './claims.ts'
 import { SessionPresence } from './presence.ts'
 import { ExecutionArm } from './execution-arm.ts'
+import { TokenUsageLedger } from './token-usage.ts'
 import { activityFrom, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
@@ -100,6 +101,7 @@ interface HostContext {
   readonly agents: AgentsLike
   readonly goals: GoalsLike
   effect(setup: () => () => void): void
+  get?(name: string): unknown
   provide?(name: string, value: unknown): void
   on?(event: string, handler: (session: { readonly id: string }, event: unknown) => void): () => void
   inject?(dependencies: readonly string[], callback: (scope: unknown) => void): void
@@ -179,8 +181,18 @@ class LedgerReader {
     }))
   }
 
-  task(taskId: string): WatchTask | undefined {
-    const row = this.#db.prepare(`SELECT task_id, project_id, title, status, assignee_session_id,
+  /** Newest non-terminal task assigned to one employee, if any. */
+  openTask(projectId: string, sessionId: string): { readonly taskId: string; readonly projectId: string } | undefined {
+    const row = this.#db.prepare(`SELECT task_id, project_id FROM tasks
+      WHERE project_id = ? AND assignee_session_id = ?
+        AND status NOT IN ('verified', 'failed', 'cancelled')
+      ORDER BY updated_at DESC LIMIT 1`).get(projectId, sessionId) as
+      { task_id?: unknown; project_id?: unknown } | undefined
+    return typeof row?.task_id === 'string' && typeof row.project_id === 'string'
+      ? { taskId: row.task_id, projectId: row.project_id } : undefined
+  }
+
+  task(taskId: string): WatchTask | undefined {    const row = this.#db.prepare(`SELECT task_id, project_id, title, status, assignee_session_id,
       dispatcher_session_id, version, updated_at, created_at
       FROM tasks WHERE task_id = ? LIMIT 1`).get(taskId) as Record<string, unknown> | undefined
     if (row === undefined) return undefined
@@ -237,6 +249,10 @@ function safeLog(path: string, message: string): void {
   try {
     appendFileSync(`${path}.plugin.log`, `${new Date().toISOString()} ${message}\n`)
   } catch { /* diagnostics never fail the watchdog */ }
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
 /**
@@ -315,10 +331,51 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     },
   })
   ctx.provide?.('executionArm', executionArm)
+  const tokenUsage = new TokenUsageLedger({
+    file: `${databasePath}.token-usage.jsonl`,
+    onThreshold: record => {
+      appendFileSync(`${databasePath}.plugin.log`, `${JSON.stringify(record)}\n`, 'utf8')
+      const compaction = ctx.get?.('compaction') as {
+        compactIfNeeded(agent: never, trigger: 'pressure', signal: AbortSignal): Promise<unknown>
+      } | undefined
+      const agent = ctx.agents.get(record.sessionId)
+      if (compaction !== undefined && agent !== undefined) {
+        // Automatic compaction at the cross-round threshold; failure only logs
+        // and never blocks or asks the user.
+        void compaction.compactIfNeeded(agent as never, 'pressure', new AbortController().signal)
+          .catch((error: unknown) => {
+            console.warn(`host-governance: token threshold compaction failed: ${String(error)}`)
+          })
+      }
+    },
+  })
+  ctx.provide?.('tokenUsage', tokenUsage)
   const disposeIdleEvents = ctx.on === undefined
     ? undefined
     : ctx.on('session/event', (session, event) => {
-      if ((event as { type?: unknown }).type === 'user/message') presence.mark(session.id, false)
+      const typed = event as { type?: unknown; data?: unknown }
+      if (typed.type === 'user/message') presence.mark(session.id, false)
+      if (typed.type === 'assistant/message' && typeof typed.data === 'object' && typed.data !== null) {
+        const data = typed.data as { turn?: unknown; usage?: Record<string, unknown> }
+        if (data.usage !== undefined) {
+          const projectId = projectOf(session.id)
+          const task = projectId === undefined ? undefined : ledger.openTask(projectId, session.id)
+          if (projectId !== undefined) {
+            tokenUsage.ingest({
+              projectId, sessionId: session.id,
+              ...(task === undefined ? {} : { taskId: task.taskId }),
+              round: typeof data.turn === 'number' ? data.turn : 1,
+              usage: {
+                inputTokens: numberOrZero(data.usage.inputTokens),
+                outputTokens: numberOrZero(data.usage.outputTokens),
+                totalTokens: numberOrZero(data.usage.totalTokens),
+                cacheReadTokens: numberOrZero(data.usage.cacheReadTokens),
+                cacheWriteTokens: numberOrZero(data.usage.cacheWriteTokens),
+              },
+            })
+          }
+        }
+      }
       idleReminder.handle(session.id, event as { type?: unknown; data?: unknown })
     })
   const claims = new ClaimVerifier({
@@ -736,6 +793,42 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           }
         },
       }), 'host-governance: /cadre/execution/arm')
+      web.effect(() => web.webServer.register({
+        kind: 'exact',
+        path: '/cadre/token/snapshot',
+        handler: async (req, res) => {
+          if (req.method !== 'POST') return reply(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED', message: '只接受 POST' })
+          const admission = web.connection.admit(req)
+          if (typeof admission === 'object' && admission !== null && 'rejection' in admission) {
+            return reply(res, (admission as { rejection: number }).rejection, { ok: false, code: 'FORBIDDEN', message: '未授权' })
+          }
+          try {
+            const body = await readBody(req) as Record<string, unknown>
+            if (typeof body.projectId !== 'string' || typeof body.actorSessionId !== 'string') {
+              return reply(res, 400, { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId/actorSessionId 必填' })
+            }
+            if (projectOf(body.actorSessionId) !== body.projectId) {
+              return reply(res, 403, { ok: false, code: 'PERMISSION_DENIED', message: '只有本项目成员可以查看 token 用量' })
+            }
+            if (typeof body.taskId === 'string') {
+              const task = ledger.task(body.taskId)
+              if (task === undefined || task.projectId !== body.projectId) {
+                return reply(res, 403, { ok: false, code: 'PERMISSION_DENIED', message: '任务不属于本项目' })
+              }
+              return reply(res, 200, { ok: true, snapshot: tokenUsage.snapshot({ taskId: body.taskId }) })
+            }
+            if (typeof body.sessionId === 'string') {
+              if (projectOf(body.sessionId) !== body.projectId) {
+                return reply(res, 403, { ok: false, code: 'PERMISSION_DENIED', message: '会话不属于本项目' })
+              }
+              return reply(res, 200, { ok: true, snapshot: tokenUsage.snapshot({ sessionId: body.sessionId }) })
+            }
+            return reply(res, 400, { ok: false, code: 'INVALID_ARGUMENT', message: 'taskId/sessionId 至少一个' })
+          } catch (error) {
+            reply(res, 500, { ok: false, code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      }), 'host-governance: /cadre/token/snapshot')
 
       const emailRoute = (
         path: string,
