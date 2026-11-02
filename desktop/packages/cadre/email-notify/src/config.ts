@@ -37,8 +37,10 @@ export function parseEmailConfig(value: unknown): EmailConfig {
     throw new Error('EMAIL_CONFIG_INVALID: config must be an object')
   }
   const source = value as Record<string, unknown>
-  if ('apiKey' in source || 'sendgridApiKey' in source || 'secret' in source) {
-    throw new Error('EMAIL_SECRET_IN_CONFIG: use apiKeyEnv, never store the key in config')
+  if ('apiKey' in source || 'sendgridApiKey' in source || 'secret' in source
+    || 'authCode' in source || 'authCodeValue' in source || 'password' in source
+    || 'pass' in source || 'smtpPassword' in source) {
+    throw new Error('EMAIL_SECRET_IN_CONFIG: use the secret store, never store the key in config')
   }
   if (typeof source.enabled !== 'boolean') throw new Error('EMAIL_CONFIG_INVALID: enabled must be boolean')
   const provider = source.provider === undefined ? 'sendgrid' : source.provider
@@ -103,6 +105,10 @@ export function parseEmailConfig(value: unknown): EmailConfig {
   if (minIntervalMs !== undefined && (typeof minIntervalMs !== 'number' || !Number.isFinite(minIntervalMs) || minIntervalMs < 0)) {
     throw new Error('EMAIL_CONFIG_INVALID: minIntervalMs must be a non-negative number')
   }
+  const authCodeRef = source.authCodeRef
+  if (authCodeRef !== undefined && (typeof authCodeRef !== 'string' || !/^smtp:[A-Za-z0-9._-]+$/u.test(authCodeRef))) {
+    throw new Error('EMAIL_CONFIG_INVALID: authCodeRef must be smtp:<projectId>')
+  }
   return {
     enabled: source.enabled,
     provider,
@@ -111,6 +117,7 @@ export function parseEmailConfig(value: unknown): EmailConfig {
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
     ...(verifiedDomains === undefined ? {} : { verifiedDomains: verifiedDomains as string[] }),
     ...smtp,
+    ...(authCodeRef === undefined ? {} : { authCodeRef }),
     ...(source.dryRun === true ? { dryRun: true } : {}),
     ...(minIntervalMs === undefined ? {} : { minIntervalMs }),
   }

@@ -33,8 +33,10 @@ export interface EmailConfig {
   readonly user?: string
   /** SMTP From display name override; defaults to `from.name`. */
   readonly fromName?: string
-  /** Environment variable holding the SMTP authorization code. */
+  /** Environment variable holding the SMTP authorization code (legacy fallback). */
   readonly authCodeEnv?: string
+  /** Reference to the encrypted secret store; the value is never stored here. */
+  readonly authCodeRef?: string
   /** When true, render but do not call the provider. */
   readonly dryRun?: boolean
   /** Minimum gap between two sends for the same project (milliseconds). */
@@ -74,7 +76,7 @@ export interface EmailMessage {
 
 /** Result of one notification attempt; failures never throw into the caller. */
 export type EmailResult =
-  | { readonly ok: true; readonly status: 'sent' | 'dry-run' | 'deduped' | 'disabled' | 'rate-limited'; readonly message?: EmailMessage }
+  | { readonly ok: true; readonly status: 'sent' | 'dry-run' | 'deduped' | 'disabled' | 'rate-limited'; readonly message?: EmailMessage; readonly warning?: string }
   | { readonly ok: false; readonly code: string; readonly message: string }
 
 /** One SendGrid send input. */

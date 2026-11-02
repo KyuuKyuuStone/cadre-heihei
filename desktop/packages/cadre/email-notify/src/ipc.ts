@@ -6,6 +6,7 @@ import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadEmailConfig, parseEmailConfig } from './config.ts'
 import type { CadreEmailNotifier } from './notifier.ts'
+import type { EmailSecretStore } from './secret-store.ts'
 import type { EmailConfig, EmailResult } from './types.ts'
 
 /** Config + presence flags safe to send to the settings UI. */
@@ -43,17 +44,19 @@ function isMissingConfig(error: unknown): boolean {
  * @param env - environment used only to compute `hasKey`.
  * @returns the config plus a boolean; the key value never crosses this boundary.
  */
-export function getEmailConfigView(
+export async function getEmailConfigView(
   directory: string,
   projectId: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
-): EmailConfigView {
+  secretStore?: EmailSecretStore,
+): Promise<EmailConfigView> {
   try {
     const config = loadEmailConfig(directory, projectId)
     const keyEnv = config.provider === 'smtp'
       ? (config.authCodeEnv ?? 'QQ_EMAIL_AUTH_CODE')
       : (config.apiKeyEnv ?? (config.provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY'))
-    const hasKey = (env[keyEnv] ?? '').trim() !== ''
+    const hasSecret = config.provider === 'smtp' && secretStore?.has(projectId) === true
+    const hasKey = hasSecret || (env[keyEnv] ?? '').trim() !== ''
     return { ...config, hasKey, configured: true }
   } catch (error) {
     if (isMissingConfig(error)) return DEFAULT_EMAIL_CONFIG_VIEW
@@ -78,7 +81,10 @@ export function setEmailConfig(
   if (!/^[A-Za-z0-9._-]+$/u.test(projectId) || projectId === '.' || projectId === '..') {
     throw new Error('EMAIL_CONFIG_INVALID: project id is not a safe file name')
   }
-  const config = parseEmailConfig(value)
+  const parsed = parseEmailConfig(value)
+  const config: EmailConfig = parsed.provider === 'smtp'
+    ? { ...parsed, authCodeRef: `smtp:${projectId}` }
+    : parsed
   mkdirSync(directory, { recursive: true })
   const target = join(directory, `${projectId}.json`)
   const temporary = `${target}.tmp`
@@ -88,8 +94,7 @@ export function setEmailConfig(
     ? (config.authCodeEnv ?? 'QQ_EMAIL_AUTH_CODE')
     : (config.apiKeyEnv ?? (config.provider === 'resend' ? 'RESEND_API_KEY' : 'SENDGRID_API_KEY'))
   const hasKey = (env[keyEnv] ?? '').trim() !== ''
-  return { ...config, hasKey, configured: true }
-}
+  return { ...config, hasKey, configured: true }}
 
 /** Test-send through the shared notifier. */
 export function testEmail(notifier: CadreEmailNotifier, projectId: string): Promise<EmailResult> {

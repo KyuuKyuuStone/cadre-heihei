@@ -15,6 +15,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import {
   CadreEmailNotifier,
+  EmailSecretStore,
   dryRunEmail,
   getEmailConfigView,
   setEmailConfig,
@@ -227,7 +228,8 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   const emailConfigDir = config.emailConfigDir
     ?? process.env.CADRE_EMAIL_CONFIG_DIR
     ?? join(homedir(), '.dsh', 'cadre-email')
-  const emailNotifier = new CadreEmailNotifier({ configDir: emailConfigDir })
+  const emailSecrets = new EmailSecretStore()
+  const emailNotifier = new CadreEmailNotifier({ configDir: emailConfigDir, secretStore: emailSecrets })
 
   const ports: StallPorts = {
     now: () => Date.now(),
@@ -548,7 +550,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
 
       const emailRoute = (
         path: string,
-        method: 'getConfig' | 'setConfig' | 'testSend' | 'dryRun',
+        method: 'getConfig' | 'setConfig' | 'testSend' | 'dryRun' | 'setSecret',
         operation: (projectId: string, body: Record<string, unknown>) => Promise<unknown> | unknown,
       ): void => {
         web.effect(() => web.webServer.register({
@@ -570,13 +572,16 @@ export function apply(ctx: HostContext, config: Config = {}): void {
               }
               reply(res, 200, { ok: true, method, result: await operation(body.projectId, body) })
             } catch (error) {
+              if ((error as { code?: unknown }).code === 'SECRET_STORE_UNAVAILABLE') {
+                return reply(res, 503, { ok: false, code: 'SECRET_STORE_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) })
+              }
               reply(res, 400, { ok: false, code: 'EMAIL_CONFIG_INVALID', message: error instanceof Error ? error.message : String(error) })
             }
           },
         }), `host-governance: ${path}`)
       }
 
-      emailRoute('/cadre/email/get', 'getConfig', projectId => getEmailConfigView(emailConfigDir, projectId))
+      emailRoute('/cadre/email/get', 'getConfig', projectId => getEmailConfigView(emailConfigDir, projectId, process.env, emailSecrets))
       emailRoute('/cadre/email/set', 'setConfig', (projectId, body) => {
         if (typeof body.config !== 'object' || body.config === null) {
           throw new Error('EMAIL_CONFIG_INVALID: config must be an object')
@@ -585,6 +590,17 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       })
       emailRoute('/cadre/email/test', 'testSend', projectId => testEmail(emailNotifier, projectId))
       emailRoute('/cadre/email/dry-run', 'dryRun', projectId => dryRunEmail(emailNotifier, projectId))
+      emailRoute('/cadre/email/secret', 'setSecret', async (projectId, body) => {
+        if (body.action === 'clear') {
+          emailSecrets.clear(projectId)
+          return { hasKey: false }
+        }
+        if (typeof body.authCode !== 'string' || body.authCode.trim() === '') {
+          throw new Error('EMAIL_SECRET_EMPTY: authCode 必填')
+        }
+        await emailSecrets.set(projectId, body.authCode)
+        return { hasKey: emailSecrets.has(projectId) }
+      })
     })
   }
 }

@@ -8,6 +8,7 @@ import { dryRunEmail, getEmailConfigView, setEmailConfig, testEmail } from '../s
 import { buildSendGridBody, redactSecret, sendWithSendGrid } from '../src/sendgrid.ts'
 import { buildResendBody, sendWithResend } from '../src/resend.ts'
 import { buildSmtpMail, sendWithSmtp } from '../src/smtp.ts'
+import { EmailSecretStore, SecretStoreUnavailableError } from '../src/secret-store.ts'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -141,9 +142,9 @@ describe('dedupe, rate limit and failures', () => {
     expect(result).toMatchObject({ ok: false, code: 'EMAIL_AUTH_FAILED' })
   })
 
-  it('IPC get returns the exact disabled default on first open instead of ENOENT', () => {
+  it('IPC get returns the exact disabled default on first open instead of ENOENT', async () => {
     const dir = workspace()
-    expect(getEmailConfigView(dir, 'p1')).toEqual({
+    expect(await getEmailConfigView(dir, 'p1')).toEqual({
       enabled: false,
       provider: 'sendgrid',
       from: { email: '', name: '' },
@@ -156,7 +157,7 @@ describe('dedupe, rate limit and failures', () => {
     })
   })
 
-  it('IPC set creates the directory and file on first save', () => {
+  it('IPC set creates the directory and file on first save', async () => {
     const root = workspace()
     const dir = join(root, 'nested', 'cadre-email')
     const view = setEmailConfig(dir, 'p1', {
@@ -164,15 +165,15 @@ describe('dedupe, rate limit and failures', () => {
     }, {})
     expect(view.configured).toBe(true)
     expect(JSON.parse(readFileSync(join(dir, 'p1.json'), 'utf8'))).toMatchObject({ enabled: true })
-    expect(getEmailConfigView(dir, 'p1', {})).toMatchObject({ enabled: true, configured: true })
+    expect(await getEmailConfigView(dir, 'p1', {})).toMatchObject({ enabled: true, configured: true })
   })
 
-  it('IPC get reports malformed JSON as a readable config error without the file path', () => {
+  it('IPC get reports malformed JSON as a readable config error without the file path', async () => {
     const dir = workspace()
     writeFileSync(join(dir, 'p1.json'), '{ not json')
-    expect(() => getEmailConfigView(dir, 'p1')).toThrow('EMAIL_CONFIG_INVALID: config is not valid JSON')
+    await expect(getEmailConfigView(dir, 'p1')).rejects.toThrow('EMAIL_CONFIG_INVALID: config is not valid JSON')
     try {
-      getEmailConfigView(dir, 'p1')
+      await getEmailConfigView(dir, 'p1')
     } catch (error) {
       expect(String(error)).not.toContain(dir)
     }
@@ -187,9 +188,83 @@ describe('dedupe, rate limit and failures', () => {
     const view = setEmailConfig(dir, 'p1', config, { SENDGRID_TEST_KEY: 'SG.secret' })
     expect(view.hasKey).toBe(true)
     expect(JSON.stringify(view)).not.toContain('SG.secret')
-    expect(getEmailConfigView(dir, 'p1', {})).toMatchObject({ enabled: true, hasKey: false })
+    expect(await getEmailConfigView(dir, 'p1', {})).toMatchObject({ enabled: true, hasKey: false })
     expect(readFileSync(join(dir, 'p1.json'), 'utf8')).not.toContain('SG.secret')
     expect(() => setEmailConfig(dir, 'p1', { ...config, apiKey: 'SG.secret' })).toThrow(/EMAIL_SECRET_IN_CONFIG/)
+    expect(() => setEmailConfig(dir, 'p1', { ...config, authCode: 'qq-secret' })).toThrow(/EMAIL_SECRET_IN_CONFIG/)
+  })
+
+  it('stores the SMTP authorization code encrypted and exposes only hasKey', async () => {
+    const root = workspace()
+    const configDir = join(root, 'config')
+    const secretDir = join(root, 'secrets')
+    const xor = (value: string | Buffer): Buffer => Buffer.from([...Buffer.from(value)].map(byte => byte ^ 0x5a))
+    const safeStorage = {
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => xor(value),
+      decryptString: (value: Buffer) => xor(value).toString('utf8'),
+    }
+    const store = new EmailSecretStore({ dir: secretDir, safeStorage })
+    setEmailConfig(configDir, 'p1', {
+      enabled: true, provider: 'smtp', from: { email: 'owner@qq.com' }, recipients: ['r@example.com'],
+    }, {})
+    expect(JSON.parse(readFileSync(join(configDir, 'p1.json'), 'utf8'))).toMatchObject({ authCodeRef: 'smtp:p1' })
+    await store.set('p1', 'qq-secret')
+    expect(store.has('p1')).toBe(true)
+    expect(await store.read('p1')).toBe('qq-secret')
+    expect(readFileSync(join(secretDir, 'p1.bin')).toString('utf8')).not.toContain('qq-secret')
+    expect(await getEmailConfigView(configDir, 'p1', {}, store)).toMatchObject({ hasKey: true })
+    expect(JSON.stringify(await getEmailConfigView(configDir, 'p1', {}, store))).not.toContain('qq-secret')
+    store.clear('p1')
+    expect(store.has('p1')).toBe(false)
+  })
+
+  it('fails closed when safeStorage is unavailable', async () => {
+    const store = new EmailSecretStore({
+      dir: workspace(),
+      safeStorage: {
+        isEncryptionAvailable: () => false,
+        encryptString: () => Buffer.alloc(0),
+        decryptString: () => '',
+      },
+    })
+    await expect(store.set('p1', 'qq-secret')).rejects.toMatchObject({ code: 'SECRET_STORE_UNAVAILABLE' })
+    await expect(store.set('p1', '')).rejects.toThrow(/EMAIL_SECRET_EMPTY/)
+    expect(SecretStoreUnavailableError).toBeTypeOf('function')
+  })
+
+  it('uses the encrypted secret for SMTP and warns when falling back to the old env', async () => {
+    const root = workspace()
+    const configDir = root
+    const secretDir = join(root, 'secrets')
+    const xor = (value: string | Buffer): Buffer => Buffer.from([...Buffer.from(value)].map(byte => byte ^ 0x5a))
+    const safeStorage = {
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => xor(value),
+      decryptString: (value: Buffer) => xor(value).toString('utf8'),
+    }
+    writeConfig(configDir, { provider: 'smtp', apiKeyEnv: undefined, from: { email: 'owner@qq.com' } })
+    const store = new EmailSecretStore({ dir: secretDir, safeStorage })
+    await store.set('p1', 'qq-secret')
+    const sent: unknown[] = []
+    const notifier = new CadreEmailNotifier({
+      configDir, env: {}, secretStore: store,
+      smtpTransport: { sendMail: async mail => { sent.push(mail); return { accepted: ['r@example.com'] } } },
+    })
+    expect(await notifier.notify({
+      kind: 'escalation', projectId: 'p1', taskId: 't1', title: 'x', reason: 'y', episodeId: 'e1',
+    })).toMatchObject({ ok: true, status: 'sent' })
+    expect(sent).toHaveLength(1)
+
+    const envDir = workspace()
+    writeConfig(envDir, { provider: 'smtp', apiKeyEnv: undefined, from: { email: 'owner@qq.com' } })
+    const fallback = new CadreEmailNotifier({
+      configDir: envDir, env: { QQ_EMAIL_AUTH_CODE: 'env-secret' },
+      smtpTransport: { sendMail: async () => ({ accepted: ['r@example.com'] }) },
+    })
+    expect(await fallback.notify({
+      kind: 'escalation', projectId: 'p1', taskId: 't2', title: 'x', reason: 'y', episodeId: 'e2',
+    })).toMatchObject({ ok: true, warning: expect.stringContaining('旧环境变量') as string })
   })
 
   it('stays silent and structured when no project config exists', async () => {
