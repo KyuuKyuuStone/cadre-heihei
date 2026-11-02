@@ -2,6 +2,7 @@
 
 ## 1.1.4
 
+- **无回复汇报邮件**：主管会话 assistant 后 10 分钟（可配）无用户回复，发送「Cadre 汇报」邮件：最近回复摘要、台账任务统计（交付/验收/失败）、下一步建议、时间；附当前窗口 `capturePage()` PNG（截图失败只发正文并注明）；发送后 paused，用户新消息恢复
 - **技能页单入口**：技能页只保留一个内嵌对话入口，问/装/建都走普通 `cadre-skill-admin` 会话，AI 用 catalog/preview/install 工具自行查询和安装
 - **技能管理员去绑定**：admin session 不再绑定 supervisor/operator；消息读写/发送与 `skill_install` 按项目成员校验，worker 也可用，跨项目/非成员拒绝
 - **SMTP IPv4/587**：nodemailer 强制 `family:4`；465 连接/超时失败自动回退 587 STARTTLS；连接/TLS 错误保留底层 code 并 redact
