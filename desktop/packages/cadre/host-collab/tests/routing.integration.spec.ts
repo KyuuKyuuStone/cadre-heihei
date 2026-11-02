@@ -21,6 +21,7 @@ const SUP = 'sup-route'
 const WORKER = 'worker-route'
 const AT = '2026-11-02T08:00:00.000Z'
 const roots: string[] = []
+let executionArmed = false
 const previousLedger = process.env.CADRE_LEDGER_PATH
 
 afterEach(() => {
@@ -97,8 +98,14 @@ async function mount(timeoutMs: number): Promise<Mounted> {
   await ctx.plugin({ inject: [...remotesInject], apply: applyRemotes })
   if (source === undefined) throw new Error('remotes source missing')
   const prompts: string[] = []
+  executionArmed = false
+  ctx.provide('executionArm', {
+    status: () => executionArmed ? { armed: true } : undefined,
+    consume: () => { executionArmed = false; return true },
+  })
   const host = {
     tools: ctx.tools,
+    get: (name: string) => ctx.get(name),
     effect: (setup: () => () => void) => ctx.effect(setup),
     on: (event: string, handler: never, options?: { prepend?: boolean }) => ctx.on(event as never, handler as never, options),
     sessionController: {
@@ -307,6 +314,35 @@ describe('DF-011 real Cordis composition (worker ask -> supervisor -> resolve)',
     }
   })
 
+  it('refuses dispatch until the user arms execution and consumes the arm', async () => {
+    const mounted = await mount(30 * 60_000)
+    try {
+      const supervisor = stubAgent(SUP)
+      const worker = stubAgent(WORKER)
+      mounted.ctx.agents.enter(supervisor, undefined)
+      mounted.ctx.agents.enter(worker, undefined)
+      const dispatch = async (): Promise<string> => {
+        const result = await mounted.ctx.tools.execute({
+          signal: new AbortController().signal,
+          callId: ToolCallId(`arm-${String(Math.random())}`),
+          name: 'dispatch_task',
+          arguments: { tasks: [{
+            employee: '小明', title: '门禁任务', body: '做', dueAt: '2026-11-03T00:00:00.000Z',
+          }] },
+          agent: supervisor,
+        })
+        const block = result.content[0]
+        return block?.type === 'text' ? block.text : ''
+      }
+      expect(await dispatch()).toContain('EXECUTION_NOT_ARMED')
+      executionArmed = true
+      expect(await dispatch()).toContain('已派发')
+      expect(await dispatch()).toContain('EXECUTION_NOT_ARMED')
+    } finally {
+      await mounted.ctx.fiber.dispose()
+    }
+  }, 15_000)
+
   it('injects the packet context into the employee prompt without supervisor history', async () => {
     const mounted = await mount(30 * 60_000)
     try {
@@ -314,6 +350,7 @@ describe('DF-011 real Cordis composition (worker ask -> supervisor -> resolve)',
       const worker = stubAgent(WORKER)
       mounted.ctx.agents.enter(supervisor, undefined)
       mounted.ctx.agents.enter(worker, undefined)
+      executionArmed = true
       const result = await mounted.ctx.tools.execute({
         signal: new AbortController().signal,
         callId: ToolCallId('dispatch-packet'),
