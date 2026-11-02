@@ -78,9 +78,11 @@ export function CadreSkillTab({ sessionId, useRoster, projectOfSession, t }: Ski
           <h1>{t('skills.tab.title')}</h1>
           <p>{t('skills.tab.description')}</p>
         </div>
-        <span className={css.count}>{t('skills.tab.count', { count: String(selected.length) })}</span>
       </header>
-      <p className={css.total}>{t('skills.total', { count: String(skillTokenTotal(entries, selected)) })}</p>
+      <div className={css.summary}>
+        <span className={css.count}>{t('skills.tab.count', { count: String(selected.length) })}</span>
+        <span className={css.total}>{t('skills.total', { count: String(skillTokenTotal(entries, selected)) })}</span>
+      </div>
       {entries.length === 0
         ? <div className={css.empty} data-skill-tab-empty><span aria-hidden="true">✦</span><p>{t('skills.empty')}</p></div>
         : <ul className={css.cards}>
