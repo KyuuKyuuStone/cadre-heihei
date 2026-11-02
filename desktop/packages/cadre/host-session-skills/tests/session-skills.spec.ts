@@ -511,7 +511,7 @@ describe('session skill packs', () => {
     const fetch = vi.fn(async (input: URL | string) => String(input).endsWith('manifest.json')
       ? new Response(JSON.stringify({
         id: 'url-pack', name: 'URL Pack', description: 'url', roles: ['worker'],
-        tokenEstimate: 1, tools: [], source: 'github:o/r', license: 'MIT',
+        tokenEstimate: 1, tools: [], source: 'github:o/r', license: 'MIT', author: 'URL Author',
       }), { status: 200 })
       : new Response('# url', { status: 200 }))
     const urlApi = createSkillApi({
@@ -547,7 +547,7 @@ describe('session skill packs', () => {
     const fetch = vi.fn(async (input: URL | string) => String(input).endsWith('manifest.json')
       ? new Response(JSON.stringify({
         id: 'url-any', name: 'URL Any', description: 'url', roles: ['worker'],
-        tokenEstimate: 1, tools: [], source: 'github:o/r', license: 'MIT',
+        tokenEstimate: 1, tools: [], source: 'github:o/r', license: 'MIT', author: 'URL Author',
       }), { status: 200 })
       : new Response('# url-any', { status: 200 }))
     const api = createSkillApi({
@@ -559,18 +559,25 @@ describe('session skill packs', () => {
       },
     })
     const sentence = '请根据 https://skillhub.cn/install/skillhub.md，安装 @zhaopintong/multi-search-engine。'
-    const anyPackage = await api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: sentence })
+    const pending = await api.installAny({ projectId: 'p1', actorSessionId: 's1', text: sentence })
+    expect(pending).toMatchObject({
+      kind: 'package', target: '@zhaopintong/multi-search-engine', installed: false, requiresConfirmation: true,
+    })
+    expect(calls).toHaveLength(0)
+    const anyPackage = await api.installAny({
+      projectId: 'p1', actorSessionId: 's1', text: sentence, confirm: true,
+    })
     expect(anyPackage).toMatchObject({ kind: 'package', target: '@zhaopintong/multi-search-engine', installed: true })
     expect(anyPackage.warnings).toEqual(expect.arrayContaining(['missing-license', 'missing-hash']))
     expect(calls.at(-1)?.[5]).toBe('@zhaopintong/multi-search-engine')
     await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: '请安装 find-skills。' }))
-      .resolves.toMatchObject({ kind: 'package', target: 'find-skills', installed: true })
+      .rejects.toMatchObject({ code: 'SKILL_CONFIRM_REQUIRED' })
     const anyUrl = await api.installAny({
       projectId: 'p1', actorSessionId: 'w1',
       text: '从 https://raw.githubusercontent.com/o/r/main/packs/url/SKILL.md 安装',
     })
     expect(anyUrl).toMatchObject({ kind: 'url', target: expect.stringContaining('raw.githubusercontent.com'), installed: true })
-    expect(anyUrl.warnings).toEqual(expect.arrayContaining(['missing-hash']))
+    expect(anyUrl.warnings).toEqual([])
     expect(fetch).toHaveBeenCalled()
     const before = calls.length
     await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: '安装 aaa-bbb 和 ccc-ddd' }))
@@ -608,35 +615,46 @@ describe('session skill packs', () => {
       },
     })
     await expect(success.installPackage({
-      projectId: 'p1', actorSessionId: 'w1', name: '@indiv-guipi/find-skills',
+      projectId: 'p1', actorSessionId: 's1', name: '@indiv-guipi/find-skills',
+    })).resolves.toMatchObject({
+      installed: false, requiresConfirmation: true,
+      warnings: expect.arrayContaining(['missing-license', 'missing-hash']),
+    })
+    expect(calls).toHaveLength(0)
+    await expect(success.installPackage({
+      projectId: 'p1', actorSessionId: 's1', name: '@indiv-guipi/find-skills', confirm: true,
     })).resolves.toMatchObject({
       name: '@indiv-guipi/find-skills', visible: true, installed: true,
       warnings: expect.arrayContaining(['missing-license', 'missing-hash']),
     })
+    await expect(success.installPackage({
+      projectId: 'p1', actorSessionId: 'w1', name: '@indiv-guipi/find-skills',
+    })).rejects.toMatchObject({ code: 'SKILL_CONFIRM_REQUIRED' })
     expect(calls[0]).toEqual([
       '-d', 'Ubuntu-24.04', '--', '/root/.local/bin/skillhub', 'install',
       '@indiv-guipi/find-skills', '--dir', packs,
     ])
     expect(readFileSync(join(auditDir, 'audit.jsonl'), 'utf8')).toContain('"result":"installed"')
     expect(readFileSync(join(auditDir, 'audit.jsonl'), 'utf8')).toContain('missing-license')
+    expect(readFileSync(join(auditDir, 'audit.jsonl'), 'utf8')).toContain('confirmedBy')
     expect(readFileSync(join(auditDir, 'audit.jsonl'), 'utf8')).not.toContain('apiKey')
 
     const failing = createSkillApi({
       db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, auditDir,
       runPackageCommand: async () => ({ code: 1, stdout: '', stderr: 'registry denied' }),
     })
-    await expect(failing.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'find-skills' }))
+    await expect(failing.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'find-skills', confirm: true }))
       .rejects.toMatchObject({ code: 'SKILL_INSTALL_PACKAGE_FAILED' })
-    await expect(failing.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'bad name; rm -rf' }))
+    await expect(failing.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'bad name; rm -rf', confirm: true }))
       .rejects.toMatchObject({ code: 'SKILL_INVALID' })
     const unsupported = createSkillApi({
       db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, auditDir,
       runPackageCommand: async () => ({ code: 127, stdout: '', stderr: 'WSL_E_DISTRO_NOT_FOUND' }),
     })
-    await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'find-skills' }))
+    await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 's1', name: 'find-skills', confirm: true }))
       .rejects.toMatchObject({ code: 'SKILL_INSTALL_PACKAGE_UNSUPPORTED' })
     await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 'w1', name: 'find-skills' }))
-      .rejects.toMatchObject({ code: 'SKILL_INSTALL_PACKAGE_UNSUPPORTED' })
+      .rejects.toMatchObject({ code: 'SKILL_CONFIRM_REQUIRED' })
     await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 'outside', name: 'find-skills' }))
       .rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
     reader.close()

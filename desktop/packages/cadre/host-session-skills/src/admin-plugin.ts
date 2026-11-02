@@ -122,21 +122,24 @@ export function apply(ctx: AdminContext): void {
 
   ctx.tools.register({
     name: 'skill_install',
-    description: 'Install one skill by package name, URL, or free text. Reuses install-package/install-url/install-any, validates strictly, returns non-blocking warnings for missing provenance, and writes the audit. No plan/apply confirmation is required.',
+    description: 'Request one skill install by package name, URL, or free text. Missing license/hash/source returns requiresConfirmation with a preview and installs nothing; a supervisor then calls again with confirm:true. Writes the audit.',
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
         name: { type: 'string', description: 'npm/SkillHub package name, e.g. @scope/name.' },
         url: { type: 'string', description: 'HTTPS GitHub raw/tree or skill URL.' },
         text: { type: 'string', description: 'Free-form instruction containing one package name or URL.' },
+        confirm: { type: 'boolean', description: 'Supervisor confirmation for a warning-bearing install.' },
       },
     },
     output: {
       schema: {
-        type: 'object', additionalProperties: false, required: ['kind', 'target', 'installed', 'warnings', 'result'],
+        type: 'object', additionalProperties: false, required: ['kind', 'target', 'installed', 'warnings'],
         properties: {
           kind: { type: 'string' }, target: { type: 'string' }, installed: { type: 'boolean' },
           warnings: { type: 'array', items: { type: 'string' } },
+          requiresConfirmation: { type: 'boolean' },
+          preview: { type: 'object', additionalProperties: true },
           result: { type: 'object', additionalProperties: true },
         },
       },
@@ -147,6 +150,7 @@ export function apply(ctx: AdminContext): void {
         ...(args.name === undefined ? {} : { name: args.name }),
         ...(args.url === undefined ? {} : { url: args.url }),
         ...(args.text === undefined ? {} : { text: args.text }),
+        ...(args.confirm === undefined ? {} : { confirm: args.confirm }),
       })
     },
   })

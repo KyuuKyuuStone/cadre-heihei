@@ -142,16 +142,26 @@ describe('skill admin model tools', () => {
       items: [expect.objectContaining({ result: 'applied', packId: 'tool-pack' })],
     })
 
-    const installed = await find('skill_install').execute({ name: '@scope/tool-install' }, run) as {
+    const pending = await find('skill_install').execute({ name: '@scope/tool-install' }, run) as {
+      kind: string; target: string; installed: boolean; requiresConfirmation: boolean; warnings: string[]
+    }
+    expect(pending).toMatchObject({
+      kind: 'package', target: '@scope/tool-install', installed: false, requiresConfirmation: true,
+    })
+    expect(pending.warnings).toEqual(expect.arrayContaining(['missing-license', 'missing-hash', 'unknown-source']))
+    const installed = await find('skill_install').execute({ name: '@scope/tool-install', confirm: true }, run) as {
       kind: string; target: string; installed: boolean; warnings: string[]
     }
     expect(installed).toMatchObject({ kind: 'package', target: '@scope/tool-install', installed: true })
     expect(installed.warnings).toEqual(expect.arrayContaining(['missing-license', 'missing-hash', 'unknown-source']))
     await expect(find('skill_install').execute({ name: '@scope/worker-install' }, { agent: { id: workerOnly.sessionId } }))
-      .resolves.toMatchObject({ kind: 'package', target: '@scope/worker-install', installed: true })
+      .rejects.toMatchObject({ code: 'SKILL_CONFIRM_REQUIRED' })
     await expect(find('skill_install').execute({
       url: 'https://raw.githubusercontent.com/o/r/main/packs/tool-url/SKILL.md',
-    }, run)).resolves.toMatchObject({ kind: 'url', target: expect.stringContaining('tool-url') })
+    }, run)).resolves.toMatchObject({ kind: 'url', target: expect.stringContaining('tool-url'), requiresConfirmation: true })
+    await expect(find('skill_install').execute({
+      url: 'https://raw.githubusercontent.com/o/r/main/packs/tool-url/SKILL.md', confirm: true,
+    }, run)).resolves.toMatchObject({ kind: 'url', target: expect.stringContaining('tool-url'), installed: true })
     expect(await find('skill_audit').execute({}, run)).toMatchObject({
       items: expect.arrayContaining([expect.objectContaining({ kind: 'tool-install', result: 'installed' })]),
     })
@@ -159,6 +169,7 @@ describe('skill admin model tools', () => {
       .rejects.toThrow(/必须且只能提供一个|SKILL_INVALID/)
     expect(readFileSync(join(root, 'audit', 'audit.jsonl'), 'utf8')).toContain('tool-install')
     expect(readFileSync(join(root, 'audit', 'audit.jsonl'), 'utf8')).toContain('missing-license')
+    expect(readFileSync(join(root, 'audit', 'audit.jsonl'), 'utf8')).toContain('confirmedBy')
 
     await admin.sendMessage({
       projectId: 'p1', actorSessionId: 'w1', sessionId: created.sessionId, text: '有什么技能',

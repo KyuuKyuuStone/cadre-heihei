@@ -42,22 +42,39 @@ export interface CatalogEntry {
 /** Non-blocking provenance warnings returned with a successful install. */
 export type InstallWarning = 'missing-license' | 'missing-hash' | 'unknown-source'
 
-/** Collect provenance gaps; these never block an install. */
+/** Collect provenance gaps; these require supervisor confirmation, never a silent install. */
 export function installWarnings(pack: {
   readonly license?: string
   readonly author?: string
   readonly source?: string
-}): InstallWarning[] {
+}, options: { readonly hasHash?: boolean } = {}): InstallWarning[] {
   const warnings: InstallWarning[] = []
   if (pack.license === undefined || pack.license.trim() === '' || pack.license === 'unknown') {
     warnings.push('missing-license')
   }
-  warnings.push('missing-hash')
+  if (options.hasHash !== true) warnings.push('missing-hash')
   if (pack.author === undefined || pack.author.trim() === ''
     || pack.source === undefined || pack.source.trim() === '' || pack.source === 'unknown') {
     warnings.push('unknown-source')
   }
   return warnings
+}
+
+/** Preview shown with a confirmation request. */
+export interface InstallPreview {
+  readonly name: string
+  readonly source: string
+  readonly license: string
+  readonly author?: string
+  readonly hasHash: boolean
+}
+
+/** Pending install result that installs nothing until a supervisor confirms. */
+export interface InstallConfirmation {
+  readonly requiresConfirmation: true
+  readonly installed: false
+  readonly warnings: readonly InstallWarning[]
+  readonly preview: InstallPreview
 }
 
 export interface SkillApi {
@@ -79,20 +96,21 @@ export interface SkillApi {
   remove(input: { projectId: string; actorSessionId: string; packId: string; confirm: unknown }): { removed: true }
   installUrl(input: {
     projectId: string; actorSessionId: string; url: unknown; confirm?: unknown
-  }): Promise<CatalogEntry>
+  }): Promise<CatalogEntry | InstallConfirmation>
   installPackage(input: {
-    projectId: string; actorSessionId: string; name: unknown
+    projectId: string; actorSessionId: string; name: unknown; confirm?: unknown
   }): Promise<{
     name: string; visible: boolean; durationMs: number; installed: true; warnings: InstallWarning[]
-  }>
+  } | InstallConfirmation>
   installAny(input: {
-    projectId: string; actorSessionId: string; text: unknown
+    projectId: string; actorSessionId: string; text: unknown; confirm?: unknown
   }): Promise<
     | {
       kind: 'package'; target: string; installed: true; warnings: InstallWarning[]
       result: { name: string; visible: boolean; durationMs: number; installed: true; warnings: InstallWarning[] }
     }
     | { kind: 'url'; target: string; installed: true; warnings: InstallWarning[]; result: CatalogEntry }
+    | (InstallConfirmation & { kind: 'package' | 'url'; target: string })
   >
 }
 
@@ -323,6 +341,25 @@ function requireActor(db: DatabaseSync, projectId: string, sessionId: string): M
     throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有本项目在册成员可以查看或修改技能')
   }
   return actor
+}
+
+/**
+ * A warning-bearing install needs a supervisor confirmation. Non-supervisors
+ * cannot proceed even with `confirm:true`.
+ * @returns pending confirmation for a supervisor without `confirm`, else undefined.
+ */
+function requireSupervisorConfirmation(
+  actor: MemberRow,
+  confirm: unknown,
+  warnings: readonly InstallWarning[],
+  preview: InstallPreview,
+): InstallConfirmation | undefined {
+  if (warnings.length === 0) return undefined
+  if (actor.role !== 'supervisor') {
+    throw new SkillIpcError('SKILL_CONFIRM_REQUIRED', 403, '该技能缺少安全信息，需主管确认后才能安装')
+  }
+  if (confirm === true) return undefined
+  return { requiresConfirmation: true, installed: false, warnings, preview }
 }
 
 /**
@@ -572,9 +609,21 @@ export function createSkillApi(options: {
       }
     },
     async installUrl(input) {
+      const actor = requireActor(db, input.projectId, input.actorSessionId)
       const inspected = await this.inspectUrl(input)
       const pack = inspected.pack
-      return this.add({
+      const warnings = installWarnings(pack, { hasHash: true })
+      const preview: InstallPreview = {
+        name: pack.name, source: pack.source, license: pack.license,
+        ...(pack.author === undefined ? {} : { author: pack.author }), hasHash: true,
+      }
+      const pending = requireSupervisorConfirmation(actor, input.confirm, warnings, preview)
+      if (pending !== undefined) {
+        auditPackage({ kind: 'install-url', url: String(input.url).slice(0, 300), result: 'confirmation-required',
+          warnings, preview })
+        return pending
+      }
+      const entry = this.add({
         projectId: input.projectId,
         actorSessionId: input.actorSessionId,
         id: pack.id,
@@ -591,12 +640,29 @@ export function createSkillApi(options: {
         content: pack.content,
         overwrite: input.confirm === true,
       })
+      auditPackage({
+        kind: 'install-url', url: String(input.url).slice(0, 300), packId: pack.id, result: 'installed', warnings,
+        ...(warnings.length === 0 ? {} : { confirmedBy: input.actorSessionId }),
+      })
+      return entry
     },
     async installPackage(input) {
-      requireActor(db, input.projectId, input.actorSessionId)
+      const actor = requireActor(db, input.projectId, input.actorSessionId)
       const name = requiredString(input.name, 'name')
       if (name.length > 128 || !PACKAGE_NAME.test(name)) {
         throw new SkillIpcError('SKILL_INVALID', 400, '包名必须是合法的 npm 包名（可带 @scope/）')
+      }
+      // A package has no catalog metadata before installation and the CLI returns
+      // no content hash, so provenance is always incomplete until a supervisor
+      // explicitly confirms.
+      const warnings = installWarnings({ license: 'unknown', source: `skillhub:${name}` })
+      const preview: InstallPreview = {
+        name, source: `skillhub:${name}`, license: 'unknown', hasHash: false,
+      }
+      const pending = requireSupervisorConfirmation(actor, input.confirm, warnings, preview)
+      if (pending !== undefined) {
+        auditPackage({ kind: 'install-package', name, result: 'confirmation-required', warnings, preview })
+        return pending
       }
       const started = Date.now()
       const args = [
@@ -634,9 +700,9 @@ export function createSkillApi(options: {
       const expectedId = name.startsWith('@') ? name.slice(1).replace('/', '-') : name
       const pack = catalog().get(expectedId)
       const visible = pack !== undefined
-      const warnings = pack === undefined ? [] : installWarnings(pack)
       auditPackage({
         kind: 'install-package', name, result: visible ? 'installed' : 'not-visible', durationMs, warnings,
+        ...(warnings.length === 0 ? {} : { confirmedBy: input.actorSessionId }),
       })
       if (!visible) {
         throw new SkillIpcError('SKILL_INSTALL_PACKAGE_FAILED', 502,
@@ -654,13 +720,21 @@ export function createSkillApi(options: {
       if (target.kind === 'package') {
         const result = await this.installPackage({
           projectId: input.projectId, actorSessionId: input.actorSessionId, name: target.target,
+          ...(input.confirm === undefined ? {} : { confirm: input.confirm }),
         })
+        if ('requiresConfirmation' in result) {
+          return { kind: 'package', target: target.target, ...result }
+        }
         return { kind: 'package', target: target.target, installed: true, warnings: result.warnings, result }
       }
       const result = await this.installUrl({
         projectId: input.projectId, actorSessionId: input.actorSessionId, url: target.target,
+        ...(input.confirm === undefined ? {} : { confirm: input.confirm }),
       })
-      return { kind: 'url', target: target.target, installed: true, warnings: installWarnings(result), result }
+      if ('requiresConfirmation' in result) {
+        return { kind: 'url', target: target.target, ...result }
+      }
+      return { kind: 'url', target: target.target, installed: true, warnings: installWarnings(result, { hasHash: true }), result }
     },
   }
 }

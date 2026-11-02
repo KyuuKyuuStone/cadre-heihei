@@ -203,8 +203,14 @@ export class SkillAdminApi {
 
   /** Install by name/url/text from the preset tool, reusing the shared validators and audit. */
   async installForSession(sessionId: string, input: {
-    readonly name?: unknown; readonly url?: unknown; readonly text?: unknown
-  }): Promise<{ kind: 'package' | 'url'; target: string; installed: true; warnings: InstallWarning[]; result: unknown }> {
+    readonly name?: unknown; readonly url?: unknown; readonly text?: unknown; readonly confirm?: unknown
+  }): Promise<
+    | { kind: 'package' | 'url'; target: string; installed: true; warnings: readonly InstallWarning[]; result: unknown }
+    | {
+      kind: 'package' | 'url'; target: string; installed: false; requiresConfirmation: true
+      warnings: readonly InstallWarning[]; preview: unknown
+    }
+  > {
     const projectId = this.projectOf(sessionId)
     const actorSessionId = this.actorFor(projectId)
     const provided = [input.name, input.url, input.text].filter(value => value !== undefined)
@@ -212,22 +218,47 @@ export class SkillAdminApi {
       throw new SkillIpcError('SKILL_INVALID', 400, 'name/url/text 必须且只能提供一个')
     }
     try {
-      let result: { kind: 'package' | 'url'; target: string; installed: true; warnings: InstallWarning[]; result: unknown }
+      let result: Awaited<ReturnType<SkillAdminApi['installForSession']>>
       if (input.name !== undefined) {
-        const installed = await this.api.installPackage({ projectId, actorSessionId, name: input.name })
-        result = { kind: 'package', target: String(input.name), installed: true, warnings: installed.warnings, result: installed }
+        const installed = await this.api.installPackage({
+          projectId, actorSessionId, name: input.name,
+          ...(input.confirm === undefined ? {} : { confirm: input.confirm }),
+        })
+        result = 'requiresConfirmation' in installed
+          ? { kind: 'package', target: String(input.name), ...installed }
+          : { kind: 'package', target: String(input.name), installed: true, warnings: installed.warnings, result: installed }
       } else if (input.url !== undefined) {
-        const entry = await this.api.installUrl({ projectId, actorSessionId, url: input.url })
-        result = { kind: 'url', target: String(input.url), installed: true, warnings: installWarnings(entry), result: entry }
+        const entry = await this.api.installUrl({
+          projectId, actorSessionId, url: input.url,
+          ...(input.confirm === undefined ? {} : { confirm: input.confirm }),
+        })
+        result = 'requiresConfirmation' in entry
+          ? { kind: 'url', target: String(input.url), ...entry }
+          : {
+            kind: 'url', target: String(input.url), installed: true,
+            warnings: installWarnings(entry, { hasHash: true }), result: entry,
+          }
       } else {
-        const installed = await this.api.installAny({ projectId, actorSessionId, text: input.text })
-        result = { ...installed, installed: true }
+        const installed = await this.api.installAny({
+          projectId, actorSessionId, text: input.text,
+          ...(input.confirm === undefined ? {} : { confirm: input.confirm }),
+        })
+        result = installed
       }
-      this.audit({
-        kind: 'tool-install', sessionId,
-        target: result.kind === 'package' ? result.target : result.target.slice(0, 300),
-        targetKind: result.kind, result: 'installed', warnings: result.warnings,
-      })
+      if (result.installed) {
+        this.audit({
+          kind: 'tool-install', sessionId,
+          target: result.kind === 'package' ? result.target : result.target.slice(0, 300),
+          targetKind: result.kind, result: 'installed', warnings: result.warnings,
+          ...(result.warnings.length === 0 ? {} : { confirmedBy: actorSessionId }),
+        })
+      } else {
+        this.audit({
+          kind: 'tool-install', sessionId,
+          target: result.kind === 'package' ? result.target : result.target.slice(0, 300),
+          targetKind: result.kind, result: 'confirmation-required', warnings: result.warnings,
+        })
+      }
       return result
     } catch (error) {
       this.audit({
