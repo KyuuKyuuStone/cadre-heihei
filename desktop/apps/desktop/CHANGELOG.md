@@ -6,17 +6,11 @@
 - **安装跳转普通对话**：技能安装不再单独弹窗/面板，点击安装进入普通技能管理员对话，由对话完成查/装/建
 - **安装对话免选项目**：打开安装对话自动创建/绑定专用内部工作区（`技能管理员工作区（内部）`），对话页隐藏项目选择 chip 并自动选中内部工作区，不弹项目选择；工作区不出现在项目部列表
 - **技能管理员工作目录**：创建 admin session 时自动 `mkdir -p` 默认工作目录 `%USERPROFILE%\.dsh\cadre-skill-admin\workspace`，返回 `cwd`/`workspaceId`，已存在复用
-- **无回复汇报邮件**：主管会话 assistant 后 10 分钟（可配）无用户回复，发送「Cadre 汇报」邮件：最近回复摘要、台账任务统计（交付/验收/失败）、下一步建议、时间；附当前窗口 `capturePage()` PNG（截图失败只发正文并注明）；发送后 paused，用户新消息恢复
 - **技能页单入口**：技能页只保留一个内嵌对话入口，问/装/建都走普通 `cadre-skill-admin` 会话，AI 用 catalog/preview/install 工具自行查询和安装
 - **技能管理员去绑定**：admin session 不再绑定 supervisor/operator；消息读写/发送与 `skill_install` 按项目成员校验，worker 也可用，跨项目/非成员拒绝
-- **SMTP IPv4/587**：nodemailer 强制 `family:4`；465 连接/超时失败自动回退 587 STARTTLS；连接/TLS 错误保留底层 code 并 redact
 - **自然语言 install-any**：自由文本中提取一个包名或 URL；SkillHub 说明 URL + 包名走包名安装，仅 URL 走 URL 安装，歧义返回 `SKILL_INSTRUCTION_UNSUPPORTED`
-- **授权码保存回退**：安装版 Host 拿不到 Electron `safeStorage` 时，自动回退 Windows DPAPI（PowerShell `ProtectedData`，密码经 stdin），仍失败才报 `SECRET_STORE_UNAVAILABLE`
-- **兼容旧密文**：secret 文件保持原始密文格式；配置仍只存 `authCodeRef`，不存/不回传授权码；日志标明 provider/失败原因，不含授权码
-- **邮件设置仅授权码**：SMTP 设置页只保留邮箱授权码直填，移除服务商/环境变量名等复杂配置；保存后写入安全存储
-- **DPAPI 安全存储**：授权码经 Electron `safeStorage`（Windows DPAPI 用户作用域）加密写入 `%APPDATA%\Cadre\secrets\email\<projectId>.bin`，配置仅保留 `authCodeRef`，get 只回 `hasKey`；不落明文
-- **删除环境变量名**：移除设置页的 `authCodeEnv` 输入；旧环境变量仍作为发送兼容回退并提示迁移
-- **其余沿用 1.1.3**：技能界面重构/页内安装/全员可装/不分角色、SMTP QQ/163 默认、Resend 修正与高级提供方
+- **邮件功能本版不提供（隐藏）**：邮件设置入口/面板隐藏，发送开关默认关闭；test/dry-run/任务汇总/无回复汇报一律返回 `EMAIL_FEATURE_DISABLED`，不读取或改写已有配置
+- **其余沿用 1.1.3**：技能界面重构/页内安装/全员可装/不分角色
 
 ## 1.1.3
 
