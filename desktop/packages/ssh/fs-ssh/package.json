@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-fs-ssh",
   "description": "Filesystem provider over the shared POSIX SSH helper",
-  "version": "1.1.4",
+  "version": "1.5.0",
   "publishConfig": {
     "access": "public"
   },
