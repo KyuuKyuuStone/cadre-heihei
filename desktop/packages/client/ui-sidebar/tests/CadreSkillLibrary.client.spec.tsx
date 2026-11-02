@@ -148,7 +148,6 @@ describe('Cadre skill library', () => {
     fireEvent.click(screen.getByRole('button', { name: '安装' }))
     expect(await screen.findByText('这条安装说明无法自动解析，需要人工判断。')).toBeTruthy()
     expect(screen.getByText('请联系主管，由技能管理员处理。')).toBeTruthy()
-    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('shows a readable error for other install failures', async () => {

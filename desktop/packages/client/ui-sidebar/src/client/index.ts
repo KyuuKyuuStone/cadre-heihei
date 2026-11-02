@@ -39,7 +39,7 @@ import {
   type CadreSkillLibraryInjected,
 } from './CadreSkillLibrary.tsx'
 import { CadreSkillPlanCard, type CadreSkillPlanInjected } from './CadreSkillPlanCard.tsx'
-import { applySkillPlan, recallAdminOperator, SkillAdminError } from './CadreSkillAdmin.ts'
+import { applySkillPlan, SkillAdminError } from './CadreSkillAdmin.ts'
 import {
   CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
@@ -621,13 +621,12 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: (sessionId: string): CadreSkillPlanInjected => ({
       applyPlan: async (planId, token, action) => {
-        const operatorSessionId = recallAdminOperator(sessionId)
-        if (operatorSessionId === undefined) {
-          throw new SkillAdminError('SKILL_ADMIN_SESSION_UNBOUND', '请从技能页重新打开该技能管理员会话')
-        }
-        const projectId = projectOfSession(operatorSessionId)
-        if (projectId === undefined) {
-          throw new SkillAdminError('SKILL_ADMIN_FORBIDDEN', '当前操作主管不在项目部花名册')
+        const projectId = projectOfSession(sessionId)
+        const operatorSessionId = roster.getSnapshot().members.find(member =>
+          member.role === 'supervisor' && member.state !== 'departed'
+          && projectOfSession(member.sessionId) === projectId)?.sessionId
+        if (projectId === undefined || operatorSessionId === undefined) {
+          throw new SkillAdminError('SKILL_ADMIN_FORBIDDEN', '当前项目部没有可执行变更的主管')
         }
         return applySkillPlan({ projectId, operatorSessionId, planId, token, action })
       },

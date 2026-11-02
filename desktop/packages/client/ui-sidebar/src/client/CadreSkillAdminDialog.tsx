@@ -6,7 +6,6 @@ import {
   createSkillAdminSession,
   deleteSkillAdminSession,
   listSkillAdminSessions,
-  rememberAdminOperator,
   SkillAdminError,
   skillAdminErrorKey,
   type SkillAdminSession,
@@ -31,7 +30,7 @@ export function CadreSkillAdminDialog({
     setBusy(true)
     setError(null)
     try {
-      setSessions(await listSkillAdminSessions(projectId, operatorSessionId))
+      setSessions(await listSkillAdminSessions(projectId))
     } catch (cause) {
       setError(cause instanceof SkillAdminError
         ? t(skillAdminErrorKey(cause.code) as never)
@@ -46,7 +45,6 @@ export function CadreSkillAdminDialog({
   const open = async (sessionId: string): Promise<void> => {
     setBusy(true)
     setError(null)
-    rememberAdminOperator(sessionId, operatorSessionId)
     try {
       await openSession(sessionId)
       onClose()
@@ -60,8 +58,7 @@ export function CadreSkillAdminDialog({
     setBusy(true)
     setError(null)
     try {
-      const created = await createSkillAdminSession(projectId, operatorSessionId)
-      rememberAdminOperator(created.sessionId, operatorSessionId)
+      const created = await createSkillAdminSession(projectId)
       setSessions(current => [created, ...current])
       await open(created.sessionId)
     } catch (cause) {

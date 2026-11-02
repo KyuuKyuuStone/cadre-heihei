@@ -6,7 +6,6 @@ import {
   createSkillAdminSession,
   listSkillAdminSessions,
   readSkillAdminMessages,
-  rememberAdminOperator,
   sendSkillAdminMessage,
   SkillAdminError,
   skillAdminErrorKey,
@@ -21,10 +20,10 @@ function errorText(cause: unknown, t: PropsLocale<'sidebar'>['t']): string {
 }
 
 export function CadreSkillChat({
-  projectId, operatorSessionId, t,
+  projectId, actorSessionId, t,
 }: {
   readonly projectId: string
-  readonly operatorSessionId: string
+  readonly actorSessionId: string
   readonly t: PropsLocale<'sidebar'>['t']
 }) {
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -42,23 +41,27 @@ export function CadreSkillChat({
     setLoading(true)
     setError(null)
     try {
-      const sessions = await listSkillAdminSessions(projectId, operatorSessionId)
-      const chosen = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-        ?? await createSkillAdminSession(projectId, operatorSessionId)
-      rememberAdminOperator(chosen.sessionId, operatorSessionId)
+      const sessions = await listSkillAdminSessions(projectId)
+      const existing = [...sessions]
+        .filter(session => typeof session.sessionId === 'string' && session.sessionId !== '')
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+      const chosen = existing ?? await createSkillAdminSession(projectId)
+      if (typeof chosen.sessionId !== 'string' || chosen.sessionId === '') {
+        throw new Error(t('skills.chat.errorSession'))
+      }
       setSessionId(chosen.sessionId)
     } catch (cause) {
       setError(errorText(cause, t))
     } finally {
       setLoading(false)
     }
-  }, [operatorSessionId, projectId, t])
+  }, [projectId, t])
 
   useEffect(() => { void boot() }, [boot])
 
   const poll = useCallback(async (): Promise<void> => {
     if (sessionId === null) return
-    const page = await readSkillAdminMessages(projectId, operatorSessionId, sessionId, nextSeq.current)
+    const page = await readSkillAdminMessages(projectId, actorSessionId, sessionId, nextSeq.current)
     nextSeq.current = Math.max(nextSeq.current, page.nextSeq)
     if (page.messages.length > 0) {
       setMessages((current) => {
@@ -71,7 +74,7 @@ export function CadreSkillChat({
         setPending(null)
       }
     }
-  }, [operatorSessionId, projectId, sessionId])
+  }, [actorSessionId, projectId, sessionId])
 
   useEffect(() => {
     if (sessionId === null) return
@@ -98,7 +101,7 @@ export function CadreSkillChat({
     setSending(true)
     setError(null)
     try {
-      await sendSkillAdminMessage(projectId, operatorSessionId, sessionId, text)
+      await sendSkillAdminMessage(projectId, actorSessionId, sessionId, text)
       setDraft('')
       pendingRef.current = text
       setPending(text)
@@ -117,7 +120,6 @@ export function CadreSkillChat({
           <h2>{t('skills.chat.title')}</h2>
           <p>{t('skills.chat.description')}</p>
         </div>
-        <span className={css.badge}>{t('skills.chat.badge')}</span>
       </header>
       <div className={css.messages} aria-live="polite">
         {loading && <p className={css.state}>{t('skills.chat.loading')}</p>}

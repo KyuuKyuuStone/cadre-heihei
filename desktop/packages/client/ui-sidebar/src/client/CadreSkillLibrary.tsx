@@ -71,7 +71,6 @@ export function CadreSkillLibraryPage({
   const activeSessionId = useSessions(state => Object.entries(state.byId)
     .find(([, session]) => (session.retainedBy.mainView ?? 0) > 0)?.[0])
   const actor = members.find(member => member.sessionId === activeSessionId)
-  const isSupervisor = actor?.role === 'supervisor'
   const projectId = actor === undefined ? undefined : projectOfSession(actor.sessionId)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
   const [busy, setBusy] = useState(false)
@@ -252,36 +251,35 @@ export function CadreSkillLibraryPage({
           }}>{t('skills.advanced')}</Button>
         </div>
       </header>
-      {isSupervisor
-        ? <CadreSkillChat projectId={projectId} operatorSessionId={actor.sessionId} t={t} />
-        : <section className={css.installPanel} data-skill-install-inline>
-          <div className={css.installHead}>
-            <div>
-              <h2>{t('skills.install.panelTitle')}</h2>
-              <p>{t('skills.install.panelDescription')}</p>
-            </div>
+      <CadreSkillChat projectId={projectId} actorSessionId={actor.sessionId} t={t} />
+      <section className={css.installPanel} data-skill-install-inline>
+        <div className={css.installHead}>
+          <div>
+            <h2>{t('skills.install.panelTitle')}</h2>
+            <p>{t('skills.install.panelDescription')}</p>
           </div>
-          <label className={css.installLabel}>{t('skills.install.source')}
-            <textarea className={css.installTextarea} value={installSource} rows={4} disabled={installBusy}
-              placeholder={t('skills.install.placeholder')}
-              onChange={(event) => { setInstallSource(event.target.value) }} />
-          </label>
-          <div className={css.installActions}>
-            <span className={css.installHint}>{t('skills.install.hint')}</span>
-            <Button variant="primary" disabled={installBusy || installSource.trim() === ''}
-              onClick={() => { void installSourceNow() }}>
-              {installBusy ? t('skills.install.busy') : t('skills.install.action')}
-            </Button>
+        </div>
+        <label className={css.installLabel}>{t('skills.install.source')}
+          <textarea className={css.installTextarea} value={installSource} rows={4} disabled={installBusy}
+            placeholder={t('skills.install.placeholder')}
+            onChange={(event) => { setInstallSource(event.target.value) }} />
+        </label>
+        <div className={css.installActions}>
+          <span className={css.installHint}>{t('skills.install.hint')}</span>
+          <Button variant="primary" disabled={installBusy || installSource.trim() === ''}
+            onClick={() => { void installSourceNow() }}>
+            {installBusy ? t('skills.install.busy') : t('skills.install.action')}
+          </Button>
+        </div>
+        {installError !== null && <p className={css.error} role="alert">{installError}</p>}
+        {installResult !== null && <p className={css.notice} role="status">{installResult}</p>}
+        {installUnsupported && (
+          <div className={css.unsupported} role="status" data-skill-install-unsupported>
+            <p>{t('skills.install.unsupported')}</p>
+            <span>{t('skills.install.askSupervisor')}</span>
           </div>
-          {installError !== null && <p className={css.error} role="alert">{installError}</p>}
-          {installResult !== null && <p className={css.notice} role="status">{installResult}</p>}
-          {installUnsupported && (
-            <div className={css.unsupported} role="status" data-skill-install-unsupported>
-              <p>{t('skills.install.unsupported')}</p>
-              <span>{t('skills.install.askSupervisor')}</span>
-            </div>
-          )}
-        </section>}
+        )}
+      </section>
       <div className={css.sources} data-skill-sources>
         <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
         <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>

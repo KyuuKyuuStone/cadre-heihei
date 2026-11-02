@@ -56,18 +56,6 @@ export class SkillAdminError extends Error {
   }
 }
 
-const operatorKey = (sessionId: string): string => `cadre.skillAdmin.operator.${sessionId}`
-
-/** Persist the operator binding for a created admin session (renderer-side hint only). */
-export function rememberAdminOperator(sessionId: string, operatorSessionId: string): void {
-  try { window.localStorage.setItem(operatorKey(sessionId), operatorSessionId) } catch { /* private mode */ }
-}
-
-/** Recall the operator that opened an admin session in this browser profile. */
-export function recallAdminOperator(sessionId: string): string | undefined {
-  try { return window.localStorage.getItem(operatorKey(sessionId)) ?? undefined } catch { return undefined }
-}
-
 async function adminCall<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const response = await fetch(`/cadre/skills/admin/${path}`, {
     method: 'POST',
@@ -82,13 +70,13 @@ async function adminCall<T>(path: string, body: Record<string, unknown>): Promis
 }
 
 /** Create an ordinary admin session and bind it to the supervisor operator. */
-export function createSkillAdminSession(projectId: string, operatorSessionId: string): Promise<SkillAdminSession> {
-  return adminCall('session', { projectId, operatorSessionId })
+export function createSkillAdminSession(projectId: string): Promise<SkillAdminSession> {
+  return adminCall('session', { projectId })
 }
 
 /** List ordinary sessions whose preset is the hidden skill administrator. */
-export function listSkillAdminSessions(projectId: string, operatorSessionId: string): Promise<readonly SkillAdminSession[]> {
-  return adminCall('sessions', { projectId, operatorSessionId })
+export function listSkillAdminSessions(projectId: string): Promise<readonly SkillAdminSession[]> {
+  return adminCall('sessions', { projectId })
 }
 
 /** Delete one ordinary admin session. */
@@ -98,16 +86,16 @@ export function deleteSkillAdminSession(projectId: string, operatorSessionId: st
 
 /** Send one supervisor message to the admin conversation. */
 export function sendSkillAdminMessage(
-  projectId: string, operatorSessionId: string, sessionId: string, text: string,
+  projectId: string, actorSessionId: string, sessionId: string, text: string,
 ): Promise<{ accepted: true }> {
-  return adminCall('message', { projectId, operatorSessionId, sessionId, text })
+  return adminCall('message', { projectId, actorSessionId, sessionId, text })
 }
 
 /** Read admin messages after a sequence number. */
 export function readSkillAdminMessages(
-  projectId: string, operatorSessionId: string, sessionId: string, afterSeq: number,
+  projectId: string, actorSessionId: string, sessionId: string, afterSeq: number,
 ): Promise<SkillAdminMessages> {
-  return adminCall('messages', { projectId, operatorSessionId, sessionId, afterSeq })
+  return adminCall('messages', { projectId, actorSessionId, sessionId, afterSeq })
 }
 
 /** Apply or cancel one confirmed plan. */
@@ -165,7 +153,6 @@ export function skillAdminErrorKey(code: string): string {
     case 'SKILL_BUILTIN_READONLY': return 'skills.admin.error.builtin'
     case 'SKILL_ADMIN_FORBIDDEN':
     case 'SKILL_FORBIDDEN': return 'skills.admin.error.forbidden'
-    case 'SKILL_ADMIN_SESSION_UNBOUND': return 'skills.admin.error.unbound'
     case 'SKILL_ADMIN_DELETE_UNSUPPORTED': return 'skills.admin.error.deleteUnsupported'
     case 'SKILL_ADMIN_UNAVAILABLE': return 'skills.admin.error.unavailable'
     case 'SKILL_ADMIN_SESSION_FAILED': return 'skills.admin.error.session'
