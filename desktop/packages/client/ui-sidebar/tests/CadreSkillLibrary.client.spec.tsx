@@ -48,12 +48,23 @@ function pageProps(role: 'supervisor' | 'worker' = 'supervisor', translate = t):
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('Cadre skill library', () => {
-  it('hides all management controls from non-supervisors', () => {
+  it('lets a worker view the library but disables install and delete', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      return json({ ok: true, result: {} })
+    })
+    vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
-    expect(screen.getByText('只有主管可以查看和管理技能库。')).toBeTruthy()
-    expect(screen.queryByPlaceholderText('GitHub 仓库、tree 或 raw SKILL.md URL')).toBeNull()
-    expect(screen.queryByRole('button', { name: '安装技能' })).toBeNull()
+    expect(await screen.findByText('内置技能')).toBeTruthy()
+    expect(screen.getByText('只有主管可以安装或删除技能，请联系主管。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '安装技能' }).hasAttribute('disabled')).toBe(true)
     expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '高级手动表单' })).toBeNull()
+    const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
+      actorSessionId: 'w1', targetSessionId: 'w1',
+    })
   })
 
   it('groups built-ins and installed skills, localizes descriptions, and keeps built-ins read-only', async () => {

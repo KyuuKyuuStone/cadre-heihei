@@ -32,7 +32,7 @@ import {
   type CadreSkillsInjected,
   type CadreSkillsRequest,
 } from './CadreSkills.tsx'
-import { CadreSkillHeaderChip, type CadreSkillHeaderChipInjected } from './CadreSkillHeaderChip.tsx'
+import { CadreSkillTab, type CadreSkillTabInjected } from './CadreSkillTab.tsx'
 import {
   CadreSkillLibraryIcon,
   CadreSkillLibraryPage,
@@ -587,10 +587,6 @@ export function apply(ctx: ClientContext): void {
     closeEmail,
   })
   const skillsRequest = createSnapshotStore<CadreSkillsRequest | null>(null)
-  const skillsRevision = createSnapshotStore(0)
-  const notifySkillsChanged = (): void => {
-    skillsRevision.set(skillsRevision.getSnapshot() + 1)
-  }
   let skillsToken = 0
   const openSkills = (
     sessionId: string,
@@ -605,10 +601,9 @@ export function apply(ctx: ClientContext): void {
   }
   const closeSkills = (): void => { skillsRequest.set(null) }
   const skillsInjected = (): CadreSkillsInjected => ({
-    hooks: { roster, sessions: sessionsSource, request: skillsRequest, revision: skillsRevision },
+    hooks: { roster, sessions: sessionsSource, request: skillsRequest },
     openSkills,
     closeSkills,
-    notifySkillsChanged,
   })
   const openSkillAdminSession = async (sessionId: string): Promise<void> => {
     await ctx.sessions.refresh()
@@ -897,19 +892,17 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
   } as never, UpdateCheckRow as never))
 
-  // Skill selection lives only in the Session header chip; the row menu no
-  // longer duplicates that entry.
-  ctx.slots.inject('conversation.session.header.utilities' as never, () => ctx.slots.register({
-    name: 'conversation.session.header.utilities',
-    id: 'cadre-skills-chip',
-    order: 10,
+  // Per-conversation skill selection is its own Conversation view tab.
+  ctx.slots.inject('conversation.view' as never, () => ctx.slots.register({
+    name: 'conversation.view',
+    id: 'skills',
+    order: 5,
     locale: NS,
-    inject: (): CadreSkillHeaderChipInjected => ({
-      hooks: { roster, sessions: sessionsSource, revision: skillsRevision },
-      projectOfSession,
-      openSkills,
-    }),
-  } as never, CadreSkillHeaderChip as never))
+    label: () => ctx.locale.bind(NS)('skills.tab'),
+    available: (sessionId: string) => roster.getSnapshot().members
+      .some(member => member.sessionId === sessionId && member.state !== 'departed'),
+    inject: (): CadreSkillTabInjected => ({ hooks: { roster }, projectOfSession }),
+  } as never, CadreSkillTab as never))
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
     name: 'sidebar.workspaces.session.menu.item',
     id: 'cadre-retire-member',

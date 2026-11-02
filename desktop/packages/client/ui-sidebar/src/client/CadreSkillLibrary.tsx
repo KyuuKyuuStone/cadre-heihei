@@ -70,6 +70,7 @@ export function CadreSkillLibraryPage({
   const activeSessionId = useSessions(state => Object.entries(state.byId)
     .find(([, session]) => (session.retainedBy.mainView ?? 0) > 0)?.[0])
   const actor = members.find(member => member.sessionId === activeSessionId)
+  const isSupervisor = actor?.role === 'supervisor'
   const projectId = actor === undefined ? undefined : projectOfSession(actor.sessionId)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
   const [busy, setBusy] = useState(false)
@@ -81,21 +82,27 @@ export function CadreSkillLibraryPage({
   const [adminOpen, setAdminOpen] = useState(false)
 
   const load = useCallback(async () => {
-    if (actor?.role !== 'supervisor' || projectId === undefined) return
+    if (actor === undefined || projectId === undefined) return
     setBusy(true)
     setError(null)
     try {
-      setEntries(await fetchSkillCatalog(projectId, actor.sessionId, undefined, navigator.language))
+      // A worker reads their own selection; a supervisor reads the library view.
+      setEntries(await fetchSkillCatalog(
+        projectId,
+        actor.sessionId,
+        isSupervisor ? undefined : actor.sessionId,
+        navigator.language,
+      ))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy(false)
     }
-  }, [actor?.role, actor?.sessionId, projectId])
+  }, [actor, isSupervisor, projectId])
 
   useEffect(() => { void load() }, [load])
 
-  if (actor?.role !== 'supervisor' || projectId === undefined) {
+  if (actor === undefined || projectId === undefined) {
     return (
       <section className={css.page} data-skill-library>
         <h1>{t('skills.library.title')}</h1>
@@ -170,7 +177,10 @@ export function CadreSkillLibraryPage({
           <ul className={css.list}>
             {rows.map(entry => (
               <li key={entry.id} className={css.card}>
-                <strong>{entry.name}</strong>
+                <div className={css.cardHead}>
+                  <strong>{entry.name}</strong>
+                  {entry.selected && <span className={css.selected}>{t('skills.selected')}</span>}
+                </div>
                 <p>{localizedDescription(entry, t)}</p>
                 <details className={css.details}>
                   <summary>{t('skills.details')}</summary>
@@ -208,15 +218,20 @@ export function CadreSkillLibraryPage({
           <p>{t('skills.library.description')}</p>
         </div>
         <div className={css.headerActions}>
-          <Button variant="primary" disabled={busy} onClick={() => { setAdminOpen(true) }}>
+          <Button variant="primary" disabled={!isSupervisor || busy}
+            title={isSupervisor ? undefined : t('skills.library.installSupervisorOnly')}
+            onClick={() => { if (isSupervisor) setAdminOpen(true) }}>
             {t('skills.admin.installEntry')}
           </Button>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
-            if (!advanced) setForm({ ...EMPTY, tools: t('skills.defaultTools'), license: t('skills.defaultLicense') })
-            setAdvanced(value => !value)
-          }}>{t('skills.advanced')}</Button>
+          {isSupervisor && (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
+              if (!advanced) setForm({ ...EMPTY, tools: t('skills.defaultTools'), license: t('skills.defaultLicense') })
+              setAdvanced(value => !value)
+            }}>{t('skills.advanced')}</Button>
+          )}
         </div>
       </header>
+      {!isSupervisor && <p className={css.hint}>{t('skills.library.installSupervisorOnly')}</p>}
       <div className={css.sources} data-skill-sources>
         <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
         <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
@@ -225,7 +240,7 @@ export function CadreSkillLibraryPage({
         <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
         <p>{t('skills.sources.caution')}</p>
       </div>
-      {adminOpen && (
+      {isSupervisor && adminOpen && (
         <CadreSkillAdminDialog
           projectId={projectId}
           operatorSessionId={actor.sessionId}
@@ -234,7 +249,7 @@ export function CadreSkillLibraryPage({
           t={t}
         />
       )}
-      {advanced && (
+      {isSupervisor && advanced && (
         <div className={css.install} data-skill-install>
           <div className={css.fields}>
             <label>{t('skills.field.id')}<Input value={form.id} disabled={busy}
@@ -272,7 +287,7 @@ export function CadreSkillLibraryPage({
       {error !== null && <p role="alert" className={css.error}>{error}</p>}
       {notice !== null && <p role="status" className={css.notice}>{notice}</p>}
       {group(t('skills.group.builtin'), builtin, false)}
-      {group(t('skills.group.installed'), installed, true)}
+      {group(t('skills.group.installed'), installed, isSupervisor)}
     </section>
   )
 }

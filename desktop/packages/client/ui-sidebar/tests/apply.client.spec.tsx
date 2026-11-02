@@ -69,9 +69,11 @@ describe('ui-sidebar apply', () => {
     expect(hostApply).not.toThrow()
   })
 
-  it('registers the session header chip without restoring the removed status strip', () => {
+  it('registers the skill Conversation view without a header chip or removed status strip', () => {
     const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
-    expect(source).toContain('conversation.session.header.utilities')
+    expect(source).toContain("id: 'skills'")
+    expect(source).not.toContain('CadreSkillHeaderChip')
+    expect(source).not.toContain('conversation.session.header.utilities')
     expect(source).not.toContain('CadreSkillSettingsMenuItem')
     expect(source).not.toContain('conversation.input.dock')
     expect(source).not.toContain('conversation.status')

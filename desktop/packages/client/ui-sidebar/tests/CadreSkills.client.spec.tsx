@@ -44,8 +44,7 @@ describe('Cadre skill settings', () => {
       return json({ ok: true, result: { skills: ['worker-only'] } })
     })
     vi.stubGlobal('fetch', fetchMock)
-    const notifySkillsChanged = vi.fn()
-    render(<CadreSkillSettingsDialog {...{ ...dialogProps(), notifySkillsChanged }} />)
+    render(<CadreSkillSettingsDialog {...dialogProps()} />)
     expect(await screen.findByText('员工技能')).toBeTruthy()
     expect(screen.queryByText('主管技能')).toBeNull()
     expect(screen.getByText(/已选技能 token 估算合计：10/)).toBeTruthy()
@@ -55,7 +54,6 @@ describe('Cadre skill settings', () => {
     expect(screen.getByRole('link', { name: '上游主页' }).getAttribute('href')).toBe('https://example.test/worker')
     fireEvent.click(screen.getByRole('button', { name: '保存技能' }))
     await waitFor(() => { expect(screen.getByText('技能已保存。')).toBeTruthy() })
-    expect(notifySkillsChanged).toHaveBeenCalledOnce()
     const catalogCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
     expect(JSON.parse((catalogCall?.[1] as RequestInit).body as string)).toMatchObject({
       actorSessionId: 'sup', targetSessionId: 'w1',

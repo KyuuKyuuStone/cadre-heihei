@@ -204,21 +204,24 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     }),
   }, EnterBehaviorRow))
 
-  const viewTabs = (): ViewTab[] => {
+  const viewTabs = (sessionId?: string): ViewTab[] => {
     const tabs: ViewTab[] = []
     for (const entry of slots.entries('conversation.view')) {
       /* v8 ignore next -- list registration validates id at load. */
       if (entry.options.id === undefined) continue
       if (!ctx.configForms.developerTools.enabled.getSnapshot() && entry.options.id === TRAJECTORY_VIEW_ID) continue
+      const available = (entry.options as { readonly available?: (sessionId: string) => boolean }).available
+      if (sessionId !== undefined && available !== undefined && !available(sessionId)) continue
       tabs.push({
         id: entry.options.id,
         label: resolveSlotLabel(entry.options.label) ?? entry.options.id,
+        ...(available === undefined ? {} : { available }),
       })
     }
     return tabs
   }
   const activateView = (sessionId: SessionId, preferred: string | null): void => {
-    const active = resolveActiveView(viewTabs(), preferred)
+    const active = resolveActiveView(viewTabs(sessionId), preferred)
     if (active !== undefined) uiConversation.binding(sessionId).activate(active.id)
   }
   const restoreView = (sessionId: SessionId): void => {

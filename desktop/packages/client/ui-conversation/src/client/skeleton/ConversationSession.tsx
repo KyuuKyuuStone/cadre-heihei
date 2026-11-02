@@ -59,7 +59,8 @@ export function ConversationSessionHeader({
   sessionId, hideChrome, useSessions, useConversationViews, useStore,
   renderSlot, open, selectView, t,
 }: ConversationSessionHeaderProps) {
-  const tabs = useConversationViews(value => value)
+  const allTabs = useConversationViews(value => value)
+  const tabs = allTabs.filter(tab => tab.available?.(sessionId) ?? true)
   const selectedId = useStore(s => s.view)
   const active = resolveActiveView(tabs, selectedId)
   const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)

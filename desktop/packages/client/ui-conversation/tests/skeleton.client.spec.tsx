@@ -663,6 +663,22 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.getByRole('tablist').hasAttribute('data-conversation-tabs')).toBe(true)
   })
 
+  it('honors a view availability predicate for the current Session', () => {
+    const visible: ViewTab[] = [
+      { id: 'chat', label: 'Chat' },
+      { id: 'skills', label: 'Skills', available: sessionId => sessionId === SID },
+    ]
+    const allowed = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs: visible })
+    expect(allowed.view.getByRole('tab', { name: 'Skills' })).toBeTruthy()
+    cleanup()
+    const hidden: ViewTab[] = [
+      { id: 'chat', label: 'Chat' },
+      { id: 'skills', label: 'Skills', available: () => false },
+    ]
+    const denied = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs: hidden })
+    expect(denied.view.queryByRole('tab', { name: 'Skills' })).toBeNull()
+  })
+
   it('rolls the pending workspace label back when switching fails', async () => {
     const selectWorkspace = vi.fn(async () => { throw new Error('connect failed') })
     const b = mount(
