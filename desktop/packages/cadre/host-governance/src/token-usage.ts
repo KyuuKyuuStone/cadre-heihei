@@ -48,6 +48,8 @@ export interface UsageSnapshot {
   readonly cachedTokens: number
   readonly completionTokens: number
   readonly totalTokens: number
+  /** cachedTokens / promptTokens, 0 when no prompt tokens were observed. */
+  readonly cacheHitRatio: number
   readonly rounds: readonly RoundUsage[]
   readonly recent: readonly RoundUsage[]
   readonly top: readonly { readonly kind: string; readonly estimatedTokens: number }[]
@@ -140,6 +142,11 @@ export class TokenUsageLedger {
       cachedTokens: task?.cachedTokens ?? session?.cachedTokens ?? 0,
       completionTokens: task?.completionTokens ?? session?.completionTokens ?? 0,
       totalTokens: task?.totalTokens ?? session?.totalTokens ?? 0,
+      cacheHitRatio: (() => {
+        const prompt = task?.promptTokens ?? session?.promptTokens ?? 0
+        const cached = task?.cachedTokens ?? session?.cachedTokens ?? 0
+        return prompt === 0 ? 0 : cached / prompt
+      })(),
       rounds,
       recent: rounds.slice(-Math.max(1, recentLimit)),
       // The provider usage only exposes aggregate counters, not per-content

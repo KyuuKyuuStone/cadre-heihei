@@ -44,6 +44,7 @@ describe('token usage ledger', () => {
     const snapshot = usage.snapshot({ taskId: 't1' })
     expect(snapshot).toMatchObject({
       taskId: 't1', promptTokens: 300, cachedTokens: 40, completionTokens: 60, totalTokens: 400,
+      cacheHitRatio: 40 / 300,
     })
     expect(snapshot.rounds).toEqual([
       { round: 1, promptTokens: 100, cachedTokens: 30, completionTokens: 20, totalTokens: 150 },
@@ -61,7 +62,7 @@ describe('token usage ledger', () => {
       projectId: 'p1', sessionId: 's1', taskId: 't1', round: 1, usage: {},
     })).toBeUndefined()
     expect(usage.snapshot({ taskId: 't1' })).toMatchObject({
-      promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0, rounds: [],
+      promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0, cacheHitRatio: 0, rounds: [],
     })
   })
 
