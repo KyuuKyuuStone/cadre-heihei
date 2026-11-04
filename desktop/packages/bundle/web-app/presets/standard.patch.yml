@@ -71,8 +71,18 @@
               compaction: true
               toolResultPruner: true
             config:
+              # Cadre budget: the host-plane compaction row is disabled by the
+              # web bundle, so this preset-scoped row is the one that runs. Keep
+              # the budget on this row; a patch targeting `compaction-basic` by
+              # id only reaches the (disabled) host row.
               - id: compaction-basic
                 name: '@deepseek-ai/dsh-compaction-basic'
+                config:
+                  thresholdTokens: 120000
+                  retainTokens: 10000
+                  stepPressureCheck: true
+                  stepPressureThresholdTokens: 120000
+                  stepMinToolCallsBetweenChecks: 0
               - id: command-compact
                 name: '@deepseek-ai/dsh-command-compact'
               - id: tool-result-pruner
