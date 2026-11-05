@@ -97,6 +97,17 @@ const CASES: GateCase[] = [
     description: '改源码不重建 → 产物 stamp 过期',
     expectRedIncludes: 'cadre-collab/entry.ts',
   },
+  {
+    // token 三项指标门禁：红样本是 KB 级合成 JSONL（真实大日志不入库）；
+    // 绿态走默认绿样本。GATE_TOKEN_SAMPLE 与 smoke 的 GATE_SMOKE_EXTRA 同构。
+    name: 'token-budget',
+    gate: 'scripts/gates/check-token-budget.ts',
+    fixture: 'scripts/gates/fixtures/token/sample-red.jsonl',
+    target: 'scripts/__gate_fixture_token_red.jsonl',
+    description: '合成样本四项判据全超标（每步/总量/新增输入/重复读）',
+    env: { GATE_TOKEN_SAMPLE: 'scripts/__gate_fixture_token_red.jsonl' },
+    expectRedIncludes: '__gate_fixture_token_red.jsonl',
+  },
 ]
 
 function run(gate: string, extraEnv: Record<string, string> = {}) {

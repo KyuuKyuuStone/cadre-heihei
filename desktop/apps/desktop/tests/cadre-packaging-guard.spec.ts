@@ -109,21 +109,28 @@ describe('assertCadreAsarEntries', () => {
   })
 })
 
-describe('cadreAsarPath', () => {
-  it('pins the Cadre compaction threshold, retained tail, step check, and spill cap', () => {
-    const patch = readFileSync('packages/bundle/cadre-app/cordis.patch.yml', 'utf8')
-    expect(patch).toContain('- id: compaction-basic')
-    expect(patch).toMatch(/thresholdTokens:\s*60000/)
-    expect(patch).toMatch(/retainTokens:\s*10000/)
-    expect(patch).toMatch(/stepPressureCheck:\s*true/)
-    expect(patch).toMatch(/stepPressureThresholdTokens:\s*40000/)
-    expect(patch).toMatch(/stepMinToolCallsBetweenChecks:\s*0/)
-    expect(patch).toContain('- id: cadre-session-skills')
-    expect(patch).toContain('@deepseek-ai/dsh-host-session-skills')
-    expect(patch).toContain('- id: spill-policy')
-    expect(patch).toMatch(/maxInlineTokens:\s*2000/)
-  })
+describe('compaction wiring', () => {
+  it('keeps the Cadre budget on the effective preset row, not a dead host row', () => {
+    const preset = readFileSync('packages/bundle/web-app/presets/standard.patch.yml', 'utf8')
+    expect(preset).toMatch(
+      /- id: compaction-basic\n\s+name: '@deepseek-ai\/dsh-compaction-basic'\n\s+config:\n\s+thresholdTokens: 120000/u,
+    )
+    expect(preset).toMatch(/retainTokens:\s*10000/u)
+    expect(preset).toMatch(/stepPressureCheck:\s*true/u)
+    expect(preset).toMatch(/stepPressureThresholdTokens:\s*120000/u)
+    expect(preset).toMatch(/stepMinToolCallsBetweenChecks:\s*0/u)
 
+    const cadre = readFileSync('packages/bundle/cadre-app/cordis.patch.yml', 'utf8')
+    expect(cadre).not.toMatch(/^\s*-\s*id:\s*compaction-basic\b/mu)
+    expect(cadre).toContain('- id: cadre-session-skills')
+    expect(cadre).toContain('@deepseek-ai/dsh-host-session-skills')
+    // Host-plane rows stay live: the Cadre spill cap still belongs here.
+    expect(cadre).toContain('- id: spill-policy')
+    expect(cadre).toMatch(/maxInlineTokens:\s*2000/u)
+  })
+})
+
+describe('cadreAsarPath', () => {
   it('mirrors electron-builder output for Windows and macOS', () => {
     expect(cadreAsarPath({ platform: 'win32', arch: 'x64' }, 'C:/out'))
       .toBe(join('C:/out', 'win-unpacked', 'resources', 'app.asar'))

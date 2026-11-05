@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { verifyDesktopRuntime } = vi.hoisted(() => ({
   verifyDesktopRuntime: vi.fn<(root: string, expected: string) => Promise<void>>(async () => undefined),
@@ -21,7 +24,38 @@ const ENVIRONMENT = {
   DOWNLOAD_TEST_RELEASE_ID: '0123456789abcdef0123456789abcdef',
 }
 
-const CONTEXT = { appOutDir: 'out', packager: { getResourcesDir: () => 'out/resources' } }
+// The afterPack gate scans the packaged resources before verifying the runtime,
+// so the fake context points at a real temp tree whose scan comes back clean.
+let fakePackRoot = ''
+let fakeResourcesDir = ''
+
+beforeEach(async () => {
+  fakePackRoot = await mkdtemp(join(tmpdir(), 'packaged-runtime-'))
+  fakeResourcesDir = join(fakePackRoot, 'resources')
+  await mkdir(fakeResourcesDir, { recursive: true })
+  await writeFile(join(fakeResourcesDir, 'app.asar'), minimalAsar())
+})
+
+afterEach(async () => {
+  await rm(fakePackRoot, { recursive: true, force: true })
+})
+
+/** Minimal asar the scanner's reader parses: empty file tree, no payload. */
+function minimalAsar(): Buffer {
+  const json = Buffer.from('{"files":{}}', 'utf8')
+  const headerSize = 8 + json.length
+  const buffer = Buffer.alloc(16 + json.length)
+  buffer.writeUInt32LE(4, 0)
+  buffer.writeUInt32LE(headerSize, 4)
+  buffer.writeUInt32LE(headerSize, 8)
+  buffer.writeUInt32LE(json.length, 12)
+  json.copy(buffer, 16)
+  return buffer
+}
+
+function fakeContext(): { appOutDir: string, packager: { getResourcesDir: () => string } } {
+  return { appOutDir: fakePackRoot, packager: { getResourcesDir: () => fakeResourcesDir } }
+}
 
 /**
  * Run the packaging hook that verifies the bundled runtime.
@@ -31,7 +65,7 @@ async function requiredRuntimeVersion(preparedRuntime?: string, preparedRuntimeV
   verifyDesktopRuntime.mockClear()
   const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
   const config = createElectronBuilderConfig(ENVIRONMENT, 'win32', 'x64', preparedRuntime, preparedRuntimeVersion)
-  await config.afterPack(CONTEXT as never)
+  await config.afterPack(fakeContext() as never)
   return verifyDesktopRuntime.mock.calls[0]?.[1]
 }
 
@@ -57,7 +91,7 @@ describe('packaged runtime verification', () => {
     const config = createElectronBuilderConfig(
       { ...ENVIRONMENT, DSH_DESKTOP_BUILD_VERSION: `${productVersion}.20260921.1` }, 'win32', 'x64')
     expect(config.extraMetadata).toMatchObject({ version: `${productVersion}.20260921.1` })
-    await config.afterPack(CONTEXT as never)
+    await config.afterPack(fakeContext() as never)
     expect(verifyDesktopRuntime.mock.calls[0]?.[1]).toBe(productVersion)
   })
 })

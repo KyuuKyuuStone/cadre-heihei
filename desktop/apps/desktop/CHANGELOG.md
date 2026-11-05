@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.1
+
+- **压缩预算接到生效行**：`compaction-basic` 的 Cadre 预算（60k 上限 / 10k 保留 / 40k 步检查）原先写在 Cadre 包对宿主排的覆盖上，而 web bundle 已禁用该排，实测压缩仍在 678k 才触发；现移到 `standard` preset 实际挂载的 `compaction-basic` 行，Cadre 包内只留一行注释说明原因
+- **门禁防回归**：`presets.spec.ts` 断言生效行配置，并用真实 `resolveConfig/resolveCompactSpec` 解析出 60k/10k/40k；`cadre-packaging-guard.spec.ts` 不再钉死死排，改为断言 preset 行带 `config`、Cadre 包内无 `compaction-basic` 覆盖
+- **更正 1.5.0 条目**：1.5.0 实际写入的是 60k/10k/40k（不是 150k/20k/60k），且因打在宿主死排从未生效
+- **分批说明**：主管与员工本批统一 60k；角色分参数（主管 150k/30k/120k）留待下一批，本版不生效
+- **验证**：断言红绿两态（3 failed → 15 passed）+ 真实引擎回放（120k→15.1k、180k→22.6k、280k→35.1k，均低于 40k 步阈值）；live 首压需重启新构建后复跑，步骤见 `设计-Token治理2-主管会话上下文预算.md` §8
+
 ## 1.5.0
 
 - **任务包与员工上下文**：派活支持六字段 TaskPacket（目标/约束/文件引用/验收/禁止/未决），员工只拿任务包+必要引用+最近一轮，不注入主管完整历史

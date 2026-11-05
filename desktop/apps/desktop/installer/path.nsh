@@ -143,6 +143,9 @@ Function InstallerPreflight
         ${Loop}
         FindClose $0
     ${EndIf}
+    ; Probe the directory the installer will actually write. When the target does
+    ; not exist yet, create it first: probing the nearest existing ancestor can
+    ; pass while the deeper target stays blocked (per-directory filter rules).
     StrCpy $2 $INSTDIR
     ${Do}
         System::Call 'kernel32::GetFileAttributesW(w r2) i.r0'
@@ -151,15 +154,39 @@ Function InstallerPreflight
         ${EndIf}
         ${GetParent} $2 $2
     ${Loop}
-    System::Call 'kernel32::GetTempFileNameW(w r2, w "HIL", i 0, w .r3) i.r0'
-    ${If} $0 == 0
-        StrCpy $InstallerError "$(INSTALLER_PATH_WRITABLE)"
+    ${IfNot} ${FileExists} "$INSTDIR"
+        CreateDirectory "$INSTDIR"
+        ${If} ${Errors}
+            StrCpy $InstallerError "$(INSTALLER_PATH_WRITABLE) [$INSTDIR]"
+            Return
+        ${EndIf}
+    ${EndIf}
+    ; Real-time security filtering can hold a fresh write for seconds while it
+    ; scans the installer, so the probe retries with a bound instead of failing
+    ; on the first attempt. A persistent failure surfaces the probed path and the
+    ; Windows error code, which names the blocking software for the user.
+    StrCpy $R7 0
+    StrCpy $R8 0
+    ${Do}
+        System::Call 'kernel32::GetTempFileNameW(w "$INSTDIR", w "HIL", i 0, w .r3) i.r0 ?e'
+        Pop $R8
+        ${If} $0 != 0
+            System::Call 'kernel32::DeleteFileW(w r3)'
+            StrCpy $R8 0
+            ${Break}
+        ${EndIf}
+        IntOp $R7 $R7 + 1
+        ${If} $R7 < 3
+            Sleep 300
+        ${EndIf}
+    ${LoopUntil} $R7 >= 3
+    ${If} $R8 != 0
+        StrCpy $InstallerError "$(INSTALLER_PATH_WRITABLE) [$INSTDIR, Windows 错误码 $R8]"
         Return
     ${EndIf}
-    System::Call 'kernel32::DeleteFileW(w r3)'
-    System::Call 'kernel32::GetDiskFreeSpaceExW(w r2, *l .r0, p 0, p 0) i.r1'
+    System::Call 'kernel32::GetDiskFreeSpaceExW(w "$INSTDIR", *l .r0, p 0, p 0) i.r1'
     ${If} $1 == 0
-        StrCpy $InstallerError "$(INSTALLER_PATH_WRITABLE)"
+        StrCpy $InstallerError "$(INSTALLER_PATH_WRITABLE) [$INSTDIR]"
         Return
     ${EndIf}
     IntOp $2 ${APP_64_UNPACKED_SIZE} + 65536

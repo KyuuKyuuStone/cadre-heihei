@@ -1,5 +1,5 @@
 import { officePackageDirectories } from '../../../scripts/libreoffice-packages.mjs'
-import { scanAsar, scanDir } from './check-no-secrets.mjs'
+import { createAfterPackGate } from './after-pack-gate.mjs'
 import { X509Certificate } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -200,30 +200,29 @@ export function createElectronBuilderConfig(
       const { resolveDesktopPolicyConfig } = await import('../lib/types/mandatory-update-policy.js')
       resolveDesktopPolicyConfig(policy)
     },
-    afterPack: async context => {
-      // Hard gate: user API keys / credentials must never ship. Throws on any hit.
-      const resources = join(context.appOutDir, 'resources')
-      const hits = [...scanDir(resources), ...scanAsar(join(resources, 'app.asar'))]
-      if (hits.length > 0) {
-        for (const hit of hits) console.error(`[check-no-secrets] ${hit.file}:${hit.line} rule=${hit.rule} value=${hit.value}`)
-        throw new Error(`check-no-secrets: ${hits.length} secret-like hit(s) in ${context.appOutDir}; packaging aborted.`)
-      }
-      console.log('[check-no-secrets] PASS (afterPack scan of resources + app.asar).')
-    },
-    afterPack: async context => {
-      const { verifyDesktopRuntime } = await import('../lib/types/runtime-tree.js')
-      const resourcesDir = context.packager.getResourcesDir(context.appOutDir)
-      if (resolvedPlatform === 'darwin' && update !== undefined) {
-        await writeMacOSAppUpdateConfig(resourcesDir, resolveMacOSAppUpdateFeed(context.packager.config.publish),
-          context.packager.appInfo.updaterCacheDirName)
-      }
-      // The bundled runtime declares whichever version prepared it: the product version for an ordinary
-      // release, and a rewritten one for installed-update qualification.
-      await verifyDesktopRuntime(buildPaths.dsh,
-        preparedRuntimeVersion ?? productVersion, { platform: resolvedPlatform, arch: resolvedArch })
-      // Unsigned Windows builds skip electron-builder's afterSign hook.
-      if (packagesWindows && unsigned) await verifyWindowsAsarUnpack(buildPaths.dsh, resourcesDir, windowsCode)
-    },
+    // One afterPack gate only: a second declaration would silently override this
+    // one (the packaged-secrets scan died exactly that way), and the duplicate-key
+    // guard in tests/electron-builder-config-afterpack.spec.ts pins it shut.
+    afterPack: createAfterPackGate({
+      writeMacOSAppUpdate: packagesMacOS && update !== undefined
+        ? async (resourcesDir, hookContext) => {
+            await writeMacOSAppUpdateConfig(resourcesDir, resolveMacOSAppUpdateFeed(hookContext.packager.config.publish),
+              hookContext.packager.appInfo.updaterCacheDirName)
+          }
+        : undefined,
+      verifyDesktopRuntime: async (runtimeRoot, expectedRuntimeVersion, options) => {
+        const { verifyDesktopRuntime } = await import('../lib/types/runtime-tree.js')
+        return verifyDesktopRuntime(runtimeRoot, expectedRuntimeVersion, options)
+      },
+      verifyWindowsAsarUnpack: packagesWindows && unsigned
+        ? (runtimeRoot, resourcesDir, code) => verifyWindowsAsarUnpack(runtimeRoot, resourcesDir, code)
+        : undefined,
+      runtimeRoot: buildPaths.dsh,
+      expectedRuntimeVersion: preparedRuntimeVersion ?? productVersion,
+      platform: resolvedPlatform,
+      arch: resolvedArch,
+      getWindowsCode: () => windowsCode,
+    }),
     afterSign: async context => {
       if (windowsSigner !== undefined) {
         await signWindowsCode(context.appOutDir, {
