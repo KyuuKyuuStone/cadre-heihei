@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 /** Sidebar shell slot registration and its Session/layout callbacks. */
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
-import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsRenderSlots, SlotMap } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { SidebarRootInjected } from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -57,6 +57,30 @@ async function bench(declare = true) {
         'sidebar': { kind: 'single', scope: 'root' },
         'main': { kind: 'keyed', scope: 'root' },
         'shell.leading': { kind: 'single', scope: 'root' },
+        // These seats are declared so the Cadre contributions into them really
+        // register: the surface assertions read stored entries, never source
+        // text, and a re-introduced contribution changes them.
+        'shell.overlay': { kind: 'list', scope: 'root' },
+        'settings.general.item': { kind: 'list', scope: 'root' },
+        'sidebar.workspaces.project.row.action': { kind: 'list', scope: 'root' },
+        'sidebar.session.row.badge': { kind: 'list', scope: 'root' },
+        'sidebar.session.row.subtitle': { kind: 'list', scope: 'root' },
+        'sidebar.workspaces.session.menu.item': {
+          kind: 'list',
+          scope: 'root',
+          inject: {
+            hooks: {
+              // The fixture renders no row menu; the hook only has to satisfy
+              // the declaration so the retire entry really registers.
+              menuOpenState: ((
+                _standard: never,
+                state: readonly [boolean, (open: boolean) => void],
+              ) => () => state) as never,
+              shortcuts: createSnapshotStore<readonly ShortcutCatalogEntry[]>([]),
+            },
+          },
+        },
+        'conversation.view': { kind: 'list', scope: 'session' },
       } },
       SidebarFrame,
     )
@@ -64,39 +88,87 @@ async function bench(declare = true) {
   return { ctx, slots, layout, uiWorkspace }
 }
 
+/** Seats this plugin contributes into; the fixture above declares every one. */
+const CADRE_SURFACES = [
+  'sidebar.panellist',
+  'main',
+  'shell.overlay',
+  'settings.general.item',
+  'sidebar.workspaces.project.row.action',
+  'sidebar.session.row.badge',
+  'sidebar.session.row.subtitle',
+  'sidebar.workspaces.session.menu.item',
+  'conversation.view',
+] as const satisfies readonly (keyof SlotMap)[]
+
+/** Registration id (or key) of every entry a surface currently holds. */
+function entryIds(slots: SlotRegistry, surface: keyof SlotMap): string[] {
+  return slots.entries(surface).map(entry => entry.options.id ?? entry.options.key ?? '')
+}
+
+/** Every id the plugin registered across its declared surfaces. */
+function surfaceIds(slots: SlotRegistry): string[] {
+  return CADRE_SURFACES.flatMap(surface => entryIds(slots, surface))
+}
+
+/** Bench with this plugin applied. */
+async function mounted() {
+  const fixture = await bench()
+  await fixture.ctx.plugin({ inject: [...inject], apply }).await()
+  return fixture
+}
+
 describe('ui-sidebar apply', () => {
   it('keeps the host Loader entry inert', () => {
     expect(hostApply).not.toThrow()
   })
 
-  it('does not register the removed token sidebar panel', () => {
-    const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
-    expect(source).not.toContain('CadreToken')
-    expect(source).not.toContain('/cadre/token/snapshot')
-    expect(source).not.toContain("id: 'cadre-token'")
+  it('keeps the removed token surface unregistered', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    try {
+      const b = await mounted()
+      // Positive half: the Cadre seats are really occupied, so the negative
+      // expectations below cannot pass vacuously.
+      expect(entryIds(b.slots, 'sidebar.panellist')).toEqual(['cadre-skills'])
+      expect(entryIds(b.slots, 'shell.overlay')).toEqual([
+        'cadre-create', 'cadre-ledger', 'cadre-retire', 'cadre-skills',
+      ])
+      // A restored token panel, card, or view would add one more entry here.
+      expect(surfaceIds(b.slots).filter(id => /token/i.test(id))).toEqual([])
+      // The removed panel read a snapshot over HTTP; nothing may call it now.
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      fetchSpy.mockRestore()
+    }
   })
 
-  it('does not register or call the email settings surface', () => {
-    const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
-    expect(source).not.toContain('CadreEmailSettings')
-    expect(source).not.toContain('cadre-email')
-    expect(source).not.toContain("'/cadre/email")
+  it('does not register or call the removed email settings surface', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    try {
+      const b = await mounted()
+      expect(entryIds(b.slots, 'settings.general.item')).toEqual(['cadre-update-check'])
+      expect(surfaceIds(b.slots).filter(id => /email|mail/i.test(id))).toEqual([])
+      expect(fetchSpy.mock.calls.map(([input]) => input instanceof URL
+        ? input.href
+        : typeof input === 'string' ? input : input.url)).toEqual([])
+    } finally {
+      fetchSpy.mockRestore()
+    }
   })
 
-  it('registers the skill Conversation view without a header chip or removed status strip', () => {
-    const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
-    expect(source).toContain("id: 'skills'")
-    expect(source).not.toContain('CadreSkillHeaderChip')
-    expect(source).not.toContain('conversation.session.header.utilities')
-    expect(source).not.toContain('CadreSkillSettingsMenuItem')
-    expect(source).not.toContain('conversation.input.dock')
-    expect(source).not.toContain('conversation.status')
+  it('registers the skill Conversation view without a header chip or status strip', async () => {
+    const b = await mounted()
+    expect(entryIds(b.slots, 'conversation.view')).toEqual(['skills'])
+    // The removed header chip and status strip were surfaces of their own; no
+    // Cadre entry may name one.
+    expect(surfaceIds(b.slots).filter(id => /chip|status/i.test(id))).toEqual([])
   })
 
-  it('does not register the removed edit-profile menu', () => {
-    const source = readFileSync(new URL('../src/client/index.ts', import.meta.url), 'utf8')
-    expect(source).not.toContain('cadre-edit-member')
-    expect(source).not.toContain('CadreEditMemberMenuItem')
+  it('does not register the removed edit-profile menu', async () => {
+    const b = await mounted()
+    // The retire row is the only Cadre row-menu entry; an edit-profile row
+    // would make this list longer.
+    expect(entryIds(b.slots, 'sidebar.workspaces.session.menu.item')).toEqual(['cadre-retire-member'])
   })
 
   it('declares only the services it uses', () => {
