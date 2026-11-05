@@ -1,0 +1,36 @@
+{"type":"assistant/message","data":{"turn":1,"usage":{"cacheReadTokens":45000,"inputTokens":800,"outputTokens":300}}}
+{"type":"tool/call","data":{"callId":"g1","name":"read","arguments":"{\"path\":\"packages/cadre/host-collab/src/index.ts\"}"}}
+{"type":"tool/result","data":{"message":{"toolCallId":"g1","content":[{"type":"text","text":"export const collabReady = true\n"}]}}}
+{"type":"assistant/message","data":{"turn":1,"usage":{"cacheReadTokens":52000,"inputTokens":800,"outputTokens":300}}}
+{"type":"tool/call","data":{"callId":"g2","name":"read","arguments":"{\"path\":\"apps/desktop/src/main.ts\"}"}}
+{"type":"tool/result","data":{"message":{"toolCallId":"g2","content":[{"type":"text","text":"// desktop entry\n"}]}}}
+{"type":"assistant/message","data":{"turn":1,"usage":{"cacheReadTokens":61000,"inputTokens":800,"outputTokens":300}}}
+{"type":"tool/call","data":{"callId":"g3","name":"read","arguments":"{\"path\":\"packages/cadre/host-governance/src/index.ts\"}"}}
+{"type":"tool/result","data":{"message":{"toolCallId":"g3","content":[{"type":"text","text":"export const governanceReady = true\n"}]}}}
+{"type":"assistant/message","data":{"turn":2,"usage":{"cacheReadTokens":70000,"inputTokens":800,"outputTokens":300}}}
+{"type":"tool/call","data":{"callId":"g4","name":"read","arguments":"{\"path\":\"packages/cadre/host-collab/src/index.ts\"}"}}
+{"type":"tool/result","data":{"message":{"toolCallId":"g4","content":[{"type":"text","text":"export const collabReady = true\n"}]}}}
+{"type":"assistant/message","data":{"turn":2,"usage":{"cacheReadTokens":78000,"inputTokens":800,"outputTokens":300}}}
+{"type":"tool/call","data":{"callId":"g5","name":"read","arguments":"{\"path\":\"apps/desktop/CHANGELOG.md\"}"}}
+{"type":"tool/result","data":{"message":{"toolCallId":"g5","content":[{"type":"text","text":"# changelog\n"}]}}}
+{"type":"assistant/message","data":{"turn":2,"usage":{"cacheReadTokens":85000,"inputTokens":800,"outputTokens":300}}}
+{"type":"tool/call","data":{"callId":"g6","name":"read","arguments":"{\"path\":\"packages/cadre/host-session-skills/src/ipc.ts\"}"}}
+{"type":"tool/result","data":{"message":{"toolCallId":"g6","content":[{"type":"text","text":"export const ipc = {}\n"}]}}}
+{"type":"assistant/message","data":{"turn":2,"usage":{"cacheReadTokens":92000,"inputTokens":800,"outputTokens":300}}}
+{"type":"tool/call","data":{"callId":"g7","name":"grep","arguments":"{\"pattern\":\"advanceReportToDelivered\",\"path\":\"cadre-collab\"}"}}
+{"type":"tool/result","data":{"message":{"toolCallId":"g7","content":[{"type":"text","text":"actor.test.ts:164\n"}]}}}
+{"type":"assistant/message","data":{"turn":3,"usage":{"cacheReadTokens":99000,"inputTokens":800,"outputTokens":300}}}
+{"type":"tool/call","data":{"callId":"g8","name":"read","arguments":"{\"path\":\"packages/cadre/host-write-guard/tests/tools.spec.ts\"}"}}
+{"type":"tool/result","data":{"message":{"toolCallId":"g8","content":[{"type":"text","text":"describe('write guard')\n"}]}}}
+{"type":"assistant/message","data":{"turn":3,"usage":{"cacheReadTokens":105000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":3,"usage":{"cacheReadTokens":110000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":3,"usage":{"cacheReadTokens":108000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":3,"usage":{"cacheReadTokens":101000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":3,"usage":{"cacheReadTokens":96000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":4,"usage":{"cacheReadTokens":88000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":4,"usage":{"cacheReadTokens":81000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":4,"usage":{"cacheReadTokens":74000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":4,"usage":{"cacheReadTokens":67000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":4,"usage":{"cacheReadTokens":59000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":4,"usage":{"cacheReadTokens":51000,"inputTokens":800,"outputTokens":300}}}
+{"type":"assistant/message","data":{"turn":4,"usage":{"cacheReadTokens":46000,"inputTokens":800,"outputTokens":300}}}
