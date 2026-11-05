@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-file-upload",
   "description": "Agent-scoped browser file upload, streaming intake, and staged receipt service",
-  "version": "1.5.0",
+  "version": "1.5.2",
   "publishConfig": {
     "access": "public"
   },

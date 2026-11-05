@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-api-workspace-controller",
   "description": "Workspace Remote commands and reconnect-safe state transport",
-  "version": "1.5.0",
+  "version": "1.5.2",
   "publishConfig": {
     "access": "public"
   },

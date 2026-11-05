@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-root",
-  "version": "1.5.0",
+  "version": "1.5.2",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -61,6 +61,7 @@
     "gates:tsc": "node scripts/gates/check-tsc-baseline.ts",
     "gates:smoke": "node scripts/gates/smoke.ts",
     "gates:evidence": "node scripts/gates/two-state-evidence.ts",
+    "gates:token": "node scripts/gates/check-token-budget.ts",
     "pregates:evidence": "node scripts/build-cadre-collab.mjs",
     "build:cadre": "node scripts/build-cadre-collab.mjs",
     "lint:fix": "tsx scripts/compile-referenced-projects.ts host-contracts && npm run lint:fix:contracts-ready",
