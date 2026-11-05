@@ -115,6 +115,56 @@ function countEvents(databasePath: string, taskId: string, toStatus: string): nu
   }
 }
 
+function countPending(databasePath: string): number {
+  const db = new DatabaseSync(databasePath)
+  try {
+    return (db.prepare('SELECT COUNT(*) AS n FROM pending_dispatch').get() as { n: number }).n
+  } finally {
+    db.close()
+  }
+}
+
+function pendingEntry(databasePath: string): {
+  pendingId: string; employee: string; title: string; body: string; dueAt: string
+  reason: string; retryable: number; status: string
+} | undefined {
+  const db = new DatabaseSync(databasePath)
+  try {
+    const entry = db.prepare(`SELECT pending_id, employee, title, body, due_at, reason, retryable, status
+      FROM pending_dispatch ORDER BY created_at DESC LIMIT 1`).get() as {
+      pending_id: string; employee: string; title: string; body: string; due_at: string
+      reason: string; retryable: number; status: string
+    } | undefined
+    if (entry === undefined) return undefined
+    return {
+      pendingId: entry.pending_id, employee: entry.employee, title: entry.title, body: entry.body,
+      dueAt: entry.due_at, reason: entry.reason, retryable: entry.retryable, status: entry.status,
+    }
+  } finally {
+    db.close()
+  }
+}
+
+function countTasks(databasePath: string): number {
+  const db = new DatabaseSync(databasePath)
+  try {
+    return (db.prepare('SELECT COUNT(*) AS n FROM tasks').get() as { n: number }).n
+  } finally {
+    db.close()
+  }
+}
+
+function addMember(databasePath: string, sessionId: string, role: string, displayName: string): void {
+  const db = new DatabaseSync(databasePath)
+  try {
+    db.prepare(`INSERT INTO members
+      (project_id, session_id, role, display_name, description, state, created_at, updated_at)
+      VALUES (?, ?, ?, ?, NULL, 'active', ?, ?)`).run(PROJECT, sessionId, role, displayName, AT, AT)
+  } finally {
+    db.close()
+  }
+}
+
 const run = (sessionId: string): unknown => ({ agent: { id: sessionId }, signal: new AbortController().signal })
 
 function row(input: {
@@ -454,5 +504,205 @@ describe('rework notification (DF-005)', () => {
     expect(result).toMatchObject({ status: 'rework', assigneeNotified: false })
     expect(result.notifyError).toContain('session offline')
     expect(countEvents(databasePath, 't1', 'rework')).toBe(1)
+  })
+})
+
+describe('dispatch_task input validation', () => {
+  interface DispatchFailure { target: string; reason: string; retryable: boolean; pendingId?: string }
+  interface DispatchResult {
+    dispatched: { taskId: string; assigneeName: string; role: string; dueAt: string }[]
+    failed: DispatchFailure[]
+  }
+
+  const item = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    employee: WORKER, title: '修好登录页', body: '登录按钮点了没反应，修好并补用例。', dueAt: AT, ...overrides,
+  })
+
+  const dispatch = async (
+    tasks: readonly Record<string, unknown>[],
+    sessionId = SUPERVISOR,
+  ): Promise<{ databasePath: string; prompts: unknown[]; result: DispatchResult }> => {
+    const databasePath = freshDatabase()
+    const { tools, prompts } = mount(databasePath)
+    seedRoster(databasePath)
+    const result = await tools.get('dispatch_task')!.execute({ tasks }, run(sessionId)) as DispatchResult
+    return { databasePath, prompts, result }
+  }
+
+  it('reports a missing title as invalid input instead of a bind error', async () => {
+    const { databasePath, prompts, result } = await dispatch([item({ title: undefined })])
+
+    expect(result.dispatched).toEqual([])
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0]?.target).toBe(WORKER)
+    expect(result.failed[0]?.reason).toContain('title')
+    expect(result.failed[0]?.reason).toContain('必填')
+    expect(result.failed[0]?.retryable).toBe(false)
+    expect(result.failed[0]?.pendingId).toBeUndefined()
+    // The whole chain of the defect: no SQL binding error, nothing written, no retry queued.
+    expect(JSON.stringify(result)).not.toContain('parameter 5')
+    expect(countTasks(databasePath)).toBe(0)
+    expect(countPending(databasePath)).toBe(0)
+    expect(prompts).toHaveLength(0)
+  })
+
+  it.each([
+    ['null', null],
+    ['a boolean', true],
+    ['an object', {}],
+    ['blank text', '   '],
+  ])('reports a title that is %s as invalid input', async (_label, title) => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+
+    const result = await tools.get('dispatch_task')!.execute({ tasks: [item({ title })] }, run(SUPERVISOR)) as DispatchResult
+
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0]?.reason).toContain('title')
+    expect(result.failed[0]?.retryable).toBe(false)
+    expect(countTasks(databasePath)).toBe(0)
+    expect(countPending(databasePath)).toBe(0)
+  })
+
+  it('reports a missing body as invalid input', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+
+    const result = await tools.get('dispatch_task')!.execute({ tasks: [item({ body: undefined })] }, run(SUPERVISOR)) as DispatchResult
+
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0]?.reason).toContain('body')
+    expect(result.failed[0]?.retryable).toBe(false)
+    expect(countTasks(databasePath)).toBe(0)
+  })
+
+  it('keeps dispatching the rest of a batch when the second of five tasks is invalid', async () => {
+    const databasePath = freshDatabase()
+    const { tools, prompts } = mount(databasePath)
+    seedRoster(databasePath)
+    const titles = ['一', '二', '三', '四', '五']
+    const tasks = titles.map(label => item({ title: `任务${label}` }))
+    tasks[1] = item({ title: undefined })
+
+    const result = await tools.get('dispatch_task')!.execute({ tasks }, run(SUPERVISOR)) as DispatchResult
+
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0]?.reason).toContain('title')
+    expect(result.dispatched).toHaveLength(4)
+    expect(new Set(result.dispatched.map(entry => entry.taskId)).size).toBe(4)
+    // Attempted, not silently dropped: the three tasks after the bad one all reached the ledger and the assignee.
+    expect(countTasks(databasePath)).toBe(4)
+    expect(prompts).toHaveLength(4)
+  })
+
+  it('labels an unknown employee as a retryable dispatch rather than invalid input', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+
+    const result = await tools.get('dispatch_task')!.execute({ tasks: [item({ employee: 'ghost' })] }, run(SUPERVISOR)) as DispatchResult
+
+    expect(result.dispatched).toEqual([])
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0]?.retryable).toBe(true)
+    expect(result.failed[0]?.pendingId).toBeDefined()
+    expect(result.failed[0]?.reason).toContain('待派：')
+    const entry = pendingEntry(databasePath)
+    expect(entry).toMatchObject({ employee: 'ghost', title: '修好登录页', retryable: 1, status: 'pending' })
+    expect(entry?.reason).toContain('没有找到员工')
+    expect(countTasks(databasePath)).toBe(0)
+  })
+
+  it('retries queued work once the employee joins the project', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+    const retry = tools.get('retry_dispatch')!
+
+    await tools.get('dispatch_task')!.execute({ tasks: [item({ employee: 'ghost' })] }, run(SUPERVISOR))
+    const pendingId = pendingEntry(databasePath)!.pendingId
+
+    const stillMissing = await retry.execute({ pendingId }, run(SUPERVISOR)) as { dispatched: unknown[]; failed: DispatchFailure[] }
+    expect(stillMissing.dispatched).toEqual([])
+    expect(stillMissing.failed[0]?.retryable).toBe(true)
+    expect(pendingEntry(databasePath)?.status).toBe('pending')
+
+    addMember(databasePath, 'ghost', 'worker', '小刚')
+    const settled = await retry.execute({ pendingId }, run(SUPERVISOR)) as
+      { dispatched: { taskId: string; dueAt: string }[]; failed: DispatchFailure[] }
+    expect(settled.failed).toEqual([])
+    expect(settled.dispatched).toHaveLength(1)
+    // The queued spec is replayed verbatim, not rebuilt from a prompt.
+    expect(settled.dispatched[0]?.dueAt).toBe(AT)
+    expect(countTasks(databasePath)).toBe(1)
+  })
+
+  it('never queues an invalid task for retry', async () => {
+    const databasePath = freshDatabase()
+    const { tools, prompts } = mount(databasePath)
+    seedRoster(databasePath)
+
+    await tools.get('dispatch_task')!.execute({ tasks: [item({ title: '' })] }, run(SUPERVISOR))
+
+    expect(countPending(databasePath)).toBe(0)
+    expect(prompts).toHaveLength(0)
+  })
+
+  it('falls back to the task title when the packet omits a goal', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+
+    const result = await tools.get('dispatch_task')!.execute(
+      { tasks: [item({ packet: { acceptance: [] } })] },
+      run(SUPERVISOR),
+    ) as DispatchResult
+
+    expect(result.failed).toEqual([])
+    expect(result.dispatched).toHaveLength(1)
+    expect(countTasks(databasePath)).toBe(1)
+  })
+
+  it('reports blank fields before a packet normalizer could throw', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+
+    const result = await tools.get('dispatch_task')!.execute(
+      { tasks: [item({ title: '  ', body: '  ', packet: { goal: '  ' } })] },
+      run(SUPERVISOR),
+    ) as DispatchResult
+
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0]?.reason).toContain('title')
+    expect(result.failed[0]?.reason).toContain('body')
+    expect(result.failed[0]?.reason).not.toContain('TaskPacket.goal')
+    expect(result.failed[0]?.retryable).toBe(false)
+    expect(countTasks(databasePath)).toBe(0)
+  })
+
+  it('classifies a storage failure apart from input errors and keeps going', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+    const db = new DatabaseSync(databasePath)
+    db.exec(`CREATE TRIGGER dispatch_disk_full BEFORE INSERT ON tasks
+      BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END`)
+    db.close()
+    const tasks = [item({ title: '会被存储拒绝' }), item({ title: '' })]
+
+    const result = await tools.get('dispatch_task')!.execute({ tasks }, run(SUPERVISOR)) as DispatchResult
+
+    expect(result.dispatched).toEqual([])
+    expect(result.failed).toHaveLength(2)
+    expect(result.failed[0]?.reason).toContain('任务台账写入失败')
+    expect(result.failed[0]?.reason).toContain('disk is full')
+    expect(result.failed[0]?.retryable).toBe(true)
+    expect(result.failed[1]?.reason).toContain('title')
+    expect(result.failed[1]?.retryable).toBe(false)
+    // The storage failure is queued for retry with the original fields intact.
+    expect(pendingEntry(databasePath)?.title).toBe('会被存储拒绝')
   })
 })

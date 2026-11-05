@@ -106,13 +106,29 @@ interface DispatchValue {
   }[]
 }
 
-/** Machine-readable failure kind; retryability derives from this, not from prose. */
-type DispatchFailureKind = 'missing-employee' | 'delivery-failed' | 'invalid-due-at'
+/**
+ * Machine-readable failure kind; retryability derives from this, not from prose.
+ * `invalid-input` rejects the spec itself and `missing-employee` rejects the
+ * employee mention, while `storage-failed` reports the ledger write — callers
+ * distinguish a fixable spec from a broken store by this tag alone.
+ */
+type DispatchFailureKind = 'missing-employee' | 'delivery-failed' | 'invalid-due-at' | 'invalid-input' | 'storage-failed'
 
 interface DispatchFailure {
   readonly kind: DispatchFailureKind
   readonly reason: string
 }
+
+/** Kinds no retry can fix: replaying the queued spec would fail identically. */
+const NON_RETRYABLE_DISPATCH_KINDS: ReadonlySet<DispatchFailureKind> = new Set<DispatchFailureKind>(['invalid-due-at', 'invalid-input'])
+
+/**
+ * Normalize one dispatch text field into a value SQLite can bind.
+ * A missing or blank field collapses to `fallback`, so a queued failure keeps
+ * its own readable reason instead of surfacing a bind error from the ledger.
+ */
+const bindableText = (value: unknown, fallback: string): string =>
+  typeof value === 'string' && value.trim() !== '' ? value : fallback
 
 /** JSON schema fragment shared by dispatch_task and retry_dispatch results. */
 const DISPATCHED_SCHEMA = {
@@ -1253,10 +1269,21 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   const dispatchOne = async (item: DispatchItem, dispatcher: string, projectId: string, signal: AbortSignal):
   Promise<{ ok: true; value: DispatchValue['dispatched'][number] } | { ok: false } & DispatchFailure> => {
     try {
+      const missing = (['employee', 'title', 'body', 'dueAt'] as const)
+        .filter(field => bindableText(item[field], '') === '')
+      if (missing.length > 0) {
+        return { ok: false, kind: 'invalid-input', reason: `任务缺少必填字段：${missing.join('、')}；每条任务都要有非空的 employee/title/body/dueAt` }
+      }
       if (Number.isNaN(Date.parse(item.dueAt))) {
         return { ok: false, kind: 'invalid-due-at', reason: `dueAt 不是合法时间：${item.dueAt}` }
       }
-      const assignee = ledger.resolveAssignee(projectId, item.employee)
+      let assignee: ReturnType<typeof ledger.resolveAssignee>
+      try {
+        assignee = ledger.resolveAssignee(projectId, item.employee)
+      } catch (error) {
+        if (signal.aborted) throw error
+        return { ok: false, kind: 'missing-employee', reason: error instanceof Error ? error.message : String(error) }
+      }
       const taskId = randomUUID()
       const normalized = normalizeTaskPacket(item.packet, { title: item.title, body: item.body })
       const initialContext = buildEmployeeContext(normalized.packet)
@@ -1311,18 +1338,21 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       }
     } catch (error) {
       if (signal.aborted) throw error
-      return { ok: false, kind: 'missing-employee', reason: error instanceof Error ? error.message : String(error) }
+      const detail = error instanceof Error ? error.message : String(error)
+      return { ok: false, kind: 'storage-failed', reason: `任务台账写入失败：${detail}` }
     }
   }
 
   /** Turn one failure into the tool-facing row, queueing retryable ones. */
   const failRow = (item: DispatchItem, dispatcher: string, projectId: string, outcome: DispatchFailure): DispatchValue['failed'][number] => {
     const { kind, reason } = outcome
-    const retryable = kind !== 'invalid-due-at'
-    const target = typeof item.employee === 'string' && item.employee !== '' ? item.employee : '(未指定员工)'
+    const retryable = !NON_RETRYABLE_DISPATCH_KINDS.has(kind)
+    const target = bindableText(item.employee, '(未指定员工)')
+    // Backstop: never hand an unbindable value to the ledger, whatever the caller sent.
     const pendingId = retryable
-      ? ledger.addPending(projectId, { dispatcher, employee: item.employee, title: item.title, body: item.body,
-        dueAt: item.dueAt, reason, retryable })
+      ? ledger.addPending(projectId, { dispatcher, employee: target,
+        title: bindableText(item.title, '(未提供标题)'), body: bindableText(item.body, '(未提供正文)'),
+        dueAt: bindableText(item.dueAt, '(未提供截止时间)'), reason, retryable })
       : undefined
     return {
       target,
@@ -1417,7 +1447,16 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           continue
         }
         console.log(`cadre-collab: dispatch failed target=${item.employee} reason=${outcome.reason}`)
-        failed.push(failRow(item, dispatcher, projectId, outcome))
+        // One bad item must not abort the rest of the batch: record it and go on.
+        try {
+          failed.push(failRow(item, dispatcher, projectId, outcome))
+        } catch (error) {
+          if (run.signal.aborted) throw error
+          const detail = error instanceof Error ? error.message : String(error)
+          console.log(`cadre-collab: dispatch failure not queued target=${String(item.employee)} reason=${detail}`)
+          failed.push({ target: bindableText(item.employee, '(未指定员工)'),
+            reason: `未能记录失败原因：${detail}`, retryable: false })
+        }
       }
       return { dispatched, failed }
     },
@@ -1441,7 +1480,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       console.log(`cadre-collab: retry ok pending=${record.pendingId} task=${outcome.value.taskId}`)
       return { dispatched: [outcome.value], failed: [] }
     }
-    ledger.settlePending(record.pendingId, { reason: outcome.reason, retryable: outcome.kind !== 'invalid-due-at' })
+    ledger.settlePending(record.pendingId, { reason: outcome.reason, retryable: !NON_RETRYABLE_DISPATCH_KINDS.has(outcome.kind) })
     console.log(`cadre-collab: retry failed pending=${record.pendingId} reason=${outcome.reason}`)
     return { dispatched: [], failed: [failRow(item, caller, projectId, outcome)] }
   }
