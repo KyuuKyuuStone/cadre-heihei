@@ -141,6 +141,13 @@ export class BasicCompactionEngine extends CompactionEngine {
   constructor(ctx: Context, config: BasicCompactionConfig = {}) {
     super(ctx)
     this.config = resolveConfig(config)
+    if (config.compactionRetries !== undefined) {
+      ctx.logger.warn(
+        'compaction-basic: compactionRetries no longer triggers a repeated condensation; '
+        + 'a pressure check condenses at most once. Remove the setting '
+        + `(configured ${String(config.compactionRetries)}).`,
+      )
+    }
     if (this.config.auto) this._registerAutomaticCompaction()
   }
 
@@ -288,7 +295,9 @@ export class BasicCompactionEngine extends CompactionEngine {
    * Compact for replayed step-boundary pressure or one provider-confirmed context
    * overflow. Both triggers price the latest durable routed request envelope;
    * overflow bypasses the normal threshold and retained-tail policy so it can
-   * force one useful balanced reduction.
+   * force one useful balanced reduction. A pressure check condenses at most once:
+   * when the measured floor stays at or above the effective threshold it logs a
+   * structured warning and returns that result instead of condensing again.
    * @param agent - agent whose latest durable routed request is measured.
    * @param trigger - normal step-boundary pressure or context-overflow recovery.
    * @param signal - live turn cancellation signal forwarded to summarization.
@@ -357,24 +366,23 @@ export class BasicCompactionEngine extends CompactionEngine {
     }
     if (measurement.totalTokens < effectiveThreshold) return null
 
-    let result: CompactionResult | null = null
-    for (let attempt = 0; attempt <= spec.compactionRetries; attempt += 1) {
-      const range = selectCompactableRange(agent.session, measurement, spec.retainTokens)
-      if (range === null) {
-        /* v8 ignore else -- concrete replacement preserves a compactable checkpoint; subclass hooks cannot mutate it. */
-        if (result === null) return null
-        /* v8 ignore next -- paired with the defensive post-success branch above. */
-        break
-      }
-      result = await this.compactRegion(range.start, range.end, agent, signal)
-      measurement = meter.measure(agent.session)
-      if (measurement.totalTokens < effectiveThreshold) return result
-    }
-
-    throw new Error(
-      `compaction still above threshold after ${spec.compactionRetries + 1} compaction attempts `
-      + `(${measurement.totalTokens} estimated tokens >= threshold ${spec.thresholdTokens})`,
+    // One condensation per check: repeating it here would shadow the checkpoint
+    // this pass just wrote, leaving a range too small to summarize into a
+    // smaller replacement. Residual pressure waits for the next check.
+    const range = selectCompactableRange(agent.session, measurement, spec.retainTokens)
+    if (range === null) return null
+    const beforeTokens = measurement.totalTokens
+    const result = await this.compactRegion(range.start, range.end, agent, signal)
+    measurement = meter.measure(agent.session)
+    const afterTokens = measurement.totalTokens
+    if (afterTokens < effectiveThreshold) return result
+    this.ctx.logger.warn(
+      `compaction floor above threshold (measured ${afterTokens} >= effectiveThreshold `
+      + `${effectiveThreshold}); event=compaction.floor_above_threshold target=${targetKey} `
+      + `estimatedTokens=${JSON.stringify({ before: beforeTokens, after: afterTokens })}; `
+      + 'returning this condensation without repeating it',
     )
+    return result
   }
 
   /**

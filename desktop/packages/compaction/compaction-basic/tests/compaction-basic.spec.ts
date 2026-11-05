@@ -890,20 +890,76 @@ describe('pressure measurement and retention', () => {
     expect(measure).toHaveBeenCalledTimes(1)
   })
 
-  it('bounds retries when a shrinking checkpoint remains above threshold', async () => {
+  it('condenses once per pressure check and warns when the floor stays above threshold', async () => {
+    const ctx = createContext()
+    const warnings: string[] = []
+    ctx.logger.warn = ((message: string) => void warnings.push(message)) as typeof ctx.logger.warn
     const compact = service({
       auto: false,
-      compactionRetries: 0,
       thresholdRatio: 0.3,
       retainTokens: 180,
-    })
+    }, ctx)
     compact.summary = Array.from({ length: 7 }, (_, index) => ({
       type: 'text',
       text: `summary ${index}`,
     }))
+    const region = vi.spyOn(compact, 'compactRegion')
+    const session = conversation(4)
 
-    await expect(compactIfNeeded(compact, conversation(4)))
-      .rejects.toThrow(/still above threshold after 1 compaction attempts/)
+    const result = await compactIfNeeded(compact, session)
+
+    expect(result).not.toBeNull()
+    expect(region).toHaveBeenCalledTimes(1)
+    expect(compact.calls).toHaveLength(1)
+    expect(session.snapshotEvents().filter(event => event.type === 'compaction/start')).toHaveLength(1)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('compaction floor above threshold')
+    expect(warnings[0]).toContain(`target=${MODEL}/${MODEL}`)
+    expect(warnings[0]).toMatch(/effectiveThreshold \d+/)
+    expect(warnings[0]).toMatch(/"before":\d+,"after":\d+/)
+    expect(warnings[0]).not.toContain('step compaction failed')
+  })
+
+  it('ignores compactionRetries beyond the single condensation', async () => {
+    const ctx = createContext()
+    const warnings: string[] = []
+    ctx.logger.warn = ((message: string) => void warnings.push(message)) as typeof ctx.logger.warn
+    const compact = service({
+      auto: false,
+      compactionRetries: 2,
+      thresholdRatio: 0.3,
+      retainTokens: 180,
+    }, ctx)
+    compact.summary = Array.from({ length: 7 }, (_, index) => ({
+      type: 'text',
+      text: `summary ${index}`,
+    }))
+    const region = vi.spyOn(compact, 'compactRegion')
+
+    await compactIfNeeded(compact, conversation(4))
+
+    expect(region).toHaveBeenCalledTimes(1)
+    expect(compact.calls).toHaveLength(1)
+    expect(warnings).toEqual([
+      expect.stringContaining('compactionRetries no longer triggers a repeated condensation'),
+      expect.stringContaining('compaction floor above threshold'),
+    ])
+  })
+
+  it('warns at load only when compactionRetries is explicitly configured', () => {
+    const unsetCtx = createContext()
+    const unsetWarnings: string[] = []
+    unsetCtx.logger.warn = ((message: string) => void unsetWarnings.push(message)) as typeof unsetCtx.logger.warn
+    service({ auto: false }, unsetCtx)
+    expect(unsetWarnings).toEqual([])
+
+    const setCtx = createContext()
+    const setWarnings: string[] = []
+    setCtx.logger.warn = ((message: string) => void setWarnings.push(message)) as typeof setCtx.logger.warn
+    service({ auto: false, compactionRetries: 1 }, setCtx)
+    expect(setWarnings).toEqual([
+      expect.stringContaining('compactionRetries no longer triggers a repeated condensation'),
+    ])
   })
 
   it('rounds a retention cut head-ward to preserve tool-call/result pairing', async () => {
@@ -1808,7 +1864,9 @@ describe('automatic listener and loader composition', () => {
     compact.summary = [{ type: 'text', text: 's' }]
     await preStep(ctx, agent(session, MODEL))
     expect(session.snapshotEvents().some(event => event.type === 'compaction/start')).toBe(true)
-    expect(compact.calls).toHaveLength(2)
+    // A step-level threshold of 1 keeps the floor above the trigger; the check
+    // reports that instead of condensing a second time.
+    expect(compact.calls).toHaveLength(1)
   })
 
   it('skips step compaction before the minimum tool interval', async () => {
@@ -1910,6 +1968,29 @@ describe('automatic listener and loader composition', () => {
 
     await expect(preStep(ctx, agent(session, MODEL))).resolves.toEqual({ kind: 'enter', messages: [] })
     expect(warnings).toContainEqual(expect.stringContaining('temporary failure'))
+    expect(session.snapshotEvents().some(event => event.type === 'compaction/summary')).toBe(false)
+  })
+
+  it('keeps the turn alive when the framed summary is not smaller than its source', async () => {
+    const ctx = createContext()
+    const warnings: string[] = []
+    ctx.logger.warn = ((message: string) => void warnings.push(message)) as typeof ctx.logger.warn
+    const compact = new TestCompactionEngine(ctx, {
+      headroomTokens: 0,
+      maxTokens: 8192,
+      thresholdRatio: 0.5,
+      retainTokens: 180,
+    })
+    compact.summary = Array.from({ length: 100 }, (_, index) => ({
+      type: 'text',
+      text: `verbose ${index} ${'x'.repeat(200)}`,
+    }))
+    const session = conversation(4)
+
+    await expect(preStep(ctx, agent(session, MODEL))).resolves.toEqual({ kind: 'enter', messages: [] })
+
+    expect(warnings).toContainEqual(expect.stringContaining('summary is not smaller'))
+    expect(warnings).toContainEqual(expect.stringContaining('continuing the turn'))
     expect(session.snapshotEvents().some(event => event.type === 'compaction/summary')).toBe(false)
   })
 
