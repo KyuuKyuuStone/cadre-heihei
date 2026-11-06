@@ -1,0 +1,1 @@
+The local service is unavailable. Restart the app; if this persists, add 127.0.0.1 and localhost to your system proxy bypass list.

@@ -1,7 +1,7 @@
-DeepSeek Harness
-DeepSeek Harness
+Cadre Heihei
+Cadre Heihei
 Add an API key to get started
-Configure official DeepSeek models to start using Harness
+Configure official DeepSeek models to start using Cadre Heihei
 Enter API key [password]
 Save and continue [disabled]
 Set up later

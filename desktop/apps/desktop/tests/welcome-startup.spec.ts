@@ -30,6 +30,7 @@ const state = vi.hoisted(() => ({
   openDevTools: vi.fn(),
   closeWelcome: vi.fn(),
   welcomeLocale: undefined as DesktopLocale | undefined,
+  welcomeAvailable: true,
   preference: 'zh',
   hasApiKey: false,
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -88,9 +89,12 @@ vi.mock('electron', () => ({
   },
   net: { fetch: vi.fn() },
   nativeTheme: state.nativeTheme,
-  session: { defaultSession: {
-    setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(), webRequest: { onBeforeSendHeaders: vi.fn() },
-  } },
+  session: {
+    fromPartition: () => ({ setProxy: vi.fn(async () => {}) }),
+    defaultSession: {
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(), webRequest: { onBeforeSendHeaders: vi.fn() },
+    },
+  },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   ipcMain: {
     handle: (name: string, callback: (...args: unknown[]) => unknown) => { state.handlers.set(name, callback) },
@@ -137,22 +141,25 @@ vi.mock('../src/host-process.ts', () => ({
   },
 }))
 vi.mock('../src/welcome-backend.ts', () => ({
-  connectDesktopWelcome: async () => ({
-    analyticsEnabled: async () => false,
-    readLocalePreference: async () => state.preference,
-    read: async () => {
-      await state.beforeRead()
-      return { loggedIn: false, hasApiKey: state.hasApiKey, writable: true, localePreference: state.preference }
-    },
-    save: async () => ({ ok: true }),
-    account: {
-      watch: (listener: (value: AccountView) => void, _failed: () => void, expired: () => void) => {
-        state.accountListener = listener
-        state.expiryListener = expired
-        return () => {}
+  startDesktopWelcome: async () => ({
+    hostCookie: state.welcomeAvailable ? 'test-cookie' : undefined,
+    backend: state.welcomeAvailable ? {
+      analyticsEnabled: async () => false,
+      readLocalePreference: async () => state.preference,
+      read: async () => {
+        await state.beforeRead()
+        return { loggedIn: false, hasApiKey: state.hasApiKey, writable: true, localePreference: state.preference }
       },
-      state: state.accountState,
-    },
+      save: async () => ({ ok: true }),
+      account: {
+        watch: (listener: (value: AccountView) => void, _failed: () => void, expired: () => void) => {
+          state.accountListener = listener
+          state.expiryListener = expired
+          return () => {}
+        },
+        state: state.accountState,
+      },
+    } : undefined,
   }),
 }))
 vi.mock('node:fs/promises', async importOriginal => ({
@@ -189,6 +196,7 @@ afterEach(() => {
 it.each([false, true])('starts welcome onboarding without carrying update focus into login or skip (Windows update=%s)', async (updated) => {
   vi.resetModules()
   vi.clearAllMocks()
+  state.welcomeAvailable = true
   state.preference = 'zh'
   state.hasApiKey = false
   state.operations = undefined
@@ -313,4 +321,31 @@ it.each([false, true])('starts welcome onboarding without carrying update focus 
   expect(state.showWorkspace).toHaveBeenCalledOnce()
   expect(state.focusWorkspace).toHaveBeenCalledOnce()
 
+})
+
+it('opens welcome without quitting when loopback authentication degrades', async () => {
+  vi.resetModules()
+  vi.clearAllMocks()
+  state.welcomeAvailable = false
+  state.preference = 'zh'
+  state.hasApiKey = false
+  state.operations = undefined
+  vi.useFakeTimers()
+  vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3')
+  vi.stubEnv('DSH_DESKTOP_DEV_PROJECT_DIR', '/development-profile')
+  vi.stubEnv('DSH_DESKTOP_NODE_BINARY', '/runtime/node')
+  vi.stubEnv('DSH_DESKTOP_PNPM_ENTRY', '/runtime/pnpm')
+  vi.stubEnv('DSH_DESKTOP_DSH_DIR', '/runtime/dsh')
+  vi.stubEnv('DSH_DESKTOP_PRIMARY_RUNTIME_DIR', '/runtime/primary-runtime')
+  vi.stubEnv('DSH_DESKTOP_HOST_INSPECT_PORT', undefined)
+  vi.stubEnv('DSH_DESKTOP_OPEN_DEVTOOLS', '0')
+  vi.stubEnv('DSH_DESKTOP_MANDATORY_UPDATE_CONFIG', undefined)
+  vi.stubEnv('DSH_DESKTOP_UPDATE_JOURNAL_DIR', undefined)
+  await import('../src/main.ts')
+  await vi.waitFor(() => { expect(state.operations).toBeDefined() })
+  expect(state.startHost).toHaveBeenCalledOnce()
+  expect(state.quit).not.toHaveBeenCalled()
+  expect(state.showWorkspace).not.toHaveBeenCalled()
+  expect(state.loadWorkspace).toHaveBeenCalledExactlyOnceWith('dsh-app://app/')
+  expect(await state.operations!.takeNotice()).toBe('backend-unavailable')
 })

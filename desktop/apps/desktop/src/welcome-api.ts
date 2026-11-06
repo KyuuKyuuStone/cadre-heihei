@@ -21,7 +21,7 @@ export const WELCOME_IPC = {
 export type WelcomeSaveResult = { readonly ok: true } | { readonly ok: false }
 
 /** One-time notification retained by the main process until Welcome receives it. */
-export type WelcomeNotice = 'session-expired'
+export type WelcomeNotice = 'session-expired' | 'backend-unavailable'
 
 type WelcomeEventName = 'auth_page_view' | 'auth_page_click' | 'api_key_save_click'
 

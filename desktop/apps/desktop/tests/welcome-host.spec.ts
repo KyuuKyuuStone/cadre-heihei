@@ -1,6 +1,6 @@
 /** Native onboarding reuses authenticated Web RPC and never reads credential values. */
 import { describe, expect, it, vi } from 'vitest'
-import { connectDesktopWelcome } from '../src/welcome-backend.ts'
+import { connectDesktopWelcome, startDesktopWelcome } from '../src/welcome-backend.ts'
 
 function transport(preference?: string) {
   const keys = new Map<string, string>()
@@ -119,8 +119,34 @@ describe('desktop welcome Web operations', () => {
     expect(await backend.read()).toMatchObject({ loggedIn: false, hasApiKey: false })
   })
 
-  it('refuses an unauthenticated Web launch', async () => {
-    const send = vi.fn<Parameters<typeof connectDesktopWelcome>[1]>(async () => new Response(null, { status: 401 }))
-    await expect(connectDesktopWelcome(url, send)).rejects.toThrow('Web authentication failed')
+  it.each([401, 407, 502])('retries HTTP %s once before reporting the Web authentication failure', async (status) => {
+    const send = vi.fn<Parameters<typeof connectDesktopWelcome>[1]>(async () => new Response(null, { status }))
+    await expect(connectDesktopWelcome(url, send)).rejects.toMatchObject({ status })
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([401, 407, 502])('keeps startup alive when both loopback authentication paths answer HTTP %s', async (status) => {
+    const send = vi.fn<Parameters<typeof startDesktopWelcome>[1]>(async () => new Response(null, { status }))
+    await expect(startDesktopWelcome(url, send, async () => '')).resolves.toEqual({
+      backend: undefined, hostCookie: undefined,
+    })
+    expect(send).toHaveBeenCalledTimes(4)
+  })
+
+  it('keeps startup alive when the loopback transport itself fails', async () => {
+    const send = vi.fn<Parameters<typeof startDesktopWelcome>[1]>(async () => {
+      throw new Error('proxy connect ECONNREFUSED 127.0.0.1:7890')
+    })
+    await expect(startDesktopWelcome(url, send, async () => '')).resolves.toEqual({
+      backend: undefined, hostCookie: undefined,
+    })
+    expect(send).toHaveBeenCalledTimes(4)
+  })
+
+  it('recovers the Host cookie from the loopback jar when the probe alone fails', async () => {
+    const send = vi.fn<Parameters<typeof startDesktopWelcome>[1]>(async () => new Response(null, { status: 407 }))
+    await expect(startDesktopWelcome(url, send, async () => 'session=jar')).resolves.toEqual({
+      backend: undefined, hostCookie: 'session=jar',
+    })
   })
 })
