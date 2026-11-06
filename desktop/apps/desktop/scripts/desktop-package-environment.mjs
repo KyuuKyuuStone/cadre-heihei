@@ -94,7 +94,7 @@ function readSettings(path, accepts) {
     contents = readFileSync(path, 'utf8')
   }
   catch {
-    throw new Error(`desktop package: cannot read ${path}; copy ${path}.example and fill in the local settings`)
+    throw new Error(`desktop package: cannot read ${path}; copy ${path}.example to ${path} and fill in the local settings, or select a machine preset: DSH_PACKAGING_PRESET=test|production with DSH_PACKAGING_CONFIG_DIR set to an absolute directory`)
   }
   let settings
   try {
