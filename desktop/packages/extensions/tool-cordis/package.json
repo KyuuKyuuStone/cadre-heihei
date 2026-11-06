@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-tool-cordis",
   "description": "Read-only runtime API inspection for Harness plugin development",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "publishConfig": {
     "access": "public"
   },
