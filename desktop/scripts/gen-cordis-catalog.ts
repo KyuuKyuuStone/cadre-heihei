@@ -134,6 +134,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   agentTeams: 'agent-team.md',
   claudeCodeMods: 'claude-code-mods.md',
   tokenMeter: 'token-meter.md',
+  tokenLedger: 'token-meter.md',
   toolResultPruner: 'compaction.md',
   tools: 'tools.md',
   typert: 'typert.md',
@@ -209,6 +210,7 @@ export const SERVICE_WALK_EXEMPTIONS: Record<string, string> = {
   sidebarRight: 'client-side right-Sidebar navigation face — packages/client/ui-sidebar-right/README.md owns the API',
   sidebarRightTabs: 'client-side right-Sidebar tab-type registry — packages/client/ui-sidebar-right/README.md owns the API',
   documentPreviews: 'client-side document renderer registry — docs/subsystems/sidebar-right.md owns the API',
+  cadreSessionRank: 'client-side cross-plugin session rank observable — packages/client/ui-sidebar/README.md owns the API',
 }
 
 /**
@@ -983,6 +985,8 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   TerminalFrame: 'Browser terminal stream frames are owned by packages/api/terminal-controller/README.md',
   TerminalRetentionFrame: 'Browser terminal window holds are owned by packages/api/terminal-controller/README.md',
   WebTerminalId: 'Browser terminal identity is owned by packages/api/terminal-controller/README.md',
+  TokenLedgerReport: 'per-Session ledger report is owned by packages/experimental/token-ledger/README.md',
+  TokenLedgerGlobalReport: 'process-wide ledger report is owned by packages/experimental/token-ledger/README.md',
 }
 
 /** Repository data policy consumed by the Cordis catalog projector. */
