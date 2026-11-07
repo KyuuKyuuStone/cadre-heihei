@@ -2,7 +2,13 @@
 
 ## 1.5.4
 
-- **任务记忆保持 1.5.x 既有行为**：恢复终态任务摘要、任务上下文注入、查询路由与归档后压缩；本批不设计 2.0 记忆系统或记忆引擎
+- **任务记忆保持 1.5.x 既有行为**：恢复终态任务摘要、任务上下文注入、查询路由与归档后压缩；归档压缩新增当前上下文阈值门（`taskMemoryCompactionThresholdTokens`，默认 60000）；本批不设计 2.0 记忆系统或记忆引擎
+- **token 账本记录细化**：实验账本按 role 记录，保留 `uncachedInput`/`cacheRead`/`cacheWrite`/`output` 四分桶，旧记录按 legacy 形状回读；默认仍不启用
+- **派发批次更透明**：批次内文件重叠会告警，非对象条目按 invalid-item 归因，不再静默；角色提示词与派发/报告输出以 expected/ 快照钉住
+- **GitHub 预发布发布脚本**：新增 `desktop-github-release.ts`——以 `<target>-release.json` 锚校验发布身份（本地 record 校验 + 远端只读先行），创建 `--prerelease` 预发布并上传安装器，读回验证 tag/target/资产；dirty 检出或 annotated tag 拒绝，不自动重试
+- **运行时构建根解析**：新增 `desktop-runtime-build-root.mjs`，接入 `prepare-dsh` 与打包环境
+- **打包提交号回退与冷树编译**：无 Git 源码树时构建提交号回退 `CADRE_SOURCE_COMMIT` 再退 `unknown` 并告警（签名发布仍要求真实提交号），真实提交号经 `DSH_CLIENT_COMMIT_HASH` 交给客户端构建；库构建顺序调整为 Host 编译 → Typert → Client 编译 → 各 bundle，冷树一遍即可构建；`package-doctor` 新增 source-commit 检查
+- **发布工程收尾**：`.gitignore` 忽略本地 lefthook 示例与运行时 `logs/`，避免打包 dirty 检查误报拒发；新增打包模板漂移回归测试（`packaging-template.spec.ts`）；发布脚本测试补 `noUncheckedIndexedAccess` 卫兵，官方构建链不再在该处硬停
 
 ## 1.5.3
 
