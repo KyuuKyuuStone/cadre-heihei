@@ -62,10 +62,16 @@ export function loadDesktopPackageEnvironment(platform, environment = process.en
     if (settings.DSH_DESKTOP_AUTO_UPDATE_ENV !== preset) throw new Error('desktop package: preset deployment must match its name')
     if (!options.unsigned && (platform === 'darwin' || !options.prepareOnly)) {
       const filename = platform === 'win32' ? 'windows-signing.env' : 'macos-signing.env'
-      Object.assign(settings, readSettings(join(dirname(dirname(path)), 'secrets', filename),
+      const secrets = join(dirname(dirname(path)), 'secrets', filename)
+      // A machine secrets directory has no sibling .example; point recovery at the tracked signing template.
+      const template = fileURLToPath(new URL(platform === 'win32'
+        ? '../config/windows-packaging/windows-signing.env.example'
+        : '../config/macos-packaging/macos-signing.env.example', import.meta.url))
+      Object.assign(settings, readSettings(secrets,
         name => platform === 'win32'
           ? /^DSH_DESKTOP_WINDOWS_(?:CER_FILE|SIGNTOOL|KEY_CONTAINER|TOKEN_PIN)$/u.test(name)
-          : MACOS_SETTING.test(name) && !publicPlatformSetting.test(name)))
+          : MACOS_SETTING.test(name) && !publicPlatformSetting.test(name),
+        `copy the signing template ${template} to ${secrets} and fill in the machine credentials`))
     }
   }
   const releaseId = environment.PACKAGE_TEST_RELEASE_ID?.trim()
@@ -86,15 +92,16 @@ export function loadDesktopPackageEnvironment(platform, environment = process.en
  * Read an explicitly selected dotenv without exposing credential-bearing parser errors.
  * @param {string} path Selected file; relative file settings resolve beside it.
  * @param {(name: string) => boolean} accepts Whether this file may declare a setting.
+ * @param {string} [missingSettings] Guidance for a missing file; defaults to copying the sibling `.example`, which machine secret files do not have.
  * @returns {NodeJS.ProcessEnv} Validated file settings.
  */
-function readSettings(path, accepts) {
+function readSettings(path, accepts, missingSettings = `copy ${path}.example to ${path} and fill in the local settings, or select a machine preset: DSH_PACKAGING_PRESET=test|production with DSH_PACKAGING_CONFIG_DIR set to an absolute directory`) {
   let contents
   try {
     contents = readFileSync(path, 'utf8')
   }
   catch {
-    throw new Error(`desktop package: cannot read ${path}; copy ${path}.example to ${path} and fill in the local settings, or select a machine preset: DSH_PACKAGING_PRESET=test|production with DSH_PACKAGING_CONFIG_DIR set to an absolute directory`)
+    throw new Error(`desktop package: cannot read ${path}; ${missingSettings}`)
   }
   let settings
   try {

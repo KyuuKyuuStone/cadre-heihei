@@ -7,11 +7,11 @@
  * 以非零退出码终止整轮打包。
  */
 
+import { createDesktopRuntimeBuildRoot } from './desktop-runtime-build-root.mjs'
 import { resolveMacOSSignatureCacheDirectory } from './macos-signature-cache-directory.mjs'
 import { packagingStep } from './packaging-step.mjs'
 import { spawn } from 'node:child_process'
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { delimiter, join, relative, resolve } from 'node:path'
 import { desktopNodeEnvironment } from '../src/node-environment.ts'
 import { createRuntimeProjectMetadata } from '../src/project-manager.ts'
@@ -45,11 +45,13 @@ import { selectOfficeEngine } from '../../../scripts/libreoffice-packages.mjs'
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const BUILD_PATHS = resolveDesktopTargetBuildPaths()
 const DSH_OUTPUT_ROOT = BUILD_PATHS.dsh
-// 每轮构建专用的临时根目录，pnpm 工作区在此解析运行时依赖图。mkdtemp 的随机
-// 目录名隔离并发构建，也让这棵树不落在仓库内；`main` 的 finally 块保证脚本
-// 结束时删除它。注意：这棵 scratch 树正是本机企业端点安全软件拦截 pnpm store
-// 写入的观测点——此处被拒会让整轮打包以非零退出码失败。
-const BUILD_ROOT = mkdtempSync(join(tmpdir(), 'dsh-desktop-runtime-'))
+// 每轮构建专用的 scratch 根目录，pnpm 工作区在此解析运行时依赖图。目录固定在
+// 仓库与系统临时目录之外的账户级位置（`desktopRuntimeBuildRoot`，可被
+// `DSH_DESKTOP_RUNTIME_BUILD_ROOT` 覆盖），mkdtemp 的随机目录名隔离并发构建，
+// `main` 的 finally 块保证脚本结束时删除它。注意：这棵 scratch 树正是本机企业
+// 端点安全软件拦截 pnpm store 写入的观测点——此处被拒会让整轮打包以非零退出
+// 码失败。
+const BUILD_ROOT = createDesktopRuntimeBuildRoot(process.env)
 // 支撑 `BUILD_ROOT` 的 pnpm 内容寻址 store。它放在每轮 scratch 根内（而非用户级
 // store），使 lockfile-only 与 frozen install 不读也不写本轮之外的任何缓存。
 const STORE_ROOT = join(BUILD_PATHS.dshPnpm, 'store')

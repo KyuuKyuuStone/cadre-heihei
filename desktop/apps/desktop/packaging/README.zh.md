@@ -75,9 +75,9 @@ production 发布使用产品版本本身，不传 `--build-version`。其上传
 
 ### 源码获取方式
 
-1. 打包要求源码目录必须是 Git 仓库，通常通过 `git clone` 获取。GitHub 网页 **Download ZIP** 解出的源码不含 `.git`，打包会在读取构建提交号时失败，报错包含 `Command failed: git rev-parse HEAD`。
-2. 推荐执行 `git clone` 后在克隆目录内打包；也可以在 ZIP 解出目录执行 `git init && git add -A && git commit -m "source import"` 后再打包。采用后者时，产物清单里的 `dshBuildCommit` 是本地新建提交，不代表上游历史。
-3. 打包前执行 `git rev-parse --show-toplevel` 自检；能输出仓库根目录即满足源码前提。
+1. 打包用 `git` 读取构建提交号，通常来自 `git clone`。GitHub 网页 **Download ZIP** 解出的源码不含 `.git`；此时打包改读 `CADRE_SOURCE_COMMIT`，未设置时本地与 test 构建以提交号 `unknown` 继续（会打印 WARN 指明该变量），签名 release 构建则要求真实提交号，缺失即失败。客户端构建没有 `unknown` 模式：WARN 之后它会停在客户端构建一步，因此一次出包需要经 `CADRE_SOURCE_COMMIT`（打包会把它转发给客户端构建）或 Git 仓库提供真实提交号。
+2. 推荐执行 `git clone` 后在克隆目录内打包。在 ZIP 解出目录中，可把 `CADRE_SOURCE_COMMIT` 设为该压缩包对应的上游提交号（签名 release 必需），或在打包前执行 `git init && git add -A && git commit -m "source import"`。两种回退下清单都记录 `dshBuildDirty=false`；采用 `git init` 时产物清单里的 `dshBuildCommit` 是本地新建提交，不代表上游历史。
+3. 打包前执行 `git rev-parse --show-toplevel` 自检；能输出仓库根目录即处于 Git 仓库内，失败时按第 2 条的回退方式处理。
 
 每条打包命令在构建与下载前检查应用 ID 以及该模式需要的更新与签名配置，随后探测本次运行要用的外部工具：归档读取工具，以及 Windows 目标的安装器编译器。macOS 检查身份、Team ID、一套完整公证凭据、`CSC_LINK` 指定的可读本地 p12 文件、显式配置的 `CSC_KEY_PASSWORD`，以及引用的 API Key 和钥匙串文件；Windows 检查公开代码签名证书、SignTool 文件、容器名称和 PIN 格式。仅准备 Windows 资源以及两个平台上的显式未签名打包均不要求签名凭据。配置检查不验证 PIN 是否正确、Token 是否登录、钥匙串是否解锁或 Apple 是否接受凭据；实际签名与公证负责这些检查。未选择机器 preset 时，`--build-version auto` 会访问目标 bucket，`--check` 下同样如此。单独运行相同检查：
 
@@ -266,7 +266,7 @@ NSIS 在安装阶段清理临时解压目录，完成后才显示完成页或自
 
 Desktop [补丁策略](../scripts/runtime-patch-policy.ts) 将每份工作区补丁明确归为共享、仅工作区或仅运行时。共享项复用根目录补丁字节，并对照根锁文件校验 hash；仅运行时项使用仓库内的独立文件，不改变工作区安装。仅工作区补丁用于构建工具或已嵌入客户端 bundle 的依赖。未分类或过期的条目、文件缺失、hash 改变、解析版本不兼容，以及仅工作区包进入运行时，都会阻止打包。[准备脚本](../scripts/prepare-runtime-patches.ts) 只写入临时项目；pnpm 负责应用选中的补丁，应用失败时会报错。
 
-Desktop 依赖 overrides 在补丁策略模块中单独声明，不从补丁版本推导。pi-ai 约束使运行时版本保持在共享补丁已验证的版本。Desktop 仍会在每次构建时重新解析运行时锁文件，再通过 `--frozen-lockfile` 安装；不同构建之间的依赖解析尚不保证可复现。CLI 打包安装测试及其他交付流程保留各自的配置。
+Desktop 依赖 overrides 在补丁策略模块中单独声明，不从补丁版本推导。pi-ai 约束使运行时版本保持在共享补丁已验证的版本。Desktop 仍会在每次构建时重新解析运行时锁文件，再通过 `--frozen-lockfile` 安装；不同构建之间的依赖解析尚不保证可复现。CLI 打包安装测试及其他交付流程保留各自的配置。解析与安装在每轮独立的 scratch 树中进行，scratch 树归属固定的账户级根目录 `~/.dsh-desktop-build/runtime`——与 pnpm store 一样位于仓库与系统临时目录之外；`DSH_DESKTOP_RUNTIME_BUILD_ROOT` 可指定其他绝对路径根目录，每轮的 scratch 树在该轮结束时删除。
 
 每条打包命令都会构建仓库，打包以 dsh 和私有 Desktop Host 为根的第一方生产依赖闭包，并准备目标专用的 Electron 分发包和包含共享 pnpm CLI 的 primary-runtime。`prepare:dsh` 在构建时安装一次生产依赖图，准备物化包供 electron-builder 归档到 `app.asar/dsh`，移除包管理器元数据，并生成包含共享包版本和最终文件哈希的 `desktop-runtime.json`。macOS 签名构建先签名并验证原生文件，再生成清单；electron-builder 不对已签名的此目录重复进行嵌套签名。资源映射明确包含默认根目录过滤器会忽略的 `dsh/node_modules`；准备完成的运行时清单在原生签名后检查。原生可执行文件及库解包到 ASAR 旁；Python、独立 Node 和 pnpm 保留在外部 runtime 资源中。Windows 打包逐项检查准备好的 PE，确认其 ASAR 条目已标记为解包，且磁盘副本字节一致；未签名构建也执行此检查。Builder glob 规则用单字符通配符匹配 PE 文件名中的花括号，因此同目录中名称匹配的文件也可能被解包。准备好的运行时 smoke 沿用已验证的目标描述符，不使用构建宿主的架构。签名安装包、公证、已安装应用升级和各目标原生模块的验收需要发布环境。
 
