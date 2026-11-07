@@ -23,7 +23,7 @@ Publish one desktop prerelease on GitHub Releases with one operator and a proven
 ## Release rules
 
 1. One operator publishes a version. While a draft or an asset-carrying release for the version exists, the script refuses a second operator, so parallel publishes cannot double-upload.
-2. The tag `v<version>`, the release `targetCommitish`, and the packaged commit must name one commit. The packaged commit comes from the `<target>-release.json` completion record that the packaging scripts write beside the installer, so no operator types a commit id.
+2. The tag `v<version>`, the release `targetCommitish`, and the packaged commit must name one commit. The packaged commit comes from the `<target>-release.json` completion record beside the installer — written by the packaging scripts for signed channel builds, and derived from the machine-written packaging run for unsigned prereleases — so no operator types a commit id.
 3. The build must come from a clean checkout. A completion record that says `dirty` is refused, because the tag would not name the tree users received.
 4. The script reads before it writes: every remote check runs first, the tag is never moved, assets are never clobbered, and every create passes `--target <commit>` explicitly.
 
@@ -31,7 +31,7 @@ Publish one desktop prerelease on GitHub Releases with one operator and a proven
 
 ## Before you publish
 
-Build the release artifacts and keep the completion record beside them. The Windows release path is `pnpm release:win --version <version>`, which produces the installer, the adjacent `.exe.blockmap`, and `win-x64-release.json` under `apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/`. A missing or stale record is a hard stop: rebuild with the current packaging scripts instead of hand-writing the record.
+Build the release artifacts and keep the completion record beside them. The Windows release path is `pnpm release:win --version <version>`, which produces the installer and the adjacent `.exe.blockmap` under `apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/`. Unsigned builds write no completion record — signed channel builds do — so derive the record from the machine-written packaging run with `pnpm exec tsx scripts/derive-unsigned-release-record.ts win-x64`, run from `apps/desktop`. It reads the newest unsigned run for the target, refuses dirty, failed, or unfinished runs, refuses to guess when the directory does not hold exactly one installer for the recorded version, and writes `win-x64-release.json` beside the installer. A missing or stale record is a hard stop: run the derive step again — never hand-write the record.
 
 Prepare the release notes as a Markdown file; `--notes-file` is required. Push the packaged commit to GitHub before publishing, because the release must target a commit the remote knows. `gh` must be installed and authenticated (`gh auth login`); the script uses the operator's own GitHub identity and never retries on its own.
 
@@ -53,7 +53,7 @@ Publish by dropping `--dry-run`. The script creates the prerelease with `gh rele
 
 ## Failure messages and recovery
 
-Every failure prints the rule that stopped the run and exits nonzero without further writes. `no completion record`, `names no version`, or `is not a full commit id`: rebuild with the packaging scripts. `with uncommitted changes`: rebuild from a clean checkout. `is not on <repository>`: push the release commit first.
+Every failure prints the rule that stopped the run and exits nonzero without further writes. `no completion record`, `names no version`, or `is not a full commit id`: rebuild with the packaging scripts, then derive the record again with `scripts/derive-unsigned-release-record.ts`. `with uncommitted changes`: rebuild from a clean checkout. `is not on <repository>`: push the release commit first.
 
 `tag ... names X, not the packaged commit` or `is an annotated tag`: reconcile the tag manually; the script never moves it. `release ... targets X, not the packaged commit`: delete the release and publish again with the script. `already carries N asset(s)`: another operator published; verify the release instead of uploading. `is a draft`: another operator is preparing it; reconcile with them. `gh release upload ... failed` or `verification failed`: view the release, reconcile the partial state manually, and only then run the script again.
 
@@ -65,4 +65,4 @@ v1.5.3 was published with a `gh release create` that omitted `--target`, so GitH
 
 ## Dev Note
 
-None.
+Unsigned packaging deliberately writes no completion record; the derive step is the bridge that lets the GitHub prerelease channel reuse the same record contract from the machine-written packaging run instead of weakening what the record means.

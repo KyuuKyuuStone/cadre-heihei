@@ -15,6 +15,7 @@ export interface DesktopTargetBuildPaths {
   readonly packedVendor: string
   readonly packedLandlock: string
   readonly downloads: string
+  readonly packagingRuns: string
 }
 
 /**
@@ -33,9 +34,10 @@ export function resolveDesktopBuildTarget(
 /**
  * Return the mutable preparation and artifact directories owned by one release target.
  * @param target - Supported Desktop target name.
- * @returns Target paths plus the shared immutable download cache.
+ * @param buildRoot - Build tree root the target tree and the shared caches hang off; defaults to the app build root.
+ * @returns Target paths plus the shared immutable download cache and the shared packaging-run journal root.
  */
-export function desktopTargetBuildPaths(target: DesktopAutoUpdateTarget): DesktopTargetBuildPaths
+export function desktopTargetBuildPaths(target: DesktopAutoUpdateTarget, buildRoot?: string): DesktopTargetBuildPaths
 
 /**
  * Return the platform and architecture of the payload one release target prepares.
