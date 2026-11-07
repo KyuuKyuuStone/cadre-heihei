@@ -104,6 +104,24 @@ function seedTask(databasePath: string, input: {
   }
 }
 
+function seedTerminalEvent(databasePath: string, input: {
+  readonly taskId: string
+  readonly status: string
+  readonly reason: string
+  readonly at?: string
+}): void {
+  const db = new DatabaseSync(databasePath)
+  try {
+    db.prepare(`INSERT INTO task_events (event_id, project_id, task_id, from_status, to_status,
+      actor_session_id, reason, message_id, idempotency_key, at)
+      VALUES (?, ?, ?, 'delivered', ?, ?, ?, NULL, ?, ?)`).run(
+      `terminal-${input.taskId}`, PROJECT, input.taskId, input.status, SUPERVISOR, input.reason,
+      `terminal:${input.taskId}`, input.at ?? AT)
+  } finally {
+    db.close()
+  }
+}
+
 function countEvents(databasePath: string, taskId: string, toStatus: string): number {
   const db = new DatabaseSync(databasePath)
   try {
@@ -507,10 +525,93 @@ describe('rework notification (DF-005)', () => {
   })
 })
 
+describe('terminal task notification (P0-1)', () => {
+  const cases = [
+    { status: 'cancelled', reason: '需求撤回', header: '【任务取消】', snapshot: 'transition-notice-cancelled.txt' },
+    { status: 'failed', reason: '构建失败', header: '【任务关闭】', snapshot: 'transition-notice-failed.txt' },
+  ] as const
+
+  for (const item of cases) {
+    it(`queues ${item.header} to the assignee once for ${item.status}`, async () => {
+      const databasePath = freshDatabase()
+      const { tools, prompts } = mount(databasePath)
+      seedRoster(databasePath)
+      seedTask(databasePath, { taskId: 't1', seq: 1, assignee: WORKER })
+      const input = { taskId: 't1', to: item.status, reason: item.reason, idempotencyKey: `${item.status}-t1` }
+
+      const first = await tools.get('transition_task')!.execute(input, run(SUPERVISOR)) as {
+        status: string; replayed: boolean; assigneeNotified?: boolean
+      }
+      expect(first).toMatchObject({ status: item.status, replayed: false, assigneeNotified: true })
+      expect(prompts).toHaveLength(1)
+      const prompt = prompts[0] as { sessionId: string; mode: string; content: { type: string; text: string }[] }
+      expect(prompt).toMatchObject({ sessionId: WORKER, mode: 'queue' })
+      expect(prompt.content[0]?.text).toContain(item.header)
+      await expect(`${prompt.content[0]?.text}\n`).toMatchFileSnapshot(`./expected/${item.snapshot}`)
+
+      const replay = await tools.get('transition_task')!.execute(input, run(SUPERVISOR)) as {
+        replayed: boolean; assigneeNotified?: boolean
+      }
+      expect(replay.replayed).toBe(true)
+      expect(replay.assigneeNotified).toBeUndefined()
+      expect(prompts).toHaveLength(1)
+    })
+
+    it(`keeps the ${item.status} transition when the notice fails`, async () => {
+      const databasePath = freshDatabase()
+      const { tools } = mount(databasePath, { prompt: () => Promise.reject(new Error('session offline')) })
+      seedRoster(databasePath)
+      seedTask(databasePath, { taskId: 't1', seq: 1, assignee: WORKER })
+
+      const result = await tools.get('transition_task')!.execute(
+        { taskId: 't1', to: item.status, reason: item.reason, idempotencyKey: `${item.status}-fail` },
+        run(SUPERVISOR),
+      ) as { status: string; assigneeNotified?: boolean; notifyError?: string }
+
+      expect(result).toMatchObject({ status: item.status, assigneeNotified: false })
+      expect(result.notifyError).toContain('session offline')
+      expect(countEvents(databasePath, 't1', item.status)).toBe(1)
+    })
+  }
+})
+
+describe('terminal task report refusal (P0-1)', () => {
+  const cases = [
+    { status: 'verified', reason: '验收通过', snapshot: 'report-terminal-verified.txt' },
+    { status: 'cancelled', reason: '需求撤回', snapshot: 'report-terminal-cancelled.txt' },
+    { status: 'failed', reason: '构建失败', snapshot: 'report-terminal-failed.txt' },
+  ] as const
+
+  for (const item of cases) {
+    it(`returns readable copy for a ${item.status} task`, async () => {
+      const databasePath = freshDatabase()
+      const { tools } = mount(databasePath)
+      seedRoster(databasePath)
+      seedTask(databasePath, { taskId: 't1', seq: 1, assignee: WORKER, status: item.status })
+      seedTerminalEvent(databasePath, { taskId: 't1', status: item.status, reason: item.reason })
+
+      const error = await tools.get('report_task')!.execute(
+        { taskId: 't1', summary: '已完成', deliverables: ['out.txt'] },
+        run(WORKER),
+      ).then(() => undefined, (reason: unknown) => reason)
+
+      expect(error).toBeInstanceOf(Error)
+      const message = (error as Error).message
+      expect(message).not.toContain('INVALID_TRANSITION')
+      expect(message).toContain('无需再回报')
+      await expect(`${message}\n`).toMatchFileSnapshot(`./expected/${item.snapshot}`)
+    })
+  }
+})
+
 describe('dispatch_task input validation', () => {
   interface DispatchFailure { target: string; reason: string; retryable: boolean; pendingId?: string }
   interface DispatchResult {
-    dispatched: { taskId: string; assigneeName: string; role: string; dueAt: string }[]
+    dispatched: {
+      taskId: string; assigneeName: string; role: string; dueAt: string
+      estimatedTokens: number; warnings: string[]
+      overlaps?: { taskId: string; assignee: string; file: string }[]
+    }[]
     failed: DispatchFailure[]
   }
 
@@ -521,12 +622,12 @@ describe('dispatch_task input validation', () => {
   const dispatch = async (
     tasks: readonly Record<string, unknown>[],
     sessionId = SUPERVISOR,
-  ): Promise<{ databasePath: string; prompts: unknown[]; result: DispatchResult }> => {
+  ): Promise<{ databasePath: string; prompts: unknown[]; result: DispatchResult; tools: Mounted['tools'] }> => {
     const databasePath = freshDatabase()
     const { tools, prompts } = mount(databasePath)
     seedRoster(databasePath)
     const result = await tools.get('dispatch_task')!.execute({ tasks }, run(sessionId)) as DispatchResult
-    return { databasePath, prompts, result }
+    return { databasePath, prompts, result, tools }
   }
 
   it('reports a missing title as invalid input instead of a bind error', async () => {
@@ -576,6 +677,50 @@ describe('dispatch_task input validation', () => {
     expect(result.failed[0]?.reason).toContain('body')
     expect(result.failed[0]?.retryable).toBe(false)
     expect(countTasks(databasePath)).toBe(0)
+  })
+
+  it.each([
+    ['null', null],
+    ['a string', 'not-a-task'],
+    ['a number', 7],
+  ])('classifies %s as invalid_item without queueing it', async (_label, value) => {
+    const databasePath = freshDatabase()
+    const { tools, prompts } = mount(databasePath)
+    seedRoster(databasePath)
+
+    const result = await tools.get('dispatch_task')!.execute({ tasks: [value] }, run(SUPERVISOR)) as DispatchResult
+
+    expect(result.dispatched).toEqual([])
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0]?.target).toBe('(非对象条目)')
+    expect(result.failed[0]?.reason).toContain('invalid_item')
+    expect(result.failed[0]?.reason).toContain('对象')
+    expect(result.failed[0]?.reason).not.toContain('任务台账写入失败')
+    expect(result.failed[0]?.retryable).toBe(false)
+    expect(result.failed[0]?.pendingId).toBeUndefined()
+    expect(countTasks(databasePath)).toBe(0)
+    expect(countPending(databasePath)).toBe(0)
+    expect(prompts).toHaveLength(0)
+  })
+
+  it('keeps dispatching valid objects when a batch contains non-object entries', async () => {
+    const databasePath = freshDatabase()
+    const { tools, prompts } = mount(databasePath)
+    seedRoster(databasePath)
+    const tasks: unknown[] = [null, item(), 7, item({ employee: WORKER_2 })]
+
+    const result = await tools.get('dispatch_task')!.execute({ tasks }, run(SUPERVISOR)) as DispatchResult
+
+    expect(result.dispatched).toHaveLength(2)
+    expect(result.failed).toHaveLength(2)
+    for (const row of result.failed) {
+      expect(row.reason).toContain('invalid_item')
+      expect(row.retryable).toBe(false)
+      expect(row.pendingId).toBeUndefined()
+    }
+    expect(countTasks(databasePath)).toBe(2)
+    expect(countPending(databasePath)).toBe(0)
+    expect(prompts).toHaveLength(2)
   })
 
   it('keeps dispatching the rest of a batch when the second of five tasks is invalid', async () => {
@@ -704,5 +849,98 @@ describe('dispatch_task input validation', () => {
     expect(result.failed[1]?.retryable).toBe(false)
     // The storage failure is queued for retry with the original fields intact.
     expect(pendingEntry(databasePath)?.title).toBe('会被存储拒绝')
+  })
+
+  it('reports a shared file on the second task without rejecting either dispatch', async () => {
+    const { databasePath, prompts, result, tools } = await dispatch([
+      item({ packet: { fileRefs: [{ path: 'src/shared.ts' }] } }),
+      item({ employee: WORKER_2, packet: { fileRefs: [{ path: 'src/shared.ts' }] } }),
+    ])
+
+    expect(result.failed).toEqual([])
+    expect(result.dispatched).toHaveLength(2)
+    const [first, second] = result.dispatched
+    expect('overlaps' in first!).toBe(false)
+    expect(second?.overlaps).toEqual([{ taskId: first!.taskId, assignee: WORKER, file: 'src/shared.ts' }])
+    // Still dispatched to both people: the notice is advisory, not a rejection.
+    expect(countTasks(databasePath)).toBe(2)
+    expect(prompts).toHaveLength(2)
+
+    const rendered = (tools.get('dispatch_task')!.output!.render({}, result) as { text?: string }[])
+      .map(block => block.text ?? '').join('\n')
+    await expect(`${rendered.replaceAll(first!.taskId, '<task-1>').replaceAll(second!.taskId, '<task-2>')}\n`)
+      .toMatchFileSnapshot('./expected/dispatch-file-overlap.txt')
+  })
+
+  it('omits overlaps when the file sets do not intersect', async () => {
+    const { result } = await dispatch([
+      item({ packet: { fileRefs: [{ path: 'src/left.ts' }] } }),
+      item({ employee: WORKER_2, packet: { fileRefs: [{ path: 'src/right.ts' }] } }),
+    ])
+
+    expect(result.dispatched).toHaveLength(2)
+    expect(result.dispatched[1]?.overlaps).toBeUndefined()
+    expect('overlaps' in result.dispatched[1]!).toBe(false)
+  })
+
+  it('persists the task fileRefs so a later dispatch call still sees the overlap', async () => {
+    const databasePath = freshDatabase()
+    const { tools, prompts } = mount(databasePath)
+    seedRoster(databasePath)
+    const execute = (tasks: readonly Record<string, unknown>[]): Promise<DispatchResult> =>
+      tools.get('dispatch_task')!.execute({ tasks }, run(SUPERVISOR)) as Promise<DispatchResult>
+
+    const first = await execute([item({ packet: { fileRefs: [{ path: 'src/shared.ts' }] } })])
+    const second = await execute([item({ employee: WORKER_2, packet: { fileRefs: [{ path: 'src/shared.ts' }] } })])
+
+    expect(second.dispatched[0]?.overlaps).toEqual([
+      { taskId: first.dispatched[0]!.taskId, assignee: WORKER, file: 'src/shared.ts' },
+    ])
+    const db = new DatabaseSync(databasePath)
+    try {
+      const persisted = db.prepare('SELECT file_refs FROM tasks WHERE task_id = ?')
+        .get(first.dispatched[0]!.taskId) as { file_refs?: string }
+      expect(JSON.parse(persisted.file_refs!)).toEqual([{ path: 'src/shared.ts' }])
+    } finally {
+      db.close()
+    }
+    expect(prompts).toHaveLength(2)
+  })
+
+  it('ignores a closed task when reporting open-file overlaps', async () => {
+    const databasePath = freshDatabase()
+    const { tools } = mount(databasePath)
+    seedRoster(databasePath)
+    const execute = (tasks: readonly Record<string, unknown>[]): Promise<DispatchResult> =>
+      tools.get('dispatch_task')!.execute({ tasks }, run(SUPERVISOR)) as Promise<DispatchResult>
+
+    const first = await execute([item({ packet: { fileRefs: [{ path: 'src/shared.ts' }] } })])
+    const db = new DatabaseSync(databasePath)
+    try {
+      db.prepare("UPDATE tasks SET status = 'verified' WHERE task_id = ?").run(first.dispatched[0]!.taskId)
+    } finally {
+      db.close()
+    }
+    const second = await execute([item({ employee: WORKER_2, packet: { fileRefs: [{ path: 'src/shared.ts' }] } })])
+
+    expect(second.dispatched[0]?.overlaps).toBeUndefined()
+  })
+
+  it('adds file_refs to an existing tasks table', () => {
+    const databasePath = freshDatabase()
+    const db = new DatabaseSync(databasePath)
+    try {
+      db.exec('CREATE TABLE tasks (task_id TEXT PRIMARY KEY)')
+    } finally {
+      db.close()
+    }
+    mount(databasePath)
+    const reader = new DatabaseSync(databasePath)
+    try {
+      const columns = reader.prepare('PRAGMA table_info(tasks)').all() as { name?: string }[]
+      expect(columns.some(column => column.name === 'file_refs')).toBe(true)
+    } finally {
+      reader.close()
+    }
   })
 })
