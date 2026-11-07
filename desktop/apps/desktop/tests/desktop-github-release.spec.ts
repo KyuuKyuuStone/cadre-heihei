@@ -98,6 +98,7 @@ function identityGh(
     if (args[0] === 'release' && args[1] === 'view') {
       const response = releaseViews[Math.min(views, releaseViews.length - 1)]
       views += 1
+      if (response === undefined) return undefined
       if (response instanceof Error) return response
       const view = JSON.parse(response) as { assets?: unknown[] }
       return JSON.stringify({ ...JSON.parse(response), assets: (view.assets ?? []).length > 0 ? view.assets : uploaded })
