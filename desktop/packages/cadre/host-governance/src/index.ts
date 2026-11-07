@@ -52,7 +52,10 @@ export interface Config {
   readonly emailEnabled?: boolean
   /** Approximate token cap for the automatic task-memory prompt block. */
   readonly taskMemoryTokens?: number
-  /** Inclusive current-context floor for archive compaction; defaults to 60,000 tokens. */
+  /**
+   * Inclusive current-context floor for archive compaction; defaults to 60,000 tokens.
+   * A configured value must be a positive safe integer; anything else fails activation.
+   */
   readonly taskMemoryCompactionThresholdTokens?: number
 }
 
@@ -111,6 +114,11 @@ interface SystemPromptLike {
   context(section: {
     name: string; order: number; text: (context: { scope?: unknown }) => string; required?: boolean
   }): () => void
+}
+
+/** Current-context measurement; resolved per event because registration order is not fixed. */
+interface TokenMeterLike {
+  measure(session: SessionLike): { readonly totalTokens: number }
 }
 
 interface HostContext {
@@ -288,6 +296,20 @@ function numberOrZero(value: unknown): number {
 }
 
 /**
+ * Validate the archive compaction floor from the plugin row.
+ * @param configured - Raw `taskMemoryCompactionThresholdTokens`; unset keeps the 60,000 default.
+ * @returns The configured floor.
+ * @throws When the value is not a positive safe integer; a rejected floor would compact on every idle archive.
+ */
+function resolveCompactionThreshold(configured: number | undefined): number {
+  if (configured === undefined) return 60_000
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    throw new Error(`host-governance: taskMemoryCompactionThresholdTokens must be a positive integer, got ${String(configured)}`)
+  }
+  return configured
+}
+
+/**
  * Register the watchdog, supervisor tools, loopback action route, and goal lifecycle.
  * @param ctx - Host context with sessions, goals, tools, and the prompt channel.
  * @param config - Optional threshold overrides from the plugin row.
@@ -298,6 +320,9 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     console.error('host-governance: CADRE_LEDGER_PATH is unset; stall watchdog is not registered')
     return
   }
+  // Validate the configured floor before acquiring the ledger handle so a bad
+  // plugin row fails activation without leaving resources behind.
+  const compactionThresholdTokens = resolveCompactionThreshold(config.taskMemoryCompactionThresholdTokens)
   const ledger = new LedgerReader(databasePath)
   const projectOf = (sessionId: string): string | undefined => ledger.projects().find(projectId =>
     ledger.members(projectId).some(member =>
@@ -385,15 +410,15 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   ctx.provide?.('tokenUsage', tokenUsage)
   const taskMemory = new TaskMemoryReader(databasePath)
   ctx.provide?.('taskMemory', taskMemory)
-  const memoryCompactionGate = new TaskMemoryCompactionGate(config.taskMemoryCompactionThresholdTokens ?? 60_000)
-  const tokenMeter = ctx.get?.('tokenMeter') as {
-    measure(session: SessionLike): { readonly totalTokens: number }
-  } | undefined
+  const memoryCompactionGate = new TaskMemoryCompactionGate(compactionThresholdTokens)
   const disposeMemoryCompaction = ctx.on === undefined
     ? undefined
     : ctx.on('agent/status', ((payload: { readonly agent: { readonly id: string; readonly status?: string }; readonly status: string }) => {
       const projectId = projectOf(payload.agent.id)
-      if (projectId === undefined || tokenMeter === undefined) return
+      if (projectId === undefined) return
+      // Resolve per event: tokenMeter is optional and may register after this plugin loads.
+      const tokenMeter = ctx.get?.('tokenMeter') as TokenMeterLike | undefined
+      if (tokenMeter === undefined) return
       const latest = taskMemory.latest(projectId)
       const agent = ctx.agents.get(payload.agent.id)
       const memoryCompaction = agent === undefined ? undefined : compactionFor(ctx, agent)

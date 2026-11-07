@@ -57,7 +57,10 @@ type StatusListener = (payload: {
   readonly status: string
 }) => void
 
-function mountCompaction(config: Config = {}, options: { readonly systemPrompt?: boolean; readonly agentPresets?: boolean } = {}) {
+function mountCompaction(
+  config: Config = {},
+  options: { readonly systemPrompt?: boolean; readonly agentPresets?: boolean; readonly lateTokenMeter?: boolean } = {},
+) {
   const path = seed()
   const raw = new DatabaseSync(path)
   try {
@@ -100,6 +103,7 @@ function mountCompaction(config: Config = {}, options: { readonly systemPrompt?:
       return compaction
     },
   }
+  let tokenMeterRegistered = options.lateTokenMeter !== true
   const systemPrompt = {
     context: (section: { name: string; text: (context: { scope?: unknown }) => string }) => {
       promptSections.push(section)
@@ -119,7 +123,7 @@ function mountCompaction(config: Config = {}, options: { readonly systemPrompt?:
       complete: () => goal,
       disarm: () => goal,
     },
-    get: (name: string) => name === 'tokenMeter' ? tokenMeter
+    get: (name: string) => name === 'tokenMeter' && tokenMeterRegistered ? tokenMeter
       : name === 'agentPresets' && options.agentPresets !== false ? agentPresets
         : name === 'systemPrompt' && options.systemPrompt === true ? systemPrompt : undefined,
     provide: () => {},
@@ -136,6 +140,7 @@ function mountCompaction(config: Config = {}, options: { readonly systemPrompt?:
     setCurrentContextTokens: (value: number) => { currentContextTokens = value },
     setCompactResult: (value: unknown) => { compactResult = value },
     setCompactFailure: (error: Error | undefined) => { compactFailure = error },
+    registerTokenMeter: () => { tokenMeterRegistered = true },
     idle: () => { statusListener({ agent, status: 'idle' }) },
     compactCalls: () => compactCalls,
     promptSections,
@@ -237,6 +242,46 @@ describe('task memory', () => {
     await mounted.settle()
     expect(mounted.compactCalls()).toBe(0)
     mounted.setCurrentContextTokens(70_000)
+    mounted.idle()
+    await mounted.settle()
+    expect(mounted.compactCalls()).toBe(1)
+  })
+
+  it('rejects a compaction floor that is not a positive safe integer at the plugin boundary', () => {
+    for (const threshold of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 1.5, 2 ** 60]) {
+      expect(() => mountCompaction({ taskMemoryCompactionThresholdTokens: threshold }))
+        .toThrow(/taskMemoryCompactionThresholdTokens must be a positive integer/u)
+    }
+    // The plugin row arrives from YAML, so a numeric-looking string is still rejected.
+    expect(() => mountCompaction({ taskMemoryCompactionThresholdTokens: '60000' } as never))
+      .toThrow(/taskMemoryCompactionThresholdTokens must be a positive integer/u)
+  })
+
+  it('honors an explicitly configured 60000 floor and a minimal positive integer', async () => {
+    const explicit = mountCompaction({ taskMemoryCompactionThresholdTokens: 60_000 })
+    explicit.setCurrentContextTokens(59_999)
+    explicit.idle()
+    await explicit.settle()
+    expect(explicit.compactCalls()).toBe(0)
+    explicit.setCurrentContextTokens(60_000)
+    explicit.idle()
+    await explicit.settle()
+    expect(explicit.compactCalls()).toBe(1)
+
+    const minimal = mountCompaction({ taskMemoryCompactionThresholdTokens: 1 })
+    minimal.setCurrentContextTokens(1)
+    minimal.idle()
+    await minimal.settle()
+    expect(minimal.compactCalls()).toBe(1)
+  })
+
+  it('resolves the optional tokenMeter per event so a late registration still governs compaction', async () => {
+    const mounted = mountCompaction({}, { lateTokenMeter: true })
+    mounted.setCurrentContextTokens(60_000)
+    mounted.idle()
+    await mounted.settle()
+    expect(mounted.compactCalls()).toBe(0)
+    mounted.registerTokenMeter()
     mounted.idle()
     await mounted.settle()
     expect(mounted.compactCalls()).toBe(1)
