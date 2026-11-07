@@ -14,6 +14,11 @@ app/scripts/gates/evidence/
 
 # 日志
 *.log
+# 运行时日志目录（本地留存，不入库）
+/logs/
+
+# 本地工具配置（lefthook init 的全注释示例，未启用，不入库）
+/lefthook.yml
 
 # 环境变量（保留示例）
 .env
