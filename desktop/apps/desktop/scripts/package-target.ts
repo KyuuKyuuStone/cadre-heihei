@@ -361,8 +361,8 @@ async function main(): Promise<void> {
     return
   }
   process.stdout.write(`desktop package: ${target.name} publishes ${buildVersion}${buildVersion === productVersion ? '' : ` for product version ${productVersion}`}\n`)
-  const packaged = readDesktopBuildCommit(REPOSITORY_ROOT)
-  Object.assign(environment, desktopBuildCommitEnvironment(packaged))
+  const packaged = readDesktopBuildCommit(REPOSITORY_ROOT, { requireRealCommit: !invocation.unsigned })
+  Object.assign(environment, desktopBuildCommitEnvironment(packaged, environment))
   const secrets = Object.entries(environment).filter(([name]) => /KEY|SECRET|TOKEN|PASSWORD|APPLE_ID/iu.test(name)).map(([, value]) => value ?? '')
   const run = createPackagingRun(join(APP_ROOT, '.desktop-build', 'packaging-runs'), {
     target: target.name, unsigned: invocation.unsigned, skipNotarization: invocation.skipNotarization,

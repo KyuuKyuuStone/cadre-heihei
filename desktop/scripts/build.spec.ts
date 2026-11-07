@@ -8,9 +8,10 @@ const root = resolve(import.meta.dirname, '..')
 const artifactGraph = {
   'native': [],
   'host-src': ['native'],
-  'host-bundle': ['host-src'],
+  'host-typert': [],
+  'client-src': ['host-src', 'host-typert'],
+  'host-bundle': ['host-src', 'client-src'],
   'desktop-bundle': ['host-bundle'],
-  'client-src': ['desktop-bundle'],
   'client-bundle': ['client-src'],
   'web': ['client-bundle'],
 }
@@ -73,11 +74,15 @@ describe('repository build steps', () => {
   })
 
   it('starts each aggregate check after its own package compilation in the complete build', () => {
-    expect(graph(buildGates(root, 'complete'))).toEqual({
+    const gates = buildGates(root, 'complete')
+    expect(graph(gates)).toEqual({
       ...artifactGraph,
       'host-check': ['host-src'],
       'client-check': ['client-src'],
     })
+    // The bundle-free Typert pass lets Client compilation run before Host bundling, whose
+    // entry resolution needs the client declarations only the compiler emits on a cold tree.
+    expect(gates.find(gate => gate.id === 'host-typert')?.args.at(-1)).toBe(resolve(root, 'scripts/generate-typert.ts'))
   })
 
   it('type-checks every program with the source-only Typert pass beside Host compilation', () => {

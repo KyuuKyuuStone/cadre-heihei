@@ -38,7 +38,8 @@ node ..\tools\package-doctor\doctor.mjs --help
 | `proxy` | 代理 + `NO_PROXY` 回环绕过 | 未设代理 → PASS；设了代理且回环全绕过 → PASS；缺 localhost/127.0.0.1/::1 → FAIL。`NO_PROXY` 按逗号切分、trim、大小写归一后做精确主机匹配（含点后缀语义），单独识别 `*` 与 `<-loopback>`；子串包含不算绕过证据 |
 | `paths` | 仓库路径 ASCII、长度 | ASCII 且 ≤120 字符 → PASS；否则 FAIL |
 | `defender` | Defender 实时扫描（查询需权限，失败降级为 WARN） | 已关闭 → PASS；开启/未知 → WARN（附排除命令） |
-| `git` | 工作树脏状态 | 干净 → PASS；脏 → WARN（`dshBuildDirty` 会写进产物清单） |
+| `git` | 工作树脏状态（仅 Git 仓库内） | 干净 → PASS；脏 → WARN（`dshBuildDirty` 会写进产物清单）；无 Git 仓库 → 不产出结果，交由 `source-commit` 分类 |
+| `source-commit` | 无 Git 历史时的构建提交号回退（镜像 `readDesktopBuildCommit`：git → `CADRE_SOURCE_COMMIT` → `unknown`） | Git 可读 HEAD → PASS（附提交号）；无 Git 历史且 `CADRE_SOURCE_COMMIT` 未设 → WARN（unsigned/test 以 `unknown` 继续但客户端构建仍需真实提交号，release 失败）；`CADRE_SOURCE_COMMIT` 非 40 位十六进制 → FAIL；git 其他失败（如未安装）→ FAIL |
 
 ## 退出码
 
@@ -58,6 +59,11 @@ node ..\tools\package-doctor\doctor.mjs --help
 - **策略自洽**（镜像自 `desktop-policy-environment.mjs:4-39`）：origin 必须 https、不带凭据/路径/
   查询/片段；test 部署要求非空 `allowedAuthOrigins`；production 禁止设置 `allowedAuthOrigins`。
 - **git 脏树**：构建会把 `dshBuildDirty`/`dshBuildCommit` 写进产物清单，发布前必须干净。
+- **无 Git 历史的源码树**：`source-commit` 检查按 `readDesktopBuildCommit` 的回退顺序分类；
+  unsigned/test 构建以 `unknown` 提交号继续（打包时附 WARN），release（签名）构建要求真实
+  提交号——Git 仓库或 `CADRE_SOURCE_COMMIT`；真实提交号还会经 `DSH_CLIENT_COMMIT_HASH`
+  交给客户端构建（该构建无 Git 时自身无法解析提交号）。该检查的正则与回退顺序须与
+  `apps/desktop/scripts/desktop-build-commit.mjs` 保持同步。
 - **键白名单是双维护镜像**：本工具的 `SHARED_SETTING`/`WINDOWS_SETTING`/`MACOS_SETTING`/
   `PRESET_SETTING`/`PUBLIC_PLATFORM_SETTING` 正则镜像
   `apps/desktop/scripts/desktop-package-environment.mjs` 的键白名单（:17-21 共享与平台键、
