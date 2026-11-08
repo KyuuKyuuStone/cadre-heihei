@@ -504,10 +504,10 @@ describe('session skill packs', () => {
     })).toMatchObject({ id: 'worker-pack' })
     expect(api.remove({ projectId: 'p1', actorSessionId: 'w1', packId: 'worker-pack', confirm: true }))
       .toEqual({ removed: true })
-    expect(() => api.add({
-      projectId: 'p1', actorSessionId: 'outside', id: 'x', name: 'x', description: 'x', roles: ['worker'],
-      tokenEstimate: 1, tools: [], source: 'manual', license: 'MIT', content: '# x',
-    })).toThrow(/在册成员/)
+    expect(api.add({
+      projectId: 'p1', actorSessionId: 'off-roster', id: 'guest-pack', name: 'Guest Pack', description: 'guest',
+      roles: ['worker'], tokenEstimate: 1, tools: [], source: 'manual', license: 'MIT', content: '# guest',
+    })).toMatchObject({ id: 'guest-pack' })
     const fetch = vi.fn(async (input: URL | string) => String(input).endsWith('manifest.json')
       ? new Response(JSON.stringify({
         id: 'url-pack', name: 'URL Pack', description: 'url', roles: ['worker'],
@@ -522,9 +522,9 @@ describe('session skill packs', () => {
       url: 'https://raw.githubusercontent.com/o/r/main/packs/url/SKILL.md',
     })).resolves.toMatchObject({ id: 'url-pack' })
     await expect(urlApi.installUrl({
-      projectId: 'p1', actorSessionId: 'outside',
+      projectId: 'p1', actorSessionId: 'off-roster', confirm: true,
       url: 'https://raw.githubusercontent.com/o/r/main/packs/url/SKILL.md',
-    })).rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
+    })).resolves.toMatchObject({ id: 'url-pack' })
     reader.close()
   })
 
@@ -588,8 +588,8 @@ describe('session skill packs', () => {
     })).rejects.toMatchObject({ code: 'SKILL_INSTRUCTION_UNSUPPORTED' })
     await expect(api.installAny({ projectId: 'p1', actorSessionId: 'w1', text: '请安装这个技能' }))
       .rejects.toMatchObject({ code: 'SKILL_INSTRUCTION_UNSUPPORTED' })
-    await expect(api.installAny({ projectId: 'p1', actorSessionId: 'outside', text: '安装 find-skills' }))
-      .rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
+    await expect(api.installAny({ projectId: 'p1', actorSessionId: 'off-roster', text: '安装 find-skills' }))
+      .rejects.toMatchObject({ code: 'SKILL_CONFIRM_REQUIRED' })
     expect(calls).toHaveLength(before)
     reader.close()
   })
@@ -655,8 +655,8 @@ describe('session skill packs', () => {
       .rejects.toMatchObject({ code: 'SKILL_INSTALL_PACKAGE_UNSUPPORTED' })
     await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 'w1', name: 'find-skills' }))
       .rejects.toMatchObject({ code: 'SKILL_CONFIRM_REQUIRED' })
-    await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 'outside', name: 'find-skills' }))
-      .rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
+    await expect(unsupported.installPackage({ projectId: 'p1', actorSessionId: 'off-roster', name: 'find-skills' }))
+      .rejects.toMatchObject({ code: 'SKILL_CONFIRM_REQUIRED' })
     reader.close()
   })
 })

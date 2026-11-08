@@ -43,11 +43,7 @@ unselected session has zero skill tokens from this plugin.
 
 ## Settings IPC
 
-POST JSON, project-scoped. `catalog`/`get`/`set` admit registered members:
-a worker may read and update its own selection, a supervisor may target any
-member. `add`/`remove`/`install-url`/`install-package` also admit any registered
-member; `preview` remains supervisor-only; admin message/read/install admit
-project members, while plan/apply remain supervisor-only.
+POST JSON, project-scoped. `catalog`/`get`/`set` admit any session of an existing project: an off-roster session reads no selection and its `set` validates and echoes without persisting, a rostered session reads and updates its own row, and a supervisor may target any member. `add`/`remove`/`install-url`/`install-package` also admit any project session. A missing project, a session rostered by another project, and a departed member stay rejected. `preview` remains supervisor-only; warning-bearing installs still need a supervisor confirmation; admin message/read/install admit project sessions, while plan/apply remain supervisor-only.
 
 - `/cadre/skills/catalog` — `{projectId, actorSessionId, targetSessionId?}` →
   catalog entries with `selected`;
@@ -129,3 +125,4 @@ team, or email tools.
 - No settings UI yet; the IPC above is the data surface.
 - Pack selection is stored as JSON in `members.skills_json`; the schema migration
   is additive and defaults to `[]`.
+- An off-roster session has no `members` row, so its `set` call validates the ids and echoes them back without persisting a selection; such a session reads every pack as unselected.

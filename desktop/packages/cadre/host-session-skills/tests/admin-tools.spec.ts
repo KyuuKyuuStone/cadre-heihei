@@ -186,8 +186,8 @@ describe('skill admin model tools', () => {
       projectId: 'p2', actorSessionId: 's1', sessionId: created.sessionId, afterSeq: 0,
     })).rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
     await expect(admin.sendMessage({
-      projectId: 'p1', actorSessionId: 'outside', sessionId: created.sessionId, text: 'x',
-    })).rejects.toMatchObject({ code: 'SKILL_FORBIDDEN' })
+      projectId: 'p1', actorSessionId: 'off-roster', sessionId: created.sessionId, text: 'x',
+    })).resolves.toEqual({ accepted: true })
 
     await expect(find('skill_catalog').execute({}, { agent: { id: 'other' } }))
       .rejects.toThrow(/未知/)

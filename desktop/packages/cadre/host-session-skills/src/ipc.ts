@@ -83,7 +83,7 @@ export interface SkillApi {
   set(input: { projectId: string; actorSessionId: string; targetSessionId: string; skills: unknown }): { skills: string[] }
   /** Supervisor-only guard used by the admin conversation and diagnostics. */
   assertSupervisor(input: { projectId: string; actorSessionId: string }): void
-  /** Require an active roster member of the project. */
+  /** Require an existing project the calling session does not belong to another project of. */
   assertMember(input: { projectId: string; actorSessionId: string }): void
   preview(input: { projectId: string; actorSessionId: string; packId: string }): {
     id: string; content: string; tokenEstimate: number; license: string
@@ -335,12 +335,48 @@ function requireMember(db: DatabaseSync, projectId: string, sessionId: string): 
   return member
 }
 
-function requireActor(db: DatabaseSync, projectId: string, sessionId: string): MemberRow {
-  const actor = readMember(db, projectId, sessionId)
-  if (actor === undefined || actor.state === 'departed') {
-    throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有本项目在册成员可以查看或修改技能')
+/** Whether the ledger carries the `projects` table; older fixtures and pre-migration ledgers do not. */
+function detectProjectsTable(db: DatabaseSync): boolean {
+  try {
+    return db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'projects' LIMIT 1").get() !== undefined
+  } catch {
+    return false
   }
-  return actor
+}
+
+/**
+ * Authorize one project-scoped call. Any session may use the skill API while its
+ * project exists, so an off-roster session is admitted with `undefined`; a
+ * missing project, a session rostered by another project, and a departed member
+ * stay rejected.
+ * @param db - readonly ledger connection.
+ * @param projectId - project the call is scoped to.
+ * @param sessionId - calling session.
+ * @param hasProjects - whether the ledger has the `projects` table.
+ * @returns the roster row of a member actor, or undefined for an off-roster session.
+ */
+function requireActor(
+  db: DatabaseSync,
+  projectId: string,
+  sessionId: string,
+  hasProjects: boolean,
+): MemberRow | undefined {
+  const project = hasProjects
+    ? db.prepare('SELECT 1 AS ok FROM projects WHERE project_id = ? LIMIT 1').get(projectId)
+    : db.prepare('SELECT 1 AS ok FROM members WHERE project_id = ? LIMIT 1').get(projectId)
+  if (project === undefined) throw new SkillIpcError('SKILL_FORBIDDEN', 403, `项目不存在：${projectId}`)
+  const actor = readMember(db, projectId, sessionId)
+  if (actor !== undefined) {
+    if (actor.state === 'departed') {
+      throw new SkillIpcError('SKILL_FORBIDDEN', 403, '会话已退出本项目，不能查看或修改技能')
+    }
+    return actor
+  }
+  const elsewhere = db.prepare('SELECT 1 AS ok FROM members WHERE session_id = ? LIMIT 1').get(sessionId)
+  if (elsewhere !== undefined) {
+    throw new SkillIpcError('SKILL_FORBIDDEN', 403, '该会话属于其他项目，不能操作本项目技能')
+  }
+  return undefined
 }
 
 /**
@@ -349,13 +385,13 @@ function requireActor(db: DatabaseSync, projectId: string, sessionId: string): M
  * @returns pending confirmation for a supervisor without `confirm`, else undefined.
  */
 function requireSupervisorConfirmation(
-  actor: MemberRow,
+  actor: MemberRow | undefined,
   confirm: unknown,
   warnings: readonly InstallWarning[],
   preview: InstallPreview,
 ): InstallConfirmation | undefined {
   if (warnings.length === 0) return undefined
-  if (actor.role !== 'supervisor') {
+  if (actor?.role !== 'supervisor') {
     throw new SkillIpcError('SKILL_CONFIRM_REQUIRED', 403, '该技能缺少安全信息，需主管确认后才能安装')
   }
   if (confirm === true) return undefined
@@ -423,6 +459,9 @@ export function createSkillApi(options: {
   const { db, ledgerPath, skillsDir, builtinDir } = options
   const doFetch = options.fetch ?? globalThis.fetch
   const runPackageCommand = options.runPackageCommand ?? runWslCommand
+  const hasProjects = detectProjectsTable(db)
+  const actorOf = (projectId: string, sessionId: string): MemberRow | undefined =>
+    requireActor(db, projectId, sessionId, hasProjects)
   const auditFile = join(options.auditDir ?? join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'cadre-skill-admin'), 'audit.jsonl')
   const auditPackage = (record: Record<string, unknown>): void => {
     try {
@@ -450,27 +489,36 @@ export function createSkillApi(options: {
 
   return {
     catalog(input) {
-      const actor = requireActor(db, input.projectId, input.actorSessionId)
+      const actor = actorOf(input.projectId, input.actorSessionId)
       const target = input.targetSessionId ?? input.actorSessionId
-      if (target !== input.actorSessionId && actor.role !== 'supervisor') {
+      if (target !== input.actorSessionId && actor?.role !== 'supervisor') {
         throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以查看其他成员的技能')
       }
-      const selected = new Set(requireMember(db, input.projectId, target).skills)
+      // An off-roster session has no roster row holding a selection, so it reads as "nothing enabled".
+      const selected = new Set(
+        target === input.actorSessionId && actor === undefined
+          ? []
+          : requireMember(db, input.projectId, target).skills,
+      )
       return [...catalog().values()].map(pack => entryOf(pack, selected.has(pack.id), input.locale))
     },
     get(input) {
-      const actor = requireActor(db, input.projectId, input.actorSessionId)
-      if (input.targetSessionId !== input.actorSessionId && actor.role !== 'supervisor') {
+      const actor = actorOf(input.projectId, input.actorSessionId)
+      if (input.targetSessionId !== input.actorSessionId && actor?.role !== 'supervisor') {
         throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以查看其他成员的技能')
       }
-      return { skills: [...requireMember(db, input.projectId, input.targetSessionId).skills] }
+      return {
+        skills: [...(input.targetSessionId === input.actorSessionId && actor === undefined
+          ? []
+          : requireMember(db, input.projectId, input.targetSessionId).skills)],
+      }
     },
     set(input) {
-      const actor = requireActor(db, input.projectId, input.actorSessionId)
-      if (input.targetSessionId !== input.actorSessionId && actor.role !== 'supervisor') {
+      const actor = actorOf(input.projectId, input.actorSessionId)
+      if (input.targetSessionId !== input.actorSessionId && actor?.role !== 'supervisor') {
         throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以修改其他成员的技能')
       }
-      requireMember(db, input.projectId, input.targetSessionId)
+      if (input.targetSessionId !== input.actorSessionId) requireMember(db, input.projectId, input.targetSessionId)
       if (!Array.isArray(input.skills) || input.skills.some(item => typeof item !== 'string')) {
         throw new SkillIpcError('SKILL_INVALID', 400, 'skills 必须是字符串数组')
       }
@@ -478,6 +526,8 @@ export function createSkillApi(options: {
       for (const id of selected) {
         packOf(id)
       }
+      // Off-roster sessions have no members row to hold a selection: validate and echo it unchanged.
+      if (actor === undefined) return { skills: selected }
       const writer = new DatabaseSync(ledgerPath)
       try {
         writer.prepare('UPDATE members SET skills_json = ?, updated_at = ? WHERE project_id = ? AND session_id = ?')
@@ -496,7 +546,7 @@ export function createSkillApi(options: {
       requireSupervisor(db, input.projectId, input.actorSessionId)
     },
     assertMember(input) {
-      requireActor(db, input.projectId, input.actorSessionId)
+      actorOf(input.projectId, input.actorSessionId)
     },
     preview(input) {
       requireSupervisor(db, input.projectId, input.actorSessionId)
@@ -508,7 +558,7 @@ export function createSkillApi(options: {
       }
     },
     add(input) {
-      requireActor(db, input.projectId, input.actorSessionId)
+      actorOf(input.projectId, input.actorSessionId)
       const pack = validatePack(input)
       const target = join(skillsDir, pack.id)
       if (builtinDir !== undefined && existsSync(join(builtinDir, pack.id))) {
@@ -554,7 +604,7 @@ export function createSkillApi(options: {
       return entryOf(saved)
     },
     remove(input) {
-      requireActor(db, input.projectId, input.actorSessionId)
+      actorOf(input.projectId, input.actorSessionId)
       const id = requiredString(input.packId, 'packId')
       if (!KEBAB_ID.test(id) || id.length > 64) throw new SkillIpcError('SKILL_INVALID', 400, 'packId 格式非法')
       if (input.confirm !== true) throw new SkillIpcError('SKILL_INVALID', 400, '删除技能包需要 confirm:true')
@@ -573,7 +623,7 @@ export function createSkillApi(options: {
       return { removed: true }
     },
     async inspectUrl(input) {
-      requireActor(db, input.projectId, input.actorSessionId)
+      actorOf(input.projectId, input.actorSessionId)
       const targets = rawTargets(input.url)
       let total = 0
       const manifestText = await fetchText(doFetch, targets.manifest, 64 * 1024, () => total, value => { total = value })
@@ -609,7 +659,7 @@ export function createSkillApi(options: {
       }
     },
     async installUrl(input) {
-      const actor = requireActor(db, input.projectId, input.actorSessionId)
+      const actor = actorOf(input.projectId, input.actorSessionId)
       const inspected = await this.inspectUrl(input)
       const pack = inspected.pack
       const warnings = installWarnings(pack, { hasHash: true })
@@ -647,7 +697,7 @@ export function createSkillApi(options: {
       return entry
     },
     async installPackage(input) {
-      const actor = requireActor(db, input.projectId, input.actorSessionId)
+      const actor = actorOf(input.projectId, input.actorSessionId)
       const name = requiredString(input.name, 'name')
       if (name.length > 128 || !PACKAGE_NAME.test(name)) {
         throw new SkillIpcError('SKILL_INVALID', 400, '包名必须是合法的 npm 包名（可带 @scope/）')
@@ -711,7 +761,7 @@ export function createSkillApi(options: {
       return { name, visible, durationMs, installed: true, warnings }
     },
     async installAny(input) {
-      requireActor(db, input.projectId, input.actorSessionId)
+      actorOf(input.projectId, input.actorSessionId)
       const text = requiredString(input.text, 'text')
       if (text.length > 4000) {
         throw new SkillIpcError('SKILL_INVALID', 400, '安装说明不能超过 4000 字')
