@@ -155,7 +155,8 @@ function writeReleaseRecord(
     version: buildVersion,
     environment: update.environment,
     channel: update.channel,
-    publicUrl: update.publicUrl,
+    provider: update.provider,
+    ...update.provider === 'generic' ? { publicUrl: update.publicUrl } : { repository: `${update.owner}/${update.repo}` },
     // Upload reads this to tag the commit a production release was packaged from.
     ...packaged === undefined ? {} : { commit: packaged.commit, dirty: packaged.dirty },
   }, null, 2)}\n`)

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DESKTOP_GITHUB_REPOSITORY,
+  DESKTOP_GITHUB_REPOSITORY_ENV,
   desktopBuildRecordFilename,
   desktopUpdateMetadataFilename,
   resolveDesktopAutoUpdateConfig,
@@ -28,6 +30,7 @@ describe('desktop auto-update environment', () => {
   ('uses one test release directory for %s %s feeds and binaries', (platform, arch, target) => {
     expect(resolveDesktopAutoUpdateConfig({ DOWNLOAD_TEST_ORIGIN: 'https://updates.example.com',
       DOWNLOAD_TEST_RELEASE_ID: RELEASE_ID }, platform, arch)).toMatchObject({
+      provider: 'generic',
       publicUrl: `https://updates.example.com/dsh-desk/${RELEASE_ID}/feeds/${target}/`,
       keyPrefix: `dsh-desk/${RELEASE_ID}/feeds/${target}`,
       binaryKeyPrefix: `dsh-desk/${RELEASE_ID}/bin/${target}`,
@@ -40,7 +43,7 @@ describe('desktop auto-update environment', () => {
       DOWNLOAD_TEST_ORIGIN: 'https://desktop-updates.example.com/',
       DOWNLOAD_TEST_RELEASE_ID: RELEASE_ID,
     }, 'darwin', 'arm64')).toEqual({
-      environment: 'test', channel: 'nightly',
+      environment: 'test', provider: 'generic', channel: 'nightly',
       target: 'mac-arm64',
       origin: 'https://desktop-updates.example.com',
       publicUrl: `https://desktop-updates.example.com/dsh-desk/${RELEASE_ID}/feeds/mac-arm64/`,
@@ -58,39 +61,60 @@ describe('desktop auto-update environment', () => {
     })
   })
 
-  it.each([undefined, RELEASE_ID, 'unused-test-value'])('keeps production paths independent of test release ID %s', (id) => {
+  it('packages every build without a loopback origin against the GitHub source', () => {
+    expect(resolveDesktopAutoUpdateConfig({}, 'win32', 'x64')).toEqual({
+      environment: 'test',
+      provider: 'github',
+      channel: 'nightly',
+      target: 'win-x64',
+      owner: 'KyuuKyuuStone',
+      repo: 'cadre-heihei',
+      releaseType: 'prerelease',
+    })
+    expect(resolveDesktopAutoUpdateConfig({ DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
+      DSH_DESKTOP_UPDATE_CHANNEL: 'latest' }, 'darwin', 'arm64')).toMatchObject({
+      environment: 'production', provider: 'github', channel: 'latest', target: 'mac-arm64', releaseType: 'release',
+    })
+  })
+
+  it.each([undefined, RELEASE_ID, 'unused-test-value'])('keeps the GitHub production source independent of test release ID %s', (id) => {
     expect(resolveDesktopAutoUpdateConfig({
       DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
       DOWNLOAD_TEST_RELEASE_ID: id,
-    }, 'win32', 'x64')).toMatchObject({
+    }, 'win32', 'x64')).toEqual({
       environment: 'production',
+      provider: 'github',
+      channel: 'nightly',
       target: 'win-x64',
-      publicUrl: 'https://download.deepseek.com/dsh-desk/feeds/win-x64/',
-      binaryKeyPrefix: 'dsh-desk/bin/win-x64',
+      owner: 'KyuuKyuuStone',
+      repo: 'cadre-heihei',
+      releaseType: 'prerelease',
     })
     expect(resolveDesktopUploadConfig({
       DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
+      DOWNLOAD_PROD_ORIGIN: 'https://downloads.example.com',
       DOWNLOAD_PROD_COS_BUCKET: 'production-download-bucket',
     }, 'win32', 'x64')).toMatchObject({
+      provider: 'generic',
       bucket: 'production-download-bucket',
       secretIdEnvName: 'DOWNLOAD_PROD_COS_SECRET_ID',
       secretKeyEnvName: 'DOWNLOAD_PROD_COS_SECRET_KEY',
     })
   })
 
-  it('requires the selected deployment origin for packages and bucket only for uploads', () => {
-    expect(() => resolveDesktopAutoUpdateConfig({}, 'darwin', 'arm64'))
-      .toThrow(/DOWNLOAD_TEST_ORIGIN/u)
-    expect(resolveDesktopAutoUpdateConfig({
-      DOWNLOAD_TEST_ORIGIN: 'https://desktop-updates.example.com',
-      DOWNLOAD_TEST_RELEASE_ID: RELEASE_ID,
-    }, 'darwin', 'arm64').publicUrl).toContain('/mac-arm64/')
+  it('requires a bucket only for uploads and no COS origin for packages', () => {
+    expect(resolveDesktopAutoUpdateConfig({}, 'darwin', 'arm64').provider).toBe('github')
+    expect(() => resolveDesktopUploadConfig({}, 'darwin', 'arm64')).toThrow(/DOWNLOAD_TEST_ORIGIN/u)
     expect(() => resolveDesktopUploadConfig({
       DOWNLOAD_TEST_ORIGIN: 'https://desktop-updates.example.com',
       DOWNLOAD_TEST_RELEASE_ID: RELEASE_ID,
     }, 'darwin', 'arm64')).toThrow(/DOWNLOAD_TEST_COS_BUCKET/u)
     expect(() => resolveDesktopUploadConfig({
       DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
+    }, 'win32', 'x64')).toThrow(/DOWNLOAD_PROD_ORIGIN/u)
+    expect(() => resolveDesktopUploadConfig({
+      DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
+      DOWNLOAD_PROD_ORIGIN: 'https://downloads.example.com',
     }, 'win32', 'x64')).toThrow(/DOWNLOAD_PROD_COS_BUCKET/u)
   })
 
@@ -101,6 +125,17 @@ describe('desktop auto-update environment', () => {
     expect(() => resolveDesktopAutoUpdateConfig({
       DOWNLOAD_TEST_ORIGIN: 'http://desktop-updates.example.com',
     }, 'darwin', 'arm64')).toThrow(/HTTPS origin/u)
+  })
+
+  it('reads the release repository from an owner/name override', () => {
+    expect(resolveDesktopAutoUpdateConfig({ [DESKTOP_GITHUB_REPOSITORY_ENV]: DESKTOP_GITHUB_REPOSITORY },
+      'win32', 'x64')).toMatchObject({ owner: 'KyuuKyuuStone', repo: 'cadre-heihei' })
+    expect(resolveDesktopAutoUpdateConfig({ [DESKTOP_GITHUB_REPOSITORY_ENV]: 'other-owner/other-repo' },
+      'win32', 'x64')).toMatchObject({ owner: 'other-owner', repo: 'other-repo' })
+    expect(() => resolveDesktopAutoUpdateConfig({ [DESKTOP_GITHUB_REPOSITORY_ENV]: 'only-owner' },
+      'win32', 'x64')).toThrow(/owner\/name pair/u)
+    expect(() => resolveDesktopAutoUpdateConfig({ [DESKTOP_GITHUB_REPOSITORY_ENV]: 'owner/name/extra' },
+      'win32', 'x64')).toThrow(/owner\/name pair/u)
   })
 
   it('rejects unknown deployments and targets', () => {
@@ -115,6 +150,7 @@ describe('desktop auto-update environment', () => {
     expect(desktopUpdateMetadataFilename('1.2.3', 'darwin')).toBe('nightly-mac.yml')
     expect(desktopUpdateMetadataFilename('1.2.3-alpha.4', 'darwin')).toBe('nightly-mac.yml')
     expect(desktopUpdateMetadataFilename('1.2.3-beta.2', 'win32')).toBe('nightly.yml')
+    expect(desktopUpdateMetadataFilename('1.2.3', 'win32', 'latest')).toBe('latest.yml')
     expect(() => desktopUpdateMetadataFilename('not-semver', 'darwin')).toThrow(/invalid Desktop version/u)
     expect(() => desktopUpdateMetadataFilename('1.2.3', 'linux')).toThrow(/unsupported metadata platform/u)
   })

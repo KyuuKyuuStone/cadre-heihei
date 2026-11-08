@@ -8,6 +8,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { load } from 'js-yaml'
+import { desktopUpdateMetadataFilename } from './desktop-auto-update-environment.mjs'
 
 const USAGE = `usage:
   pnpm exec tsx scripts/desktop-github-release.ts <installer> [more assets...] --notes-file <markdown>
@@ -232,6 +234,10 @@ export function resolveDesktopGithubReleasePlan(
   const planned = [...assets.map(path => resolve(path))]
   const blockmap = `${installer}.blockmap`
   if (existsSync(blockmap) && !planned.includes(blockmap)) planned.push(blockmap)
+  // electron-updater reads the channel metadata from the release itself, so the release must carry
+  // it next to the installer. Publishing a full release without the latest metadata would leave
+  // installed apps unable to see it, so the file must exist and name the packaged version.
+  planned.push(resolveUpdateMetadataAsset(installer, record.version, target, prerelease))
   const planAssets = planned.map(path => ({ path, name: basename(path), size: statSync(path).size }))
   return {
     repository,
@@ -244,6 +250,35 @@ export function resolveDesktopGithubReleasePlan(
     prerelease,
     assets: planAssets,
   }
+}
+
+/**
+ * Locate the channel metadata electron-builder wrote beside the installer.
+ * @param installer - Installer path whose directory holds the metadata.
+ * @param version - Packaged version the metadata must name.
+ * @param target - Desktop release target read from the installer name.
+ * @param prerelease - Whether this run publishes a prerelease, which requires the nightly metadata.
+ * @returns Path of the metadata file to upload.
+ */
+function resolveUpdateMetadataAsset(installer: string, version: string, target: string, prerelease: boolean): string {
+  const platform = target.startsWith('mac') ? 'darwin' : 'win32'
+  const channel = prerelease ? 'nightly' : 'latest'
+  const metadataPath = join(dirname(installer), desktopUpdateMetadataFilename(version, platform, channel))
+  if (!existsSync(metadataPath)) {
+    fail(`desktop release: missing update metadata ${metadataPath}; package with DSH_DESKTOP_UPDATE_CHANNEL=${channel} so electron-builder writes it beside the installer`)
+  }
+  let parsed: unknown
+  try {
+    parsed = load(readFileSync(metadataPath, 'utf8'))
+  }
+  catch (error) {
+    fail(`desktop release: update metadata ${metadataPath} is not valid YAML: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const named = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).version : undefined
+  if (typeof named !== 'string' || named !== version) {
+    fail(`desktop release: update metadata ${metadataPath} names version ${String(named)}, not the packaged ${version}`)
+  }
+  return metadataPath
 }
 
 function readDesktopCompletionRecord(recordPath: string): DesktopCompletionRecord {

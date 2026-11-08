@@ -37,6 +37,10 @@ function setupArtifacts(): Fixture {
   )
   const notes = join(root, 'notes.md')
   writeFileSync(notes, `# ${VERSION} notes`)
+  for (const channel of ['nightly', 'latest']) {
+    writeFileSync(join(root, `${channel}.yml`),
+      `version: ${VERSION}\nfiles:\n  - url: ${INSTALLER_NAME}\n    sha512: fixture\n    size: 15\npath: ${INSTALLER_NAME}\nsha512: fixture\n`)
+  }
   return { root, installer, notes }
 }
 
@@ -116,7 +120,7 @@ function identityGh(
 }
 
 describe('desktop github release plan', () => {
-  it('builds a plan from the installer and its completion record, adding the adjacent blockmap', () => {
+  it('builds a plan from the installer and its completion record, adding the adjacent blockmap and channel metadata', () => {
     const fixture = setupArtifacts()
     const plan = planFrom(fixture)
     expect(plan).toMatchObject({
@@ -128,7 +132,25 @@ describe('desktop github release plan', () => {
       title: `Cadre Heihei ${VERSION}`,
       prerelease: true,
     })
-    expect(plan.assets.map(asset => asset.name)).toEqual([INSTALLER_NAME, `${INSTALLER_NAME}.blockmap`])
+    expect(plan.assets.map(asset => asset.name)).toEqual([INSTALLER_NAME, `${INSTALLER_NAME}.blockmap`, 'nightly.yml'])
+  })
+
+  it('uploads the latest metadata, not the nightly one, for a full release', () => {
+    const fixture = setupArtifacts()
+    const plan = resolveDesktopGithubReleasePlan([fixture.installer], fixture.notes, null, REPOSITORY, false)
+    expect(plan.assets.map(asset => asset.name)).toEqual([INSTALLER_NAME, `${INSTALLER_NAME}.blockmap`, 'latest.yml'])
+  })
+
+  it('refuses to publish without the channel metadata update checks read', () => {
+    const fixture = setupArtifacts()
+    rmSync(join(fixture.root, 'nightly.yml'))
+    expect(() => planFrom(fixture)).toThrow(/missing update metadata .*nightly\.yml/u)
+  })
+
+  it('refuses metadata that names another version than the packaged one', () => {
+    const fixture = setupArtifacts()
+    writeFileSync(join(fixture.root, 'nightly.yml'), 'version: 1.5.3\npath: installer.exe\nsha512: fixture\n')
+    expect(() => planFrom(fixture)).toThrow(/names version 1\.5\.3, not the packaged 1\.5\.4/u)
   })
 
   it('refuses a dirty build because the tag would not name the tree users received', () => {
