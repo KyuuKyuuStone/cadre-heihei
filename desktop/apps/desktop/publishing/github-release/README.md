@@ -1,5 +1,5 @@
 ---
-description: "Publish one desktop prerelease on GitHub Releases with one operator and a proven three-point commit identity. The release script validates the packaged commit, the tag and the release target before it writes anything."
+description: "Publish one desktop release on GitHub Releases with one operator and a proven three-point commit identity. The release script validates the packaged commit, the tag and the release target before it writes anything; the default marks a prerelease and --latest publishes a full release."
 ---
 
 # Desktop GitHub release publication
@@ -8,7 +8,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Publish one desktop prerelease on GitHub Releases with one operator and a proven three-point commit identity. The release script validates the packaged commit, the tag and the release target before it writes anything. The [publication reference](../README.md) and the [CI publication workflow](../ci/README.md) own the download-service and self-hosted channels; this reference owns the public prerelease channel the release operators publish directly on GitHub.
+Publish one desktop release on GitHub Releases with one operator and a proven three-point commit identity. The release script validates the packaged commit, the tag and the release target before it writes anything; the default marks a prerelease and --latest publishes a full release. The [publication reference](../README.md) and the [CI publication workflow](../ci/README.md) own the download-service and self-hosted channels; this reference owns the public release channel the release operators publish directly on GitHub.
 
 ## Table of Contents
 
@@ -47,7 +47,7 @@ pnpm exec tsx scripts/desktop-github-release.ts \
   --notes-file <notes.md> --dry-run
 ```
 
-Publish by dropping `--dry-run`. The script creates the prerelease with `gh release create v<version> --target <commit> --prerelease --title --notes-file`, uploads the installer and its blockmap without `--clobber`, reads the release back, and verifies the tag, the target commit, and every asset's state, size, and SHA-256 digest before it reports success. An existing empty release that targets the packaged commit is resumed; every other existing release state is refused.
+Publish by dropping `--dry-run`. The script creates the release with `gh release create v<version> --target <commit> --title --notes-file`, adding `--prerelease` unless the publish passed `--latest`, uploads the installer and its blockmap without `--clobber`, reads the release back, and verifies the tag, the target commit, the prerelease mark against the requested mode, and every asset's state, size, and SHA-256 digest before it reports success. An existing empty release that targets the packaged commit and carries the matching prerelease mark is resumed; every other existing release state is refused.
 
 <a id="recovery"></a>
 

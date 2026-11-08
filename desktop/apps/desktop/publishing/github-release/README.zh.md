@@ -1,5 +1,5 @@
 ---
-description: "以单一发布人在 GitHub Releases 上发布桌面端预发布，并先证明三点提交一致。发布脚本在校验打包提交、tag 与 Release 目标全部一致前不写任何远端状态。"
+description: "以单一发布人在 GitHub Releases 上发布桌面端版本，并先证明三点提交一致。发布脚本在校验打包提交、tag 与 Release 目标全部一致前不写任何远端状态；缺省发布预发布，--latest 发布正式版。"
 ---
 
 # 桌面端 GitHub 发布
@@ -8,7 +8,7 @@ description: "以单一发布人在 GitHub Releases 上发布桌面端预发布�
 
 ## 概述
 
-以单一发布人在 GitHub Releases 上发布桌面端预发布，并先证明三点提交一致。发布脚本在校验打包提交、tag 与 Release 目标全部一致前不写任何远端状态。[发布参考](../README.zh.md)与 [CI 发布流程](../ci/README.zh.md)负责下载服务与自托管通道；本参考负责发布负责人直接在 GitHub 上发布的公开预发布通道。
+以单一发布人在 GitHub Releases 上发布桌面端版本，并先证明三点提交一致。发布脚本在校验打包提交、tag 与 Release 目标全部一致前不写任何远端状态；缺省发布预发布，--latest 发布正式版。[发布参考](../README.zh.md)与 [CI 发布流程](../ci/README.zh.md)负责下载服务与自托管通道；本参考负责发布负责人直接在 GitHub 上发布的公开发布通道。
 
 ## 目录
 
@@ -47,7 +47,7 @@ pnpm exec tsx scripts/desktop-github-release.ts \
   --notes-file <notes.md> --dry-run
 ```
 
-去掉 `--dry-run` 即正式发布。脚本用 `gh release create v<version> --target <commit> --prerelease --title --notes-file` 创建预发布，不带 `--clobber` 上传安装包与 blockmap，回读 Release，并核对 tag、目标提交与每个资产的 state、大小与 SHA-256 摘要后才报告成功。已存在且指向打包提交的空 Release 会被续传；其余既有状态一律拒绝。
+去掉 `--dry-run` 即正式发布。脚本用 `gh release create v<version> --target <commit> --title --notes-file` 创建 Release，未传 `--latest` 时额外携带 `--prerelease`，不带 `--clobber` 上传安装包与 blockmap，回读 Release，并核对 tag、目标提交、预发布标记与请求模式一致以及每个资产的 state、大小与 SHA-256 摘要后才报告成功。已存在、指向打包提交且预发布标记匹配的空 Release 会被续传；其余既有状态一律拒绝。
 
 <a id="recovery"></a>
 

@@ -75,6 +75,7 @@ function releaseViewJson(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     tagName: TAG,
     isDraft: false,
+    isPrerelease: true,
     targetCommitish: COMMIT,
     assets: [],
     url: `https://github.com/${REPOSITORY}/releases/tag/${TAG}`,
@@ -125,6 +126,7 @@ describe('desktop github release plan', () => {
       commit: COMMIT,
       tag: TAG,
       title: `Cadre Heihei ${VERSION}`,
+      prerelease: true,
     })
     expect(plan.assets.map(asset => asset.name)).toEqual([INSTALLER_NAME, `${INSTALLER_NAME}.blockmap`])
   })
@@ -161,6 +163,13 @@ describe('desktop github release plan', () => {
     const result = desktopGithubRelease([fixture.installer], { run: fakeGh(() => undefined).run })
     expect(result.ok).toBe(false)
     expect(result.message).toContain('--notes-file is required')
+  })
+
+  it('plans a full release with the latest flag and keeps the prerelease default', () => {
+    const fixture = setupArtifacts()
+    const latestPlan = resolveDesktopGithubReleasePlan([fixture.installer], fixture.notes, null, REPOSITORY, false)
+    expect(latestPlan.prerelease).toBe(false)
+    expect(planFrom(fixture).prerelease).toBe(true)
   })
 })
 
@@ -219,6 +228,21 @@ describe('desktop github release identity', () => {
     expect(() => verifyDesktopGithubReleaseIdentity(plan, run)).toThrow(/is a draft/)
   })
 
+  it('refuses to resume a full release when publishing a prerelease', () => {
+    const plan = planFrom(setupArtifacts())
+    const { run } = identityGh([releaseViewJson({ isPrerelease: false })])
+    expect(() => verifyDesktopGithubReleaseIdentity(plan, run))
+      .toThrow(/is not marked prerelease, but this run publishes a prerelease/)
+  })
+
+  it('refuses to resume a prerelease-marked release when publishing with --latest', () => {
+    const fixture = setupArtifacts()
+    const plan = resolveDesktopGithubReleasePlan([fixture.installer], fixture.notes, null, REPOSITORY, false)
+    const { run } = identityGh([releaseViewJson()])
+    expect(() => verifyDesktopGithubReleaseIdentity(plan, run))
+      .toThrow(/is marked prerelease, but this run publishes a full release/)
+  })
+
   it('refuses a packaged commit that is not on the remote', () => {
     const plan = planFrom(setupArtifacts())
     const { run } = fakeGh(args => (args[0] === 'api' && args[1]?.includes('/commits/') ? new Error('HTTP 404: Not Found') : undefined))
@@ -252,6 +276,20 @@ describe('desktop github release publish', () => {
     expect(result.ok).toBe(true)
     expect(calls.some(call => call.includes('create'))).toBe(false)
     expect(calls.some(call => call.includes('upload'))).toBe(true)
+  })
+
+  it('publishes a full release with --latest: the create call carries no --prerelease flag', () => {
+    const fixture = setupArtifacts()
+    const { run, calls } = identityGh([
+      new Error(`release ${TAG} not found`),
+      releaseViewJson({ isPrerelease: false }),
+    ])
+    const result = desktopGithubRelease([fixture.installer, '--notes-file', fixture.notes, '--latest'], { run })
+    expect(result.ok).toBe(true)
+    const create = calls.find(call => call.includes('create'))
+    expect(create).toBeDefined()
+    expect(create).not.toContain('--prerelease')
+    expect(create?.includes('--title')).toBe(true)
   })
 
   it('fails when the published release no longer names the packaged commit', () => {

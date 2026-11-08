@@ -1,4 +1,7 @@
-/** Publish one desktop prerelease on GitHub Releases after proving tag, release target, and packaged commit are the same commit. */
+/**
+ * Publish one desktop release on GitHub Releases after proving tag, release target, and packaged
+ * commit are the same commit; the default marks a prerelease and --latest publishes a full release.
+ */
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -8,12 +11,13 @@ import { pathToFileURL } from 'node:url'
 
 const USAGE = `usage:
   pnpm exec tsx scripts/desktop-github-release.ts <installer> [more assets...] --notes-file <markdown>
-      [--title <title>] [--repository <owner/name>] [--dry-run]
+      [--title <title>] [--repository <owner/name>] [--latest] [--dry-run]
 
 The first asset is the installer; its sibling <target>-release.json completion record names the
 packaged commit. An adjacent <installer>.blockmap is uploaded with the installer automatically.
 Every publish proves three identities before writing anything: the packaged commit from the
-completion record, the remote tag v<version>, and the GitHub release targetCommitish.`
+completion record, the remote tag v<version>, and the GitHub release targetCommitish.
+The default publish marks a prerelease; --latest publishes a full release instead.`
 
 /** GitHub repository that hosts the public prereleases the desktop update check reads. */
 export const DESKTOP_GITHUB_REPOSITORY = 'KyuuKyuuStone/cadre-heihei'
@@ -38,6 +42,8 @@ export interface DesktopGithubReleasePlan {
   readonly tag: string
   readonly title: string
   readonly notesFile: string
+  /** Whether gh marks the release as a prerelease; the --latest flag publishes a full release instead. */
+  readonly prerelease: boolean
   readonly assets: readonly DesktopGithubReleaseAsset[]
 }
 
@@ -93,6 +99,7 @@ interface ReleaseAssetView {
 interface ReleaseView {
   readonly tagName: string
   readonly isDraft: boolean
+  readonly isPrerelease: boolean
   readonly targetCommitish: string
   readonly assets: readonly ReleaseAssetView[]
   readonly url: string
@@ -123,19 +130,21 @@ function sha256File(path: string): string {
 /**
  * Parse the release command line into assets and publishing flags.
  * @param argv - Command line after the script name.
- * @returns Assets in argument order plus the notes file, title, repository, and dry-run flag.
+ * @returns Assets in argument order plus the notes file, title, repository, latest flag, and dry-run flag.
  */
 export function parseDesktopGithubReleaseArgs(argv: readonly string[]): {
   readonly assets: readonly string[]
   readonly notesFile: string
   readonly title: string | null
   readonly repository: string
+  readonly latest: boolean
   readonly dryRun: boolean
 } {
   const assets: string[] = []
   let notesFile: string | null = null
   let title: string | null = null
   let repository = DESKTOP_GITHUB_REPOSITORY
+  let latest = false
   let dryRun = false
   const flagsWithValue = new Map<string, (value: string) => void>([
     ['--notes-file', value => { notesFile = value }],
@@ -147,6 +156,10 @@ export function parseDesktopGithubReleaseArgs(argv: readonly string[]): {
     if (arg === undefined) continue
     if (arg === '--dry-run') {
       dryRun = true
+      continue
+    }
+    if (arg === '--latest') {
+      latest = true
       continue
     }
     const accept = flagsWithValue.get(arg)
@@ -162,7 +175,7 @@ export function parseDesktopGithubReleaseArgs(argv: readonly string[]): {
   }
   if (assets.length === 0) fail(`no installer given\n\n${USAGE}`)
   if (notesFile === null) fail(`--notes-file is required; a public release publishes without notes otherwise\n\n${USAGE}`)
-  return { assets, notesFile, title, repository, dryRun }
+  return { assets, notesFile, title, repository, latest, dryRun }
 }
 
 /**
@@ -171,6 +184,7 @@ export function parseDesktopGithubReleaseArgs(argv: readonly string[]): {
  * @param notesFile - Markdown file with the release notes.
  * @param title - Release title, or null for the "Cadre Heihei <version>" default.
  * @param repository - GitHub repository that receives the release.
+ * @param prerelease - Whether the release is marked prerelease; the --latest flag passes false.
  * @returns The validated plan naming one commit, one version, and every uploaded file.
  */
 export function resolveDesktopGithubReleasePlan(
@@ -178,6 +192,7 @@ export function resolveDesktopGithubReleasePlan(
   notesFile: string,
   title: string | null,
   repository: string,
+  prerelease = true,
 ): DesktopGithubReleasePlan {
   if (!/^[^\s/]+\/[^\s/]+$/.test(repository)) fail(`repository ${repository} is not owner/name`)
   if (!existsSync(notesFile) || statSync(notesFile).size === 0) {
@@ -226,6 +241,7 @@ export function resolveDesktopGithubReleasePlan(
     tag: `v${record.version}`,
     title: title ?? `Cadre Heihei ${record.version}`,
     notesFile: resolve(notesFile),
+    prerelease,
     assets: planAssets,
   }
 }
@@ -305,6 +321,11 @@ export function verifyDesktopGithubReleaseIdentity(plan: DesktopGithubReleasePla
   if (view.isDraft) {
     fail(`desktop release: release ${plan.tag} is a draft; another operator may be preparing it — one person publishes a release, so verify and reconcile the draft manually instead of uploading into it`)
   }
+  if (view.isPrerelease !== plan.prerelease) {
+    const remote = view.isPrerelease ? 'is marked prerelease' : 'is not marked prerelease'
+    const planned = plan.prerelease ? 'a prerelease' : 'a full release (--latest)'
+    fail(`desktop release: release ${plan.tag} ${remote}, but this run publishes ${planned}; one person publishes a release — reconcile the existing release manually instead of uploading into it`)
+  }
   if (view.targetCommitish !== plan.commit) {
     fail(`desktop release: release ${plan.tag} targets ${view.targetCommitish}, not the packaged commit ${plan.commit}; the tag, the release target and the packaged commit must be one commit (v1.5.3 shipped this mismatch) — delete the release and publish again with this script`)
   }
@@ -316,7 +337,7 @@ export function verifyDesktopGithubReleaseIdentity(plan: DesktopGithubReleasePla
 }
 
 function viewRelease(plan: DesktopGithubReleasePlan, run: GhRunner): ReleaseView | undefined {
-  const fields = 'tagName,isDraft,targetCommitish,assets,url'
+  const fields = 'tagName,isDraft,isPrerelease,targetCommitish,assets,url'
   const result = run(['release', 'view', plan.tag, '--repo', plan.repository, '--json', fields])
   if (result.status !== 0) {
     if (/release .*not found/i.test(result.stderr)) return undefined
@@ -326,7 +347,7 @@ function viewRelease(plan: DesktopGithubReleasePlan, run: GhRunner): ReleaseView
 }
 
 /**
- * Create the prerelease when absent and upload every planned asset.
+ * Create the release when absent and upload every planned asset.
  * @param plan - Validated plan naming one commit.
  * @param releaseExisted - True when the preflight found an empty release targeting the commit.
  * @param run - gh runner seam.
@@ -335,7 +356,8 @@ export function publishDesktopGithubRelease(plan: DesktopGithubReleasePlan, rele
   if (!releaseExisted) {
     const created = run([
       'release', 'create', plan.tag, '--repo', plan.repository, '--target', plan.commit,
-      '--prerelease', '--title', plan.title, '--notes-file', plan.notesFile,
+      ...(plan.prerelease ? ['--prerelease'] : []),
+      '--title', plan.title, '--notes-file', plan.notesFile,
     ])
     if (created.status !== 0) {
       fail(`desktop release: gh release create ${plan.tag} failed (exit ${created.status}): ${stderrTail(created.stderr)}; another operator may have created it meanwhile — view the release before doing anything else`)
@@ -361,6 +383,10 @@ export function verifyPublishedDesktopGithubRelease(plan: DesktopGithubReleasePl
   }
   if (view.targetCommitish !== plan.commit) {
     fail(`desktop release: verification failed: release ${plan.tag} targets ${view.targetCommitish}, expected ${plan.commit}`)
+  }
+  if (view.isPrerelease !== plan.prerelease) {
+    const remote = view.isPrerelease ? 'is marked prerelease' : 'is not marked prerelease'
+    fail(`desktop release: verification failed: release ${plan.tag} ${remote}, expected ${plan.prerelease ? 'a prerelease' : 'a full release (--latest)'}`)
   }
   for (const asset of plan.assets) {
     const remote = view.assets.find(candidate => candidate.name === asset.name)
@@ -394,9 +420,9 @@ export function desktopGithubRelease(argv: readonly string[], options: DesktopGi
   const log = options.log ?? ((message: string) => console.log(message))
   try {
     const args = parseDesktopGithubReleaseArgs(argv)
-    const plan = resolveDesktopGithubReleasePlan(args.assets, args.notesFile, args.title, args.repository)
+    const plan = resolveDesktopGithubReleasePlan(args.assets, args.notesFile, args.title, args.repository, !args.latest)
     const assetNames = plan.assets.map(asset => `${asset.name} (${asset.size} B)`).join(', ')
-    log(`desktop release: v${plan.version} from ${plan.repository} @ ${plan.commit.slice(0, 12)} (${plan.target})`)
+    log(`desktop release: v${plan.version} from ${plan.repository} @ ${plan.commit.slice(0, 12)} (${plan.target}${plan.prerelease ? ', prerelease' : ', latest'})`)
     log(`desktop release: assets: ${assetNames}`)
     const { releaseExisted } = verifyDesktopGithubReleaseIdentity(plan, run)
     log(`desktop release: three-point identity verified${releaseExisted ? '; resuming an empty release' : ''}`)
