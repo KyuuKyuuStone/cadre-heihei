@@ -89,7 +89,7 @@ export function apply(ctx: AdminContext): void {
     },
     async execute(args, run) {
       const query = typeof args.query === 'string' ? args.query.toLowerCase() : ''
-      const skills = admin().catalogFor(sessionOf(run)).filter(skill =>
+      const skills = (await admin().catalogFor(sessionOf(run))).filter(skill =>
         query === '' || `${skill.id} ${skill.name} ${skill.description}`.toLowerCase().includes(query))
       return { skills }
     },
@@ -122,14 +122,14 @@ export function apply(ctx: AdminContext): void {
 
   ctx.tools.register({
     name: 'skill_install',
-    description: 'Request one skill install by package name, URL, or free text. Missing license/hash/source returns requiresConfirmation with a preview and installs nothing; a supervisor then calls again with confirm:true. Writes the audit.',
+    description: 'Request one skill install by package name, URL, or free text. Missing license/hash/source returns requiresConfirmation with a preview and installs nothing; call again with confirm:true once the user agrees. Writes the audit.',
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
         name: { type: 'string', description: 'npm/SkillHub package name, e.g. @scope/name.' },
         url: { type: 'string', description: 'HTTPS GitHub raw/tree or skill URL.' },
         text: { type: 'string', description: 'Free-form instruction containing one package name or URL.' },
-        confirm: { type: 'boolean', description: 'Supervisor confirmation for a warning-bearing install.' },
+        confirm: { type: 'boolean', description: 'User confirmation for a warning-bearing install.' },
       },
     },
     output: {
@@ -189,7 +189,7 @@ export function apply(ctx: AdminContext): void {
         ...(args.url === undefined ? {} : { url: args.url }),
         ...(args.packId === undefined ? {} : { packId: args.packId }),
       })
-      const confirmToken = admin().tokenForSession(sessionId, plan.planId)
+      const confirmToken = await admin().tokenForSession(sessionId, plan.planId)
       return { ...plan, ...(confirmToken === undefined ? {} : { confirmToken }) }
     },
   })
@@ -215,7 +215,7 @@ export function apply(ctx: AdminContext): void {
     },
     async execute(args, run) {
       const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 20
-      return { items: admin().auditForSession(sessionOf(run), limit) }
+      return { items: await admin().auditForSession(sessionOf(run), limit) }
     },
   })
 }

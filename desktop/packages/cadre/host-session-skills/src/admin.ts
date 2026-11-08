@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
+import { loadSkillCatalog, type SkillPack } from './catalog.ts'
 import { createSkillApi, installWarnings, SkillIpcError, type InstallWarning, type PackageCommandResult, type SkillApi, type ValidPack } from './ipc.ts'
 
 /** The agent preset reserved for the skill administrator conversation. */
@@ -107,6 +108,23 @@ export interface ApplyInput {
   readonly action?: 'apply' | 'cancel'
 }
 
+/**
+ * A skill-admin failure the caller can recover from: a stable `code` plus the single
+ * corrective action in `remediation`. The message repeats the remediation so surfaces
+ * that forward only `code` and `message` stay actionable.
+ */
+export class SkillAdminRecoveryError extends SkillIpcError {
+  /**
+   * @param code - stable failure code.
+   * @param status - HTTP status the Host route replies with.
+   * @param message - what failed, in user terms.
+   * @param remediation - the action that recovers.
+   */
+  constructor(code: string, status: number, message: string, readonly remediation: string) {
+    super(code, status, `${message}。处理方式：${remediation}`)
+  }
+}
+
 /** Auditor and executor behind the skill-admin conversation. */
 export class SkillAdminApi {
   private readonly api: SkillApi
@@ -115,6 +133,7 @@ export class SkillAdminApi {
   private readonly auditFile: string
   private readonly now: () => number
   private readonly skillsDir: string
+  private readonly builtinDir: string | undefined
   private readonly pending = new Map<string, PendingPlan>()
   private readonly projects = new Map<string, string>()
   private readonly bindingsFile: string
@@ -146,6 +165,7 @@ export class SkillAdminApi {
     this.workspace = options.workspace
     this.now = options.now ?? Date.now
     this.skillsDir = options.skillsDir
+    this.builtinDir = options.builtinDir
     const auditDir = options.auditDir ?? join(homedir(), '.dsh', 'cadre-skill-admin')
     mkdirSync(auditDir, { recursive: true })
     this.auditFile = join(auditDir, 'audit.jsonl')
@@ -153,27 +173,35 @@ export class SkillAdminApi {
   }
 
   /** Catalog for an admin session's project. */
-  catalogFor(sessionId: string): ReturnType<SkillApi['catalog']> {
-    const projectId = this.projectOf(sessionId)
-    return this.api.catalog({ projectId, actorSessionId: this.actorFor(projectId) })
+  async catalogFor(sessionId: string): Promise<ReturnType<SkillApi['catalog']>> {
+    const projectId = await this.projectFor(sessionId)
+    return this.api.catalog({ projectId, actorSessionId: this.operatorFor(projectId, sessionId) })
   }
 
-  /** Detail for an admin session's project; includes the body the model may inspect. */
-  previewFor(sessionId: string, packId: string): ReturnType<SkillApi['preview']> {
-    const projectId = this.projectOf(sessionId)
-    return this.api.preview({ projectId, actorSessionId: this.actorFor(projectId), packId })
+  /**
+   * Detail for an admin session's project, including the body the model may inspect.
+   * Read from the pack directories so the admin preset does not borrow a roster role.
+   */
+  async previewFor(sessionId: string, packId: string): Promise<ReturnType<SkillApi['preview']>> {
+    await this.projectFor(sessionId)
+    const pack = this.packFor(packId)
+    return {
+      id: pack.id, content: pack.content, tokenEstimate: pack.tokenEstimate, license: pack.license,
+      ...(pack.author === undefined ? {} : { author: pack.author }),
+      ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
+    }
   }
 
   /** Audit rows for an admin session's project. */
-  auditForSession(sessionId: string, limit?: number): readonly Record<string, unknown>[] {
-    this.projectOf(sessionId)
+  async auditForSession(sessionId: string, limit?: number): Promise<readonly Record<string, unknown>[]> {
+    await this.projectFor(sessionId)
     return this.readAudit(limit)
   }
 
-  /** Plan for an admin session's project. */
+  /** Plan for an admin session's project; the admin session acts as the operator. */
   async planForSession(sessionId: string, input: Omit<PlanInput, 'projectId' | 'operatorSessionId'>): Promise<SkillPlan> {
-    const projectId = this.projectOf(sessionId)
-    return this.plan({ projectId, operatorSessionId: this.actorFor(projectId), ...input })
+    const projectId = await this.projectFor(sessionId)
+    return this.composePlan(projectId, this.operatorFor(projectId, sessionId), input)
   }
 
   /** Send one user message to an admin session; any project member may call. */
@@ -214,8 +242,8 @@ export class SkillAdminApi {
       warnings: readonly InstallWarning[]; preview: unknown
     }
   > {
-    const projectId = this.projectOf(sessionId)
-    const actorSessionId = this.actorFor(projectId)
+    const projectId = await this.projectFor(sessionId)
+    const actorSessionId = this.operatorFor(projectId, sessionId)
     const provided = [input.name, input.url, input.text].filter(value => value !== undefined)
     if (provided.length !== 1) {
       throw new SkillIpcError('SKILL_INVALID', 400, 'name/url/text 必须且只能提供一个')
@@ -273,8 +301,8 @@ export class SkillAdminApi {
   }
 
   /** Confirmation token for a plan created by an admin session. */
-  tokenForSession(sessionId: string, planId: string): string | undefined {
-    this.projectOf(sessionId)
+  async tokenForSession(sessionId: string, planId: string): Promise<string | undefined> {
+    await this.projectFor(sessionId)
     return this.tokenFor(planId)
   }
 
@@ -336,15 +364,30 @@ export class SkillAdminApi {
   /** Build a preview; this never writes the skill directory. */
   async plan(input: PlanInput): Promise<SkillPlan> {
     this.requireOperator(input.projectId, input.operatorSessionId)
+    return this.composePlan(input.projectId, input.operatorSessionId, input)
+  }
+
+  /**
+   * Build a preview for one project and operator without re-checking the roster role.
+   * @param projectId - project the plan is scoped to.
+   * @param operatorSessionId - session that will confirm the plan in `apply`.
+   * @param input - requested action; `projectId` and `operatorSessionId` are ignored.
+   * @returns the plan, already stashed with its confirmation token.
+   */
+  private async composePlan(
+    projectId: string,
+    operatorSessionId: string,
+    input: Omit<PlanInput, 'projectId' | 'operatorSessionId'>,
+  ): Promise<SkillPlan> {
     const kind = input.kind ?? 'install'
     if (kind === 'remove' || (kind === 'update' && input.url === undefined)) {
-      return this.planLocal(input, kind)
+      return this.planLocal({ ...input, projectId, operatorSessionId }, kind)
     }
     if (input.url === undefined) throw new SkillIpcError('SKILL_URL_INVALID', 400, 'url 必填')
     let inspected
     try {
       inspected = await this.api.inspectUrl({
-        projectId: input.projectId, actorSessionId: input.operatorSessionId, url: input.url,
+        projectId, actorSessionId: operatorSessionId, url: input.url,
       })
     } catch (error) {
       if (error instanceof SkillIpcError && ['SKILL_URL_INVALID', 'SKILL_URL_FETCH_FAILED', 'SKILL_INVALID', 'SKILL_TOO_LARGE'].includes(error.code)) {
@@ -380,9 +423,7 @@ export class SkillAdminApi {
       summary: `${kind === 'update' ? '更新' : '安装'} ${pack.id}（${pack.name}）到 ${join(this.skillsDir, pack.id)}`,
       expiresAt: new Date(this.now() + 10 * 60_000).toISOString(),
     }
-    this.pending.set(planId, {
-      plan, projectId: input.projectId, operatorSessionId: input.operatorSessionId, token: randomUUID(), pack,
-    })
+    this.pending.set(planId, { plan, projectId, operatorSessionId, token: randomUUID(), pack })
     return plan
   }
 
@@ -494,25 +535,109 @@ export class SkillAdminApi {
   }
 
   private requireProject(projectId: string): void {
-    const row = this.db.prepare(
-      "SELECT session_id FROM members WHERE project_id = ? AND state != 'departed' LIMIT 1",
-    ).get(projectId) as { session_id?: unknown } | undefined
-    if (row?.session_id === undefined) throw new SkillIpcError('SKILL_FORBIDDEN', 403, '本项目没有在册成员')
+    if (this.ledgerProjects().includes(projectId)) return
+    throw new SkillIpcError('SKILL_FORBIDDEN', 403, `未知项目：${projectId}`)
   }
 
-  /** Pick a real roster member for project-scoped API calls; no supervisor requirement. */
-  private actorFor(projectId: string): string {
+  /**
+   * Session id to attribute project-scoped skill calls to. A roster supervisor is preferred
+   * because warning-bearing installs keep their confirmation authority; without one the
+   * calling admin session acts, which the project-scoped skill API admits off-roster.
+   * @param projectId - project the call is scoped to.
+   * @param sessionId - calling admin session.
+   * @returns a non-departed supervisor's session id, else the calling session id.
+   */
+  private operatorFor(projectId: string, sessionId: string): string {
     const row = this.db.prepare(
-      "SELECT session_id FROM members WHERE project_id = ? AND state != 'departed' ORDER BY CASE role WHEN 'supervisor' THEN 0 ELSE 1 END, session_id LIMIT 1",
+      "SELECT session_id FROM members WHERE project_id = ? AND state != 'departed' AND role = 'supervisor' ORDER BY session_id LIMIT 1",
     ).get(projectId) as { session_id?: unknown } | undefined
-    if (typeof row?.session_id !== 'string') throw new SkillIpcError('SKILL_FORBIDDEN', 403, '本项目没有在册成员')
-    return row.session_id
+    return typeof row?.session_id === 'string' ? row.session_id : sessionId
   }
 
-  private projectOf(sessionId: string): string {
-    const projectId = this.bindingOf(sessionId)
-    if (projectId === undefined) throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
-    return projectId
+  /**
+   * Resolve the project an admin tool call acts on, binding the session on first use when the
+   * ledger makes that unambiguous. Bindings written by an earlier Host run win over recovery.
+   * @param sessionId - calling session, which the admin preset scopes to skill administration.
+   * @returns the project bound to the session.
+   */
+  private async projectFor(sessionId: string): Promise<string> {
+    const bound = this.bindingOf(sessionId)
+    if (bound !== undefined) return bound
+    const recovered = await this.recoverBinding(sessionId)
+    if (recovered !== undefined) return recovered
+    throw new SkillAdminRecoveryError('SKILL_ADMIN_SESSION_NOT_FOUND', 404,
+      '未知的技能管理员会话',
+      this.ledgerProjects().length > 1
+        ? '本项目存在多个项目，重新打开技能页并新建技能管理员会话，让会话重新绑定到项目'
+        : '打开技能页新建技能管理员会话，让会话重新绑定到项目')
+  }
+
+  /**
+   * Bind a still-unknown session to the ledger's only project, proving first that the Host
+   * lists it as an admin-preset session so an arbitrary id cannot claim administration.
+   * @param sessionId - session reported by the calling tool.
+   * @returns the recovered project id, or undefined when recovery is not possible.
+   */
+  private async recoverBinding(sessionId: string): Promise<string | undefined> {
+    const projects = this.ledgerProjects()
+    const only = projects[0]
+    if (projects.length !== 1 || only === undefined) return undefined
+    let listed: boolean
+    try {
+      listed = (await this.sessions.list({ preset: SKILL_ADMIN_PRESET }))
+        .some(session => session.sessionId === sessionId)
+    } catch (error) {
+      // Without a session store the preset scope cannot be checked, so recovery stays unavailable.
+      console.error(`host-session-skills: cannot verify admin session for recovery: ${error instanceof Error ? error.message : String(error)}`)
+      return undefined
+    }
+    if (!listed) return undefined
+    this.bind(sessionId, only)
+    return only
+  }
+
+  /**
+   * Projects the ledger still tracks, read from the schema the ledger provides.
+   * @returns non-archived project ids; empty when the ledger cannot be read.
+   */
+  private ledgerProjects(): string[] {
+    const read = (sql: string): string[] => this.db.prepare(sql).all().flatMap(row => {
+      const value = (row as { project_id?: unknown }).project_id
+      return typeof value === 'string' && value !== '' ? [value] : []
+    })
+    const hasTable = (name: string): boolean => this.db.prepare(
+      "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+    ).get(name) !== undefined
+    try {
+      if (!hasTable('projects')) return read('SELECT DISTINCT project_id FROM members')
+      try {
+        return read('SELECT project_id FROM projects WHERE archived_at IS NULL')
+      } catch {
+        // Older project tables carry no archive column, so every row still counts.
+        return read('SELECT project_id FROM projects')
+      }
+    } catch {
+      // An unreadable ledger cannot prove which project a session belongs to.
+      return []
+    }
+  }
+
+  /**
+   * Read one pack from the same builtin-over-installed catalog the skill IPC serves.
+   * @param packId - catalog pack id.
+   * @returns the pack, including its SKILL.md body.
+   */
+  private packFor(packId: string): SkillPack {
+    const packs = new Map<string, SkillPack>()
+    if (this.builtinDir !== undefined) {
+      for (const [id, pack] of loadSkillCatalog(this.builtinDir, 'builtin')) packs.set(id, pack)
+    }
+    for (const [id, pack] of loadSkillCatalog(this.skillsDir, 'installed')) {
+      if (!packs.has(id)) packs.set(id, pack)
+    }
+    const pack = packs.get(packId)
+    if (pack === undefined) throw new SkillIpcError('SKILL_NOT_FOUND', 400, `未知技能包：${packId}`)
+    return pack
   }
 
   private async requireSession(projectId: string, sessionId: string): Promise<void> {

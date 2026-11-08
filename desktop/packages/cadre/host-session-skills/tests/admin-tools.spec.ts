@@ -196,6 +196,59 @@ describe('skill admin model tools', () => {
     db.close()
   })
 
+  it('serves the four admin tools for a project with no roster row', async () => {
+    const root = workspace()
+    const packs = join(root, 'installed')
+    mkdirSync(join(packs, 'sample-pack'), { recursive: true })
+    writeFileSync(join(packs, 'sample-pack', 'manifest.json'), JSON.stringify({
+      id: 'sample-pack', name: 'Sample', description: 'sample', roles: ['worker'],
+      tokenEstimate: 4, tools: [], source: 'internal', license: 'MIT',
+    }))
+    writeFileSync(join(packs, 'sample-pack', 'SKILL.md'), '# sample body')
+    const db = new DatabaseSync(join(root, 'ledger.sqlite'))
+    db.exec(`CREATE TABLE projects (
+      project_id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, archived_at TEXT);
+    CREATE TABLE members (project_id TEXT NOT NULL, session_id TEXT NOT NULL, role TEXT NOT NULL,
+      state TEXT NOT NULL, skills_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, session_id))`)
+    db.exec(`INSERT INTO projects (project_id, name, root_path, created_at)
+      VALUES ('p9', '无花名册项目', '/tmp/p9', 'now')`)
+    const port: AdminSessionPort = {
+      create: async () => ({ sessionId: 'admin-9' }),
+      list: async () => [{ sessionId: 'admin-9', title: '技能管理员', updatedAt: 1 }],
+    }
+    const admin = new SkillAdminApi({
+      db, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs, sessions: port,
+      auditDir: join(root, 'audit'),
+      workspace: { create: async (path: string) => ({ id: `ws-${path}`, path, attachSession: async () => {} }) },
+    })
+    const created = await admin.createSession({ projectId: 'p9', cwd: join(root, 'cwd') })
+    expect(created.sessionId).toBe('admin-9')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM members').get()).toMatchObject({ count: 0 })
+
+    const registered: Registered[] = []
+    apply({
+      tools: { register: tool => { registered.push(tool as unknown as Registered); return () => {} } },
+      get: () => admin,
+    })
+    const run = { agent: { id: created.sessionId } }
+    const find = (name: string): Registered => registered.find(tool => tool.name === name) as Registered
+
+    // None of the four tools may fall back to the "unknown skill admin session" dead end.
+    expect(await find('skill_catalog').execute({}, run))
+      .toMatchObject({ skills: [expect.objectContaining({ id: 'sample-pack' })] })
+    expect(await find('skill_preview').execute({ packId: 'sample-pack' }, run))
+      .toMatchObject({ id: 'sample-pack', content: '# sample body' })
+    const planned = await find('skill_plan').execute({ kind: 'remove', packId: 'sample-pack' }, run) as {
+      planId: string; confirmToken: string; kind: string
+    }
+    expect(planned).toMatchObject({ kind: 'remove' })
+    expect(planned.confirmToken).toBeTruthy()
+    expect(await find('skill_audit').execute({}, run)).toMatchObject({ items: expect.any(Array) })
+    db.close()
+  })
+
   it('reports a readable failure when the workspace cannot be created', async () => {
     const root = workspace()
     const blocked = join(root, 'blocked')
