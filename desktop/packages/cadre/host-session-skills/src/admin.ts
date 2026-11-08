@@ -3,7 +3,7 @@
  * confirmed execution through the existing skill IPC validators.
  * @module
  */
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -117,6 +117,8 @@ export class SkillAdminApi {
   private readonly skillsDir: string
   private readonly pending = new Map<string, PendingPlan>()
   private readonly projects = new Map<string, string>()
+  private readonly bindingsFile: string
+  private bindingsLoaded = false
   private readonly db: DatabaseSync
 
   constructor(options: {
@@ -147,6 +149,7 @@ export class SkillAdminApi {
     const auditDir = options.auditDir ?? join(homedir(), '.dsh', 'cadre-skill-admin')
     mkdirSync(auditDir, { recursive: true })
     this.auditFile = join(auditDir, 'audit.jsonl')
+    this.bindingsFile = join(auditDir, 'sessions.json')
   }
 
   /** Catalog for an admin session's project. */
@@ -303,17 +306,17 @@ export class SkillAdminApi {
       throw new SkillIpcError('SKILL_ADMIN_WORKSPACE_ATTACH_FAILED', 500,
         `无法绑定技能管理员工作区：${error instanceof Error ? error.message : String(error)}`)
     }
-    this.projects.set(created.sessionId, input.projectId)
+    this.bind(created.sessionId, input.projectId)
     return {
       sessionId: created.sessionId, title: '技能管理员', updatedAt: this.now(),
       cwd: workspace.path, workspaceId: workspace.id,
     }
   }
 
-  /** List admin sessions created for one project in this Host process. */
+  /** List admin sessions created for one project, including those of earlier Host runs. */
   async listSessions(input: { readonly projectId: string }): Promise<readonly AdminSession[]> {
     const sessions = await this.sessions.list({ preset: SKILL_ADMIN_PRESET })
-    return sessions.filter(session => this.projects.get(session.sessionId) === input.projectId)
+    return sessions.filter(session => this.bindingOf(session.sessionId) === input.projectId)
   }
 
   async deleteSession(input: {
@@ -322,11 +325,11 @@ export class SkillAdminApi {
     if (this.sessions.delete === undefined) {
       throw new SkillIpcError('SKILL_ADMIN_DELETE_UNSUPPORTED', 501, '当前 Host 不支持删除会话')
     }
-    if (this.projects.get(input.sessionId) !== input.projectId) {
+    if (this.bindingOf(input.sessionId) !== input.projectId) {
       throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
     }
     await this.sessions.delete({ sessionId: input.sessionId })
-    this.projects.delete(input.sessionId)
+    this.unbind(input.sessionId)
     return { deleted: true }
   }
 
@@ -507,18 +510,81 @@ export class SkillAdminApi {
   }
 
   private projectOf(sessionId: string): string {
-    const projectId = this.projects.get(sessionId)
+    const projectId = this.bindingOf(sessionId)
     if (projectId === undefined) throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
     return projectId
   }
 
   private async requireSession(projectId: string, sessionId: string): Promise<void> {
-    if (this.projects.get(sessionId) !== projectId) {
+    if (this.bindingOf(sessionId) !== projectId) {
       throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
     }
     const owned = (await this.sessions.list({ preset: SKILL_ADMIN_PRESET }))
       .some(session => session.sessionId === sessionId)
     if (!owned) throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
+  }
+
+  /**
+   * Resolve a session's project, lazily reading the bindings file written by earlier Host runs.
+   * Recovery is lazy so a Host that never touches skill administration performs no extra file IO.
+   * @param sessionId - Ordinary session id reported by the Host.
+   * @returns The bound project id, or undefined when this Host never bound the session.
+   */
+  private bindingOf(sessionId: string): string | undefined {
+    const known = this.projects.get(sessionId)
+    if (known !== undefined) return known
+    this.loadBindings()
+    return this.projects.get(sessionId)
+  }
+
+  /**
+   * Read the persisted bindings once per instance, keeping bindings created or deleted in this
+   * process authoritative over the file.
+   */
+  private loadBindings(): void {
+    if (this.bindingsLoaded) return
+    this.bindingsLoaded = true
+    if (!existsSync(this.bindingsFile)) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(readFileSync(this.bindingsFile, 'utf8'))
+    } catch {
+      // A truncated or hand-edited file only costs session recovery; the Host recreates bindings on demand.
+      return
+    }
+    if (typeof parsed !== 'object' || parsed === null) return
+    for (const [sessionId, projectId] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof projectId !== 'string' || projectId === '') continue
+      if (!this.projects.has(sessionId)) this.projects.set(sessionId, projectId)
+    }
+  }
+
+  /** Persist the whole binding map so a later Host run can resolve these sessions. */
+  private saveBindings(): void {
+    this.loadBindings()
+    const sorted = [...this.projects.entries()].sort(([first], [second]) => first.localeCompare(second))
+    const temporaryPath = `${this.bindingsFile}.tmp`
+    try {
+      writeFileSync(temporaryPath, `${JSON.stringify(Object.fromEntries(sorted), null, 2)}\n`, 'utf8')
+      renameSync(temporaryPath, this.bindingsFile)
+    } catch (error) {
+      // Losing durability must not fail the user-visible operation that already succeeded.
+      rmSync(temporaryPath, { force: true })
+      console.error(`host-session-skills: cannot persist admin session bindings to ${this.bindingsFile}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /** Bind one admin session to its project and persist the binding. */
+  private bind(sessionId: string, projectId: string): void {
+    this.loadBindings()
+    this.projects.set(sessionId, projectId)
+    this.saveBindings()
+  }
+
+  /** Drop one admin session binding and persist the removal. */
+  private unbind(sessionId: string): void {
+    if (!this.projects.delete(sessionId)) return
+    this.saveBindings()
   }
 
   private readAudit(limit?: number): readonly Record<string, unknown>[] {
