@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-mcp-resources",
   "description": "Scoped MCP resource discovery and reading through shared model tools",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "publishConfig": {
     "access": "public"
   },

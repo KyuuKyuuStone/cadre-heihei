@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-browser-use-stagehand-native",
   "description": "Experimental Stagehand browser tools with separately configured native models",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "publishConfig": {
     "access": "public"
   },

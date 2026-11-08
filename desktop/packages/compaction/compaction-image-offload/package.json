@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-compaction-image-offload",
   "description": "Durable image offload for image-capable routes: replace over-budget request images with placeholders and retry",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "publishConfig": {
     "access": "public"
   },

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-session-format",
   "description": "Streaming adjacent Session format migration machinery",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "publishConfig": {
     "access": "public"
   },
