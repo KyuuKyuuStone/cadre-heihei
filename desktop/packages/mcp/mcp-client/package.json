@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-mcp-client",
   "description": "MCP client bridge: connects to MCP servers and registers their tools on ctx.tools",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "publishConfig": {
     "access": "public"
   },

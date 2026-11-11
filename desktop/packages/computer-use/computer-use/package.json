@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-computer-use",
   "description": "Exclusive named computer-use provider registration",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "publishConfig": {
     "access": "public"
   },
