@@ -594,6 +594,7 @@ export function apply(ctx: ClientContext): void {
   const skillLibraryInjected = (): CadreSkillLibraryInjected => ({
     hooks: { roster, sessions: sessionsSource },
     projectOfSession,
+    defaultProjectId: () => resolveDefaultProject() ?? undefined,
     openSkillAdminSession,
   })
   // @ts-expect-error -- ui-tool owns the tool slot declaration; importing it statically would form a project-reference cycle.

@@ -1,11 +1,12 @@
 /**
  * Global skill library: built-in packs are read-only; installation goes through
- * the skill-administrator conversation. Member settings only select.
+ * the skill-administrator conversation. Any session opens the full page; skill
+ * IPC runs under the foreground session's own id, scoped to the resolved project.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
+import type { CadreRosterMember, CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import {
   addSkillToLibrary,
   fetchSkillCatalog,
@@ -18,6 +19,8 @@ import css from './CadreSkillLibrary.module.css'
 export interface CadreSkillLibraryInjected {
   hooks: { roster: HostObservable<CadreRosterState>; sessions: HostObservable<CadreSessionsState> }
   projectOfSession(sessionId: string): string | undefined
+  /** Fallback project for a session that belongs to no project; undefined when none exists. */
+  defaultProjectId(): string | undefined
   openSkillAdminSession(sessionId: string, workspaceId?: string): Promise<void>
 }
 
@@ -57,6 +60,28 @@ const skillHref = (entry: CadreSkillEntry): string => {
   return homepage !== '' ? homepage : entry.source.trim()
 }
 
+/**
+ * Resolve the session id that authorizes skill IPC for the project. The host
+ * admits any session while the project exists, so the foreground session acts
+ * under its own id — roster member or not. Without a foreground session, the
+ * page borrows the project supervisor, else its first non-departed member by
+ * session id (mirroring the host's actorFor proxy rule).
+ */
+const actingSessionIdOf = (
+  members: readonly CadreRosterMember[],
+  projectId: string | undefined,
+  activeSessionId: string | undefined,
+  projectOfSession: (sessionId: string) => string | undefined,
+): string | undefined => {
+  if (projectId === undefined) return undefined
+  if (activeSessionId !== undefined) return activeSessionId
+  const inProject = members.filter(member =>
+    member.state !== 'departed' && projectOfSession(member.sessionId) === projectId)
+  const supervisor = inProject.find(member => member.role === 'supervisor')
+  if (supervisor !== undefined) return supervisor.sessionId
+  return [...inProject].sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0))[0]?.sessionId
+}
+
 /** Sidebar icon for the global skill library. */
 export function CadreSkillLibraryIcon({ size }: PropsRuntime<'sidebar.panellist'>) {
   return <span className={css.icon} style={{ width: size, height: size }} aria-hidden="true">✦</span>
@@ -64,13 +89,14 @@ export function CadreSkillLibraryIcon({ size }: PropsRuntime<'sidebar.panellist'
 
 /** Global panel listing built-in and installed skills. */
 export function CadreSkillLibraryPage({
-  useRoster, useSessions, projectOfSession, openSkillAdminSession, t,
+  useRoster, useSessions, projectOfSession, defaultProjectId, openSkillAdminSession, t,
 }: PropsRuntime<'main'> & InjectFace<CadreSkillLibraryInjected> & PropsLocale<'sidebar'>) {
   const members = useRoster(state => state.members)
   const activeSessionId = useSessions(state => Object.entries(state.byId)
     .find(([, session]) => (session.retainedBy.mainView ?? 0) > 0)?.[0])
-  const actor = members.find(member => member.sessionId === activeSessionId)
-  const projectId = actor === undefined ? undefined : projectOfSession(actor.sessionId)
+  const sessionProjectId = activeSessionId === undefined ? undefined : projectOfSession(activeSessionId)
+  const projectId = sessionProjectId ?? defaultProjectId()
+  const actorSessionId = actingSessionIdOf(members, projectId, activeSessionId, projectOfSession)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -82,21 +108,21 @@ export function CadreSkillLibraryPage({
   const [openError, setOpenError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    if (actor === undefined || projectId === undefined) return
+    if (actorSessionId === undefined || projectId === undefined) return
     setBusy(true)
     setError(null)
     try {
-      setEntries(await fetchSkillCatalog(projectId, actor.sessionId, actor.sessionId, navigator.language))
+      setEntries(await fetchSkillCatalog(projectId, actorSessionId, actorSessionId, navigator.language))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy(false)
     }
-  }, [actor, projectId])
+  }, [actorSessionId, projectId])
 
   useEffect(() => { void load() }, [load])
 
-  if (actor === undefined || projectId === undefined) {
+  if (actorSessionId === undefined || projectId === undefined) {
     return (
       <section className={css.page} data-skill-library>
         <h1>{t('skills.library.title')}</h1>
@@ -130,7 +156,7 @@ export function CadreSkillLibraryPage({
     setError(null)
     setNotice(null)
     try {
-      await addSkillToLibrary(projectId, actor.sessionId, {
+      await addSkillToLibrary(projectId, actorSessionId, {
         ...form,
         tokenEstimate: Number(form.tokenEstimate),
         tools: form.tools.split(',').map(item => item.trim()).filter(item => item !== ''),
@@ -175,7 +201,7 @@ export function CadreSkillLibraryPage({
     setError(null)
     setNotice(null)
     try {
-      await removeSkillFromLibrary(projectId, actor.sessionId, id)
+      await removeSkillFromLibrary(projectId, actorSessionId, id)
       setNotice(t('skills.notice.removed'))
       await load()
     } catch (cause) {

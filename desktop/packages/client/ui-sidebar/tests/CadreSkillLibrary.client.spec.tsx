@@ -40,6 +40,7 @@ function pageProps(role: 'supervisor' | 'worker' = 'supervisor', translate = t):
     useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
       selector({ byId: { [role === 'supervisor' ? 'sup' : 'w1']: { retainedBy: { mainView: 1 } } } })) as never,
     projectOfSession: () => 'p1',
+    defaultProjectId: () => undefined,
     openSkillAdminSession: async () => {},
     t: translate,
   } as unknown as ComponentProps<typeof CadreSkillLibraryPage>
@@ -151,12 +152,95 @@ describe('Cadre skill library', () => {
     await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('chat-1', 'ws-1') })
   })
 
-  it('shows a readable prompt when the session has no project roster membership', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: ENTRIES })))
+  it('shows the full page to a session outside the roster, acting under its own session id', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      if (url.endsWith('/admin/sessions')) return json({ ok: true, result: [] })
+      if (url.endsWith('/admin/session')) return json({ ok: true, result: { sessionId: 'chat-1', title: '技能管理员', updatedAt: 1, workspaceId: 'ws-1' } })
+      return json({ ok: true, result: { removed: true } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const props = pageProps('worker')
-    render(<CadreSkillLibraryPage {...{ ...props, projectOfSession: () => undefined }} />)
-    expect(screen.getByText('当前会话不属于任何项目部或花名册，无法管理技能。')).toBeTruthy()
+    render(<CadreSkillLibraryPage {...{
+      ...props,
+      useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
+        selector({ byId: { plain: { retainedBy: { mainView: 1 } } } })) as never,
+      projectOfSession: () => undefined,
+      defaultProjectId: () => 'p1',
+    }} />)
+    expect(await screen.findByText('内置技能')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '打开安装对话' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '高级手动表单' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(true)
+    })
+    const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
+      projectId: 'p1', actorSessionId: 'plain', targetSessionId: 'plain',
+    })
+    const removal = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/remove'))
+    expect(JSON.parse((removal?.[1] as RequestInit).body as string)).toMatchObject({
+      projectId: 'p1', actorSessionId: 'plain',
+    })
+  })
+
+  it('keeps the read-only fallback when no project exists at all', async () => {
+    const fetchMock = vi.fn(async () => json({ ok: true, result: ENTRIES }))
+    vi.stubGlobal('fetch', fetchMock)
+    const props = pageProps('worker')
+    render(<CadreSkillLibraryPage {...{
+      ...props,
+      projectOfSession: () => undefined,
+      defaultProjectId: () => undefined,
+    }} />)
+    expect(screen.getByText('当前没有可用的项目部或在册成员，暂时无法管理技能。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '打开安装对话' })).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the read-only fallback when no foreground session and no usable roster member exist', async () => {
+    const fetchMock = vi.fn(async () => json({ ok: true, result: ENTRIES }))
+    vi.stubGlobal('fetch', fetchMock)
+    const props = pageProps('worker')
+    render(<CadreSkillLibraryPage {...{
+      ...props,
+      useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
+        selector({ byId: {} })) as never,
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector({
+        status: 'ready',
+        members: [{ sessionId: 'gone', role: 'supervisor', displayName: '前主管', state: 'departed' }],
+        error: null,
+      })) as never,
+      projectOfSession: (sessionId: string) => (sessionId === 'gone' ? 'p1' : undefined),
+      defaultProjectId: () => 'p1',
+    }} />)
+    expect(screen.getByText('当前没有可用的项目部或在册成员，暂时无法管理技能。')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '打开安装对话' })).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('borrows the project supervisor when no foreground session exists', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (requestUrl(input).endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      return json({ ok: true, result: {} })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const props = pageProps('worker')
+    render(<CadreSkillLibraryPage {...{
+      ...props,
+      useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
+        selector({ byId: {} })) as never,
+      defaultProjectId: () => 'p1',
+    }} />)
+    expect(await screen.findByText('内置技能')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '打开安装对话' })).toBeTruthy()
+    const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
+      projectId: 'p1', actorSessionId: 'sup', targetSessionId: 'sup',
+    })
   })
 
   it('shows an inline empty state when the library has no skills', async () => {
