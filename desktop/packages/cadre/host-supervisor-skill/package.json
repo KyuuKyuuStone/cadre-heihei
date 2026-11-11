@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-supervisor-skill",
   "description": "Supervisor-only Cadre management Skill",
-  "version": "1.5.8",
+  "version": "1.5.9",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

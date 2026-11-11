@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-hmr",
   "description": "Web client graph synchronization and rebuilt-bundle reload transport",
-  "version": "1.5.8",
+  "version": "1.5.9",
   "publishConfig": {
     "access": "public"
   },

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-translator",
   "description": "Machine translation with reusable Session results",
-  "version": "1.5.8",
+  "version": "1.5.9",
   "publishConfig": {
     "access": "public"
   },

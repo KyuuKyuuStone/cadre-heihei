@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-skill-badge",
   "description": "Bundled dsh badge skill provider for DeepSeek Harness",
-  "version": "1.5.8",
+  "version": "1.5.9",
   "publishConfig": {
     "access": "public"
   },
