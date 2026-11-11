@@ -189,7 +189,7 @@ describe('skill admin session bindings across restarts', () => {
     )
     expect(failure).toBeInstanceOf(SkillAdminRecoveryError)
     expect(failure).toMatchObject({ code: 'SKILL_ADMIN_SESSION_NOT_FOUND', status: 404 })
-    expect(failure.remediation).toMatch(/技能管理员会话/u)
+    expect(failure.remediation).toMatch(/projectId/u)
     expect(failure.message).toMatch(/未知的技能管理员会话/u)
     // The remediation travels in the message so HTTP and tool callers both see it.
     expect(failure.message).toMatch(/处理方式：/u)

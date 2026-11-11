@@ -10,7 +10,7 @@ import type { SkillPlan } from './admin.ts'
 import type { SkillPack } from './catalog.ts'
 import { loadSkillCatalog, searchLocalPacks } from './catalog.ts'
 import type { PackCheck } from './diagnostics.ts'
-import { collectPackHealth } from './diagnostics.ts'
+import { checkSkillCatalog } from './diagnostics.ts'
 
 /** One catalog row as the conversational tools expose it. */
 export interface SkillSummary {
@@ -364,7 +364,7 @@ export class SkillConversationExecutor {
       if (query.trim() === '') {
         throw new SkillIpcError('SKILL_INVALID', 400, 'query 必填')
       }
-      const local = await this.port.searchable(sessionId, binding.projectId, query, limit)
+      const local = await this.localSearch(sessionId, binding.projectId, query, limit)
       if (this.search === undefined) {
         return succeed({ items: local, source: 'local', degraded: true, message: '远程搜索不可用，已返回本地结果；可稍后重试远程搜索' })
       }
@@ -380,6 +380,28 @@ export class SkillConversationExecutor {
       }
     } catch (error) {
       return failureOf(error)
+    }
+  }
+
+  /**
+   * Read local candidates, reporting an unreadable catalog instead of a generic failure.
+   * @param sessionId - calling agent session id.
+   * @param projectId - resolved project.
+   * @param query - free-text query.
+   * @param limit - result cap.
+   * @returns local candidates in rank order.
+   */
+  private async localSearch(
+    sessionId: string,
+    projectId: string | undefined,
+    query: string,
+    limit: number,
+  ): Promise<SearchResult[]> {
+    try {
+      return await this.port.searchable(sessionId, projectId, query, limit)
+    } catch (error) {
+      if (error instanceof SkillIpcError) throw error
+      throw new SkillIpcError('SKILL_SEARCH_UNAVAILABLE', 503, '本地技能目录不可读，暂时无法搜索')
     }
   }
 
@@ -850,6 +872,9 @@ export function createSessionPort(options: SessionPortOptions): SkillConversatio
     },
     async create(sessionId, projectId, input) {
       if (projectId === undefined) throw new SkillIpcError('SKILL_PROJECT_REQUIRED', 400, '无法确定项目')
+      if (input.overwrite === true && resolver.resolve(sessionId, projectId).role !== 'supervisor') {
+        throw new SkillIpcError('SKILL_FORBIDDEN', 403, `会话 ${sessionId} 不是本项目主管，不能覆盖技能包 ${input.id}；请主管执行覆盖或更换技能 id`)
+      }
       const created = createViaApi(api, { projectId, actorSessionId: actorOf(sessionId), pack: input })
       audit.append(auditItem({
         kind: 'create', actorSessionId: sessionId, projectId, result: 'created', packId: created.id,
@@ -877,7 +902,11 @@ export function createSessionPort(options: SessionPortOptions): SkillConversatio
       return installed
     },
     async check(_sessionId, _projectId, packId) {
-      return collectPackHealth(packs(), packId === undefined ? {} : { packId })
+      return checkSkillCatalog({
+        skillsDir,
+        ...(builtinDir === undefined ? {} : { builtinDir }),
+        ...(packId === undefined ? {} : { packId }),
+      })
     },
     async audit(sessionId, projectId, limit) {
       if (projectId === undefined) throw new SkillIpcError('SKILL_PROJECT_REQUIRED', 400, '无法确定项目')

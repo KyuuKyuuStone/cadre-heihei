@@ -8,6 +8,10 @@ import { createSkillApi } from './ipc.ts'
 import { createAuditLog, createLedgerResolver, createSessionPort, SkillConversationExecutor } from './conversation.ts'
 import type { SkillConversationPort, SkillSearchProvider } from './conversation.ts'
 
+/** The executor entry points the tool surface calls; the concrete class satisfies this. */
+export type SkillToolExecutor = Pick<SkillConversationExecutor,
+'catalog' | 'searchQuery' | 'preview' | 'install' | 'create' | 'check' | 'audit' | 'plan'>
+
 /** One text block returned to the model. */
 export interface ToolContent {
   readonly type: 'text'
@@ -94,7 +98,7 @@ function optionalInteger(value: unknown, fallback: number): number {
  * @param executor - the shared executor behind every tool.
  * @returns the tool definitions in stable order.
  */
-export function skillConversationTools(executor: SkillConversationExecutor): readonly ToolRegistration[] {
+export function skillConversationTools(executor: SkillToolExecutor): readonly ToolRegistration[] {
   return [
     tool({
       name: 'skill_catalog',
@@ -267,7 +271,7 @@ export function skillConversationTools(executor: SkillConversationExecutor): rea
  * @param executor - the shared executor behind the eight tools.
  * @returns the disposer that removes this registration.
  */
-export function registerSkillConversationTools(ctx: ToolsContext, executor: SkillConversationExecutor): () => void {
+export function registerSkillConversationTools(ctx: ToolsContext, executor: SkillToolExecutor): () => void {
   const disposers: (() => void)[] = []
   for (const definition of skillConversationTools(executor)) {
     try {

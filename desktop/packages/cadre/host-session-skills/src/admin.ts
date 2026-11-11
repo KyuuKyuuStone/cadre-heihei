@@ -571,8 +571,8 @@ export class SkillAdminApi {
     throw new SkillAdminRecoveryError('SKILL_ADMIN_SESSION_NOT_FOUND', 404,
       '未知的技能管理员会话',
       this.ledgerProjects().length > 1
-        ? '本项目存在多个项目，重新打开技能页并新建技能管理员会话，让会话重新绑定到项目'
-        : '打开技能页新建技能管理员会话，让会话重新绑定到项目')
+        ? '本项目存在多个项目，请在调用技能工具时显式传入 projectId，让会话绑定到目标项目'
+        : '请在调用技能工具时传入 projectId，让会话绑定到项目')
   }
 
   /**
