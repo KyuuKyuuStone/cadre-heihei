@@ -15,6 +15,12 @@
       name: '@deepseek-ai/dsh-host-supervisor-skill'
     - id: cadre-session-skills
       name: '@deepseek-ai/dsh-host-session-skills'
+    # The eight conversational skill tools. Mounted once for the whole host so every
+    # preset and session (Cadre, standard, PTC, minimal, creative) can find, install,
+    # create, and check skills from the conversation; the hidden admin preset keeps
+    # its own preset-scoped row with the bound-operator semantics.
+    - id: cadre-skill-conversation
+      name: '@deepseek-ai/dsh-host-session-skills/conversation'
     # Ordinary conversation embedded by the skills page. It is hidden from the
     # preset picker and never joins the roster; it has no shell or team tools.
     - id: preset-cadre-skill-admin

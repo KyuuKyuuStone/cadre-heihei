@@ -8,8 +8,11 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { loadSkillCatalog, type SkillPack } from './catalog.ts'
+import { loadSkillCatalog, searchLocalPacks, type SkillPack } from './catalog.ts'
 import { createSkillApi, installWarnings, SkillIpcError, type InstallWarning, type PackageCommandResult, type SkillApi, type ValidPack } from './ipc.ts'
+import { collectPackHealth } from './diagnostics.ts'
+import type { AuditItem, SkillConversationPort } from './conversation.ts'
+import { createViaApi, installViaApi, loadPacks, summaryOfEntry } from './conversation.ts'
 
 /** The agent preset reserved for the skill administrator conversation. */
 export const SKILL_ADMIN_PRESET = 'cadre-skill-admin'
@@ -737,4 +740,112 @@ export class SkillAdminApi {
     })
     appendFileSync(this.auditFile, `${line}\n`, 'utf8')
   }
+
+  /**
+   * The eight conversational tools' view of this admin service.
+   *
+   * The preset keeps its 1.5.7 behavior: the project binding is recovered on first
+   * use, and the admin session borrows the roster supervisor as the API actor. Ordinary
+   * sessions authenticate with their own session id instead, through the host row.
+   * @returns the conversational port backed by this service.
+   */
+  conversationPort(): SkillConversationPort {
+    const packs = (): ReadonlyMap<string, SkillPack> => loadPacks({
+      skillsDir: this.skillsDir,
+      ...(this.builtinDir === undefined ? {} : { builtinDir: this.builtinDir }),
+    })
+    const projectOf = async (sessionId: string, projectId?: string): Promise<string> => {
+      const project = await this.projectFor(sessionId)
+      if (projectId !== undefined && projectId !== project) {
+        throw new SkillIpcError('SKILL_FORBIDDEN', 403, `技能管理员会话绑定项目 ${project}，不能操作项目 ${projectId}`)
+      }
+      return project
+    }
+    const actorFor = async (sessionId: string, projectId?: string): Promise<{ projectId: string; actorSessionId: string }> => {
+      const project = await projectOf(sessionId, projectId)
+      return { projectId: project, actorSessionId: this.operatorFor(project, sessionId) }
+    }
+    return {
+      resolve: async (sessionId, projectId) => ({ projectId: await projectOf(sessionId, projectId), role: 'supervisor' }),
+      catalog: async (sessionId, _projectId, query) => {
+        const needle = query.trim().toLowerCase()
+        const rows = (await this.catalogFor(sessionId)).map(summaryOfEntry)
+        return needle === '' ? rows : rows.filter(row => `${row.id} ${row.name} ${row.description}`.toLowerCase().includes(needle))
+      },
+      searchable: async (_sessionId, _projectId, query, limit) => searchLocalPacks(packs(), query, limit),
+      preview: async (sessionId, _projectId, packId, sourceUrl) => {
+        if (sourceUrl !== undefined) {
+          throw new SkillIpcError('SKILL_URL_FETCH_FAILED', 502, '技能管理员会话只预览本地技能包；远程结果请在普通会话中预览')
+        }
+        const pack = this.packFor(packId)
+        await this.projectFor(sessionId)
+        return {
+          id: pack.id,
+          name: pack.name,
+          description: pack.description,
+          content: pack.content,
+          tokenEstimate: pack.tokenEstimate,
+          license: pack.license,
+          ...(pack.author === undefined ? {} : { author: pack.author }),
+          ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
+        }
+      },
+      create: async (sessionId, _projectId, input) => {
+        const actor = await actorFor(sessionId)
+        const created = createViaApi(this.api, { projectId: actor.projectId, actorSessionId: actor.actorSessionId, pack: input })
+        this.audit({ id: randomUUID(), kind: 'create', actorSessionId: sessionId, projectId: actor.projectId, result: 'created', packId: created.id, warnings: [] })
+        return created
+      },
+      install: async (sessionId, _projectId, input) => {
+        const actor = await actorFor(sessionId)
+        const installed = await installViaApi(this.api, {
+          projectId: actor.projectId,
+          actorSessionId: actor.actorSessionId,
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.url === undefined ? {} : { url: input.url }),
+          ...(input.text === undefined ? {} : { text: input.text }),
+          ...(input.confirm === undefined ? {} : { confirm: input.confirm }),
+        })
+        this.audit({
+          id: randomUUID(), kind: `install-${installed.kind}`, actorSessionId: sessionId, projectId: actor.projectId,
+          result: installed.installed ? 'installed' : 'confirmation-required', warnings: [...installed.warnings], target: installed.target,
+        })
+        return installed
+      },
+      check: async (_sessionId, _projectId, packId) => collectPackHealth(packs(), packId === undefined ? {} : { packId }),
+      audit: async (sessionId, _projectId, limit) => {
+        await this.projectFor(sessionId)
+        return this.readAudit(limit).flatMap(row => auditRowOf(row))
+      },
+      plan: async (sessionId, _projectId, input) => {
+        const plan = await this.planForSession(sessionId, input)
+        const token = this.tokenFor(plan.planId)
+        return token === undefined ? plan : { ...plan, confirmToken: token }
+      },
+      record: item => {
+        this.audit({ ...item })
+      },
+    }
+  }
+}
+
+function stringField(record: Record<string, unknown>, field: string, fallback: string): string {
+  const value = record[field]
+  return typeof value === 'string' ? value : fallback
+}
+
+function auditRowOf(row: Record<string, unknown>): AuditItem[] {
+  const time = stringField(row, 'time', '')
+  return [{
+    id: stringField(row, 'id', '') === '' ? randomUUID() : stringField(row, 'id', ''),
+    time,
+    kind: stringField(row, 'kind', 'unknown'),
+    actorSessionId: stringField(row, 'actorSessionId', stringField(row, 'confirmedBy', '')),
+    projectId: stringField(row, 'projectId', ''),
+    result: stringField(row, 'result', 'unknown'),
+    warnings: Array.isArray(row.warnings) ? row.warnings.filter((item): item is string => typeof item === 'string') : [],
+    ...(typeof row.packId === 'string' ? { packId: row.packId } : {}),
+    ...(typeof row.target === 'string' ? { target: row.target } : typeof row.url === 'string' ? { target: row.url } : {}),
+    ...(typeof row.message === 'string' ? { message: row.message } : {}),
+  }]
 }

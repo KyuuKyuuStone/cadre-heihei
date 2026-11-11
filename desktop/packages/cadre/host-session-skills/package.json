@@ -8,6 +8,7 @@
   "exports": {
     ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
     "./admin": { "types": "./lib/types/admin-plugin.d.ts", "default": "./lib/admin-plugin.js" },
+    "./conversation": { "types": "./lib/types/conversation-tools.d.ts", "default": "./lib/conversation-tools.js" },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },

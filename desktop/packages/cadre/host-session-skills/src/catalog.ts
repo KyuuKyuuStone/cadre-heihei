@@ -251,3 +251,69 @@ function synthesizePack(directory: string, origin: SkillOrigin, scope: string | 
     content,
   }
 }
+
+/** One local search candidate, shaped like a remote result without a URL. */
+export interface LocalSearchHit {
+  readonly packId: string
+  readonly name: string
+  readonly description: string
+  readonly sourceUrl: string
+  readonly license: string
+  readonly author?: string
+  readonly homepage?: string
+}
+
+/**
+ * Match packs against a free-text query, ranked by id/name before description.
+ * @param packs - the merged local catalog.
+ * @param query - case-insensitive text; empty matches every pack.
+ * @param limit - maximum results returned.
+ * @returns local candidates in rank order.
+ */
+export function searchLocalPacks(
+  packs: ReadonlyMap<string, SkillPack>,
+  query: string,
+  limit: number,
+): LocalSearchHit[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return []
+  const ranked: { readonly rank: number; readonly hit: LocalSearchHit }[] = []
+  for (const pack of packs.values()) {
+    const id = pack.id.toLowerCase()
+    const name = pack.name.toLowerCase()
+    const description = pack.description.toLowerCase()
+    let rank = -1
+    if (id === needle || name === needle) rank = 0
+    else if (id.startsWith(needle) || name.startsWith(needle)) rank = 1
+    else if (id.includes(needle) || name.includes(needle)) rank = 2
+    else if (description.includes(needle)) rank = 3
+    if (rank < 0) continue
+    ranked.push({
+      rank,
+      hit: {
+        packId: pack.id,
+        name: pack.name,
+        description: pack.description,
+        sourceUrl: pack.homepage ?? '',
+        license: pack.license,
+        ...(pack.author === undefined ? {} : { author: pack.author }),
+        ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
+      },
+    })
+  }
+  return ranked.sort((left, right) => left.rank - right.rank).slice(0, Math.max(0, limit)).map(item => item.hit)
+}
+
+/**
+ * Find ids present in both the builtin and installed roots.
+ * @param left - one catalog map.
+ * @param right - the other catalog map.
+ * @returns ids that exist in both.
+ */
+export function duplicateIds(left: ReadonlyMap<string, SkillPack>, right: ReadonlyMap<string, SkillPack>): string[] {
+  const ids: string[] = []
+  for (const id of left.keys()) {
+    if (right.has(id)) ids.push(id)
+  }
+  return ids
+}
