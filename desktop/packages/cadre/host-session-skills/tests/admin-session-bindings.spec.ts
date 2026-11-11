@@ -63,6 +63,27 @@ function sessionPort(): AdminSessionPort & { readonly store: string[] } {
   }
 }
 
+/** A project id shaped like the real ledger's, kept as one constant for the fixtures below. */
+const REAL_PROJECT = '253e8634-3a36-4c08-97d2-241ca0a8e7be'
+
+/**
+ * Real-ledger shape: the schema created `projects` and no writer filled it, so the roster is
+ * the only evidence that the project exists.
+ */
+function rosterOnlyLedger(root: string): DatabaseSync {
+  const db = new DatabaseSync(join(root, 'ledger.sqlite'))
+  db.exec(`CREATE TABLE projects (
+    project_id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, archived_at TEXT);
+  CREATE TABLE members (project_id TEXT NOT NULL, session_id TEXT NOT NULL, role TEXT NOT NULL,
+    state TEXT NOT NULL, skills_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, session_id))`)
+  db.prepare(`INSERT INTO members (project_id, session_id, role, state, skills_json, created_at, updated_at)
+    VALUES (?, 's1', 'supervisor', 'available', '[]', 'now', 'now'),
+           (?, 'w1', 'worker', 'available', '[]', 'now', 'now')`).run(REAL_PROJECT, REAL_PROJECT)
+  return db
+}
+
 const workspacePort = {
   create: async (path: string) => ({ id: `ws-${path}`, path, attachSession: async () => {} }),
 }
@@ -204,6 +225,23 @@ describe('skill admin session bindings across restarts', () => {
     await expect(warned.installForSession(created.sessionId, {
       url: 'https://raw.githubusercontent.com/o/r/main/packs/remote/SKILL.md', confirm: true,
     })).rejects.toMatchObject({ code: 'SKILL_CONFIRM_REQUIRED' })
+    db.close()
+  })
+
+  it('serves a project the roster carries while the projects table stays empty', async () => {
+    const root = workspace()
+    const db = rosterOnlyLedger(root)
+    const port = sessionPort()
+    const options = optionsFor(root, db, port)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM projects').get()).toMatchObject({ count: 0 })
+
+    const admin = new SkillAdminApi(options)
+    const created = await admin.createSession({ projectId: REAL_PROJECT, cwd: join(root, 'cwd') })
+    expect(await admin.catalogFor(created.sessionId)).toEqual(expect.any(Array))
+    expect(await admin.auditForSession(created.sessionId)).toEqual([])
+    // Roster-only evidence does not admit an id the ledger never mentioned.
+    await expect(admin.createSession({ projectId: 'p9', cwd: join(root, 'cwd-2') }))
+      .rejects.toMatchObject({ code: 'SKILL_FORBIDDEN', message: expect.stringMatching(/未知项目/u) })
     db.close()
   })
 })

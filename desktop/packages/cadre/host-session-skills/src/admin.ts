@@ -597,7 +597,9 @@ export class SkillAdminApi {
   }
 
   /**
-   * Projects the ledger still tracks, read from the schema the ledger provides.
+   * Projects the ledger still tracks, read from the schema the ledger provides. The `projects`
+   * table is optional metadata that the shipped schema creates without rows, so the roster
+   * contributes projects as well.
    * @returns non-archived project ids; empty when the ledger cannot be read.
    */
   private ledgerProjects(): string[] {
@@ -609,13 +611,16 @@ export class SkillAdminApi {
       "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
     ).get(name) !== undefined
     try {
-      if (!hasTable('projects')) return read('SELECT DISTINCT project_id FROM members')
+      const roster = read('SELECT DISTINCT project_id FROM members')
+      if (!hasTable('projects')) return roster
+      let metadata: string[]
       try {
-        return read('SELECT project_id FROM projects WHERE archived_at IS NULL')
+        metadata = read('SELECT project_id FROM projects WHERE archived_at IS NULL')
       } catch {
         // Older project tables carry no archive column, so every row still counts.
-        return read('SELECT project_id FROM projects')
+        metadata = read('SELECT project_id FROM projects')
       }
+      return [...new Set([...metadata, ...roster])]
     } catch {
       // An unreadable ledger cannot prove which project a session belongs to.
       return []

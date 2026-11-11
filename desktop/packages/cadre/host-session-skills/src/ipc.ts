@@ -345,6 +345,21 @@ function detectProjectsTable(db: DatabaseSync): boolean {
 }
 
 /**
+ * Whether the ledger knows the project. The `projects` table carries optional metadata:
+ * the shipped schema creates it and no writer fills it, so the roster is the
+ * authoritative evidence that a project exists.
+ * @param db - readonly ledger connection.
+ * @param projectId - project the call is scoped to.
+ * @param hasProjects - whether the ledger has the `projects` table.
+ * @returns true when the roster or the project table carries the id.
+ */
+function projectExists(db: DatabaseSync, projectId: string, hasProjects: boolean): boolean {
+  if (db.prepare('SELECT 1 AS ok FROM members WHERE project_id = ? LIMIT 1').get(projectId) !== undefined) return true
+  if (!hasProjects) return false
+  return db.prepare('SELECT 1 AS ok FROM projects WHERE project_id = ? LIMIT 1').get(projectId) !== undefined
+}
+
+/**
  * Authorize one project-scoped call. Any session may use the skill API while its
  * project exists, so an off-roster session is admitted with `undefined`; a
  * missing project, a session rostered by another project, and a departed member
@@ -361,10 +376,7 @@ function requireActor(
   sessionId: string,
   hasProjects: boolean,
 ): MemberRow | undefined {
-  const project = hasProjects
-    ? db.prepare('SELECT 1 AS ok FROM projects WHERE project_id = ? LIMIT 1').get(projectId)
-    : db.prepare('SELECT 1 AS ok FROM members WHERE project_id = ? LIMIT 1').get(projectId)
-  if (project === undefined) throw new SkillIpcError('SKILL_FORBIDDEN', 403, `项目不存在：${projectId}`)
+  if (!projectExists(db, projectId, hasProjects)) throw new SkillIpcError('SKILL_FORBIDDEN', 403, `项目不存在：${projectId}`)
   const actor = readMember(db, projectId, sessionId)
   if (actor !== undefined) {
     if (actor.state === 'departed') {

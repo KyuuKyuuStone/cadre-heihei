@@ -43,7 +43,7 @@ unselected session has zero skill tokens from this plugin.
 
 ## Settings IPC
 
-POST JSON, project-scoped. `catalog`/`get`/`set` admit any session of an existing project: an off-roster session reads no selection and its `set` validates and echoes without persisting, a rostered session reads and updates its own row, and a supervisor may target any member. `add`/`remove`/`install-url`/`install-package` also admit any project session. A missing project, a session rostered by another project, and a departed member stay rejected. `preview` remains supervisor-only; warning-bearing installs still need a supervisor confirmation; admin message/read/install admit project sessions, while plan/apply remain supervisor-only.
+POST JSON, project-scoped. `catalog`/`get`/`set` admit any session of an existing project: an off-roster session reads no selection and its `set` validates and echoes without persisting, a rostered session reads and updates its own row, and a supervisor may target any member. `add`/`remove`/`install-url`/`install-package` also admit any project session. A missing project, a session rostered by another project, and a departed member stay rejected. Existence is proven by a `members` row or a `projects` row: the schema creates `projects` without filling it, so a roster-only ledger still serves its project. `preview` remains supervisor-only; warning-bearing installs still need a supervisor confirmation; admin message/read/install admit project sessions, while plan/apply remain supervisor-only.
 
 - `/cadre/skills/catalog` — `{projectId, actorSessionId, targetSessionId?}` →
   catalog entries with `selected`;
