@@ -62,6 +62,15 @@ interface SkillResponse {
   readonly result?: unknown
   readonly code?: string
   readonly message?: string
+  readonly remediation?: string
+}
+
+/** Transport failure that preserves the stable code and corrective action. */
+export class SkillOperationError extends Error {
+  constructor(readonly code: string, readonly detail: string, readonly remediation?: string) {
+    super(`${code} · ${detail}`)
+    this.name = 'SkillOperationError'
+  }
 }
 
 async function skillCall(
@@ -75,9 +84,11 @@ async function skillCall(
   })
   const result = await response.json() as SkillResponse
   if (!response.ok || result.ok !== true) {
-    throw new Error(result.code === undefined
-      ? (result.message ?? `HTTP ${String(response.status)}`)
-      : `${result.code} · ${result.message ?? '请求失败'}`)
+    throw new SkillOperationError(
+      result.code ?? `HTTP_${String(response.status)}`,
+      result.message ?? '请求失败',
+      result.remediation,
+    )
   }
   return result.result
 }
@@ -133,11 +144,32 @@ export async function installSkillPackage(
   }
 }
 
-export interface CadreInstallAnyResult {
+export interface CadreInstallPreview {
+  readonly name: string
+  readonly source: string
+  readonly license: string
+  readonly author?: string
+  readonly hasHash: boolean
+}
+
+interface CadreInstallSuccess {
   readonly kind: 'package' | 'url'
   readonly target: string
+  readonly installed: true
+  readonly warnings: readonly string[]
   readonly result: unknown
 }
+
+interface CadreInstallConfirmation {
+  readonly kind: 'package' | 'url'
+  readonly target: string
+  readonly installed: false
+  readonly requiresConfirmation: true
+  readonly warnings: readonly string[]
+  readonly preview: CadreInstallPreview
+}
+
+export type CadreInstallAnyResult = CadreInstallSuccess | CadreInstallConfirmation
 
 export async function installSkillAny(
   projectId: string, actorSessionId: string, text: string,

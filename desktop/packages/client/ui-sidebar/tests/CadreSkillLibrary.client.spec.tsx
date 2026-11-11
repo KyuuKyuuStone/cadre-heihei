@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CadreSkillLibraryPage } from '../src/client/CadreSkillLibrary.tsx'
 import type { CadreRosterState } from '../src/client/CadreSidebar.tsx'
 import { en, zh } from '../src/client/locales.ts'
@@ -18,8 +18,8 @@ const t = ((key: keyof typeof zh, params?: Record<string, unknown>) => {
 }) as never
 const tEn = ((key: keyof typeof en) => en[key]) as never
 
-function json(body: unknown): Response {
-  return { ok: true, status: 200, json: async () => body } as Response
+function json(body: unknown, status = 200): Response {
+  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response
 }
 
 function requestUrl(input: RequestInfo | URL): string {
@@ -41,51 +41,54 @@ function pageProps(role: 'supervisor' | 'worker' = 'supervisor', translate = t):
       selector({ byId: { [role === 'supervisor' ? 'sup' : 'w1']: { retainedBy: { mainView: 1 } } } })) as never,
     projectOfSession: () => 'p1',
     defaultProjectId: () => undefined,
-    openSkillAdminSession: async () => {},
     t: translate,
-  } as unknown as ComponentProps<typeof CadreSkillLibraryPage>
+  } as ComponentProps<typeof CadreSkillLibraryPage>
+}
+
+function catalogFetch(entries = ENTRIES, health?: unknown) {
+  return vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const url = requestUrl(input)
+    if (url.endsWith('/catalog')) return json({ ok: true, result: entries })
+    if (url.endsWith('/admin/diag')) return json({ ok: true, result: health ?? { packs: { total: 0, ok: 0, warning: 0, error: 0 } } })
+    return json({ ok: true, result: {} })
+  })
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('Cadre skill library', () => {
-  it('opens an ordinary install chat, then deletes and uses the manual form', async () => {
-    const openSkillAdminSession = vi.fn(async () => {})
+  it('uses conversation commands without dedicated session requests and still deletes installed skills', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)
       if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      if (url.endsWith('/admin/sessions')) return json({ ok: true, result: [] })
-      if (url.endsWith('/admin/session')) return json({ ok: true, result: { sessionId: 'chat-1', title: '技能管理员', updatedAt: 1, workspaceId: 'ws-1' } })
+      if (url.endsWith('/admin/diag')) return json({ ok: true, result: {} })
       return json({ ok: true, result: { removed: true } })
     })
     vi.stubGlobal('fetch', fetchMock)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    render(<CadreSkillLibraryPage {...{ ...pageProps('worker'), openSkillAdminSession }} />)
+    render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(await screen.findByText('内置技能')).toBeTruthy()
-    expect(screen.queryByLabelText('安装说明')).toBeNull()
-    expect(screen.queryByText('技能助手')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '打开安装对话' }))
-    await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('chat-1', 'ws-1') })
-    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/admin/session'))).toBe(true)
-    expect(screen.getByRole('button', { name: '删除' })).toBeTruthy()
+    expect(screen.getByText('在任意对话中使用技能')).toBeTruthy()
+    expect(screen.getByText(zh['skills.commands.find'])).toBeTruthy()
+    expect(screen.getByText(zh['skills.commands.install'])).toBeTruthy()
+    expect(screen.getByText(zh['skills.commands.create'])).toBeTruthy()
+    expect(screen.getByText(zh['skills.commands.check'])).toBeTruthy()
+    expect(fetchMock.mock.calls.some(([input]) => /\/admin\/sessions?$/u.test(requestUrl(input)))).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(true)
     })
     const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
-    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
-      actorSessionId: 'w1', targetSessionId: 'w1',
-    })
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({ actorSessionId: 'w1', targetSessionId: 'w1' })
   })
 
   it('groups built-ins and installed skills, localizes descriptions, and keeps built-ins read-only', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: ENTRIES })))
+    vi.stubGlobal('fetch', catalogFetch())
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(await screen.findByText('内置技能')).toBeTruthy()
     expect(screen.getByText('已安装')).toBeTruthy()
     expect(screen.getByText('落地页设计：信息结构、转化文案、视觉规范、状态与上线检查。')).toBeTruthy()
     expect(screen.queryByText('English landing page description')).toBeNull()
-    expect(screen.queryByText(/技能市场/)).toBeNull()
     expect(screen.getAllByRole('button', { name: '删除' })).toHaveLength(1)
     fireEvent.click(screen.getAllByText('详情')[0]!)
     expect(screen.getByText('约 100 tokens')).toBeTruthy()
@@ -95,94 +98,185 @@ describe('Cadre skill library', () => {
     expect(link.getAttribute('href')).toBe('https://example.test/ai-design')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
-    expect(screen.getByText('local')).toBeTruthy()
   })
 
-  it('reuses the latest admin session and opens it as an ordinary conversation', async () => {
-    const openSkillAdminSession = vi.fn(async () => {})
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = requestUrl(input)
-      if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      if (url.endsWith('/admin/sessions')) {
-        return json({ ok: true, result: [{ sessionId: 'chat-9', title: '技能管理员', updatedAt: 9 }] })
-      }
-      return json({ ok: true, result: {} })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    render(<CadreSkillLibraryPage {...{ ...pageProps('worker'), openSkillAdminSession }} />)
-    await screen.findByText('内置技能')
-    expect(screen.queryByLabelText('安装说明')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '打开安装对话' }))
-    await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('chat-9') })
-    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/admin/session'))).toBe(false)
+  it('renders ok, warning and error health with expandable code and remediation', async () => {
+    const entries = [...ENTRIES, {
+      id: 'broken-skill', name: '异常技能', description: '需要修复', roles: ['worker'], tokenEstimate: 20,
+      tools: [], origin: 'installed', source: 'local', license: 'MIT', selected: false,
+    }]
+    const health = {
+      status: 'error',
+      items: [
+        { packId: 'ai-design', status: 'ok', issues: [] },
+        { packId: 'worker-only', status: 'warning', issues: [{ code: 'PACK_METADATA_INVALID', message: 'tokenEstimate 无效', remediation: '将 tokenEstimate 修正为非负整数后重查', field: 'tokenEstimate' }] },
+        { packId: 'broken-skill', status: 'error', issues: [{ code: 'PACK_CONTENT_MISSING', message: '缺少 SKILL.md', remediation: '补充 SKILL.md 后再次运行 skill_check' }] },
+      ],
+    }
+    vi.stubGlobal('fetch', catalogFetch(entries, health))
+    render(<CadreSkillLibraryPage {...pageProps()} />)
+    expect(await screen.findByText('健康')).toBeTruthy()
+    expect(screen.getByText('有警告')).toBeTruthy()
+    expect(screen.getByText('有异常')).toBeTruthy()
+    const summaries = await screen.findAllByText('发现 1 个问题')
+    const details = summaries[0]!.closest('details')
+    expect(details?.hasAttribute('open')).toBe(false)
+    fireEvent.click(summaries[0]!)
+    expect(details?.hasAttribute('open')).toBe(true)
+    expect(screen.getByText('PACK_METADATA_INVALID')).toBeTruthy()
+    expect(screen.getByText('字段：tokenEstimate')).toBeTruthy()
+    expect(screen.getByText('将 tokenEstimate 修正为非负整数后重查')).toBeTruthy()
+    fireEvent.click(summaries[1]!)
+    expect(screen.getByText('PACK_CONTENT_MISSING')).toBeTruthy()
+    expect(screen.getByText('补充 SKILL.md 后再次运行 skill_check')).toBeTruthy()
   })
 
-  it('shows a readable error when opening the installer fails', async () => {
-    const openSkillAdminSession = vi.fn(async () => {})
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+  it('keeps an ordinary session catalog visible without a page alert when health is forbidden', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (requestUrl(input).endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      return json({ ok: false, code: 'SKILL_ADMIN_UNAVAILABLE', message: 'no service' })
-    }))
-    render(<CadreSkillLibraryPage {...{ ...pageProps('worker'), openSkillAdminSession }} />)
-    await screen.findByText('内置技能')
-    fireEvent.click(screen.getByRole('button', { name: '打开安装对话' }))
-    expect(await screen.findByText('技能管理员当前不可用：Host 未接入会话服务。')).toBeTruthy()
-    expect(openSkillAdminSession).not.toHaveBeenCalled()
-  })
-
-  it('does not require a supervisor to open the installer', async () => {
-    const openSkillAdminSession = vi.fn(async () => {})
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      if (requestUrl(input).endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      if (requestUrl(input).endsWith('/admin/sessions')) return json({ ok: true, result: [] })
-      if (requestUrl(input).endsWith('/admin/session')) {
-        return json({ ok: true, result: { sessionId: 'chat-1', title: '技能管理员', updatedAt: 1, workspaceId: 'ws-1' } })
-      }
-      return json({ ok: true, result: {} })
-    }))
-    const props = pageProps('worker')
-    const useRoster = ((selector: (value: CadreRosterState) => unknown) => selector({
-      status: 'ready',
-      members: [{ sessionId: 'w1', role: 'worker', displayName: '员工', state: 'available' }],
-      error: null,
-    })) as never
-    render(<CadreSkillLibraryPage {...{ ...props, useRoster, openSkillAdminSession }} />)
-    await screen.findByText('内置技能')
-    fireEvent.click(screen.getByRole('button', { name: '打开安装对话' }))
-    await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('chat-1', 'ws-1') })
-  })
-
-  it('keeps install and recovery actions available when the catalog returns SKILL_FORBIDDEN', async () => {
-    let catalogCalls = 0
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (requestUrl(input).endsWith('/catalog')) {
-        catalogCalls += 1
-        return catalogCalls === 1
-          ? json({ ok: false, code: 'SKILL_FORBIDDEN', message: 'denied' })
-          : json({ ok: true, result: ENTRIES })
-      }
-      return json({ ok: true, result: [] })
+      return json({ ok: false, code: 'SKILL_ADMIN_FORBIDDEN', message: 'denied' }, 403)
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
+    expect(await screen.findByText('员工技能')).toBeTruthy()
+    expect((await screen.findAllByText('未检查')).length).toBe(2)
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('skill_check({ packId: "ai-design" })')).toBeTruthy()
+    expect(screen.getByText('skill_check({ packId: "worker-only" })')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^安装$/u })).toBeTruthy()
+  })
 
+  it('degrades totals-only health responses to per-skill skill_check instructions', async () => {
+    vi.stubGlobal('fetch', catalogFetch(ENTRIES, { packs: { total: 2, ok: 1, warning: 1, error: 0 } }))
+    render(<CadreSkillLibraryPage {...pageProps('worker')} />)
+    expect(await screen.findByText('员工技能')).toBeTruthy()
+    expect((await screen.findAllByText('暂时无法读取健康状态；在当前对话运行：')).length).toBe(2)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('copies exact conversation commands and reports clipboard failure without replacing the text', async () => {
+    const writeText = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { language: 'zh-CN', clipboard: { writeText } })
+    vi.stubGlobal('fetch', catalogFetch())
+    render(<CadreSkillLibraryPage {...pageProps('worker')} />)
+    await screen.findByText('员工技能')
+    const command = screen.getByText(zh['skills.commands.find'])
+    const row = command.parentElement?.parentElement as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: '复制' }))
+    await waitFor(() => { expect(writeText).toHaveBeenCalledWith(zh['skills.commands.find']) })
+    expect(within(row).getByRole('button', { name: '已复制' })).toBeTruthy()
+    writeText.mockRejectedValueOnce(new Error('denied'))
+    fireEvent.click(within(row).getByRole('button', { name: '已复制' }))
+    expect(await within(row).findByText('复制失败，请选中指令文本手动复制。')).toBeTruthy()
+    expect(screen.getByText(zh['skills.commands.find'])).toBeTruthy()
+  })
+
+  it('shows warnings and a copyable confirm:true instruction without retrying a dropped confirmation', async () => {
+    const writeText = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { language: 'zh-CN', clipboard: { writeText } })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      if (url.endsWith('/admin/diag')) return json({ ok: true, result: {} })
+      if (url.endsWith('/install-any')) return json({ ok: true, result: {
+        kind: 'package', target: '@scope/name', installed: false, requiresConfirmation: true,
+        warnings: ['missing-license', 'missing-hash'],
+        preview: { name: 'Scoped skill', source: 'skillhub:@scope/name', license: 'unknown', author: 'Author', hasHash: false },
+      } })
+      return json({ ok: true, result: {} })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreSkillLibraryPage {...pageProps('worker')} />)
+    await screen.findByText('员工技能')
+    fireEvent.change(screen.getByLabelText('直接安装（URL 或包名）'), { target: { value: '@scope/name' } })
+    fireEvent.click(screen.getByRole('button', { name: /^安装$/u }))
+    expect(await screen.findByText('需要主管核对后确认')).toBeTruthy()
+    expect(screen.getByText('missing-license')).toBeTruthy()
+    expect(screen.getByText('缺少许可信息')).toBeTruthy()
+    expect(screen.getByText('请先核对上游许可，再由主管确认是否安装。')).toBeTruthy()
+    expect(screen.getByText('missing-hash')).toBeTruthy()
+    expect(screen.getByText('Scoped skill')).toBeTruthy()
+    const command = 'skill_install({ name: "@scope/name", confirm: true })'
+    const commandElement = screen.getByText(command)
+    const row = commandElement.parentElement?.parentElement as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: '复制' }))
+    await waitFor(() => { expect(writeText).toHaveBeenCalledWith(command) })
+    expect(confirm).not.toHaveBeenCalled()
+    expect(fetchMock.mock.calls.filter(([input]) => requestUrl(input).endsWith('/install-any'))).toHaveLength(1)
+    const installCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/install-any'))
+    expect(JSON.parse((installCall?.[1] as RequestInit).body as string)).not.toHaveProperty('confirm')
+  })
+
+  it('shows successful install warnings with code and Chinese remediation', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      if (url.endsWith('/admin/diag')) return json({ ok: true, result: {} })
+      if (url.endsWith('/install-any')) return json({ ok: true, result: {
+        kind: 'package', target: '@scope/name', installed: true, warnings: ['unknown-source'],
+        result: { name: '@scope/name', visible: true, durationMs: 1, installed: true, warnings: ['unknown-source'] },
+      } })
+      return json({ ok: true, result: {} })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreSkillLibraryPage {...pageProps('worker')} />)
+    await screen.findByText('员工技能')
+    fireEvent.change(screen.getByLabelText('直接安装（URL 或包名）'), { target: { value: '@scope/name' } })
+    fireEvent.click(screen.getByRole('button', { name: /^安装$/u }))
+    expect(await screen.findByText('已安装 @scope/name（包名）')).toBeTruthy()
+    expect(screen.getByText('unknown-source')).toBeTruthy()
+    expect(screen.getByText('来源或作者未知')).toBeTruthy()
+    expect(screen.getByText('请先检查上游主页与 SKILL.md，确认可信后再安装。')).toBeTruthy()
+    expect(screen.queryByText('需要主管核对后确认')).toBeNull()
+  })
+
+  it('retains install failure code, message and actionable remediation', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
+      if (url.endsWith('/admin/diag')) return json({ ok: true, result: {} })
+      if (url.endsWith('/install-any')) return json({ ok: false, code: 'SKILL_WRITE_FAILED', message: '技能目录不可写' }, 500)
+      return json({ ok: true, result: {} })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreSkillLibraryPage {...pageProps('worker')} />)
+    await screen.findByText('员工技能')
+    fireEvent.change(screen.getByLabelText('直接安装（URL 或包名）'), { target: { value: '@scope/name' } })
+    fireEvent.click(screen.getByRole('button', { name: /^安装$/u }))
+    expect(await screen.findByText('SKILL_WRITE_FAILED')).toBeTruthy()
+    expect(screen.getByText('技能目录不可写')).toBeTruthy()
+    expect(screen.getByText('检查目录权限和磁盘空间，运行 skill_check 确认状态后重试。')).toBeTruthy()
+    expect(screen.getByText('员工技能')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '重新加载' })).toBeNull()
+  })
+
+  it('keeps commands and recovery available when the catalog returns SKILL_FORBIDDEN', async () => {
+    let catalogCalls = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (requestUrl(input).endsWith('/catalog')) {
+        catalogCalls += 1
+        return catalogCalls === 1 ? json({ ok: false, code: 'SKILL_FORBIDDEN', message: 'denied' }) : json({ ok: true, result: ENTRIES })
+      }
+      return json({ ok: true, result: {} })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(await screen.findByText(zh['skills.admin.error.forbidden'])).toBeTruthy()
-    expect(screen.getByText(zh['skills.library.errorHint'])).toBeTruthy()
-    expect(screen.queryByText(/SKILL_FORBIDDEN/u)).toBeNull()
-    expect(screen.getByRole('button', { name: zh['skills.install.open'] })).toBeTruthy()
-
+    expect(screen.getByText('SKILL_FORBIDDEN')).toBeTruthy()
+    expect(screen.getByText(zh['skills.remediation.forbidden'])).toBeTruthy()
+    expect(screen.getByText(zh['skills.commands.install'])).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: zh['skills.library.retry'] }))
     expect(await screen.findByText('内置技能')).toBeTruthy()
     expect(catalogCalls).toBe(2)
     expect(screen.queryByText(zh['skills.admin.error.forbidden'])).toBeNull()
   })
 
-  it('shows the full page to a session outside the roster, acting under its own session id', async () => {
+  it('shows the full page outside the roster under the foreground session id', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)
       if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      if (url.endsWith('/admin/sessions')) return json({ ok: true, result: [] })
-      if (url.endsWith('/admin/session')) return json({ ok: true, result: { sessionId: 'chat-1', title: '技能管理员', updatedAt: 1, workspaceId: 'ws-1' } })
+      if (url.endsWith('/admin/diag')) return json({ ok: true, result: {} })
       return json({ ok: true, result: { removed: true } })
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -196,89 +290,67 @@ describe('Cadre skill library', () => {
       defaultProjectId: () => 'p1',
     }} />)
     expect(await screen.findByText('内置技能')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '打开安装对话' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^安装$/u })).toBeTruthy()
     expect(screen.getByRole('button', { name: '高级手动表单' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(true)
-    })
     const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
-    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
-      projectId: 'p1', actorSessionId: 'plain', targetSessionId: 'plain',
-    })
-    const removal = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/remove'))
-    expect(JSON.parse((removal?.[1] as RequestInit).body as string)).toMatchObject({
-      projectId: 'p1', actorSessionId: 'plain',
-    })
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({ projectId: 'p1', actorSessionId: 'plain', targetSessionId: 'plain' })
+    expect(fetchMock.mock.calls.some(([input]) => /\/admin\/sessions?$/u.test(requestUrl(input)))).toBe(false)
   })
 
-  it('keeps the read-only fallback when no project exists at all', async () => {
+  it('keeps the read-only fallback when no project exists at all', () => {
     const fetchMock = vi.fn(async () => json({ ok: true, result: ENTRIES }))
     vi.stubGlobal('fetch', fetchMock)
     const props = pageProps('worker')
-    render(<CadreSkillLibraryPage {...{
-      ...props,
-      projectOfSession: () => undefined,
-      defaultProjectId: () => undefined,
-    }} />)
-    expect(screen.getByText('当前没有可用的项目部或在册成员，暂时无法管理技能。')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '打开安装对话' })).toBeNull()
+    render(<CadreSkillLibraryPage {...{ ...props, projectOfSession: () => undefined, defaultProjectId: () => undefined }} />)
+    expect(screen.getByText('当前没有可用项目或会话，暂时无法读取技能。')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^安装$/u })).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('keeps the read-only fallback when no foreground session and no usable roster member exist', async () => {
+  it('keeps the read-only fallback when no foreground session or usable member exists', () => {
     const fetchMock = vi.fn(async () => json({ ok: true, result: ENTRIES }))
     vi.stubGlobal('fetch', fetchMock)
     const props = pageProps('worker')
     render(<CadreSkillLibraryPage {...{
       ...props,
-      useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
-        selector({ byId: {} })) as never,
+      useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) => selector({ byId: {} })) as never,
       useRoster: ((selector: (value: CadreRosterState) => unknown) => selector({
-        status: 'ready',
-        members: [{ sessionId: 'gone', role: 'supervisor', displayName: '前主管', state: 'departed' }],
-        error: null,
+        status: 'ready', members: [{ sessionId: 'gone', role: 'supervisor', displayName: '前主管', state: 'departed' }], error: null,
       })) as never,
       projectOfSession: (sessionId: string) => (sessionId === 'gone' ? 'p1' : undefined),
       defaultProjectId: () => 'p1',
     }} />)
-    expect(screen.getByText('当前没有可用的项目部或在册成员，暂时无法管理技能。')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '打开安装对话' })).toBeNull()
+    expect(screen.getByText('当前没有可用项目或会话，暂时无法读取技能。')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^安装$/u })).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('borrows the project supervisor when no foreground session exists', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-      if (requestUrl(input).endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      return json({ ok: true, result: {} })
-    })
+  it('uses an available project member when no foreground session exists', async () => {
+    const fetchMock = catalogFetch()
     vi.stubGlobal('fetch', fetchMock)
     const props = pageProps('worker')
     render(<CadreSkillLibraryPage {...{
       ...props,
-      useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) =>
-        selector({ byId: {} })) as never,
+      useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) => selector({ byId: {} })) as never,
       defaultProjectId: () => 'p1',
     }} />)
     expect(await screen.findByText('内置技能')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '打开安装对话' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^安装$/u })).toBeTruthy()
     const call = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
-    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({
-      projectId: 'p1', actorSessionId: 'sup', targetSessionId: 'sup',
-    })
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toMatchObject({ projectId: 'p1', actorSessionId: 'sup', targetSessionId: 'sup' })
   })
 
   it('shows an inline empty state when the library has no skills', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: [] })))
+    vi.stubGlobal('fetch', catalogFetch([]))
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
-    expect(await screen.findByText('还没有技能，先在上方粘贴 URL 或包名安装。')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '打开安装对话' })).toBeTruthy()
+    expect(await screen.findByText('还没有技能，可在当前对话查找或安装技能。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^安装$/u })).toBeTruthy()
   })
 
   it('requires confirmation before deleting a skill', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       if (requestUrl(input).endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      return json({ ok: true, result: { removed: true } })
+      return json({ ok: true, result: {} })
     })
     vi.stubGlobal('fetch', fetchMock)
     vi.spyOn(window, 'confirm').mockReturnValue(false)
@@ -288,24 +360,18 @@ describe('Cadre skill library', () => {
     expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(false)
   })
 
-  it('localizes built-in descriptions in English', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: ENTRIES })))
+  it('localizes built-in descriptions and conversation instructions in English', async () => {
+    vi.stubGlobal('fetch', catalogFetch())
     render(<CadreSkillLibraryPage {...pageProps('supervisor', tEn)} />)
     expect(await screen.findByText('Landing-page design: information structure, conversion copy, visual rules, states, and ship checks.')).toBeTruthy()
+    expect(screen.getByText('Use skills in any conversation')).toBeTruthy()
+    expect(screen.getByLabelText('Direct install (URL or package)')).toBeTruthy()
   })
 
-  it('has no URL installer, keeps sources and the folded manual form, and deletes installed skills', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-      const url = requestUrl(input)
-      if (url.endsWith('/catalog')) return json({ ok: true, result: ENTRIES })
-      return json({ ok: true, result: { removed: true } })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('keeps sources and the folded manual form available', async () => {
+    vi.stubGlobal('fetch', catalogFetch())
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     await screen.findByText('员工技能')
-    expect(screen.queryByPlaceholderText(/SKILL\.md URL/)).toBeNull()
-    expect(screen.queryByText('同名技能已存在时覆盖')).toBeNull()
     const sources = document.querySelector('[data-skill-sources]')
     expect(sources).not.toBeNull()
     expect(sources!.querySelectorAll('a')).toHaveLength(4)
@@ -314,13 +380,8 @@ describe('Cadre skill library', () => {
       expect(link.getAttribute('rel')).toBe('noopener noreferrer')
     }
     expect(screen.getByText('第三方技能请先审查再安装。')).toBeTruthy()
-    expect(screen.getByText('SkillHub').getAttribute('href')).toBe('https://skillhub.cn')
     expect(screen.queryByLabelText('技能 id')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '高级手动表单' }))
     expect(screen.getByLabelText('技能 id')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(await screen.findByText('技能已删除。')).toBeTruthy()
-    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).endsWith('/remove'))).toBe(true)
   })
-
 })

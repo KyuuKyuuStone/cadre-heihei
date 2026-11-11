@@ -1,19 +1,26 @@
 /**
- * Global skill library: built-in packs are read-only; installation goes through
- * the skill-administrator conversation. Any session opens the full page; skill
- * IPC runs under the foreground session's own id, scoped to the resolved project.
+ * Global skill library: the catalog stays readable in every session, while
+ * optional health and install results retain actionable remediation.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Checkbox, Input, Tag, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreRosterMember, CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import {
   addSkillToLibrary,
   fetchSkillCatalog,
+  installSkillAny,
   removeSkillFromLibrary,
+  SkillOperationError,
+  type CadreInstallAnyResult,
   type CadreSkillEntry,
 } from './CadreSkills.tsx'
-import { createSkillAdminSession, listSkillAdminSessions, SkillAdminError, skillAdminErrorKey } from './CadreSkillAdmin.ts'
+import {
+  fetchSkillHealth,
+  type SkillHealth,
+  type SkillHealthIssue,
+  type SkillHealthStatus,
+} from './CadreSkillAdmin.ts'
 import css from './CadreSkillLibrary.module.css'
 
 export interface CadreSkillLibraryInjected {
@@ -21,7 +28,6 @@ export interface CadreSkillLibraryInjected {
   projectOfSession(sessionId: string): string | undefined
   /** Fallback project for a session that belongs to no project; undefined when none exists. */
   defaultProjectId(): string | undefined
-  openSkillAdminSession(sessionId: string, workspaceId?: string): Promise<void>
 }
 
 interface ManualState {
@@ -37,9 +43,13 @@ interface ManualState {
 }
 
 interface LibraryError {
+  readonly code: string
   readonly message: string
+  readonly remediation: string
   readonly recoverable: boolean
 }
+
+type Translator = PropsLocale<'sidebar'>['t']
 
 const EMPTY: ManualState = {
   id: '', name: '', description: '', roles: ['worker'], tokenEstimate: '',
@@ -56,7 +66,7 @@ const SKILL_SOURCES = {
 const BUILTIN_SOURCES = /^(builtin|internal|cadre)$/iu
 const isBuiltin = (entry: CadreSkillEntry): boolean =>
   entry.origin === 'builtin' || (entry.origin === undefined && BUILTIN_SOURCES.test(entry.source.trim()))
-const localizedDescription = (entry: CadreSkillEntry, t: PropsLocale<'sidebar'>['t']): string => {
+const localizedDescription = (entry: CadreSkillEntry, t: Translator): string => {
   if (entry.id === 'ai-design' || entry.id === 'landing-page-design') return t('skills.desc.ai-design')
   return entry.description
 }
@@ -65,13 +75,7 @@ const skillHref = (entry: CadreSkillEntry): string => {
   return homepage !== '' ? homepage : entry.source.trim()
 }
 
-/**
- * Resolve the session id that authorizes skill IPC for the project. The host
- * admits any session while the project exists, so the foreground session acts
- * under its own id — roster member or not. Without a foreground session, the
- * page borrows the project supervisor, else its first non-departed member by
- * session id (mirroring the host's actorFor proxy rule).
- */
+/** Resolve the foreground session used by the existing project-scoped skill IPC. */
 const actingSessionIdOf = (
   members: readonly CadreRosterMember[],
   projectId: string | undefined,
@@ -87,12 +91,153 @@ const actingSessionIdOf = (
   return [...inProject].sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0))[0]?.sessionId
 }
 
-const libraryError = (cause: unknown, t: PropsLocale<'sidebar'>['t']): LibraryError => {
-  const message = cause instanceof Error ? cause.message : String(cause)
+const remediationOf = (code: string, t: Translator): string => {
+  switch (code) {
+    case 'SKILL_PROJECT_REQUIRED': return t('skills.remediation.projectRequired')
+    case 'SKILL_ADMIN_FORBIDDEN':
+    case 'SKILL_FORBIDDEN': return t('skills.remediation.forbidden')
+    case 'SKILL_CONFIRM_REQUIRED': return t('skills.remediation.confirmRequired')
+    case 'SKILL_NOT_FOUND': return t('skills.remediation.notFound')
+    case 'SKILL_EXISTS': return t('skills.remediation.exists')
+    case 'SKILL_BUILTIN_READONLY': return t('skills.remediation.builtin')
+    case 'SKILL_INVALID': return t('skills.remediation.invalid')
+    case 'SKILL_SEARCH_UNAVAILABLE': return t('skills.remediation.searchUnavailable')
+    case 'SKILL_URL_FETCH_FAILED': return t('skills.remediation.urlFetch')
+    case 'SKILL_WRITE_FAILED': return t('skills.remediation.write')
+    case 'SKILL_ADMIN_PLAN_EXPIRED':
+    case 'SKILL_ADMIN_TOKEN_INVALID': return t('skills.remediation.plan')
+    default: return t('skills.remediation.generic')
+  }
+}
+
+const libraryError = (cause: unknown, t: Translator): LibraryError => {
+  if (cause instanceof SkillOperationError) {
+    const forbidden = cause.code === 'SKILL_FORBIDDEN' || cause.code === 'SKILL_ADMIN_FORBIDDEN'
+    return {
+      code: cause.code,
+      message: forbidden ? t('skills.admin.error.forbidden') : cause.detail,
+      remediation: cause.remediation ?? remediationOf(cause.code, t),
+      recoverable: true,
+    }
+  }
+  const detail = cause instanceof Error ? cause.message : String(cause)
+  const matched = /^([A-Z][A-Z0-9_]+) · /u.exec(detail)
+  const code = matched?.[1] ?? 'SKILL_UNKNOWN'
+  const forbidden = code === 'SKILL_FORBIDDEN' || code === 'SKILL_ADMIN_FORBIDDEN'
   return {
-    message: /\bSKILL_(?:ADMIN_)?FORBIDDEN\b/u.test(message) ? t('skills.admin.error.forbidden') : message,
+    code,
+    message: forbidden ? t('skills.admin.error.forbidden') : matched === null ? detail : detail.slice(matched[0].length),
+    remediation: remediationOf(code, t),
     recoverable: true,
   }
+}
+
+const inputError = (message: string, t: Translator): LibraryError => ({
+  code: 'SKILL_INVALID', message, remediation: remediationOf('SKILL_INVALID', t), recoverable: false,
+})
+
+const healthTone = (status: SkillHealthStatus): 'success' | 'warning' | 'danger' => {
+  switch (status) {
+    case 'ok': return 'success'
+    case 'warning': return 'warning'
+    case 'error': return 'danger'
+  }
+}
+
+const healthLabel = (status: SkillHealthStatus, t: Translator): string => {
+  switch (status) {
+    case 'ok': return t('skills.health.ok')
+    case 'warning': return t('skills.health.warning')
+    case 'error': return t('skills.health.error')
+  }
+}
+
+function CopyCommand({ command, label, t }: { command: string; label: string; t: Translator }) {
+  const [copied, setCopied] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const copy = async (): Promise<void> => {
+    setCopied(false)
+    setFailed(false)
+    const accepted = await writeClipboard(command)
+    if (accepted) setCopied(true)
+    else setFailed(true)
+  }
+  return (
+    <div className={css.commandRow}>
+      <div className={css.commandText}>
+        <span className={css.commandLabel}>{label}</span>
+        <code>{command}</code>
+        {failed && <span className={css.copyFailed} role="status">{t('skills.commands.copyFailed')}</span>}
+      </div>
+      <Button variant="ghost" size="sm" onClick={() => { void copy() }}>
+        {copied ? t('skills.commands.copied') : t('skills.commands.copy')}
+      </Button>
+    </div>
+  )
+}
+
+function IssueList({ issues, t }: { issues: readonly SkillHealthIssue[]; t: Translator }) {
+  return (
+    <ul className={css.issues}>
+      {issues.map(issue => (
+        <li key={`${issue.code}:${issue.field ?? ''}`}>
+          <code>{issue.code}</code>
+          {issue.field !== undefined && <span>{t('skills.health.field', { field: issue.field })}</span>}
+          <p>{issue.message}</p>
+          <p className={css.remediation}>{issue.remediation}</p>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+const warningIssue = (code: string, t: Translator): SkillHealthIssue => {
+  switch (code) {
+    case 'missing-license': return {
+      code, message: t('skills.warning.missing-license.message'), remediation: t('skills.warning.missing-license.remediation'),
+    }
+    case 'missing-hash': return {
+      code, message: t('skills.warning.missing-hash.message'), remediation: t('skills.warning.missing-hash.remediation'),
+    }
+    case 'unknown-source': return {
+      code, message: t('skills.warning.unknown-source.message'), remediation: t('skills.warning.unknown-source.remediation'),
+    }
+    default: return {
+      code, message: t('skills.warning.unknown.message'), remediation: t('skills.warning.unknown.remediation'),
+    }
+  }
+}
+
+function InstallResult({ result, t }: { result: CadreInstallAnyResult; t: Translator }) {
+  const issues = result.warnings.map(code => warningIssue(code, t))
+  if (result.installed) {
+    if (issues.length === 0) return null
+    return (
+      <section className={css.installResult} data-skill-install-warnings>
+        <h3>{t('skills.install.warningsTitle')}</h3>
+        <IssueList issues={issues} t={t} />
+      </section>
+    )
+  }
+  const command = result.kind === 'package'
+    ? t('skills.commands.confirmPackage', { target: JSON.stringify(result.target) })
+    : t('skills.commands.confirmUrl', { target: JSON.stringify(result.target) })
+  return (
+    <section className={css.installResult} data-skill-install-confirmation>
+      <h3>{t('skills.install.pendingTitle')}</h3>
+      <p>{t('skills.install.pendingDescription')}</p>
+      <h4>{t('skills.install.previewTitle')}</h4>
+      <dl className={css.preview}>
+        <div><dt>{t('skills.field.name')}</dt><dd>{result.preview.name}</dd></div>
+        <div><dt>{t('skills.admin.plan.source')}</dt><dd>{result.preview.source}</dd></div>
+        <div><dt>{t('skills.admin.plan.license')}</dt><dd>{result.preview.license}</dd></div>
+        {result.preview.author !== undefined && <div><dt>{t('skills.admin.plan.author')}</dt><dd>{result.preview.author}</dd></div>}
+        <div><dt>{t('skills.admin.plan.hash')}</dt><dd>{t(result.preview.hasHash ? 'skills.install.hashPresent' : 'skills.install.hashMissing')}</dd></div>
+      </dl>
+      <IssueList issues={issues} t={t} />
+      <CopyCommand command={command} label={t('skills.commands.confirmLabel')} t={t} />
+    </section>
+  )
 }
 
 /** Sidebar icon for the global skill library. */
@@ -102,7 +247,7 @@ export function CadreSkillLibraryIcon({ size }: PropsRuntime<'sidebar.panellist'
 
 /** Global panel listing built-in and installed skills. */
 export function CadreSkillLibraryPage({
-  useRoster, useSessions, projectOfSession, defaultProjectId, openSkillAdminSession, t,
+  useRoster, useSessions, projectOfSession, defaultProjectId, t,
 }: PropsRuntime<'main'> & InjectFace<CadreSkillLibraryInjected> & PropsLocale<'sidebar'>) {
   const members = useRoster(state => state.members)
   const activeSessionId = useSessions(state => Object.entries(state.byId)
@@ -111,19 +256,25 @@ export function CadreSkillLibraryPage({
   const projectId = sessionProjectId ?? defaultProjectId()
   const actorSessionId = actingSessionIdOf(members, projectId, activeSessionId, projectOfSession)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
+  const [health, setHealth] = useState<SkillHealth | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [installing, setInstalling] = useState(false)
+  const [installText, setInstallText] = useState('')
+  const [installResult, setInstallResult] = useState<CadreInstallAnyResult | null>(null)
   const [error, setError] = useState<LibraryError | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [advanced, setAdvanced] = useState(false)
   const [form, setForm] = useState<ManualState>(EMPTY)
   const [tokenManual, setTokenManual] = useState(false)
-  const [opening, setOpening] = useState(false)
-  const [openError, setOpenError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (actorSessionId === undefined || projectId === undefined) return
     setBusy(true)
     setError(null)
+    setHealth(undefined)
+    void fetchSkillHealth(projectId, actorSessionId)
+      .then(result => { setHealth(result ?? null) })
+      .catch(() => { setHealth(null) })
     try {
       setEntries(await fetchSkillCatalog(projectId, actorSessionId, actorSessionId, navigator.language))
     } catch (cause) {
@@ -146,23 +297,23 @@ export function CadreSkillLibraryPage({
 
   const addManual = async (): Promise<void> => {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(form.id) || form.id.length > 64) {
-      setError({ message: t('skills.error.id'), recoverable: false })
+      setError(inputError(t('skills.error.id'), t))
       return
     }
     if (form.name.trim() === '' || form.content.trim() === '' || form.roles.length === 0) {
-      setError({ message: t('skills.error.required'), recoverable: false })
+      setError(inputError(t('skills.error.required'), t))
       return
     }
     if (!/^\d+$/u.test(form.tokenEstimate)) {
-      setError({ message: t('skills.error.tokens'), recoverable: false })
+      setError(inputError(t('skills.error.tokens'), t))
       return
     }
     if (entries.some(entry => entry.id === form.id && isBuiltin(entry))) {
-      setError({ message: t('skills.error.builtin'), recoverable: false })
+      setError(inputError(t('skills.error.builtin'), t))
       return
     }
     if (entries.some(entry => entry.id === form.id)) {
-      setError({ message: t('skills.error.exists'), recoverable: false })
+      setError(inputError(t('skills.error.exists'), t))
       return
     }
     setBusy(true)
@@ -185,26 +336,33 @@ export function CadreSkillLibraryPage({
     }
   }
 
-  const openInstaller = async (): Promise<void> => {
-    setOpening(true)
-    setOpenError(null)
+  const install = async (): Promise<void> => {
+    const text = installText.trim()
+    if (text === '') {
+      setError(inputError(t('skills.install.empty'), t))
+      return
+    }
+    setBusy(true)
+    setInstalling(true)
+    setError(null)
+    setNotice(null)
+    setInstallResult(null)
     try {
-      const sessions = await listSkillAdminSessions(projectId)
-      const existing = [...sessions]
-        .filter(session => typeof session.sessionId === 'string' && session.sessionId !== '')
-        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
-      const chosen = existing ?? await createSkillAdminSession(projectId)
-      if (chosen.workspaceId === undefined) {
-        await openSkillAdminSession(chosen.sessionId)
-      } else {
-        await openSkillAdminSession(chosen.sessionId, chosen.workspaceId)
+      const result = await installSkillAny(projectId, actorSessionId, text)
+      setInstallResult(result)
+      if (result.installed) {
+        setInstallText('')
+        setNotice(t('skills.install.doneAny', {
+          target: result.target,
+          kind: t(result.kind === 'package' ? 'skills.install.kindPackage' : 'skills.install.kindUrl'),
+        }))
+        await load()
       }
     } catch (cause) {
-      setOpenError(cause instanceof SkillAdminError
-        ? t(skillAdminErrorKey(cause.code) as never)
-        : libraryError(cause, t).message)
+      setError({ ...libraryError(cause, t), recoverable: false })
     } finally {
-      setOpening(false)
+      setInstalling(false)
+      setBusy(false)
     }
   }
 
@@ -231,33 +389,55 @@ export function CadreSkillLibraryPage({
         ? <p className={css.groupEmpty}>{t('skills.library.groupEmpty')}</p>
         : (
           <ul className={css.list}>
-            {rows.map(entry => (
-              <li key={entry.id} className={css.card}>
-                <div className={css.cardHead}>
-                  <strong>{entry.name}</strong>
-                  {entry.selected && <span className={css.selected}>{t('skills.selected')}</span>}
-                </div>
-                <p>{localizedDescription(entry, t)}</p>
-                <details className={css.details}>
-                  <summary>{t('skills.details')}</summary>
-                  <div className={css.meta}>
-                    <span>{t('skills.tokenEstimate', { count: String(entry.tokenEstimate) })}</span>
-                    <span>{entry.tools.join(', ') || t('skills.toolsNone')}</span>
-                    {entry.author !== undefined && entry.author.trim() !== '' && (
-                      <span>{t('skills.author', { author: entry.author })}</span>
-                    )}
-                    <span>{t('skills.licenseLabel', { license: entry.license })}</span>
-                    {/^https?:\/\//iu.test(skillHref(entry))
-                      ? <a href={skillHref(entry)} target="_blank" rel="noopener noreferrer">{t('skills.upstream')}</a>
-                      : <span>{skillHref(entry)}</span>}
+            {rows.map(entry => {
+              const packHealth = health?.items.find(item => item.packId === entry.id)
+              return (
+                <li key={entry.id} className={css.card}>
+                  <div className={css.cardHead}>
+                    <strong>{entry.name}</strong>
+                    {entry.selected && <span className={css.selected}>{t('skills.selected')}</span>}
+                    {packHealth !== undefined
+                      ? <Tag tone={healthTone(packHealth.status)}>{healthLabel(packHealth.status, t)}</Tag>
+                      : <Tag tone="neutral">{t(health === undefined ? 'skills.health.loading' : 'skills.health.unavailableTag')}</Tag>}
                   </div>
-                </details>
-                {deletable && (
-                  <Button variant="ghost" size="sm" disabled={busy}
-                    onClick={() => { void remove(entry.id) }}>{t('skills.remove')}</Button>
-                )}
-              </li>
-            ))}
+                  <p>{localizedDescription(entry, t)}</p>
+                  {packHealth !== undefined && packHealth.issues.length > 0 && (
+                    <details className={css.healthIssues}>
+                      <summary>{t('skills.health.issueCount', { count: String(packHealth.issues.length) })}</summary>
+                      <IssueList issues={packHealth.issues} t={t} />
+                    </details>
+                  )}
+                  {health !== undefined && packHealth === undefined && (
+                    <div className={css.healthFallback}>
+                      <span>{t('skills.health.unavailable')}</span>
+                      <CopyCommand
+                        command={t('skills.commands.checkPack', { id: JSON.stringify(entry.id) })}
+                        label={t('skills.commands.checkPackLabel')}
+                        t={t}
+                      />
+                    </div>
+                  )}
+                  <details className={css.details}>
+                    <summary>{t('skills.details')}</summary>
+                    <div className={css.meta}>
+                      <span>{t('skills.tokenEstimate', { count: String(entry.tokenEstimate) })}</span>
+                      <span>{entry.tools.join(', ') || t('skills.toolsNone')}</span>
+                      {entry.author !== undefined && entry.author.trim() !== '' && (
+                        <span>{t('skills.author', { author: entry.author })}</span>
+                      )}
+                      <span>{t('skills.licenseLabel', { license: entry.license })}</span>
+                      {/^https?:\/\//iu.test(skillHref(entry))
+                        ? <a href={skillHref(entry)} target="_blank" rel="noopener noreferrer">{t('skills.upstream')}</a>
+                        : <span>{skillHref(entry)}</span>}
+                    </div>
+                  </details>
+                  {deletable && (
+                    <Button variant="ghost" size="sm" disabled={busy}
+                      onClick={() => { void remove(entry.id) }}>{t('skills.remove')}</Button>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
     </section>
@@ -286,11 +466,27 @@ export function CadreSkillLibraryPage({
             <h2>{t('skills.install.panelTitle')}</h2>
             <p>{t('skills.install.panelDescription')}</p>
           </div>
-          <Button variant="primary" disabled={opening} onClick={() => { void openInstaller() }}>
-            {opening ? t('skills.install.opening') : t('skills.install.open')}
+        </div>
+        <div className={css.commands} data-skill-commands>
+          <CopyCommand command={t('skills.commands.find')} label={t('skills.commands.findLabel')} t={t} />
+          <CopyCommand command={t('skills.commands.install')} label={t('skills.commands.installLabel')} t={t} />
+          <CopyCommand command={t('skills.commands.create')} label={t('skills.commands.createLabel')} t={t} />
+          <CopyCommand command={t('skills.commands.check')} label={t('skills.commands.checkLabel')} t={t} />
+        </div>
+        <div className={css.directInstall}>
+          <label>{t('skills.install.source')}
+            <Input value={installText} disabled={busy} placeholder={t('skills.install.placeholder')}
+              onChange={(event) => {
+                setInstallText(event.target.value)
+                setInstallResult(null)
+              }} />
+          </label>
+          <Button variant="primary" disabled={busy} onClick={() => { void install() }}>
+            {installing ? t('skills.install.busy') : t('skills.install.action')}
           </Button>
         </div>
-        {openError !== null && <p className={css.error} role="alert">{openError}</p>}
+        <p className={css.hint}>{t('skills.install.hint')}</p>
+        {installResult !== null && <InstallResult result={installResult} t={t} />}
       </section>
       <div className={css.sources} data-skill-sources>
         <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
@@ -336,8 +532,10 @@ export function CadreSkillLibraryPage({
         </div>
       )}
       {error !== null && (
-        <div role="alert">
+        <div className={css.errorPanel} role="alert">
+          <code className={css.errorCode}>{error.code}</code>
           <p className={css.error}>{error.message}</p>
+          <p className={css.remediation}>{error.remediation}</p>
           {error.recoverable && (
             <>
               <p>{t('skills.library.errorHint')}</p>

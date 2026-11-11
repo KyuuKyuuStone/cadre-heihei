@@ -639,10 +639,235 @@
   min-height: 32px;
 }
 
+.commands {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.commandRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.commandText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.commandLabel {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.commandText code {
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.commandRow > button {
+  flex: none;
+  min-width: 52px;
+}
+
+.copyFailed {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.directInstall {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+}
+
+.directInstall label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.directInstall > button {
+  flex: none;
+}
+
+.installResult {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+}
+
+.installResult h3,
+.installResult h4,
+.installResult p {
+  margin: 0;
+}
+
+.installResult h3 {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.installResult h4 {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.installResult > p {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.preview div {
+  min-width: 0;
+}
+
+.preview dt {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.preview dd {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.issues {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.issues li {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.issues li > code,
+.issues li > span {
+  display: block;
+  font-family: var(--dsw-font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.issues li > span {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.issues li > p {
+  margin: 4px 0 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.issues li > p.remediation,
+.remediation {
+  color: var(--dsw-alias-label-primary);
+}
+
+.healthIssues {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.healthIssues summary {
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.healthIssues .issues {
+  margin-top: 8px;
+}
+
+.healthFallback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.errorPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 30%, transparent);
+  border-radius: var(--dsw-radius-md);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 6%, transparent);
+}
+
+.errorPanel p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.errorCode {
+  color: var(--dsw-alias-state-error-primary);
+  font-family: var(--dsw-font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 720px) {
   .page { padding: 16px; }
   .header { flex-direction: column; }
   .headerActions { width: 100%; }
+  .commands { grid-template-columns: minmax(0, 1fr); }
+  .directInstall { flex-direction: column; align-items: stretch; }
+  .directInstall > button { width: 100%; }
+  .preview { grid-template-columns: minmax(0, 1fr); }
   .installActions { align-items: stretch; }
   .installActions button { width: 100%; }
 }

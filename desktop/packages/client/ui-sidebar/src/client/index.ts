@@ -587,15 +587,10 @@ export function apply(ctx: ClientContext): void {
     openSkills,
     closeSkills,
   })
-  const openSkillAdminSession = async (sessionId: string, _workspaceId?: string): Promise<void> => {
-    await ctx.sessions.refresh()
-    workspaceNavigation.openSession(sessionId)
-  }
   const skillLibraryInjected = (): CadreSkillLibraryInjected => ({
     hooks: { roster, sessions: sessionsSource },
     projectOfSession,
     defaultProjectId: () => resolveDefaultProject() ?? undefined,
-    openSkillAdminSession,
   })
   // @ts-expect-error -- ui-tool owns the tool slot declaration; importing it statically would form a project-reference cycle.
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
