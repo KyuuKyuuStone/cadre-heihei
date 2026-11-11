@@ -152,6 +152,31 @@ describe('Cadre skill library', () => {
     await waitFor(() => { expect(openSkillAdminSession).toHaveBeenCalledWith('chat-1', 'ws-1') })
   })
 
+  it('keeps install and recovery actions available when the catalog returns SKILL_FORBIDDEN', async () => {
+    let catalogCalls = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (requestUrl(input).endsWith('/catalog')) {
+        catalogCalls += 1
+        return catalogCalls === 1
+          ? json({ ok: false, code: 'SKILL_FORBIDDEN', message: 'denied' })
+          : json({ ok: true, result: ENTRIES })
+      }
+      return json({ ok: true, result: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CadreSkillLibraryPage {...pageProps('worker')} />)
+
+    expect(await screen.findByText(zh['skills.admin.error.forbidden'])).toBeTruthy()
+    expect(screen.getByText(zh['skills.library.errorHint'])).toBeTruthy()
+    expect(screen.queryByText(/SKILL_FORBIDDEN/u)).toBeNull()
+    expect(screen.getByRole('button', { name: zh['skills.install.open'] })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: zh['skills.library.retry'] }))
+    expect(await screen.findByText('内置技能')).toBeTruthy()
+    expect(catalogCalls).toBe(2)
+    expect(screen.queryByText(zh['skills.admin.error.forbidden'])).toBeNull()
+  })
+
   it('shows the full page to a session outside the roster, acting under its own session id', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = requestUrl(input)

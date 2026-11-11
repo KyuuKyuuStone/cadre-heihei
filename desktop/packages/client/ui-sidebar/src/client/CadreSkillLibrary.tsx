@@ -36,6 +36,11 @@ interface ManualState {
   content: string
 }
 
+interface LibraryError {
+  readonly message: string
+  readonly recoverable: boolean
+}
+
 const EMPTY: ManualState = {
   id: '', name: '', description: '', roles: ['worker'], tokenEstimate: '',
   tools: '', source: 'manual', license: '', content: '',
@@ -82,6 +87,14 @@ const actingSessionIdOf = (
   return [...inProject].sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0))[0]?.sessionId
 }
 
+const libraryError = (cause: unknown, t: PropsLocale<'sidebar'>['t']): LibraryError => {
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return {
+    message: /\bSKILL_(?:ADMIN_)?FORBIDDEN\b/u.test(message) ? t('skills.admin.error.forbidden') : message,
+    recoverable: true,
+  }
+}
+
 /** Sidebar icon for the global skill library. */
 export function CadreSkillLibraryIcon({ size }: PropsRuntime<'sidebar.panellist'>) {
   return <span className={css.icon} style={{ width: size, height: size }} aria-hidden="true">✦</span>
@@ -99,7 +112,7 @@ export function CadreSkillLibraryPage({
   const actorSessionId = actingSessionIdOf(members, projectId, activeSessionId, projectOfSession)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<LibraryError | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [advanced, setAdvanced] = useState(false)
   const [form, setForm] = useState<ManualState>(EMPTY)
@@ -114,11 +127,11 @@ export function CadreSkillLibraryPage({
     try {
       setEntries(await fetchSkillCatalog(projectId, actorSessionId, actorSessionId, navigator.language))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(libraryError(cause, t))
     } finally {
       setBusy(false)
     }
-  }, [actorSessionId, projectId])
+  }, [actorSessionId, projectId, t])
 
   useEffect(() => { void load() }, [load])
 
@@ -133,23 +146,23 @@ export function CadreSkillLibraryPage({
 
   const addManual = async (): Promise<void> => {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(form.id) || form.id.length > 64) {
-      setError(t('skills.error.id'))
+      setError({ message: t('skills.error.id'), recoverable: false })
       return
     }
     if (form.name.trim() === '' || form.content.trim() === '' || form.roles.length === 0) {
-      setError(t('skills.error.required'))
+      setError({ message: t('skills.error.required'), recoverable: false })
       return
     }
     if (!/^\d+$/u.test(form.tokenEstimate)) {
-      setError(t('skills.error.tokens'))
+      setError({ message: t('skills.error.tokens'), recoverable: false })
       return
     }
     if (entries.some(entry => entry.id === form.id && isBuiltin(entry))) {
-      setError(t('skills.error.builtin'))
+      setError({ message: t('skills.error.builtin'), recoverable: false })
       return
     }
     if (entries.some(entry => entry.id === form.id)) {
-      setError(t('skills.error.exists'))
+      setError({ message: t('skills.error.exists'), recoverable: false })
       return
     }
     setBusy(true)
@@ -166,7 +179,7 @@ export function CadreSkillLibraryPage({
       setNotice(t('skills.notice.added'))
       await load()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(libraryError(cause, t))
     } finally {
       setBusy(false)
     }
@@ -189,7 +202,7 @@ export function CadreSkillLibraryPage({
     } catch (cause) {
       setOpenError(cause instanceof SkillAdminError
         ? t(skillAdminErrorKey(cause.code) as never)
-        : cause instanceof Error ? cause.message : String(cause))
+        : libraryError(cause, t).message)
     } finally {
       setOpening(false)
     }
@@ -205,7 +218,7 @@ export function CadreSkillLibraryPage({
       setNotice(t('skills.notice.removed'))
       await load()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(libraryError(cause, t))
     } finally {
       setBusy(false)
     }
@@ -322,9 +335,21 @@ export function CadreSkillLibraryPage({
           </div>
         </div>
       )}
-      {error !== null && <p role="alert" className={css.error}>{error}</p>}
+      {error !== null && (
+        <div role="alert">
+          <p className={css.error}>{error.message}</p>
+          {error.recoverable && (
+            <>
+              <p>{t('skills.library.errorHint')}</p>
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => { void load() }}>
+                {t('skills.library.retry')}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       {notice !== null && <p role="status" className={css.notice}>{notice}</p>}
-      {entries.length === 0 && (
+      {entries.length === 0 && error === null && (
         <p className={css.emptyState}>{t(busy ? 'skills.library.loading' : 'skills.library.empty')}</p>
       )}
       {entries.length > 0 && group(t('skills.group.builtin'), builtin, false)}
