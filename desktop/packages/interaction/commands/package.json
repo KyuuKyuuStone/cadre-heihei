@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-commands",
   "description": "Plugin-owned human command registry for DeepSeek Harness UIs",
-  "version": "1.5.9",
+  "version": "1.5.10",
   "publishConfig": {
     "access": "public"
   },

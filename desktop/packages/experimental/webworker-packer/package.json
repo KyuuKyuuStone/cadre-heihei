@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-webworker-packer",
   "description": "Build-time packer for the browser runtime's base VFS image and ordered data-overlay archives",
-  "version": "1.5.9",
+  "version": "1.5.10",
   "publishConfig": {
     "access": "public"
   },
