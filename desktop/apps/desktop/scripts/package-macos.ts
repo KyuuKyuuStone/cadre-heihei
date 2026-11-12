@@ -78,6 +78,8 @@ export async function packageMacOSArtifacts(
   const expected = resolveMacOSSigningEnvironment(environment)
   const credentials = resolveMacOSNotarizationEnvironment(environment)
   const update = resolveDesktopAutoUpdateConfig(environment, 'darwin', arch)
+  // The packaged GitHub configuration is written by electron-builder; only the generic test feed is written here and is verifiable.
+  const genericFeed = update.provider === 'generic' ? update : undefined
   const appPath = join(artifactsRoot, arch === 'arm64' ? 'mac-arm64' : 'mac', 'DeepSeek Harness.app')
   const root = await mkdtemp(join(dirname(artifactsRoot), 'notarization-'))
   const zipApp = join(root, 'zip', basename(appPath))
@@ -85,11 +87,11 @@ export async function packageMacOSArtifacts(
   const zipOutput = join(root, 'zip-artifacts')
   const dmgOutput = join(root, 'dmg-artifacts')
   try {
-    await verifyMacOSAppUpdateConfig(appPath, update)
+    if (genericFeed !== undefined) await verifyMacOSAppUpdateConfig(appPath, genericFeed)
     await apple.copyApp(appPath, zipApp)
     await apple.copyApp(appPath, dmgApp)
-    await verifyMacOSAppUpdateConfig(zipApp, update)
-    await verifyMacOSAppUpdateConfig(dmgApp, update)
+    if (genericFeed !== undefined) await verifyMacOSAppUpdateConfig(zipApp, genericFeed)
+    if (genericFeed !== undefined) await verifyMacOSAppUpdateConfig(dmgApp, genericFeed)
     apple.verifySignature(zipApp, expected)
     apple.verifySignature(dmgApp, expected)
     const results = await Promise.allSettled([
@@ -106,8 +108,8 @@ export async function packageMacOSArtifacts(
     if (failures.length > 0) {
       throw new AggregateError(failures.map(result => result.reason), 'desktop macOS packaging: artifact lanes failed')
     }
-    await verifyMacOSAppUpdateConfig(zipApp, update)
-    await verifyMacOSAppUpdateConfig(dmgApp, update)
+    if (genericFeed !== undefined) await verifyMacOSAppUpdateConfig(zipApp, genericFeed)
+    if (genericFeed !== undefined) await verifyMacOSAppUpdateConfig(dmgApp, genericFeed)
     apple.verifySignature(zipApp, expected)
     apple.verifySignature(dmgApp, expected)
     const base = `deepseek-harness-${version}-mac-${arch}`

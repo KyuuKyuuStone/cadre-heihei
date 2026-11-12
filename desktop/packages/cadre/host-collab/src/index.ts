@@ -19,7 +19,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
   buildEmployeeContext, estimateTokens, measureTokenBudget, normalizeTaskPacket, TokenBudgetController,
-  type TaskPacketInput,
+  type TaskFileRef, type TaskPacketInput,
 } from './task-packet.ts'
 import { appendFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -86,7 +86,7 @@ interface DispatchItem {
 }
 
 interface DispatchArgs {
-  readonly tasks: readonly DispatchItem[]
+  readonly tasks: readonly unknown[]
 }
 
 interface DispatchValue {
@@ -97,6 +97,11 @@ interface DispatchValue {
     readonly dueAt: string
     readonly estimatedTokens: number
     readonly warnings: readonly string[]
+    readonly overlaps?: readonly {
+      readonly taskId: string
+      readonly assignee: string
+      readonly file: string
+    }[]
   }[]
   readonly failed: readonly {
     readonly target: string
@@ -108,11 +113,12 @@ interface DispatchValue {
 
 /**
  * Machine-readable failure kind; retryability derives from this, not from prose.
- * `invalid-input` rejects the spec itself and `missing-employee` rejects the
- * employee mention, while `storage-failed` reports the ledger write — callers
- * distinguish a fixable spec from a broken store by this tag alone.
+ * `invalid-input` rejects the spec itself, `invalid-item` rejects a non-object batch
+ * entry, and `missing-employee` rejects the employee mention, while `storage-failed`
+ * reports the ledger write — callers distinguish a fixable spec from a broken store
+ * by this tag alone.
  */
-type DispatchFailureKind = 'missing-employee' | 'delivery-failed' | 'invalid-due-at' | 'invalid-input' | 'storage-failed'
+type DispatchFailureKind = 'missing-employee' | 'delivery-failed' | 'invalid-due-at' | 'invalid-input' | 'invalid-item' | 'storage-failed'
 
 interface DispatchFailure {
   readonly kind: DispatchFailureKind
@@ -120,7 +126,7 @@ interface DispatchFailure {
 }
 
 /** Kinds no retry can fix: replaying the queued spec would fail identically. */
-const NON_RETRYABLE_DISPATCH_KINDS: ReadonlySet<DispatchFailureKind> = new Set<DispatchFailureKind>(['invalid-due-at', 'invalid-input'])
+const NON_RETRYABLE_DISPATCH_KINDS: ReadonlySet<DispatchFailureKind> = new Set<DispatchFailureKind>(['invalid-due-at', 'invalid-input', 'invalid-item'])
 
 /**
  * Normalize one dispatch text field into a value SQLite can bind.
@@ -129,6 +135,38 @@ const NON_RETRYABLE_DISPATCH_KINDS: ReadonlySet<DispatchFailureKind> = new Set<D
  */
 const bindableText = (value: unknown, fallback: string): string =>
   typeof value === 'string' && value.trim() !== '' ? value : fallback
+
+/** Object guard for the raw tool boundary: null, arrays, and primitives are not task specs. */
+const isDispatchItem = (value: unknown): value is DispatchItem =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** Readable target for a malformed batch entry that has no employee field to read. */
+const dispatchItemTarget = (item: unknown): string =>
+  isDispatchItem(item) ? bindableText(item.employee, '(未指定员工)') : '(非对象条目)'
+
+/** Type name for an invalid-item diagnostic, without echoing arbitrary payload text. */
+const dispatchItemType = (item: unknown): string =>
+  item === null ? 'null' : Array.isArray(item) ? 'array' : typeof item
+
+/** File paths from one task's persisted `file_refs` JSON; malformed rows are ignored. */
+function fileRefPaths(value: string): string[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch (error) {
+    console.log(`cadre-collab: invalid file_refs reason=${error instanceof Error ? error.message : String(error)}`)
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const paths: string[] = []
+  for (const item of parsed) {
+    const path = typeof item === 'string'
+      ? item
+      : typeof item === 'object' && item !== null ? (item as { readonly path?: unknown }).path : undefined
+    if (typeof path === 'string' && path.trim() !== '') paths.push(path)
+  }
+  return paths
+}
 
 /** JSON schema fragment shared by dispatch_task and retry_dispatch results. */
 const DISPATCHED_SCHEMA = {
@@ -142,6 +180,17 @@ const DISPATCHED_SCHEMA = {
       dueAt: { type: 'string' },
       estimatedTokens: { type: 'number' },
       warnings: { type: 'array', items: { type: 'string' } },
+      overlaps: {
+        type: 'array',
+        items: {
+          type: 'object', additionalProperties: false, required: ['taskId', 'assignee', 'file'],
+          properties: {
+            taskId: { type: 'string' },
+            assignee: { type: 'string' },
+            file: { type: 'string' },
+          },
+        },
+      },
     },
   },
 } as const
@@ -255,9 +304,9 @@ interface TransitionTaskValue {
   readonly status: string
   readonly steps: readonly { readonly from: string; readonly to: string; readonly eventId: string }[]
   readonly replayed: boolean
-  /** DF-005: only set for a fresh `rework` transition. */
+  /** DF-005/P0-1: only set for a fresh `rework`, `cancelled` or `failed` transition. */
   readonly assigneeNotified?: boolean
-  /** DF-005: why the assignee prompt failed; the transition still stands. */
+  /** DF-005/P0-1: why the assignee prompt failed; the transition still stands. */
   readonly notifyError?: string
 }
 
@@ -265,6 +314,38 @@ const TASK_LIST_OPEN_STATUSES = ['dispatched', 'accepted', 'in_progress', 'deliv
 const TASK_LIST_MAX_LIMIT = 100
 const TASK_LIST_DEFAULT_LIMIT = 50
 const TRANSITION_TARGETS = ['review', 'verified', 'rework', 'failed', 'cancelled'] as const
+
+interface AssigneeNotice {
+  readonly title: string
+  readonly reasonLabel: string
+  readonly statusLine: string
+}
+
+/** Employee-facing copy for the transition targets that return, cancel or close a task. */
+function transitionNotice(to: string): AssigneeNotice | undefined {
+  switch (to) {
+    case 'rework':
+      return {
+        title: '【任务打回】',
+        reasonLabel: '打回原因：',
+        statusLine: '任务状态已置 rework。请按原因修改后重新调用 report_task 回报。',
+      }
+    case 'cancelled':
+      return {
+        title: '【任务取消】',
+        reasonLabel: '取消原因：',
+        statusLine: '任务状态已置 cancelled。无需再回报。',
+      }
+    case 'failed':
+      return {
+        title: '【任务关闭】',
+        reasonLabel: '关闭原因：',
+        statusLine: '任务状态已置 failed。无需再回报。',
+      }
+    default:
+      return undefined
+  }
+}
 
 /** Stable Cordis plugin name. */
 export const name = 'cadre-collab'
@@ -306,7 +387,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   latest_dispatch_message_id TEXT, latest_report_message_id TEXT,
   created_at TEXT NOT NULL, dispatched_at TEXT, accepted_at TEXT, started_at TEXT,
   delivered_at TEXT, review_started_at TEXT, closed_at TEXT, updated_at TEXT NOT NULL,
-  version INTEGER NOT NULL DEFAULT 1, due_at TEXT,
+  version INTEGER NOT NULL DEFAULT 1, due_at TEXT, file_refs TEXT,
   UNIQUE (project_id, seq)
 );
 CREATE TABLE IF NOT EXISTS messages (
@@ -425,6 +506,9 @@ class Ledger {
     const columns = this.db.prepare('PRAGMA table_info(tasks)').all() as { name?: string }[]
     if (!columns.some(column => column.name === 'due_at')) {
       this.db.exec('ALTER TABLE tasks ADD COLUMN due_at TEXT')
+    }
+    if (!columns.some(column => column.name === 'file_refs')) {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN file_refs TEXT')
     }
   }
 
@@ -611,6 +695,25 @@ class Ledger {
     }
   }
 
+  /** Latest event that put one terminal task into its current status, for a readable report refusal. */
+  terminalNotice(projectId: string, taskId: string, status: string): { at: string; reason?: string } | undefined {
+    const event = this.db.prepare(`SELECT at, reason FROM task_events
+      WHERE project_id = ? AND task_id = ? AND to_status = ?
+      ORDER BY at DESC, rowid DESC LIMIT 1`).get(projectId, taskId, status) as
+      { at?: unknown; reason?: unknown } | undefined
+    const task = this.db.prepare('SELECT updated_at FROM tasks WHERE project_id = ? AND task_id = ?')
+      .get(projectId, taskId) as { updated_at?: unknown } | undefined
+    if (task === undefined) return undefined
+    const at = typeof event?.at === 'string'
+      ? event.at
+      : typeof task.updated_at === 'string' ? task.updated_at : undefined
+    if (at === undefined) return undefined
+    return {
+      at,
+      ...(typeof event?.reason === 'string' && event.reason.trim() !== '' ? { reason: event.reason } : {}),
+    }
+  }
+
   /** Latest non-terminal task assigned to one worker, with its dispatcher. */
   openTask(projectId: string, workerSessionId: string): { taskId: string; title: string; dispatcherSessionId?: string } | undefined {
     const row = this.db.prepare(`SELECT task_id, title, dispatcher_session_id FROM tasks
@@ -626,6 +729,22 @@ class Ledger {
     }
   }
 
+  /** Open tasks' referenced files, for the dispatch_task overlap advisory (P0-2). */
+  openFileRefs(projectId: string): { taskId: string; assignee: string; files: readonly string[] }[] {
+    const rows = this.db.prepare(`SELECT task_id, assignee_session_id, file_refs FROM tasks
+      WHERE project_id = ? AND status NOT IN ('verified','failed','cancelled')
+        AND file_refs IS NOT NULL
+      ORDER BY seq`).all(projectId) as
+      { task_id: string; assignee_session_id: string; file_refs: string }[]
+    return rows
+      .map(row => ({
+        taskId: row.task_id,
+        assignee: row.assignee_session_id,
+        files: fileRefPaths(row.file_refs),
+      }))
+      .filter(row => row.files.length > 0)
+  }
+
   /** Display name for one roster member, falling back to the session id. */
   name(projectId: string, sessionId: string): string {
     const row = this.db.prepare(`SELECT COALESCE(NULLIF(TRIM(display_name), ''), session_id) AS name
@@ -637,6 +756,7 @@ class Ledger {
   beginDispatch(projectId: string, input: {
     taskId: string; title: string; body: string; dueAt: string
     dispatcher: string; assignee: string; idempotencyKey: string; messageId: string
+    fileRefs: readonly TaskFileRef[]
   }): void {
     const now = new Date().toISOString()
     const sha = createHash('sha256').update(input.body).digest('hex')
@@ -645,10 +765,11 @@ class Ledger {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       this.db.prepare(`INSERT INTO tasks (task_id, project_id, seq, title, body, body_bytes, body_sha256, status,
-        dispatcher_session_id, assignee_session_id, created_at, updated_at, due_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'dispatched', ?, ?, ?, ?, ?)`).run(
+        dispatcher_session_id, assignee_session_id, created_at, updated_at, due_at, file_refs)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'dispatched', ?, ?, ?, ?, ?, ?)`).run(
         input.taskId, projectId, seq, input.title, input.body, Buffer.byteLength(input.body), sha,
-        input.dispatcher, input.assignee, now, now, input.dueAt)
+        input.dispatcher, input.assignee, now, now, input.dueAt,
+        input.fileRefs.length === 0 ? null : JSON.stringify(input.fileRefs))
       this.db.prepare(`INSERT INTO messages (message_id, project_id, task_id, direction, channel,
         from_session_id, to_session_id, body, body_bytes, body_sha256, preview, idempotency_key,
         delivery_state, received_at, delivered_at)
@@ -831,13 +952,16 @@ const MAX_RETRIES = 3
 
 /** Supervisor duties injected into every supervisor Session's prompt (product rule). */
 const SUPERVISOR_DUTY = [
-  '你是本项目的主管，只做调度与验收，不替员工做专业执行：',
-  '1. 只做任务拆解、按花名册派活（dispatch_task）、验收汇总；',
-  '2. 有对应角色的员工时，不得代劳该员工的专业执行工作；',
-  '3. 当任务需要某个角色但花名册中没有时：明确告诉用户缺少哪个角色、为什么需要它，并询问用户是否需要配置这个角色的员工；不得自己补位执行，不得假装已经派出去，也不要自行创建员工（选角色/模型需要用户决定）；dispatch_task 对不在册员工会返回 missing-employee；',
-  '4. 验收前先用 list_tasks 核对台账状态；验收/打回/搁置用 transition_task（to=verified/rework/failed/cancelled，后三者必须写 reason），并对照任务的完成条件核实证据（交付物），不以口头说明代替；',
-  '5. 汇报用户时区分「已证实 / 未决 / 风险」三类，不把推测写成结论；',
-  `6. 一次最多派 ${String(MAX_DISPATCH_ITEMS)} 条任务（多了要分批）；同一失败重试最多 ${String(MAX_RETRIES)} 次，超过必须换人或找用户裁决。`,
+  '你是本项目的主管：负责拆解、派活、验收和向用户汇报；专业执行全部交给员工，有对应角色的员工时不得代劳。',
+  '派活',
+  '1. 只派给下方花名册里的人（dispatch_task 对不在册的人返回 missing-employee）。缺少所需角色时，告诉用户缺哪个角色、为什么需要，由用户决定是否配置；不要自己补位执行，不要自行创建员工，不要声称已派出。',
+  '2. 每条任务写清：目标与完成定义、可检验的验收项（命令/文件/预期输出）、约束与禁止项、截止时间。需要给人看的文档时，在验收项写明文档名称、读者和用途；未明确要求时，不要求员工另写说明性文档。',
+  '3. 同一文件同一时间只交给一名员工；改派前先用 transition_task 把原任务置 cancelled 并写明原因。',
+  `4. 一次最多派 ${String(MAX_DISPATCH_ITEMS)} 条（多了分批）；同一失败最多重试 ${String(MAX_RETRIES)} 次，超过就换人或请用户裁决。`,
+  '验收',
+  '5. 先用 list_tasks 核对台账状态，再逐条对照验收项检查交付物；口头说明不算证据。你不能运行命令，所以派活时就要求员工把命令和完整输出用重定向保存为原始日志并给出路径；不要把 AI 交接用的说明性文档作为交付要求。',
+  '6. 验收结论对应具体版本（文件路径+哈希或 commit）；验收后内容又变了，需要重新验收。',
+  '7. 用 transition_task 结案：verified / rework / failed / cancelled；后三者必须写 reason，rework 的 reason 要列出缺少的具体证据。',
 ].join('\n')
 
 /**
@@ -845,17 +969,18 @@ const SUPERVISOR_DUTY = [
  * and decisions, not a relay of every employee report.
  */
 const REPORTING_POLICY = [
-  '汇报策略（对用户）：',
-  '1. 不要逐条复述员工汇报，也不要贴原文；用户不需要每条任务的技术细节。',
-  '2. 默认不打扰，你有权判断什么值得告诉用户；能自己判断的不要拿去问。',
-  '3. 只有这些必须汇报：任务失败/卡住/重试超限；结果偏离用户要求或与此前决定冲突；需要用户决策（选方案、缺角色是否加人、范围变更）；发现数据/安全/兼容性风险；一批任务阶段性完成、可以验收。',
-  '4. 正常完成、中间过程（「员工 A 正在写代码」）、技术细节（改了哪个文件）不汇报。',
-  '5. 汇报用总结式：一段话说清发生了什么、结果如何、需要用户做什么，不要罗列原文。',
-  '6. 按阶段汇报，不实时打扰；攒一批一起说，只有必须立刻告知的风险才当下说。',
+  '对用户汇报',
+  '8. 默认不打扰；能自己判断的不要拿去问。只在以下情况汇报：任务失败、卡住或重试超限；结果偏离用户要求或与此前决定冲突；需要用户决策（选方案、缺角色是否加人、范围变更）；发现数据/安全/兼容性风险；一批任务阶段性完成、可以验收。',
+  '9. 正常进展、中间过程和技术细节（改了哪个文件）不汇报；攒一批一起说，只有必须立刻告知的风险才当下说。',
+  '10. 用一段话说明发生了什么、结果如何、需要用户做什么；有不确定的地方在句中标明「已证实」或「未决」，不要把推测写成结论；不转贴员工原文。',
 ].join('\n')
 
-/** Roster rows as prompt lines: 名字 + 角色（岗位描述前 80 字）. */
-function rosterLines(rows: readonly { name: string; role: string; description?: string }[]): string {
+/**
+ * Roster rows as prompt lines: 名字 + 角色（岗位描述前 80 字）.
+ * @param rows - active project members, supervisors first.
+ * @returns one `- 名字（主管|员工 · 描述）` line per member, or '' when empty.
+ */
+export function rosterLines(rows: readonly { name: string; role: string; description?: string }[]): string {
   return rows.map((row) => {
     const title = row.role === 'supervisor' ? '主管' : '员工'
     const duty = row.description === undefined ? '' : ` · ${row.description.slice(0, 80)}`
@@ -867,23 +992,38 @@ function rosterLines(rows: readonly { name: string; role: string; description?: 
  * Supervisor text. The roster is interpolated on every assembly (the section
  * callback re-reads the ledger), so a new employee is visible on the next turn
  * instead of only in the first report-in snapshot.
+ * @param roster - output of {@link rosterLines}.
+ * @returns the supervisor's `cadre-role` system-prompt section.
  */
-function supervisorDuty(roster: string): string {
+export function supervisorDuty(roster: string): string {
+  // Static policy first, roster last: a roster change then invalidates only the
+  // tail of the cached prompt prefix.
   return [
     SUPERVISOR_DUTY,
-    '',
-    '以下是当前花名册（每轮重新读取）。派活前必须先核对；名单可能在上一次对话后变化，不要沿用旧印象：',
-    roster === '' ? '（暂无成员；先创建员工再派活）' : roster,
-    '',
-    '派活时用花名册里的名字指认员工；人不在名单里就说明缺哪个角色，并询问用户是否要配置该角色的员工，不要猜、不要补位、不要假装已派出。',
-    '',
     REPORTING_POLICY,
+    '',
+    '当前花名册（每轮重新读取，派活前以此为准，不要沿用旧印象；用名单里的名字指认员工）：',
+    roster === '' ? '（暂无员工。告诉用户需要哪些角色，请用户创建。）' : roster,
   ].join('\n')
 }
 
-/** Worker role text: one line, roster 「角色负责什么」, re-read on every assembly. */
-function workerDuty(role: { readonly name: string; readonly role: string }): string {
-  return `你的角色：${role.name}——${role.role}`
+/** Worker working rules shared by every employee; the role line precedes them. */
+const WORKER_POLICY = [
+  '你是本项目的员工，任务来自【主管任务】消息：',
+  '1. 只做任务包范围内的事；目标、验收项或文件引用不清楚时，先用 ask_user_question 提问（会转给主管），不要猜。',
+  '2. 修改文件前确认没有别人正在改；发现文件被并发修改或被移动，停下来问主管，不要覆盖。',
+  '3. 完成后调用 report_task：summary 默认不超过 10 行，先写结论，再分「已证实（附关键命令结果和日志路径）」与「未决」；deliverables 列出改动文件和原始日志路径。没跑过的检查，不要说它通过了。',
+  '4. 只有任务包的验收项明确要求给用户的文档，或交付对象是用户时，才编写方案、发布说明、README、CHANGELOG、交接文档等；否则不新建说明性 .md。原始日志必须保留，不用 AI 总结代替。',
+  '5. 收到【任务打回】时，只补原因里列出的项，然后重新回报。',
+].join('\n')
+
+/**
+ * Worker role text: roster 「角色负责什么」 plus the shared rules, re-read on every assembly.
+ * @param role - the worker's display name and roster role description.
+ * @returns the worker's `cadre-role` system-prompt section.
+ */
+export function workerDuty(role: { readonly name: string; readonly role: string }): string {
+  return `你的角色：${role.name}——${role.role}\n${WORKER_POLICY}`
 }
 
 /** Mint the official request identity for one programmatic prompt. */
@@ -1266,9 +1406,12 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   })
 
   /** Dispatch exactly one spec; shared by the initial and the retry path. */
-  const dispatchOne = async (item: DispatchItem, dispatcher: string, projectId: string, signal: AbortSignal):
+  const dispatchOne = async (item: unknown, dispatcher: string, projectId: string, signal: AbortSignal):
   Promise<{ ok: true; value: DispatchValue['dispatched'][number] } | { ok: false } & DispatchFailure> => {
     try {
+      if (!isDispatchItem(item)) {
+        return { ok: false, kind: 'invalid-item', reason: `任务条目格式无效（invalid_item）：需要对象，收到 ${dispatchItemType(item)}` }
+      }
       const missing = (['employee', 'title', 'body', 'dueAt'] as const)
         .filter(field => bindableText(item[field], '') === '')
       if (missing.length > 0) {
@@ -1305,12 +1448,20 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           estimatedTokens: 0, warnings: [],
         } }
       }
+      const overlapPaths = new Set(normalized.packet.fileRefs.map(ref => ref.path))
+      const overlaps = overlapPaths.size === 0
+        ? []
+        : ledger.openFileRefs(projectId).flatMap((other) => {
+          const shared = [...new Set(other.files)].filter(file => overlapPaths.has(file))
+          return shared.map(file => ({ taskId: other.taskId, assignee: other.assignee, file }))
+        })
       const messageId = randomUUID()
       const metric = measureTokenBudget({
         taskId, sessionId: assignee.sessionId, estimatedTokens: estimateTokens(context),
       })
       ledger.beginDispatch(projectId, { taskId, title: item.title, body: item.body, dueAt: item.dueAt,
-        dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId })
+        dispatcher, assignee: assignee.sessionId, idempotencyKey, messageId,
+        fileRefs: normalized.packet.fileRefs })
       try {
         await controller.prompt({
           requestId: requestId(), sessionId: assignee.sessionId, mode: 'queue',
@@ -1334,6 +1485,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         value: {
           taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt,
           estimatedTokens: metric.estimatedTokens, warnings: metric.warnings,
+          ...(overlaps.length === 0 ? {} : { overlaps }),
         },
       }
     } catch (error) {
@@ -1344,15 +1496,16 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   }
 
   /** Turn one failure into the tool-facing row, queueing retryable ones. */
-  const failRow = (item: DispatchItem, dispatcher: string, projectId: string, outcome: DispatchFailure): DispatchValue['failed'][number] => {
+  const failRow = (item: unknown, dispatcher: string, projectId: string, outcome: DispatchFailure): DispatchValue['failed'][number] => {
     const { kind, reason } = outcome
     const retryable = !NON_RETRYABLE_DISPATCH_KINDS.has(kind)
-    const target = bindableText(item.employee, '(未指定员工)')
+    const target = dispatchItemTarget(item)
+    const fields = isDispatchItem(item) ? item : undefined
     // Backstop: never hand an unbindable value to the ledger, whatever the caller sent.
     const pendingId = retryable
       ? ledger.addPending(projectId, { dispatcher, employee: target,
-        title: bindableText(item.title, '(未提供标题)'), body: bindableText(item.body, '(未提供正文)'),
-        dueAt: bindableText(item.dueAt, '(未提供截止时间)'), reason, retryable })
+        title: bindableText(fields?.title, '(未提供标题)'), body: bindableText(fields?.body, '(未提供正文)'),
+        dueAt: bindableText(fields?.dueAt, '(未提供截止时间)'), reason, retryable })
       : undefined
     return {
       target,
@@ -1371,6 +1524,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   const dispatchMeta = (_args: unknown, value: DispatchValue) => ({
     dispatched: value.dispatched.map(row => ({
       taskId: row.taskId, assigneeName: row.assigneeName, role: row.role, dueAt: row.dueAt,
+      ...(row.overlaps === undefined ? {} : { overlaps: row.overlaps }),
     })),
     failed: value.failed.map(row => ({
       target: row.target, reason: row.reason, retryable: row.retryable,
@@ -1425,8 +1579,10 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       },
       render: (_args: unknown, value: DispatchValue) => {
         const ok = value.dispatched.map(row => `已派发 ${row.taskId} → ${row.assigneeName}（${row.role}），截止 ${row.dueAt}`)
+        const overlap = value.dispatched.flatMap(row => (row.overlaps ?? []).map(item =>
+          `文件重叠：${row.taskId} 与 ${item.taskId}（${item.assignee}）共用 ${item.file}；已照常派发，请留意并发写入。`))
         const bad = value.failed.map(row => `未派出「${row.target}」：${row.reason}`)
-        return [text([...ok, ...bad].join('\n') || '没有任何任务被派出')]
+        return [text([...ok, ...overlap, ...bad].join('\n') || '没有任何任务被派出')]
       },
       presentationMeta: dispatchMeta,
     },
@@ -1446,7 +1602,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           dispatched.push(outcome.value)
           continue
         }
-        console.log(`cadre-collab: dispatch failed target=${item.employee} reason=${outcome.reason}`)
+        console.log(`cadre-collab: dispatch failed target=${dispatchItemTarget(item)} reason=${outcome.reason}`)
         // One bad item must not abort the rest of the batch: record it and go on.
         try {
           failed.push(failRow(item, dispatcher, projectId, outcome))
@@ -1603,15 +1759,21 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     execute: async (args: ReportArgs, run: ToolRun) => {
       const reporter = callerOf(run)
       const projectId = ledger.projectOf(reporter)
+      const task = ledger.task(projectId, args.taskId)
+      if (task === undefined) throw new Error(`任务不存在：${args.taskId}`)
+      if (task.assignee !== reporter) throw new Error(`只能回报派给自己的任务（该任务属于 ${task.assignee}）`)
+      if (task.status === 'verified' || task.status === 'failed' || task.status === 'cancelled') {
+        const notice = ledger.terminalNotice(projectId, task.taskId, task.status)
+        const at = notice?.at ?? '（时间未知）'
+        const reason = notice?.reason?.trim() || '（主管未填写）'
+        throw new Error(`任务已于 ${at} 被主管置为 ${task.status}，原因：${reason}，无需再回报。`)
+      }
       if (typeof args.summary !== 'string' || args.summary.trim() === '') {
         throw new Error('汇报结论（summary）不能为空：必须写清做了什么与结果')
       }
       if (!Array.isArray(args.deliverables) || args.deliverables.length === 0) {
         throw new Error('汇报必须附交付物（deliverables 至少一条：文件路径或产物说明）')
       }
-      const task = ledger.task(projectId, args.taskId)
-      if (task === undefined) throw new Error(`任务不存在：${args.taskId}`)
-      if (task.assignee !== reporter) throw new Error(`只能回报派给自己的任务（该任务属于 ${task.assignee}）`)
       const deliverables = args.deliverables ?? []
       const messageId = ledger.report(projectId, { taskId: task.taskId, summary: args.summary, deliverables, reporter })
       const finalStatus = ledger.task(projectId, task.taskId)?.status ?? 'unknown'
@@ -1717,14 +1879,15 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         ...(args.reason === undefined ? {} : { reason: args.reason }),
       })
       if (!outcome.ok) throw new Error(`${outcome.code}: ${outcome.message}`)
-      // DF-005: a rework must reach the assignee, not only the ledger. The
-      // notice is sent only for a fresh transition: a replay (same
-      // idempotencyKey, task already rework) must not page the employee twice.
-      // A delivery failure never rolls the status back — the reason is already
-      // in task_events; the tool reports the failed notice instead.
+      // P0-1: a rework, cancellation or failure must reach the assignee, not
+      // only the ledger. The notice is sent only for a fresh transition: a
+      // replay (same idempotencyKey, task already terminal) must not page the
+      // employee twice. A delivery failure never rolls the status back — the
+      // reason is already in task_events; the tool reports the failed notice.
+      const notice = transitionNotice(args.to)
       let assigneeNotified: boolean | undefined
       let notifyError: string | undefined
-      if (args.to === 'rework' && !outcome.replayed) {
+      if (notice !== undefined && !outcome.replayed) {
         const task = ledger.task(member.projectId, args.taskId)
         if (task !== undefined) {
           const noticeReason = args.reason?.trim()
@@ -1734,17 +1897,17 @@ export function apply(ctx: HostContext, config: Config = {}): void {
               sessionId: task.assignee,
               mode: 'queue',
               content: [text([
-                '【任务打回】', `任务号：${task.taskId}`, `标题：${task.title}`, '',
-                `打回原因：${noticeReason === undefined || noticeReason === '' ? '（主管未填写）' : noticeReason}`, '',
-                '任务状态已置 rework。请按原因修改后重新调用 report_task 回报。',
+                notice.title, `任务号：${task.taskId}`, `标题：${task.title}`, '',
+                `${notice.reasonLabel}${noticeReason === undefined || noticeReason === '' ? '（主管未填写）' : noticeReason}`, '',
+                notice.statusLine,
               ].join('\n'))],
             }, run.signal)
             assigneeNotified = true
           } catch (error) {
             assigneeNotified = false
             notifyError = error instanceof Error ? error.message : String(error)
-            appendDiagnostic(`rework-notify-failed task=${task.taskId} assignee=${task.assignee} reason=${notifyError}`)
-            console.log(`cadre-collab: rework notify failed task=${task.taskId} assignee=${task.assignee} reason=${notifyError}`)
+            appendDiagnostic(`notify-failed task=${task.taskId} assignee=${task.assignee} status=${args.to} reason=${notifyError}`)
+            console.log(`cadre-collab: notify failed task=${task.taskId} assignee=${task.assignee} status=${args.to} reason=${notifyError}`)
           }
         }
       }

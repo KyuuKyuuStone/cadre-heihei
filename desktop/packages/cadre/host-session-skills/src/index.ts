@@ -73,8 +73,9 @@ function membership(db: DatabaseSync, sessionId: string): Membership | undefined
 /**
  * Bind the Host session controller to the narrow port the admin API needs.
  * The controller is resolved lazily on each call: a plugin can load before the
- * session-controller service exists.
- * @param ctx - Host context that may expose `sessionController`.
+ * session-controller service exists. Deletion maps to the workspace registry's
+ * archive of the session, which stops its activity and drops it from the open list.
+ * @param ctx - Host context that may expose `sessionController` and `workspaceRegistry`.
  * @returns the lazy port.
  */
 export function adminSessionPort(ctx: HostContext): AdminSessionPort {
@@ -112,10 +113,22 @@ export function adminSessionPort(ctx: HostContext): AdminSessionPort {
     if (query?.readSession === undefined) throw new SkillIpcError('SKILL_ADMIN_UNAVAILABLE', 503, '当前 Host 无法读取会话历史')
     return (await query.readSession(sessionId)).events
   }
+  const removeSession = async (sessionId: string): Promise<void> => {
+    const registry = ctx.get?.('workspaceRegistry') as {
+      archiveSession?(sessionId: string, options?: { readonly stopActivity?: boolean }): Promise<void>
+    } | undefined
+    if (registry?.archiveSession === undefined) {
+      throw new SkillIpcError('SKILL_ADMIN_DELETE_UNSUPPORTED', 501, '当前 Host 不支持删除会话')
+    }
+    await registry.archiveSession(sessionId, { stopActivity: true })
+  }
   return {
     create: async input => {
       const created = await controller().create({ cwd: input.cwd, agentPreset: input.preset })
       return { sessionId: created.sessionId }
+    },
+    delete: async input => {
+      await removeSession(input.sessionId)
     },
     list: async input => {
       const listed = await controller().list({})
@@ -500,6 +513,16 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       route('/cadre/skills/admin/delete-session', body => requireAdmin().deleteSession({
         projectId: required(body, 'projectId'),
         sessionId: required(body, 'sessionId'),
+      }))
+      /*
+       * Rebinding one skill key: the old bound session is deleted first, and a deletion
+       * failure aborts before the replacement is created. `skillId` is opaque, so no catalog
+       * or directory check applies; `result` carries exactly the bound session's three fields.
+       */
+      route('/cadre/skills/admin/bind-session', body => requireAdmin().bindSession({
+        projectId: required(body, 'projectId'),
+        skillId: required(body, 'skillId'),
+        skillName: required(body, 'skillName'),
       }))
       route('/cadre/skills/admin/message', body => requireAdmin().sendMessage({
         projectId: required(body, 'projectId'),

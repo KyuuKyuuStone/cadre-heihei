@@ -2,7 +2,7 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { app } from 'electron'
+import { app, type AuthInfo } from 'electron'
 import electronUpdater, { type AppUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater'
 import { gt, valid } from 'semver'
 import type { DesktopUpdateState } from './ipc.ts'
@@ -18,6 +18,10 @@ export class DesktopUpdateCoordinator {
   private downloaded = false
   private disposed = false
   private checkOperation: Promise<DesktopUpdateState> | undefined
+  /** Latest abandoned check whose updater promise may still settle; it blocks retries until it does. */
+  private stalledCheck: Promise<DesktopUpdateState> | undefined
+  /** Identifies the check allowed to publish, so an abandoned one cannot apply its late result. */
+  private checkEpoch = 0
   private downloadOperation: Promise<DesktopUpdateState> | undefined
   private installOperation: Promise<DesktopUpdateState> | undefined
 
@@ -40,6 +44,16 @@ export class DesktopUpdateCoordinator {
   }
 
   /**
+   * Answer an authenticating-proxy challenge so the request fails instead of waiting for credentials
+   * nobody supplies: the app has no interactive credential prompt for updater transport.
+   * @param _authInfo - Proxy challenge details; no credential source is configured.
+   * @param callback - Electron credential callback; empty credentials cancel the request.
+   */
+  private readonly onLogin = (_authInfo: AuthInfo, callback: (username: string, password: string) => void): void => {
+    callback('', '')
+  }
+
+  /**
    * @param publish - Receives observable states for every Desktop window.
    * @param beforeRestart - Completes task authorization, admission locking, and owned-process shutdown.
    * @param updater - Process-owned Electron updater, replaceable at the network/platform test boundary.
@@ -47,6 +61,8 @@ export class DesktopUpdateCoordinator {
    * @param currentVersion - Actual installed application version.
    * @param channel - Installed package channel; omitted test/local callers retain nightly.
    * @param downloadResult - Once per completed download attempt, including platform preparation failures.
+   * @param checkDeadlineMs - Total budget for one check, spanning config resolution, retries, and transport;
+   *   the transport idle deadline bounds only a single request.
    */
   constructor(
     private readonly publish: (state: DesktopUpdateState) => DesktopUpdateState,
@@ -56,7 +72,11 @@ export class DesktopUpdateCoordinator {
     private readonly currentVersion: () => string = () => app.getVersion(),
     private readonly downloadResult?: (success: boolean, reason?: string) => void,
     private readonly channel: 'nightly' | 'latest' = 'nightly',
+    private readonly checkDeadlineMs: number = Number(process.env.DSH_DESKTOP_UPDATE_CHECK_DEADLINE_MS ?? 20_000),
   ) {
+    if (!Number.isSafeInteger(checkDeadlineMs) || checkDeadlineMs < 1000 || checkDeadlineMs > 2_147_483_647) {
+      throw new Error('desktop update: check deadline must be an integer from 1000 through 2147483647')
+    }
     if (updater === autoUpdater) {
       // electron-updater omits this internal transport property from its public declarations.
       // Real-Electron qualification exercises the pinned dependency integration.
@@ -75,6 +95,7 @@ export class DesktopUpdateCoordinator {
     this.updater.on('download-progress', this.onProgress)
     this.updater.on('update-downloaded', this.onDownloaded)
     this.updater.on('error', this.onError)
+    this.updater.on('login', this.onLogin)
   }
 
   /** Latest observable state; complete download identity remains main-process-owned. */
@@ -89,11 +110,61 @@ export class DesktopUpdateCoordinator {
     this.assertLive()
     if (this.downloadOperation !== undefined || this.installOperation !== undefined || this.downloaded) return this.current
     if (!manual && this.current.phase === 'error' && this.current.failedOperation === 'download') return this.current
-    this.checkOperation ??= Promise.resolve().then(() => this.doCheck())
-      .finally(() => { this.checkOperation = undefined })
-    const result = await this.checkOperation
+    const stalled = this.stalledCheck === undefined ? undefined : this.failure(new Error(
+      'desktop update: the previous check did not finish and still holds the updater'), 'check')
+    if (stalled !== undefined) {
+      // Re-running would await the same unsettled updater promise, so report the stalled attempt instead.
+      if (manual) this.setState(stalled)
+      return stalled
+    }
+    this.checkOperation ??= this.startCheck()
+    const result = await this.settleCheck(this.checkOperation)
     if (manual && result.phase === 'error') this.setState(result)
     return result
+  }
+
+  /** Start one check whose result may publish only while this epoch stays current. */
+  private startCheck(): Promise<DesktopUpdateState> {
+    const epoch = ++this.checkEpoch
+    const operation: Promise<DesktopUpdateState> = Promise.resolve().then(() => this.doCheck(epoch))
+      .finally(() => {
+        if (this.checkOperation === operation) this.checkOperation = undefined
+      })
+    return operation
+  }
+
+  /**
+   * Wait for one check within the total budget.
+   * @param operation - Shared check whose updater promise may never settle.
+   * @returns Its result, or a deadline failure that leaves the stalled attempt latched.
+   */
+  private async settleCheck(operation: Promise<DesktopUpdateState>): Promise<DesktopUpdateState> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<'deadline'>((resolve) => {
+      timer = setTimeout(() => { resolve('deadline') }, this.checkDeadlineMs)
+    })
+    try {
+      const settled = await Promise.race([operation, deadline])
+      if (settled !== 'deadline') return settled
+      this.abandonCheck(operation)
+      return this.failure(Object.assign(new Error('Desktop update check did not finish within the deadline'),
+        { code: 'ETIMEDOUT' }), 'check')
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * @param operation - Unsettled check that keeps `CheckForUpdatesPromise` occupied inside electron-updater.
+   */
+  private abandonCheck(operation: Promise<DesktopUpdateState>): void {
+    if (this.checkOperation === operation) this.checkOperation = undefined
+    this.checkEpoch++
+    this.stalledCheck = operation
+    // The library promise stays pending; only its settlement may reopen checking.
+    void operation.finally(() => {
+      if (this.stalledCheck === operation) this.stalledCheck = undefined
+    })
   }
 
   /**
@@ -151,8 +222,9 @@ export class DesktopUpdateCoordinator {
     this.disposed = true
     this.updater.off('download-progress', this.onProgress)
     this.updater.off('update-downloaded', this.onDownloaded)
+    this.updater.off('login', this.onLogin)
     // Pending updater promises can still emit EventEmitter errors during shutdown.
-    void Promise.allSettled([this.checkOperation, this.downloadOperation, this.installOperation])
+    void Promise.allSettled([this.checkOperation, this.stalledCheck, this.downloadOperation, this.installOperation])
       .then(() => { this.updater.off('error', this.onError) })
   }
 
@@ -181,7 +253,11 @@ export class DesktopUpdateCoordinator {
     return this.candidate === undefined ? {} : { version: this.candidate }
   }
 
-  private async doCheck(): Promise<DesktopUpdateState> {
+  /**
+   * @param epoch - Check generation allowed to publish its outcome.
+   * @returns The published state, or the current state when an abandoned check only settles late.
+   */
+  private async doCheck(epoch: number): Promise<DesktopUpdateState> {
     try {
       this.assertLive()
       if (!this.enabled()) throw new Error('desktop update: this application has no packaged update source')
@@ -190,6 +266,7 @@ export class DesktopUpdateCoordinator {
       const version = result.updateInfo.version
       if (valid(version) === null) throw new Error('desktop update: feed version is invalid')
       if (this.channel === 'latest' && version.includes('-')) throw new Error('desktop update: latest feed contains a prerelease')
+      if (epoch !== this.checkEpoch) return this.current
       this.candidate = result.isUpdateAvailable && gt(version, this.currentVersion()) ? version : undefined
       return this.setState(this.candidate === undefined ? { phase: 'idle' } : { phase: 'available', version })
     } catch (error) {

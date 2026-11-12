@@ -1,43 +1,41 @@
-/**
- * Global skill library: built-in packs are read-only; installation goes through
- * the skill-administrator conversation. Member settings only select.
- */
-import { useCallback, useEffect, useState } from 'react'
-import { Button, Checkbox, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+/** Skill catalog and health with conversation-bound install and use actions. */
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
+import type { CadreRosterMember, CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
 import {
-  addSkillToLibrary,
   fetchSkillCatalog,
   removeSkillFromLibrary,
+  SkillOperationError,
   type CadreSkillEntry,
 } from './CadreSkills.tsx'
-import { createSkillAdminSession, listSkillAdminSessions, SkillAdminError, skillAdminErrorKey } from './CadreSkillAdmin.ts'
+import {
+  bindSkillSession,
+  fetchSkillHealth,
+  SkillAdminError,
+  type SkillHealth,
+  type SkillHealthStatus,
+} from './CadreSkillAdmin.ts'
 import css from './CadreSkillLibrary.module.css'
 
 export interface CadreSkillLibraryInjected {
   hooks: { roster: HostObservable<CadreRosterState>; sessions: HostObservable<CadreSessionsState> }
   projectOfSession(sessionId: string): string | undefined
-  openSkillAdminSession(sessionId: string, workspaceId?: string): Promise<void>
+  /** Fallback project for a session that belongs to no project; undefined when none exists. */
+  defaultProjectId(): string | undefined
+  openSession(sessionId: string): void
 }
 
-interface ManualState {
-  id: string
-  name: string
-  description: string
-  roles: string[]
-  tokenEstimate: string
-  tools: string
-  source: string
-  license: string
-  content: string
+interface LibraryError {
+  readonly code: string
+  readonly message: string
+  readonly remediation: string
+  readonly recoverable: boolean
 }
 
-const EMPTY: ManualState = {
-  id: '', name: '', description: '', roles: ['worker'], tokenEstimate: '',
-  tools: '', source: 'manual', license: '', content: '',
-}
+type Translator = PropsLocale<'sidebar'>['t']
 
+const INSTALL_SKILL_ID = '__install__'
 const SKILL_SOURCES = {
   skillhub: 'https://skillhub.cn',
   clawhub: 'https://clawhub.ai',
@@ -48,257 +46,345 @@ const SKILL_SOURCES = {
 const BUILTIN_SOURCES = /^(builtin|internal|cadre)$/iu
 const isBuiltin = (entry: CadreSkillEntry): boolean =>
   entry.origin === 'builtin' || (entry.origin === undefined && BUILTIN_SOURCES.test(entry.source.trim()))
-const localizedDescription = (entry: CadreSkillEntry, t: PropsLocale<'sidebar'>['t']): string => {
+const localizedDescription = (entry: CadreSkillEntry, t: Translator): string => {
   if (entry.id === 'ai-design' || entry.id === 'landing-page-design') return t('skills.desc.ai-design')
   return entry.description
 }
-const skillHref = (entry: CadreSkillEntry): string => {
-  const homepage = entry.homepage?.trim() ?? ''
-  return homepage !== '' ? homepage : entry.source.trim()
+
+/** Resolve the foreground session used by the existing project-scoped skill IPC. */
+const actingSessionIdOf = (
+  members: readonly CadreRosterMember[],
+  projectId: string | undefined,
+  activeSessionId: string | undefined,
+  projectOfSession: (sessionId: string) => string | undefined,
+): string | undefined => {
+  if (projectId === undefined) return undefined
+  if (activeSessionId !== undefined) return activeSessionId
+  const inProject = members.filter(member =>
+    member.state !== 'departed' && projectOfSession(member.sessionId) === projectId)
+  const supervisor = inProject.find(member => member.role === 'supervisor')
+  if (supervisor !== undefined) return supervisor.sessionId
+  return [...inProject].sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0))[0]?.sessionId
 }
 
-/** Sidebar icon for the global skill library. */
+const asError = (error: unknown, t: Translator): LibraryError => {
+  if (error instanceof SkillOperationError) {
+    const forbidden = error.code === 'SKILL_FORBIDDEN' || error.code === 'SKILL_ADMIN_FORBIDDEN'
+    return {
+      code: error.code,
+      message: forbidden ? t('skills.admin.error.forbidden') : error.detail,
+      remediation: error.remediation ?? t(forbidden ? 'skills.library.forbiddenRemediation' : 'skills.library.errorRemediation'),
+      recoverable: true,
+    }
+  }
+  return {
+    code: 'SKILL_LIBRARY_LOAD_FAILED',
+    message: t('skills.library.loadFailed'),
+    remediation: t('skills.library.errorRemediation'),
+    recoverable: true,
+  }
+}
+
+const bindingErrorCode = (error: unknown): string =>
+  error instanceof SkillAdminError ? error.code : 'SKILL_BIND_SESSION_FAILED'
+
+function BindingErrorNotice({ code, t }: { readonly code: string; readonly t: Translator }) {
+  let message = t('skills.bind.error.generic')
+  let remediation = t('skills.bind.remediation.generic')
+  if (code === 'SKILL_BIND_DELETE_FAILED') {
+    message = t('skills.bind.error.deleteFailed')
+    remediation = t('skills.bind.remediation.deleteFailed')
+  } else if (code === 'SKILL_BIND_SESSION_FAILED') {
+    message = t('skills.bind.error.sessionFailed')
+    remediation = t('skills.bind.remediation.sessionFailed')
+  } else if (code === 'SKILL_ADMIN_DELETE_UNSUPPORTED') {
+    message = t('skills.bind.error.deleteUnsupported')
+    remediation = t('skills.bind.remediation.deleteUnsupported')
+  } else if (code === 'SKILL_PROJECT_REQUIRED') {
+    message = t('skills.bind.error.projectRequired')
+    remediation = t('skills.bind.remediation.projectRequired')
+  } else if (code === 'SKILL_SESSION_OPEN_FAILED') {
+    message = t('skills.bind.error.openFailed')
+    remediation = t('skills.bind.remediation.openFailed')
+  }
+  return (
+    <div className={css.bindError} role="alert">
+      <span className={css.errorCode}>{code}</span>
+      <p>{message}</p>
+      <p>{remediation}</p>
+    </div>
+  )
+}
+
+function SkillSourcesNavigation({ t }: { readonly t: Translator }) {
+  const label = t('skills.sources.label')
+  return (
+    <nav className={css.sources} aria-label={label} data-skill-sources>
+      <span className={css.sourcesLabel}>{label}</span>
+      <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
+      <a href={SKILL_SOURCES.clawhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.clawhub')}</a>
+      <a href={SKILL_SOURCES.aiDesign} target="_blank" rel="noopener noreferrer">{t('skills.sources.aiDesign')}</a>
+      <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
+      <p>{t('skills.sources.caution')}</p>
+    </nav>
+  )
+}
+
+const healthLabel = (status: SkillHealthStatus, t: Translator): string => {
+  switch (status) {
+    case 'ok': return t('skills.health.ok')
+    case 'warning': return t('skills.health.warning')
+    case 'error': return t('skills.health.error')
+  }
+}
+const healthTone = (status: SkillHealthStatus): 'success' | 'warning' | 'danger' => {
+  switch (status) {
+    case 'ok': return 'success'
+    case 'warning': return 'warning'
+    case 'error': return 'danger'
+  }
+}
+
 export function CadreSkillLibraryIcon({ size }: PropsRuntime<'sidebar.panellist'>) {
   return <span className={css.icon} style={{ width: size, height: size }} aria-hidden="true">✦</span>
 }
 
-/** Global panel listing built-in and installed skills. */
 export function CadreSkillLibraryPage({
-  useRoster, useSessions, projectOfSession, openSkillAdminSession, t,
-}: PropsRuntime<'main'> & InjectFace<CadreSkillLibraryInjected> & PropsLocale<'sidebar'>) {
+  useRoster,
+  useSessions,
+  projectOfSession,
+  defaultProjectId,
+  openSession,
+  t,
+}: PropsRuntime<'sidebar'> & PropsLocale<'sidebar'> & InjectFace<CadreSkillLibraryInjected>) {
   const members = useRoster(state => state.members)
-  const activeSessionId = useSessions(state => Object.entries(state.byId)
-    .find(([, session]) => (session.retainedBy.mainView ?? 0) > 0)?.[0])
-  const actor = members.find(member => member.sessionId === activeSessionId)
-  const projectId = actor === undefined ? undefined : projectOfSession(actor.sessionId)
+  const byId = useSessions(state => state.byId)
+  const activeSessionId = Object.entries(byId)
+    .sort(([, a], [, b]) => (b.retainedBy.mainView ?? 0) - (a.retainedBy.mainView ?? 0))
+    .find(([, session]) => (session.retainedBy.mainView ?? 0) > 0)?.[0]
+  const projectId = (activeSessionId === undefined ? undefined : projectOfSession(activeSessionId)) ?? defaultProjectId()
+  const actorSessionId = actingSessionIdOf(members, projectId, activeSessionId, projectOfSession)
   const [entries, setEntries] = useState<readonly CadreSkillEntry[]>([])
+  const [health, setHealth] = useState<SkillHealth | undefined>()
+  const [healthFailure, setHealthFailure] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<LibraryError | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [advanced, setAdvanced] = useState(false)
-  const [form, setForm] = useState<ManualState>(EMPTY)
-  const [tokenManual, setTokenManual] = useState(false)
-  const [opening, setOpening] = useState(false)
-  const [openError, setOpenError] = useState<string | null>(null)
+  const [bindingTarget, setBindingTarget] = useState<string | null>(null)
+  const [bindingErrors, setBindingErrors] = useState<Readonly<Record<string, string>>>({})
+  const catalogGeneration = useRef(0)
+  const scopeGeneration = useRef(0)
+
+  useEffect(() => {
+    setEntries([])
+    setBusy(false)
+    setError(null)
+    setNotice(null)
+    setBindingTarget(null)
+    setBindingErrors({})
+    return () => { scopeGeneration.current += 1 }
+  }, [actorSessionId, projectId])
 
   const load = useCallback(async () => {
-    if (actor === undefined || projectId === undefined) return
+    if (projectId === undefined || actorSessionId === undefined) return
+    const scope = scopeGeneration.current
+    const generation = ++catalogGeneration.current
+    const current = () => generation === catalogGeneration.current && scope === scopeGeneration.current
     setBusy(true)
     setError(null)
     try {
-      setEntries(await fetchSkillCatalog(projectId, actor.sessionId, actor.sessionId, navigator.language))
+      const rows = await fetchSkillCatalog(projectId, actorSessionId, actorSessionId, navigator.language)
+      if (current()) setEntries(rows)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      if (current()) setError(asError(cause, t))
     } finally {
-      setBusy(false)
+      if (current()) setBusy(false)
     }
-  }, [actor, projectId])
+  }, [actorSessionId, projectId, t])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+    return () => { catalogGeneration.current += 1 }
+  }, [load])
+  useEffect(() => {
+    if (projectId === undefined || actorSessionId === undefined) return
+    let cancelled = false
+    setHealth(undefined)
+    setHealthFailure(null)
+    void fetchSkillHealth(projectId, actorSessionId).then(result => {
+      if (cancelled) return
+      if (result === undefined) setHealthFailure(200)
+      else setHealth(result)
+    }).catch((cause: unknown) => {
+      if (!cancelled) setHealthFailure(cause instanceof SkillAdminError && cause.code === 'SKILL_ADMIN_FORBIDDEN' ? 403 : 500)
+    })
+    return () => { cancelled = true }
+  }, [actorSessionId, projectId])
 
-  if (actor === undefined || projectId === undefined) {
+  if (projectId === undefined || actorSessionId === undefined) {
     return (
-      <section className={css.page} data-skill-library>
+      <section className={css.page}>
         <h1>{t('skills.library.title')}</h1>
         <p>{t('skills.library.readOnly')}</p>
+        <SkillSourcesNavigation t={t} />
       </section>
     )
   }
 
-  const addManual = async (): Promise<void> => {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(form.id) || form.id.length > 64) {
-      setError(t('skills.error.id'))
-      return
-    }
-    if (form.name.trim() === '' || form.content.trim() === '' || form.roles.length === 0) {
-      setError(t('skills.error.required'))
-      return
-    }
-    if (!/^\d+$/u.test(form.tokenEstimate)) {
-      setError(t('skills.error.tokens'))
-      return
-    }
-    if (entries.some(entry => entry.id === form.id && isBuiltin(entry))) {
-      setError(t('skills.error.builtin'))
-      return
-    }
-    if (entries.some(entry => entry.id === form.id)) {
-      setError(t('skills.error.exists'))
-      return
-    }
-    setBusy(true)
-    setError(null)
-    setNotice(null)
+  const openSkillConversation = async (skillId: string, skillName: string): Promise<void> => {
+    if (bindingTarget !== null) return
+    const scope = scopeGeneration.current
+    const current = () => scope === scopeGeneration.current
+    setBindingTarget(skillId)
+    setBindingErrors(current => {
+      const next = { ...current }
+      delete next[skillId]
+      return next
+    })
+    let sessionId: string | undefined
     try {
-      await addSkillToLibrary(projectId, actor.sessionId, {
-        ...form,
-        tokenEstimate: Number(form.tokenEstimate),
-        tools: form.tools.split(',').map(item => item.trim()).filter(item => item !== ''),
-        overwrite: false,
-      })
-      setAdvanced(false)
-      setNotice(t('skills.notice.added'))
-      await load()
+      const binding = await bindSkillSession(projectId, skillId, skillName)
+      if (current()) sessionId = binding.sessionId
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      if (current()) setBindingErrors(existing => ({ ...existing, [skillId]: bindingErrorCode(cause) }))
+      return
     } finally {
-      setBusy(false)
+      if (current()) setBindingTarget(null)
     }
-  }
-
-  const openInstaller = async (): Promise<void> => {
-    setOpening(true)
-    setOpenError(null)
+    if (sessionId === undefined || !current()) return
     try {
-      const sessions = await listSkillAdminSessions(projectId)
-      const existing = [...sessions]
-        .filter(session => typeof session.sessionId === 'string' && session.sessionId !== '')
-        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
-      const chosen = existing ?? await createSkillAdminSession(projectId)
-      if (chosen.workspaceId === undefined) {
-        await openSkillAdminSession(chosen.sessionId)
-      } else {
-        await openSkillAdminSession(chosen.sessionId, chosen.workspaceId)
-      }
-    } catch (cause) {
-      setOpenError(cause instanceof SkillAdminError
-        ? t(skillAdminErrorKey(cause.code) as never)
-        : cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setOpening(false)
+      openSession(sessionId)
+    } catch {
+      if (current()) setBindingErrors(existing => ({ ...existing, [skillId]: 'SKILL_SESSION_OPEN_FAILED' }))
     }
   }
 
   const remove = async (id: string): Promise<void> => {
     if (!window.confirm(t('skills.confirmRemove', { id }))) return
+    const scope = scopeGeneration.current
+    const current = () => scope === scopeGeneration.current
     setBusy(true)
     setError(null)
     setNotice(null)
     try {
-      await removeSkillFromLibrary(projectId, actor.sessionId, id)
+      await removeSkillFromLibrary(projectId, actorSessionId, id)
+      if (!current()) return
       setNotice(t('skills.notice.removed'))
       await load()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      if (current()) setError(asError(cause, t))
     } finally {
-      setBusy(false)
+      if (current()) setBusy(false)
     }
   }
 
-  const group = (title: string, rows: readonly CadreSkillEntry[], deletable: boolean) => (
-    <section className={css.group}>
+  const group = (title: string, rows: readonly CadreSkillEntry[], removable: boolean) => (
+    <section className={css.group} key={title}>
       <h2>{title}</h2>
       {rows.length === 0
         ? <p className={css.groupEmpty}>{t('skills.library.groupEmpty')}</p>
         : (
-          <ul className={css.list}>
-            {rows.map(entry => (
-              <li key={entry.id} className={css.card}>
-                <div className={css.cardHead}>
-                  <strong>{entry.name}</strong>
-                  {entry.selected && <span className={css.selected}>{t('skills.selected')}</span>}
-                </div>
-                <p>{localizedDescription(entry, t)}</p>
-                <details className={css.details}>
-                  <summary>{t('skills.details')}</summary>
-                  <div className={css.meta}>
-                    <span>{t('skills.tokenEstimate', { count: String(entry.tokenEstimate) })}</span>
-                    <span>{entry.tools.join(', ') || t('skills.toolsNone')}</span>
-                    {entry.author !== undefined && entry.author.trim() !== '' && (
-                      <span>{t('skills.author', { author: entry.author })}</span>
-                    )}
-                    <span>{t('skills.licenseLabel', { license: entry.license })}</span>
-                    {/^https?:\/\//iu.test(skillHref(entry))
-                      ? <a href={skillHref(entry)} target="_blank" rel="noopener noreferrer">{t('skills.upstream')}</a>
-                      : <span>{skillHref(entry)}</span>}
+          <div className={css.list}>
+            {rows.map(entry => {
+              const packHealth = health?.items.find(item => item.packId === entry.id)
+              const healthUnavailable = healthFailure !== null || (health !== undefined && packHealth === undefined)
+              const healthState = health === undefined || healthFailure !== null || packHealth === undefined ? undefined : packHealth.status
+              const binding = bindingTarget === entry.id
+              const bindingError = bindingErrors[entry.id]
+              return (
+                <article className={css.card} key={entry.id} data-skill-id={entry.id}>
+                  <div className={css.cardHead}>
+                    <span className={css.cardName}>{entry.name}</span>
+                    {healthState === undefined
+                      ? <Tag tone="neutral">{t(healthUnavailable ? 'skills.health.unavailableTag' : 'skills.health.loading')}</Tag>
+                      : <Tag tone={healthTone(healthState)}>{healthLabel(healthState, t)}</Tag>}
+                    {entry.selected && <span className={css.selected}>{t('skills.selected')}</span>}
                   </div>
-                </details>
-                {deletable && (
-                  <Button variant="ghost" size="sm" disabled={busy}
-                    onClick={() => { void remove(entry.id) }}>{t('skills.remove')}</Button>
-                )}
-              </li>
-            ))}
-          </ul>
+                  <p className={css.cardDescription}>{localizedDescription(entry, t)}</p>
+                  <div className={css.cardBody}>
+                    <div className={css.meta}>
+                      <span>{entry.roles.join(' / ')}</span>
+                      <span>{t('skills.tokenEstimate', { count: String(entry.tokenEstimate) })}</span>
+                      <span>{entry.tools.join(', ') || t('skills.toolsNone')}</span>
+                      {entry.author !== undefined && <span>{t('skills.author', { author: entry.author })}</span>}
+                      <span>{t('skills.licenseLabel', { license: entry.license })}</span>
+                    </div>
+                    {healthUnavailable && <p className={css.healthFallback}>{t('skills.health.unavailable')}</p>}
+                    {packHealth !== undefined && packHealth.issues.length > 0 && healthFailure === null && (
+                      <details className={css.healthIssues}>
+                        <summary>{t('skills.health.issueCount', { count: String(packHealth.issues.length) })}</summary>
+                        <div className={css.issueList}>
+                          {packHealth.issues.map(issue => (
+                            <div className={css.issueItem} key={`${issue.code}:${issue.field ?? ''}:${issue.message}`}>
+                              <span className={css.issueCode}>{issue.code}</span>
+                              <p className={css.issueMessage}>{issue.message}</p>
+                              <p className={css.issueRemediation}>{issue.remediation}</p>
+                              {issue.field !== undefined && <span className={css.issueField}>{t('skills.health.field', { field: issue.field })}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                  <div className={css.cardActions}>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={busy || bindingTarget !== null}
+                      onClick={() => { void openSkillConversation(entry.id, entry.name) }}
+                    >
+                      {binding ? t('skills.library.openingConversation') : t('skills.library.useConversation')}
+                    </Button>
+                    {removable && <Button variant="ghost" size="sm" disabled={busy || bindingTarget !== null} onClick={() => { void remove(entry.id) }}>{t('skills.remove')}</Button>}
+                  </div>
+                  {bindingError !== undefined && <BindingErrorNotice code={bindingError} t={t} />}
+                </article>
+              )
+            })}
+          </div>
         )}
     </section>
   )
 
   const builtin = entries.filter(isBuiltin)
   const installed = entries.filter(entry => !isBuiltin(entry))
-
   return (
-    <section className={css.page} data-skill-library>
+    <section className={css.page}>
       <header className={css.header}>
         <div>
           <h1>{t('skills.library.title')}</h1>
           <p>{t('skills.library.description')}</p>
         </div>
         <div className={css.headerActions}>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
-            if (!advanced) setForm({ ...EMPTY, tools: t('skills.defaultTools'), license: t('skills.defaultLicense') })
-            setAdvanced(value => !value)
-          }}>{t('skills.advanced')}</Button>
-        </div>
-      </header>
-      <section className={css.installPanel} data-skill-install-entry>
-        <div className={css.installHead}>
-          <div>
-            <h2>{t('skills.install.panelTitle')}</h2>
-            <p>{t('skills.install.panelDescription')}</p>
-          </div>
-          <Button variant="primary" disabled={opening} onClick={() => { void openInstaller() }}>
-            {opening ? t('skills.install.opening') : t('skills.install.open')}
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={busy || bindingTarget !== null}
+            onClick={() => { void openSkillConversation(INSTALL_SKILL_ID, t('skills.library.installConversation')) }}
+          >
+            {bindingTarget === INSTALL_SKILL_ID ? t('skills.library.openingConversation') : t('skills.library.installConversation')}
           </Button>
         </div>
-        {openError !== null && <p className={css.error} role="alert">{openError}</p>}
-      </section>
-      <div className={css.sources} data-skill-sources>
-        <span className={css.sourcesLabel}>{t('skills.sources.label')}</span>
-        <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
-        <a href={SKILL_SOURCES.clawhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.clawhub')}</a>
-        <a href={SKILL_SOURCES.aiDesign} target="_blank" rel="noopener noreferrer">{t('skills.sources.aiDesign')}</a>
-        <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
-        <p>{t('skills.sources.caution')}</p>
-      </div>
-      {advanced && (
-        <div className={css.install} data-skill-install>
-          <div className={css.fields}>
-            <label>{t('skills.field.id')}<Input value={form.id} disabled={busy}
-              onChange={(event) => { setForm({ ...form, id: event.target.value.trim() }) }} /></label>
-            <label>{t('skills.field.name')}<Input value={form.name} disabled={busy}
-              onChange={(event) => { setForm({ ...form, name: event.target.value }) }} /></label>
-            <label>{t('skills.field.description')}<Input value={form.description} disabled={busy}
-              onChange={(event) => { setForm({ ...form, description: event.target.value }) }} /></label>
-            <label>{t('skills.field.tokens')}<Input type="number" min={0} value={form.tokenEstimate} disabled={busy}
-              onChange={(event) => { setTokenManual(true); setForm({ ...form, tokenEstimate: event.target.value }) }} /></label>
-            <label>{t('skills.field.tools')}<Input value={form.tools} disabled={busy}
-              onChange={(event) => { setForm({ ...form, tools: event.target.value }) }} /></label>
-            <label>{t('skills.field.source')}<Input value={form.source} disabled={busy}
-              onChange={(event) => { setForm({ ...form, source: event.target.value }) }} /></label>
-            <label>{t('skills.field.license')}<Input value={form.license} disabled={busy}
-              onChange={(event) => { setForm({ ...form, license: event.target.value }) }} /></label>
-            <div className={css.roles}>
-              <span>{t('skills.field.role')}</span>
-              <Checkbox checked={form.roles.includes('worker')} label={t('skills.role.worker')}
-                onChange={(next) => { setForm({ ...form, roles: next ? [...form.roles, 'worker'] : form.roles.filter(item => item !== 'worker') }) }} />
-              <Checkbox checked={form.roles.includes('supervisor')} label={t('skills.role.supervisor')}
-                onChange={(next) => { setForm({ ...form, roles: next ? [...form.roles, 'supervisor'] : form.roles.filter(item => item !== 'supervisor') }) }} />
-            </div>
-            <label>{t('skills.field.content')}
-              <textarea className={css.textarea} value={form.content} rows={6} disabled={busy}
-                onChange={(event) => {
-                  const content = event.target.value
-                  setForm({ ...form, content, ...(tokenManual ? {} : { tokenEstimate: String(Math.ceil(content.length / 4)) }) })
-                }} />
-            </label>
-            <Button variant="primary" size="sm" disabled={busy} onClick={() => { void addManual() }}>{t('skills.addSave')}</Button>
-          </div>
+      </header>
+      <SkillSourcesNavigation t={t} />
+      {bindingErrors[INSTALL_SKILL_ID] !== undefined && <BindingErrorNotice code={bindingErrors[INSTALL_SKILL_ID]} t={t} />}
+      {error !== null && (
+        <div className={css.errorPanel} role="alert">
+          <span className={css.errorCode}>{error.code}</span>
+          <p className={css.error}>{error.message}</p>
+          <p className={css.remediation}>{error.remediation}</p>
+          {error.recoverable && (
+            <>
+              <p>{t('skills.library.errorHint')}</p>
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => { void load() }}>
+                {t('skills.library.retry')}
+              </Button>
+            </>
+          )}
         </div>
       )}
-      {error !== null && <p role="alert" className={css.error}>{error}</p>}
       {notice !== null && <p role="status" className={css.notice}>{notice}</p>}
-      {entries.length === 0 && (
+      {entries.length === 0 && error === null && (
         <p className={css.emptyState}>{t(busy ? 'skills.library.loading' : 'skills.library.empty')}</p>
       )}
       {entries.length > 0 && group(t('skills.group.builtin'), builtin, false)}

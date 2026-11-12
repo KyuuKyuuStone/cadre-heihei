@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { expect, it } from 'vitest'
 import { loadDesktopPackageEnvironment } from '../scripts/desktop-package-environment.mjs'
 
@@ -31,6 +32,24 @@ it('loads unsigned public settings without requiring the signing secret file or 
     expect(prepared.DSH_PACKAGING_PRESET).toBe('test')
     expect(() => loadDesktopPackageEnvironment('win32', { DSH_PACKAGING_CONFIG_DIR: root, DSH_PACKAGING_PRESET: 'test' }))
       .toThrow(/cannot read/u)
+  })
+})
+
+it.each(['win32', 'darwin'] as const)('directs missing %s signing secrets to the tracked signing template', async (platform) => {
+  await withPreset(async (root) => {
+    const filename = platform === 'win32' ? 'windows-signing.env' : 'macos-signing.env'
+    const template = resolve(import.meta.dirname, '..', 'config', platform === 'win32' ? 'windows-packaging' : 'macos-packaging', `${filename}.example`)
+    expect(existsSync(template)).toBe(true)
+    let message = ''
+    try {
+      loadDesktopPackageEnvironment(platform, { DSH_PACKAGING_CONFIG_DIR: root, DSH_PACKAGING_PRESET: 'test' })
+    }
+    catch (error) {
+      message = error instanceof Error ? error.message : ''
+    }
+    expect(message).toContain(`cannot read ${join(root, 'secrets', filename)}`)
+    expect(message).toContain(`copy the signing template ${template} to ${join(root, 'secrets', filename)} and fill in the machine credentials`)
+    expect(message).not.toContain(`${join(root, 'secrets', filename)}.example`)
   })
 })
 

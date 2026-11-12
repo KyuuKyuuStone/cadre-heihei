@@ -15,6 +15,9 @@ function fixture(): { root: string; leaf: string } {
   const root = mkdtempSync(join(tmpdir(), 'dsh-referenced-projects-'))
   onTestFinished(() => { removeFixtureSafely(root) })
   const leaf = join(root, 'leaf package')
+  // The artifact build's Typert pass locates this workspace by its tsconfig.host.json and an
+  // empty packages/ tree, which contributes no Typert artifacts.
+  mkdirSync(join(root, 'packages'))
   mkdirSync(join(leaf, 'src'), { recursive: true })
   writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }))
   writeFileSync(join(leaf, 'src/index.ts'), 'export const value: number = 42\n')

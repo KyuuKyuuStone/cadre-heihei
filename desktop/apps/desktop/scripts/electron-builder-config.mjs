@@ -96,20 +96,22 @@ export function createElectronBuilderConfig(
   if (windowsSigner !== undefined) {
     installWindowsNsisBootstrapSigner({ sign: windowsSigner })
   }
-  const update = unsigned ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
+  // The GitHub source needs no signing inputs, so an artifact built without a certificate still
+  // carries a real update source instead of shipping none.
+  const update = resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
   if (preparedRuntime !== undefined) buildPaths.dsh = preparedRuntime
   // electron-builder merges extraMetadata into the packaged manifest, so a build version here reaches
   // the artifact names, the update feed, and the installed app.getVersion() the updater compares against.
   const productVersion = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')).version
   const buildVersion = resolveDesktopBuildVersion(env, productVersion)
-  if (update?.channel === 'latest' && buildVersion.includes('-')) throw new Error('desktop package: latest requires a stable version')
+  if (update.channel === 'latest' && buildVersion.includes('-')) throw new Error('desktop package: latest requires a stable version')
   const packaged = resolveDesktopBuildCommit(env)
   return {
     appId,
     protocols: [{ name: 'Cadre Heihei', schemes: ['dsh'] }],
     extraMetadata: {
       dshDesktopAppId: appId,
-      dshDesktopUpdateChannel: update?.channel ?? 'nightly',
+      dshDesktopUpdateChannel: update.channel,
       ...(policy === undefined ? {} : { dshMandatoryUpdatePolicy: policy }),
       ...buildVersion === productVersion ? {} : { version: buildVersion },
       ...packaged === undefined ? {} : { dshBuildCommit: packaged.commit, dshBuildDirty: packaged.dirty },
@@ -204,7 +206,7 @@ export function createElectronBuilderConfig(
     // one (the packaged-secrets scan died exactly that way), and the duplicate-key
     // guard in tests/electron-builder-config-afterpack.spec.ts pins it shut.
     afterPack: createAfterPackGate({
-      writeMacOSAppUpdate: packagesMacOS && update !== undefined
+      writeMacOSAppUpdate: packagesMacOS && update.provider === 'generic'
         ? async (resourcesDir, hookContext) => {
             await writeMacOSAppUpdateConfig(resourcesDir, resolveMacOSAppUpdateFeed(hookContext.packager.config.publish),
               hookContext.packager.appInfo.updaterCacheDirName)
@@ -234,7 +236,7 @@ export function createElectronBuilderConfig(
       }
       if (context.electronPlatformName !== 'darwin' || unsigned) return
       const appPath = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
-      if (update !== undefined) {
+      if (update.provider === 'generic') {
         await verifyMacOSAppUpdateConfig(appPath, resolveMacOSAppUpdateFeed(context.packager.config.publish),
           context.packager.appInfo.updaterCacheDirName)
       }
@@ -286,6 +288,8 @@ export function createElectronBuilderConfig(
       differentialPackage: true,
     },
     detectUpdateChannel: false,
-    publish: update === undefined ? null : [{ provider: 'generic', url: update.publicUrl, channel: update.channel }],
+    publish: [update.provider === 'generic'
+      ? { provider: 'generic', url: update.publicUrl, channel: update.channel }
+      : { provider: 'github', owner: update.owner, repo: update.repo, channel: update.channel, releaseType: update.releaseType }],
   }
 }

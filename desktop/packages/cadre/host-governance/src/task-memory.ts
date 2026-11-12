@@ -136,13 +136,33 @@ export class TaskMemoryReader {
 /** Gate one forced compaction per new task-memory archive and idle session. */
 export class TaskMemoryCompactionGate {
   readonly #seen = new Map<string, string>()
+  readonly #thresholdTokens: number
 
   /**
-   * True when a new completed task has been archived and the session is idle.
-   * Marking happens only after a successful compaction, so failures retry.
+   * Create a gate with an inclusive current-context token floor.
+   * @param thresholdTokens - current-context tokens must reach this value.
    */
-  shouldCompact(sessionId: string, latest: { readonly updatedAt: string } | undefined, status: string | undefined): boolean {
-    if (latest === undefined || status !== 'idle') return false
+  constructor(thresholdTokens: number) {
+    this.#thresholdTokens = thresholdTokens
+  }
+
+  /**
+   * True when a new completed task has been archived, the session is idle,
+   * and current context reaches the configured floor. Cumulative usage is not
+   * an input. Marking happens only after a successful compaction, so failures retry.
+   * @param sessionId - actor session.
+   * @param latest - newest archived task marker.
+   * @param status - current agent status.
+   * @param currentContextTokens - current replay-aware context measurement.
+   * @returns whether this archive and context qualify for forced compaction.
+   */
+  shouldCompact(
+    sessionId: string,
+    latest: { readonly updatedAt: string } | undefined,
+    status: string | undefined,
+    currentContextTokens: number,
+  ): boolean {
+    if (latest === undefined || status !== 'idle' || currentContextTokens < this.#thresholdTokens) return false
     return this.#seen.get(sessionId) !== latest.updatedAt
   }
 

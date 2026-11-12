@@ -587,14 +587,11 @@ export function apply(ctx: ClientContext): void {
     openSkills,
     closeSkills,
   })
-  const openSkillAdminSession = async (sessionId: string, _workspaceId?: string): Promise<void> => {
-    await ctx.sessions.refresh()
-    workspaceNavigation.openSession(sessionId)
-  }
   const skillLibraryInjected = (): CadreSkillLibraryInjected => ({
     hooks: { roster, sessions: sessionsSource },
     projectOfSession,
-    openSkillAdminSession,
+    defaultProjectId: () => resolveDefaultProject() ?? undefined,
+    openSession: (sessionId) => { workspaceNavigation.openSession(sessionId) },
   })
   // @ts-expect-error -- ui-tool owns the tool slot declaration; importing it statically would form a project-reference cycle.
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
@@ -888,9 +885,9 @@ export function apply(ctx: ClientContext): void {
     order: 5,
     locale: NS,
     label: () => ctx.locale.bind(NS)('skills.tab'),
-    available: (sessionId: string) => roster.getSnapshot().members
-      .some(member => member.sessionId === sessionId && member.state !== 'departed'),
-    inject: (): CadreSkillTabInjected => ({ hooks: { roster }, projectOfSession }),
+    inject: (): CadreSkillTabInjected => ({
+      hooks: { roster }, projectOfSession, defaultProjectId: () => resolveDefaultProject() ?? undefined,
+    }),
   } as never, CadreSkillTab as never))
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
     name: 'sidebar.workspaces.session.menu.item',

@@ -1,12 +1,37 @@
 # Changelog
 
+## 1.5.4
+
+- **任务记忆保持 1.5.x 既有行为**：恢复终态任务摘要、任务上下文注入、查询路由与归档后压缩；归档压缩新增当前上下文阈值门（`taskMemoryCompactionThresholdTokens`，默认 60000）；本批不设计 2.0 记忆系统或记忆引擎
+- **token 账本记录细化**：实验账本按 role 记录，保留 `uncachedInput`/`cacheRead`/`cacheWrite`/`output` 四分桶，旧记录按 legacy 形状回读；默认仍不启用
+- **派发批次更透明**：批次内文件重叠会告警，非对象条目按 invalid-item 归因，不再静默；角色提示词与派发/报告输出以 expected/ 快照钉住
+- **GitHub 预发布发布脚本**：新增 `desktop-github-release.ts`——以 `<target>-release.json` 锚校验发布身份（本地 record 校验 + 远端只读先行），创建 `--prerelease` 预发布并上传安装器，读回验证 tag/target/资产；dirty 检出或 annotated tag 拒绝，不自动重试
+- **运行时构建根解析**：新增 `desktop-runtime-build-root.mjs`，接入 `prepare-dsh` 与打包环境
+- **打包提交号回退与冷树编译**：无 Git 源码树时构建提交号回退 `CADRE_SOURCE_COMMIT` 再退 `unknown` 并告警（签名发布仍要求真实提交号），真实提交号经 `DSH_CLIENT_COMMIT_HASH` 交给客户端构建；库构建顺序调整为 Host 编译 → Typert → Client 编译 → 各 bundle，冷树一遍即可构建；`package-doctor` 新增 source-commit 检查
+- **发布工程收尾**：`.gitignore` 忽略本地 lefthook 示例与运行时 `logs/`，避免打包 dirty 检查误报拒发；新增打包模板漂移回归测试（`packaging-template.spec.ts`）；发布脚本测试补 `noUncheckedIndexedAccess` 卫兵，官方构建链不再在该处硬停
+
+## 1.5.3
+
+- **欢迎页降级防御**：回环认证失败不再启动即退出，保留欢迎页并提示 `backend-unavailable`；已知诱因之一是代理开着但 `NO_PROXY` 缺回环绕过、回环流量被推进代理（未证实为该机根因）；降级模式为只读，不能配置 API Key
+- **会话凭据修复**：损坏的浏览器会话凭据不再阻断启动
+- **token 用量账本（实验）**：新增可重放的 token 用量账本，默认不启用
+- **打包模板与预检**：`.env.windows.example`/`.env.macos.example` 纳入跟踪并改为可直接通过 `check:package` 自动更新检查的占位值，缺失配置提示改善；源码打包要求目录为 Git 仓库；`package-doctor` 打包预检工具迁入仓库，machine-local 副本退役
+
+## 1.5.2
+
+- **压缩链修复**：`compaction-basic` 每次压力检查最多压缩一次，残余压力留待下次检查而非当场重压，避免链式复压打碎刚写下的可复用检查点前缀；超阈改为 warn 返回不再抛错
+- **pnpm store 移出 %TEMP%**：企业终端防护拦截 %TEMP% 下 electron-pnpm 的建目录/符号链接行为（EPERM），`STORE_ROOT` 改为 `.desktop-build/targets/win-x64/dsh-pnpm/store`，并补中文注释
+- **派发缺字段不再掩盖真因**：host-collab 派发缺字段时改为入口分层校验、failRow 归一化、逐项 try/catch 不中止整批，不再以 SQLite `parameter N` 绑定错误掩盖真因
+- **发布门禁与安装器**：新增 `release-version-gate`（目标版本必须严格高于已发布最高版本）与 `after-pack-gate`（打包后产物校验）并接入 `release.mjs`/`electron-builder-config.mjs`；安装器 preflight 与中英文文案修复（`path.nsh`/`strings.nsh`）；two-state-evidence 证据门禁扩展；secrets 扫描对文档锚点中的 `sk-` 字样不再误报
+- **token 预算门禁补齐**：补上 `gates:token` script 指向的 `scripts/gates/check-token-budget.ts` 实现与 `fixtures/token/{sample-green,sample-red}.jsonl`，修好版本提升提交引入该 script 时留下的悬空引用
+
 ## 1.5.1
 
-- **压缩预算接到生效行**：`compaction-basic` 的 Cadre 预算（60k 上限 / 10k 保留 / 40k 步检查）原先写在 Cadre 包对宿主排的覆盖上，而 web bundle 已禁用该排，实测压缩仍在 678k 才触发；现移到 `standard` preset 实际挂载的 `compaction-basic` 行，Cadre 包内只留一行注释说明原因
-- **门禁防回归**：`presets.spec.ts` 断言生效行配置，并用真实 `resolveConfig/resolveCompactSpec` 解析出 60k/10k/40k；`cadre-packaging-guard.spec.ts` 不再钉死死排，改为断言 preset 行带 `config`、Cadre 包内无 `compaction-basic` 覆盖
-- **更正 1.5.0 条目**：1.5.0 实际写入的是 60k/10k/40k（不是 150k/20k/60k），且因打在宿主死排从未生效
-- **分批说明**：主管与员工本批统一 60k；角色分参数（主管 150k/30k/120k）留待下一批，本版不生效
-- **验证**：断言红绿两态（3 failed → 15 passed）+ 真实引擎回放（120k→15.1k、180k→22.6k、280k→35.1k，均低于 40k 步阈值）；live 首压需重启新构建后复跑，步骤见 `设计-Token治理2-主管会话上下文预算.md` §8
+- **压缩预算接到生效行**：`compaction-basic` 的 Cadre 预算（120k 上限 / 10k 保留 / 120k 步检查）原先写在 Cadre 包对宿主排的覆盖上，而 web bundle 已禁用该排，实测压缩仍在 678k 才触发；现移到 `standard` preset 实际挂载的 `compaction-basic` 行，Cadre 包内只留一行注释说明原因
+- **门禁防回归**：`presets.spec.ts` 断言生效行配置，并用真实 `resolveConfig/resolveCompactSpec` 解析出 120k/10k/120k；`cadre-packaging-guard.spec.ts` 不再钉死死排，改为断言 preset 行带 `config`、Cadre 包内无 `compaction-basic` 覆盖
+- **更正 1.5.0 条目**：1.5.0 实际写入的是 150k/20k/60k，且因打在宿主死排从未生效
+- **分批说明**：主管与员工本批统一 120k；角色分参数（主管 150k/30k/120k）留待下一批，本版不生效
+- **验证**：断言红绿两态（3 failed → 15 passed）+ 真实引擎回放（120k→15.1k、180k→22.6k、280k→35.1k，均低于 120k 步阈值）；live 首压需重启新构建后复跑，步骤见 `设计-Token治理2-主管会话上下文预算.md` §8
 
 ## 1.5.0
 

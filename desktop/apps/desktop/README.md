@@ -336,6 +336,8 @@ Background mandatory-installation confirmation requests Windows taskbar attentio
 
 Ordinary update HTTP requests have a per-connection inactivity deadline: no response headers or no further response bytes for `60000` ms fails the operation. `DSH_DESKTOP_UPDATE_HTTP_IDLE_TIMEOUT_MS` accepts an integer from `1000` through `2147483647` to adjust it; active downloads have no total-duration deadline. Failed downloads retain the retry indicator and require another user action.
 
+One check has a separate total deadline of `20000` ms covering config resolution, provider retries, and transport, because a single request deadline cannot bound an updater promise that never settles. `DSH_DESKTOP_UPDATE_CHECK_DEADLINE_MS` accepts an integer from `1000` through `2147483647`. An expiring manual check reports a network check failure; while the abandoned updater promise stays pending, further checks report it immediately instead of reopening it. A check that settles late cannot publish its version. An authenticating-proxy challenge is answered with empty credentials, so that request fails instead of waiting for credentials the app never prompts for.
+
 On Windows with workspace dependencies installed, run this command from the repository root:
 
 ```sh

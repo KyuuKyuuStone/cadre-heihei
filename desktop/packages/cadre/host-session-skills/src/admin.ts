@@ -3,12 +3,16 @@
  * confirmed execution through the existing skill IPC validators.
  * @module
  */
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
+import { loadSkillCatalog, searchLocalPacks, type SkillPack } from './catalog.ts'
 import { createSkillApi, installWarnings, SkillIpcError, type InstallWarning, type PackageCommandResult, type SkillApi, type ValidPack } from './ipc.ts'
+import { collectPackHealth } from './diagnostics.ts'
+import type { AuditItem, SkillConversationPort } from './conversation.ts'
+import { createViaApi, installViaApi, loadPacks, summaryOfEntry } from './conversation.ts'
 
 /** The agent preset reserved for the skill administrator conversation. */
 export const SKILL_ADMIN_PRESET = 'cadre-skill-admin'
@@ -45,6 +49,28 @@ export interface AdminSessionPort {
   delete?(input: { readonly sessionId: string }): Promise<void>
   prompt?(input: { readonly sessionId: string; readonly text: string }): Promise<void>
   messages?(input: { readonly sessionId: string; readonly afterSeq: number }): Promise<AdminMessages>
+}
+
+/** Input for {@link SkillAdminApi.bindSession}. */
+export interface BindSessionInput {
+  readonly projectId: string
+  /** Opaque binding key: a real pack id or the reserved `__install__` value. */
+  readonly skillId: string
+  /** Session title shown in the session list. */
+  readonly skillName: string
+}
+
+/** One project skill key answered by a freshly bound admin session. */
+export interface BoundSkillSession {
+  readonly sessionId: string
+  readonly title: string
+  readonly projectId: string
+}
+
+/** The persisted session bound to one project's skill key. */
+interface SkillSessionBinding {
+  readonly sessionId: string
+  readonly updatedAt: string
 }
 
 /** The dedicated workspace registry surface used by the admin conversation. */
@@ -107,6 +133,23 @@ export interface ApplyInput {
   readonly action?: 'apply' | 'cancel'
 }
 
+/**
+ * A skill-admin failure the caller can recover from: a stable `code` plus the single
+ * corrective action in `remediation`. The message repeats the remediation so surfaces
+ * that forward only `code` and `message` stay actionable.
+ */
+export class SkillAdminRecoveryError extends SkillIpcError {
+  /**
+   * @param code - stable failure code.
+   * @param status - HTTP status the Host route replies with.
+   * @param message - what failed, in user terms.
+   * @param remediation - the action that recovers.
+   */
+  constructor(code: string, status: number, message: string, readonly remediation: string) {
+    super(code, status, `${message}。处理方式：${remediation}`)
+  }
+}
+
 /** Auditor and executor behind the skill-admin conversation. */
 export class SkillAdminApi {
   private readonly api: SkillApi
@@ -115,8 +158,14 @@ export class SkillAdminApi {
   private readonly auditFile: string
   private readonly now: () => number
   private readonly skillsDir: string
+  private readonly builtinDir: string | undefined
   private readonly pending = new Map<string, PendingPlan>()
   private readonly projects = new Map<string, string>()
+  private readonly bindingsFile: string
+  private readonly skillSessionsFile: string
+  private readonly skillSessions = new Map<string, Map<string, SkillSessionBinding>>()
+  private skillSessionsLoaded = false
+  private bindingsLoaded = false
   private readonly db: DatabaseSync
 
   constructor(options: {
@@ -144,33 +193,44 @@ export class SkillAdminApi {
     this.workspace = options.workspace
     this.now = options.now ?? Date.now
     this.skillsDir = options.skillsDir
+    this.builtinDir = options.builtinDir
     const auditDir = options.auditDir ?? join(homedir(), '.dsh', 'cadre-skill-admin')
     mkdirSync(auditDir, { recursive: true })
     this.auditFile = join(auditDir, 'audit.jsonl')
+    this.bindingsFile = join(auditDir, 'sessions.json')
+    this.skillSessionsFile = join(auditDir, 'skill-sessions.json')
   }
 
   /** Catalog for an admin session's project. */
-  catalogFor(sessionId: string): ReturnType<SkillApi['catalog']> {
-    const projectId = this.projectOf(sessionId)
-    return this.api.catalog({ projectId, actorSessionId: this.actorFor(projectId) })
+  async catalogFor(sessionId: string): Promise<ReturnType<SkillApi['catalog']>> {
+    const projectId = await this.projectFor(sessionId)
+    return this.api.catalog({ projectId, actorSessionId: this.operatorFor(projectId, sessionId) })
   }
 
-  /** Detail for an admin session's project; includes the body the model may inspect. */
-  previewFor(sessionId: string, packId: string): ReturnType<SkillApi['preview']> {
-    const projectId = this.projectOf(sessionId)
-    return this.api.preview({ projectId, actorSessionId: this.actorFor(projectId), packId })
+  /**
+   * Detail for an admin session's project, including the body the model may inspect.
+   * Read from the pack directories so the admin preset does not borrow a roster role.
+   */
+  async previewFor(sessionId: string, packId: string): Promise<ReturnType<SkillApi['preview']>> {
+    await this.projectFor(sessionId)
+    const pack = this.packFor(packId)
+    return {
+      id: pack.id, content: pack.content, tokenEstimate: pack.tokenEstimate, license: pack.license,
+      ...(pack.author === undefined ? {} : { author: pack.author }),
+      ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
+    }
   }
 
   /** Audit rows for an admin session's project. */
-  auditForSession(sessionId: string, limit?: number): readonly Record<string, unknown>[] {
-    this.projectOf(sessionId)
+  async auditForSession(sessionId: string, limit?: number): Promise<readonly Record<string, unknown>[]> {
+    await this.projectFor(sessionId)
     return this.readAudit(limit)
   }
 
-  /** Plan for an admin session's project. */
+  /** Plan for an admin session's project; the admin session acts as the operator. */
   async planForSession(sessionId: string, input: Omit<PlanInput, 'projectId' | 'operatorSessionId'>): Promise<SkillPlan> {
-    const projectId = this.projectOf(sessionId)
-    return this.plan({ projectId, operatorSessionId: this.actorFor(projectId), ...input })
+    const projectId = await this.projectFor(sessionId)
+    return this.composePlan(projectId, this.operatorFor(projectId, sessionId), input)
   }
 
   /** Send one user message to an admin session; any project member may call. */
@@ -211,8 +271,8 @@ export class SkillAdminApi {
       warnings: readonly InstallWarning[]; preview: unknown
     }
   > {
-    const projectId = this.projectOf(sessionId)
-    const actorSessionId = this.actorFor(projectId)
+    const projectId = await this.projectFor(sessionId)
+    const actorSessionId = this.operatorFor(projectId, sessionId)
     const provided = [input.name, input.url, input.text].filter(value => value !== undefined)
     if (provided.length !== 1) {
       throw new SkillIpcError('SKILL_INVALID', 400, 'name/url/text 必须且只能提供一个')
@@ -270,15 +330,16 @@ export class SkillAdminApi {
   }
 
   /** Confirmation token for a plan created by an admin session. */
-  tokenForSession(sessionId: string, planId: string): string | undefined {
-    this.projectOf(sessionId)
+  async tokenForSession(sessionId: string, planId: string): Promise<string | undefined> {
+    await this.projectFor(sessionId)
     return this.tokenFor(planId)
   }
 
   /** Create or list ordinary admin sessions; never writes a roster row. */
   async createSession(input: {
-    readonly projectId: string; readonly cwd: string
+    readonly projectId: string; readonly cwd: string; readonly title?: string
   }): Promise<AdminSession> {
+    const title = input.title ?? '技能管理员'
     this.requireProject(input.projectId)
     try {
       mkdirSync(input.cwd, { recursive: true })
@@ -296,24 +357,78 @@ export class SkillAdminApi {
       throw new SkillIpcError('SKILL_ADMIN_WORKSPACE_FAILED', 500,
         `无法注册技能管理员工作区：${error instanceof Error ? error.message : String(error)}`)
     }
-    const created = await this.sessions.create({ preset: SKILL_ADMIN_PRESET, cwd: workspace.path, title: '技能管理员' })
+    const created = await this.sessions.create({ preset: SKILL_ADMIN_PRESET, cwd: workspace.path, title })
     try {
       await workspace.attachSession(created.sessionId)
     } catch (error) {
       throw new SkillIpcError('SKILL_ADMIN_WORKSPACE_ATTACH_FAILED', 500,
         `无法绑定技能管理员工作区：${error instanceof Error ? error.message : String(error)}`)
     }
-    this.projects.set(created.sessionId, input.projectId)
+    this.bind(created.sessionId, input.projectId)
     return {
-      sessionId: created.sessionId, title: '技能管理员', updatedAt: this.now(),
+      sessionId: created.sessionId, title, updatedAt: this.now(),
       cwd: workspace.path, workspaceId: workspace.id,
     }
   }
 
-  /** List admin sessions created for one project in this Host process. */
+  /** List admin sessions created for one project, including those of earlier Host runs. */
   async listSessions(input: { readonly projectId: string }): Promise<readonly AdminSession[]> {
     const sessions = await this.sessions.list({ preset: SKILL_ADMIN_PRESET })
-    return sessions.filter(session => this.projects.get(session.sessionId) === input.projectId)
+    return sessions.filter(session => this.bindingOf(session.sessionId) === input.projectId)
+  }
+
+  /**
+   * Bind one skill key to a fresh admin session, deleting the session bound to that key before.
+   * A failed deletion aborts before any session is created, so a failed replacement never leaves
+   * the key without a session. `skillId` is opaque: it is never checked against the catalog or a
+   * directory, and `__install__` is an ordinary value.
+   * @param input - project, opaque skill key, and the title the new session carries.
+   * @returns the created session's identity, its title, and its project.
+   */
+  async bindSession(input: BindSessionInput): Promise<BoundSkillSession> {
+    this.requireProject(input.projectId)
+    // Binding requests carry no session id, so the operator is the project's roster supervisor.
+    const supervisor = this.supervisorOf(input.projectId)
+    if (supervisor === undefined) {
+      throw new SkillIpcError('SKILL_FORBIDDEN', 403, `项目 ${input.projectId} 没有在册主管，不能绑定技能会话`)
+    }
+    // Re-prove the resolved operator so a departed or reassigned roster row cannot bind.
+    this.api.assertSupervisor({ projectId: input.projectId, actorSessionId: supervisor })
+    const previous = this.skillBindingOf(input.projectId, input.skillId)
+    if (previous !== undefined) {
+      if (this.sessions.delete === undefined) {
+        throw new SkillAdminRecoveryError('SKILL_ADMIN_DELETE_UNSUPPORTED', 501,
+          `技能键 ${input.skillId} 已绑定会话 ${previous.sessionId}，当前 Host 不支持删除会话`,
+          '换用支持会话删除的 Host，或先结束旧会话再重试绑定')
+      }
+      try {
+        await this.sessions.delete({ sessionId: previous.sessionId })
+      } catch (error) {
+        // An unsupported Host keeps its own 501: the capability is missing, the deletion did not fail.
+        if (error instanceof SkillIpcError && error.code === 'SKILL_ADMIN_DELETE_UNSUPPORTED') throw error
+        throw new SkillAdminRecoveryError('SKILL_BIND_DELETE_FAILED', 502,
+          `删除旧绑定会话 ${previous.sessionId} 失败，未创建新会话：${error instanceof Error ? error.message : String(error)}`,
+          '确认 Host 会话控制器可用且旧会话未被占用后重试绑定')
+      }
+      this.unbind(previous.sessionId)
+      this.unbindSkill(input.projectId, input.skillId)
+    }
+    let created: AdminSession
+    try {
+      created = await this.createSession({
+        projectId: input.projectId,
+        cwd: join(homedir(), '.dsh', 'cadre-skill-admin', 'workspace'),
+        title: input.skillName,
+      })
+    } catch (error) {
+      // Guard failures keep their route status; everything else is one binding failure.
+      if (error instanceof SkillIpcError && error.status === 403) throw error
+      throw new SkillAdminRecoveryError('SKILL_BIND_SESSION_FAILED', 500,
+        `创建技能会话失败：${error instanceof Error ? error.message : String(error)}`,
+        '检查 cadre-skill-admin preset 与 Host sessionController 后重试')
+    }
+    this.bindSkill(input.projectId, input.skillId, created.sessionId)
+    return { sessionId: created.sessionId, title: created.title, projectId: input.projectId }
   }
 
   async deleteSession(input: {
@@ -322,26 +437,41 @@ export class SkillAdminApi {
     if (this.sessions.delete === undefined) {
       throw new SkillIpcError('SKILL_ADMIN_DELETE_UNSUPPORTED', 501, '当前 Host 不支持删除会话')
     }
-    if (this.projects.get(input.sessionId) !== input.projectId) {
+    if (this.bindingOf(input.sessionId) !== input.projectId) {
       throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
     }
     await this.sessions.delete({ sessionId: input.sessionId })
-    this.projects.delete(input.sessionId)
+    this.unbind(input.sessionId)
     return { deleted: true }
   }
 
   /** Build a preview; this never writes the skill directory. */
   async plan(input: PlanInput): Promise<SkillPlan> {
     this.requireOperator(input.projectId, input.operatorSessionId)
+    return this.composePlan(input.projectId, input.operatorSessionId, input)
+  }
+
+  /**
+   * Build a preview for one project and operator without re-checking the roster role.
+   * @param projectId - project the plan is scoped to.
+   * @param operatorSessionId - session that will confirm the plan in `apply`.
+   * @param input - requested action; `projectId` and `operatorSessionId` are ignored.
+   * @returns the plan, already stashed with its confirmation token.
+   */
+  private async composePlan(
+    projectId: string,
+    operatorSessionId: string,
+    input: Omit<PlanInput, 'projectId' | 'operatorSessionId'>,
+  ): Promise<SkillPlan> {
     const kind = input.kind ?? 'install'
     if (kind === 'remove' || (kind === 'update' && input.url === undefined)) {
-      return this.planLocal(input, kind)
+      return this.planLocal({ ...input, projectId, operatorSessionId }, kind)
     }
     if (input.url === undefined) throw new SkillIpcError('SKILL_URL_INVALID', 400, 'url 必填')
     let inspected
     try {
       inspected = await this.api.inspectUrl({
-        projectId: input.projectId, actorSessionId: input.operatorSessionId, url: input.url,
+        projectId, actorSessionId: operatorSessionId, url: input.url,
       })
     } catch (error) {
       if (error instanceof SkillIpcError && ['SKILL_URL_INVALID', 'SKILL_URL_FETCH_FAILED', 'SKILL_INVALID', 'SKILL_TOO_LARGE'].includes(error.code)) {
@@ -377,9 +507,7 @@ export class SkillAdminApi {
       summary: `${kind === 'update' ? '更新' : '安装'} ${pack.id}（${pack.name}）到 ${join(this.skillsDir, pack.id)}`,
       expiresAt: new Date(this.now() + 10 * 60_000).toISOString(),
     }
-    this.pending.set(planId, {
-      plan, projectId: input.projectId, operatorSessionId: input.operatorSessionId, token: randomUUID(), pack,
-    })
+    this.pending.set(planId, { plan, projectId, operatorSessionId, token: randomUUID(), pack })
     return plan
   }
 
@@ -491,34 +619,282 @@ export class SkillAdminApi {
   }
 
   private requireProject(projectId: string): void {
-    const row = this.db.prepare(
-      "SELECT session_id FROM members WHERE project_id = ? AND state != 'departed' LIMIT 1",
-    ).get(projectId) as { session_id?: unknown } | undefined
-    if (row?.session_id === undefined) throw new SkillIpcError('SKILL_FORBIDDEN', 403, '本项目没有在册成员')
+    if (this.ledgerProjects().includes(projectId)) return
+    throw new SkillIpcError('SKILL_FORBIDDEN', 403, `未知项目：${projectId}`)
   }
 
-  /** Pick a real roster member for project-scoped API calls; no supervisor requirement. */
-  private actorFor(projectId: string): string {
-    const row = this.db.prepare(
-      "SELECT session_id FROM members WHERE project_id = ? AND state != 'departed' ORDER BY CASE role WHEN 'supervisor' THEN 0 ELSE 1 END, session_id LIMIT 1",
-    ).get(projectId) as { session_id?: unknown } | undefined
-    if (typeof row?.session_id !== 'string') throw new SkillIpcError('SKILL_FORBIDDEN', 403, '本项目没有在册成员')
-    return row.session_id
+  /**
+   * Session id to attribute project-scoped skill calls to. A roster supervisor is preferred
+   * because warning-bearing installs keep their confirmation authority; without one the
+   * calling admin session acts, which the project-scoped skill API admits off-roster.
+   * @param projectId - project the call is scoped to.
+   * @param sessionId - calling admin session.
+   * @returns a non-departed supervisor's session id, else the calling session id.
+   */
+  private operatorFor(projectId: string, sessionId: string): string {
+    return this.supervisorOf(projectId) ?? sessionId
   }
 
-  private projectOf(sessionId: string): string {
-    const projectId = this.projects.get(sessionId)
-    if (projectId === undefined) throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
-    return projectId
+  /**
+   * The roster supervisor that may act for a project, resolved without a calling session.
+   * @param projectId - project whose roster row is read.
+   * @returns a non-departed supervisor's session id, or undefined when the project has none.
+   */
+  private supervisorOf(projectId: string): string | undefined {
+    const row = this.db.prepare(
+      "SELECT session_id FROM members WHERE project_id = ? AND state != 'departed' AND role = 'supervisor' ORDER BY session_id LIMIT 1",
+    ).get(projectId) as { session_id?: unknown } | undefined
+    return typeof row?.session_id === 'string' ? row.session_id : undefined
+  }
+
+  /**
+   * Resolve the project an admin tool call acts on, binding the session on first use when the
+   * ledger makes that unambiguous. Bindings written by an earlier Host run win over recovery.
+   * @param sessionId - calling session, which the admin preset scopes to skill administration.
+   * @returns the project bound to the session.
+   */
+  private async projectFor(sessionId: string): Promise<string> {
+    const bound = this.bindingOf(sessionId)
+    if (bound !== undefined) return bound
+    const recovered = await this.recoverBinding(sessionId)
+    if (recovered !== undefined) return recovered
+    throw new SkillAdminRecoveryError('SKILL_ADMIN_SESSION_NOT_FOUND', 404,
+      '未知的技能管理员会话',
+      this.ledgerProjects().length > 1
+        ? '本项目存在多个项目，请在调用技能工具时显式传入 projectId，让会话绑定到目标项目'
+        : '请在调用技能工具时传入 projectId，让会话绑定到项目')
+  }
+
+  /**
+   * Bind a still-unknown session to the ledger's only project, proving first that the Host
+   * lists it as an admin-preset session so an arbitrary id cannot claim administration.
+   * @param sessionId - session reported by the calling tool.
+   * @returns the recovered project id, or undefined when recovery is not possible.
+   */
+  private async recoverBinding(sessionId: string): Promise<string | undefined> {
+    const projects = this.ledgerProjects()
+    const only = projects[0]
+    if (projects.length !== 1 || only === undefined) return undefined
+    let listed: boolean
+    try {
+      listed = (await this.sessions.list({ preset: SKILL_ADMIN_PRESET }))
+        .some(session => session.sessionId === sessionId)
+    } catch (error) {
+      // Without a session store the preset scope cannot be checked, so recovery stays unavailable.
+      console.error(`host-session-skills: cannot verify admin session for recovery: ${error instanceof Error ? error.message : String(error)}`)
+      return undefined
+    }
+    if (!listed) return undefined
+    this.bind(sessionId, only)
+    return only
+  }
+
+  /**
+   * Projects the ledger still tracks, read from the schema the ledger provides. The `projects`
+   * table is optional metadata that the shipped schema creates without rows, so the roster
+   * contributes projects as well.
+   * @returns non-archived project ids; empty when the ledger cannot be read.
+   */
+  private ledgerProjects(): string[] {
+    const read = (sql: string): string[] => this.db.prepare(sql).all().flatMap(row => {
+      const value = (row as { project_id?: unknown }).project_id
+      return typeof value === 'string' && value !== '' ? [value] : []
+    })
+    const hasTable = (name: string): boolean => this.db.prepare(
+      "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+    ).get(name) !== undefined
+    try {
+      const roster = read('SELECT DISTINCT project_id FROM members')
+      if (!hasTable('projects')) return roster
+      let metadata: string[]
+      try {
+        metadata = read('SELECT project_id FROM projects WHERE archived_at IS NULL')
+      } catch {
+        // Older project tables carry no archive column, so every row still counts.
+        metadata = read('SELECT project_id FROM projects')
+      }
+      return [...new Set([...metadata, ...roster])]
+    } catch {
+      // An unreadable ledger cannot prove which project a session belongs to.
+      return []
+    }
+  }
+
+  /**
+   * Read one pack from the same builtin-over-installed catalog the skill IPC serves.
+   * @param packId - catalog pack id.
+   * @returns the pack, including its SKILL.md body.
+   */
+  private packFor(packId: string): SkillPack {
+    const packs = new Map<string, SkillPack>()
+    if (this.builtinDir !== undefined) {
+      for (const [id, pack] of loadSkillCatalog(this.builtinDir, 'builtin')) packs.set(id, pack)
+    }
+    for (const [id, pack] of loadSkillCatalog(this.skillsDir, 'installed')) {
+      if (!packs.has(id)) packs.set(id, pack)
+    }
+    const pack = packs.get(packId)
+    if (pack === undefined) throw new SkillIpcError('SKILL_NOT_FOUND', 400, `未知技能包：${packId}`)
+    return pack
   }
 
   private async requireSession(projectId: string, sessionId: string): Promise<void> {
-    if (this.projects.get(sessionId) !== projectId) {
+    if (this.bindingOf(sessionId) !== projectId) {
       throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
     }
     const owned = (await this.sessions.list({ preset: SKILL_ADMIN_PRESET }))
       .some(session => session.sessionId === sessionId)
     if (!owned) throw new SkillIpcError('SKILL_ADMIN_SESSION_NOT_FOUND', 404, '未知的技能管理员会话')
+  }
+
+  /**
+   * Resolve a session's project, lazily reading the bindings file written by earlier Host runs.
+   * Recovery is lazy so a Host that never touches skill administration performs no extra file IO.
+   * @param sessionId - Ordinary session id reported by the Host.
+   * @returns The bound project id, or undefined when this Host never bound the session.
+   */
+  private bindingOf(sessionId: string): string | undefined {
+    const known = this.projects.get(sessionId)
+    if (known !== undefined) return known
+    this.loadBindings()
+    return this.projects.get(sessionId)
+  }
+
+  /**
+   * Read the persisted bindings once per instance, keeping bindings created or deleted in this
+   * process authoritative over the file.
+   */
+  private loadBindings(): void {
+    if (this.bindingsLoaded) return
+    this.bindingsLoaded = true
+    if (!existsSync(this.bindingsFile)) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(readFileSync(this.bindingsFile, 'utf8'))
+    } catch {
+      // A truncated or hand-edited file only costs session recovery; the Host recreates bindings on demand.
+      return
+    }
+    if (typeof parsed !== 'object' || parsed === null) return
+    for (const [sessionId, projectId] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof projectId !== 'string' || projectId === '') continue
+      if (!this.projects.has(sessionId)) this.projects.set(sessionId, projectId)
+    }
+  }
+
+  /** Persist the whole binding map so a later Host run can resolve these sessions. */
+  private saveBindings(): void {
+    this.loadBindings()
+    const sorted = [...this.projects.entries()].sort(([first], [second]) => first.localeCompare(second))
+    const temporaryPath = `${this.bindingsFile}.tmp`
+    try {
+      writeFileSync(temporaryPath, `${JSON.stringify(Object.fromEntries(sorted), null, 2)}\n`, 'utf8')
+      renameSync(temporaryPath, this.bindingsFile)
+    } catch (error) {
+      // Losing durability must not fail the user-visible operation that already succeeded.
+      rmSync(temporaryPath, { force: true })
+      console.error(`host-session-skills: cannot persist admin session bindings to ${this.bindingsFile}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /** Bind one admin session to its project and persist the binding. */
+  private bind(sessionId: string, projectId: string): void {
+    this.loadBindings()
+    this.projects.set(sessionId, projectId)
+    this.saveBindings()
+  }
+
+  /** Drop one admin session binding and persist the removal. */
+  private unbind(sessionId: string): void {
+    // Load first so a binding written by an earlier run is removed rather than left behind.
+    this.loadBindings()
+    if (!this.projects.delete(sessionId)) return
+    this.saveBindings()
+  }
+
+  /**
+   * Resolve the session bound to one project's skill key.
+   * @param projectId - project the binding is scoped to.
+   * @param skillId - opaque binding key, including the reserved `__install__` value.
+   * @returns the binding, or undefined when this key has no session yet.
+   */
+  private skillBindingOf(projectId: string, skillId: string): SkillSessionBinding | undefined {
+    this.loadSkillSessions()
+    return this.skillSessions.get(projectId)?.get(skillId)
+  }
+
+  /**
+   * Read the persisted skill bindings once per instance, keeping bindings written or deleted
+   * in this process authoritative over the file. The file maps project to skill key to session,
+   * so the reserved `__install__` key stays separate per project.
+   */
+  private loadSkillSessions(): void {
+    if (this.skillSessionsLoaded) return
+    this.skillSessionsLoaded = true
+    if (!existsSync(this.skillSessionsFile)) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(readFileSync(this.skillSessionsFile, 'utf8'))
+    } catch {
+      // A truncated or hand-edited file only costs the delete-old step; the next bind rewrites it.
+      return
+    }
+    if (typeof parsed !== 'object' || parsed === null) return
+    for (const [projectId, entries] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof entries !== 'object' || entries === null) continue
+      for (const [skillId, raw] of Object.entries(entries as Record<string, unknown>)) {
+        if (typeof raw !== 'object' || raw === null) continue
+        const binding = raw as { sessionId?: unknown; updatedAt?: unknown }
+        if (typeof binding.sessionId !== 'string' || binding.sessionId === '') continue
+        const project = this.skillSessions.get(projectId) ?? new Map<string, SkillSessionBinding>()
+        project.set(skillId, {
+          sessionId: binding.sessionId,
+          updatedAt: typeof binding.updatedAt === 'string' ? binding.updatedAt : '',
+        })
+        this.skillSessions.set(projectId, project)
+      }
+    }
+  }
+
+  /** Persist every project→skill→session binding atomically, sorted for stable diffs. */
+  private saveSkillSessions(): void {
+    this.loadSkillSessions()
+    const sorted: Record<string, Record<string, SkillSessionBinding>> = {}
+    for (const [projectId, skills] of [...this.skillSessions.entries()]
+      .sort(([first], [second]) => first.localeCompare(second))) {
+      if (skills.size === 0) continue
+      sorted[projectId] = Object.fromEntries(
+        [...skills.entries()].sort(([first], [second]) => first.localeCompare(second)),
+      )
+    }
+    const temporaryPath = `${this.skillSessionsFile}.tmp`
+    try {
+      writeFileSync(temporaryPath, `${JSON.stringify(sorted, null, 2)}\n`, 'utf8')
+      renameSync(temporaryPath, this.skillSessionsFile)
+    } catch (error) {
+      // Losing durability must not fail the binding that already succeeded.
+      rmSync(temporaryPath, { force: true })
+      console.error(`host-session-skills: cannot persist skill session bindings to ${this.skillSessionsFile}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /** Bind one skill key to its session and persist the change. */
+  private bindSkill(projectId: string, skillId: string, sessionId: string): void {
+    this.loadSkillSessions()
+    const project = this.skillSessions.get(projectId) ?? new Map<string, SkillSessionBinding>()
+    project.set(skillId, { sessionId, updatedAt: new Date(this.now()).toISOString() })
+    this.skillSessions.set(projectId, project)
+    this.saveSkillSessions()
+  }
+
+  /** Drop one skill key's binding and persist the removal. */
+  private unbindSkill(projectId: string, skillId: string): void {
+    // Load first so a binding written by an earlier run is removed rather than left behind.
+    this.loadSkillSessions()
+    const project = this.skillSessions.get(projectId)
+    if (project === undefined || !project.delete(skillId)) return
+    if (project.size === 0) this.skillSessions.delete(projectId)
+    this.saveSkillSessions()
   }
 
   private readAudit(limit?: number): readonly Record<string, unknown>[] {
@@ -541,4 +917,112 @@ export class SkillAdminApi {
     })
     appendFileSync(this.auditFile, `${line}\n`, 'utf8')
   }
+
+  /**
+   * The eight conversational tools' view of this admin service.
+   *
+   * The preset keeps its 1.5.7 behavior: the project binding is recovered on first
+   * use, and the admin session borrows the roster supervisor as the API actor. Ordinary
+   * sessions authenticate with their own session id instead, through the host row.
+   * @returns the conversational port backed by this service.
+   */
+  conversationPort(): SkillConversationPort {
+    const packs = (): ReadonlyMap<string, SkillPack> => loadPacks({
+      skillsDir: this.skillsDir,
+      ...(this.builtinDir === undefined ? {} : { builtinDir: this.builtinDir }),
+    })
+    const projectOf = async (sessionId: string, projectId?: string): Promise<string> => {
+      const project = await this.projectFor(sessionId)
+      if (projectId !== undefined && projectId !== project) {
+        throw new SkillIpcError('SKILL_FORBIDDEN', 403, `技能管理员会话绑定项目 ${project}，不能操作项目 ${projectId}`)
+      }
+      return project
+    }
+    const actorFor = async (sessionId: string, projectId?: string): Promise<{ projectId: string; actorSessionId: string }> => {
+      const project = await projectOf(sessionId, projectId)
+      return { projectId: project, actorSessionId: this.operatorFor(project, sessionId) }
+    }
+    return {
+      resolve: async (sessionId, projectId) => ({ projectId: await projectOf(sessionId, projectId), role: 'supervisor' }),
+      catalog: async (sessionId, _projectId, query) => {
+        const needle = query.trim().toLowerCase()
+        const rows = (await this.catalogFor(sessionId)).map(summaryOfEntry)
+        return needle === '' ? rows : rows.filter(row => `${row.id} ${row.name} ${row.description}`.toLowerCase().includes(needle))
+      },
+      searchable: async (_sessionId, _projectId, query, limit) => searchLocalPacks(packs(), query, limit),
+      preview: async (sessionId, _projectId, packId, sourceUrl) => {
+        if (sourceUrl !== undefined) {
+          throw new SkillIpcError('SKILL_URL_FETCH_FAILED', 502, '技能管理员会话只预览本地技能包；远程结果请在普通会话中预览')
+        }
+        const pack = this.packFor(packId)
+        await this.projectFor(sessionId)
+        return {
+          id: pack.id,
+          name: pack.name,
+          description: pack.description,
+          content: pack.content,
+          tokenEstimate: pack.tokenEstimate,
+          license: pack.license,
+          ...(pack.author === undefined ? {} : { author: pack.author }),
+          ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
+        }
+      },
+      create: async (sessionId, _projectId, input) => {
+        const actor = await actorFor(sessionId)
+        const created = createViaApi(this.api, { projectId: actor.projectId, actorSessionId: actor.actorSessionId, pack: input })
+        this.audit({ id: randomUUID(), kind: 'create', actorSessionId: sessionId, projectId: actor.projectId, result: 'created', packId: created.id, warnings: [] })
+        return created
+      },
+      install: async (sessionId, _projectId, input) => {
+        const actor = await actorFor(sessionId)
+        const installed = await installViaApi(this.api, {
+          projectId: actor.projectId,
+          actorSessionId: actor.actorSessionId,
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.url === undefined ? {} : { url: input.url }),
+          ...(input.text === undefined ? {} : { text: input.text }),
+          ...(input.confirm === undefined ? {} : { confirm: input.confirm }),
+        })
+        this.audit({
+          id: randomUUID(), kind: `install-${installed.kind}`, actorSessionId: sessionId, projectId: actor.projectId,
+          result: installed.installed ? 'installed' : 'confirmation-required', warnings: [...installed.warnings], target: installed.target,
+        })
+        return installed
+      },
+      check: async (_sessionId, _projectId, packId) => collectPackHealth(packs(), packId === undefined ? {} : { packId }),
+      audit: async (sessionId, _projectId, limit) => {
+        await this.projectFor(sessionId)
+        return this.readAudit(limit).flatMap(row => auditRowOf(row))
+      },
+      plan: async (sessionId, _projectId, input) => {
+        const plan = await this.planForSession(sessionId, input)
+        const token = this.tokenFor(plan.planId)
+        return token === undefined ? plan : { ...plan, confirmToken: token }
+      },
+      record: item => {
+        this.audit({ ...item })
+      },
+    }
+  }
+}
+
+function stringField(record: Record<string, unknown>, field: string, fallback: string): string {
+  const value = record[field]
+  return typeof value === 'string' ? value : fallback
+}
+
+function auditRowOf(row: Record<string, unknown>): AuditItem[] {
+  const time = stringField(row, 'time', '')
+  return [{
+    id: stringField(row, 'id', '') === '' ? randomUUID() : stringField(row, 'id', ''),
+    time,
+    kind: stringField(row, 'kind', 'unknown'),
+    actorSessionId: stringField(row, 'actorSessionId', stringField(row, 'confirmedBy', '')),
+    projectId: stringField(row, 'projectId', ''),
+    result: stringField(row, 'result', 'unknown'),
+    warnings: Array.isArray(row.warnings) ? row.warnings.filter((item): item is string => typeof item === 'string') : [],
+    ...(typeof row.packId === 'string' ? { packId: row.packId } : {}),
+    ...(typeof row.target === 'string' ? { target: row.target } : typeof row.url === 'string' ? { target: row.url } : {}),
+    ...(typeof row.message === 'string' ? { message: row.message } : {}),
+  }]
 }

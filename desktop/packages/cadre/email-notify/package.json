@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-cadre-email-notify",
   "description": "Per-project Cadre email notifications through SendGrid, Resend, or SMTP",
-  "version": "1.5.2",
+  "version": "1.6.1",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

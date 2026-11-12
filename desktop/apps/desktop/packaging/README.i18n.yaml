@@ -21,8 +21,11 @@
   en: 3f38ab26ee195b39
   zh: f00eddafa8f3b9ca
 /desktop-packaging/configuration-and-local-builds:
-  en: f5dc36baf414ecc5
-  zh: 8984741b356ac1d3
+  en: 7e923f4e8bf67f6d
+  zh: cc04a0e76a6b0d97
+/desktop-packaging/configuration-and-local-builds/source-checkout:
+  en: 4387d50b914024c9
+  zh: 23de3032b23f0f35
 /desktop-packaging/windows-actions-packaging:
   en: e1b101593f6f755e
   zh: 121f225de399de1e
@@ -33,11 +36,11 @@
   en: 6843a0fdc03ead58
   zh: 957f92fc8126e23e
 /desktop-packaging/local-macos-dmg-without-release-signing:
-  en: 2feaa0412247d81f
-  zh: 461dde8e13fd4734
+  en: 8202e05334c61103
+  zh: da03ac49e734f85f
 /desktop-packaging/macos-release-signing-and-diagnostics:
-  en: 62c125856aa03c26
-  zh: 9fc00a43c8b1e8e2
+  en: 79d64235f16b8dc2
+  zh: a6338598814bc0d7
 /desktop-packaging/directory-builds-and-preparation:
   en: 30d58517c9c2044f
   zh: 16d26bdc923fc4ba
@@ -51,8 +54,8 @@
   en: a7aa3066e649ffe8
   zh: 4334637910058c09
 /desktop-packaging/installation-and-release-verification:
-  en: 0006b6b1ae4998f4
-  zh: 2bab6918b0c37b25
+  en: 1f67a456bba4c621
+  zh: 995615962f5a2cf2
 /desktop-packaging/dev-note:
   en: b75c8458928b72b9
   zh: 003ba4e17b4b5269

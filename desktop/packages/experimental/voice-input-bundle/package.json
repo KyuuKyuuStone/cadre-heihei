@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-voice-input-bundle",
   "description": "Experimental voice input with local SenseVoice; downloads its runtime on first use",
-  "version": "1.5.2",
+  "version": "1.6.1",
   "icon": "./icon.svg",
   "publishConfig": {
     "access": "public"

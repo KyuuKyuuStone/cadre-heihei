@@ -14,11 +14,19 @@ app/scripts/gates/evidence/
 
 # 日志
 *.log
+# 运行时日志目录（本地留存，不入库）
+/logs/
+
+# 本地工具配置（lefthook init 的全注释示例，未启用，不入库）
+/lefthook.yml
 
 # 环境变量（保留示例）
 .env
 .env.*
 !.env.example
+# 打包 dotenv 模板（受版本控制；复制后的 .env.windows/.env.macos 仍忽略）
+!desktop/apps/desktop/.env.windows.example
+!desktop/apps/desktop/.env.macos.example
 
 # 操作系统临时文件
 .DS_Store

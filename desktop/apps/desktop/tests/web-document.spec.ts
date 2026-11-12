@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { authenticateWebHost, forwardWebRequest, serveWebDocument } from '../src/web-document.ts'
+import { DesktopHostAuthenticationError, authenticateWebHost, forwardWebRequest, serveWebDocument } from '../src/web-document.ts'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -29,10 +29,36 @@ it('serves the Web entry and assets without starting or contacting a Host', asyn
 
 it('requires the Host authentication exchange and retains only its cookie value', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 303, headers: { 'set-cookie': 'session=owned; HttpOnly; SameSite=Strict' } }))
-    .mockResolvedValueOnce(new Response('unauthorized', { status: 401 }))
+    .mockResolvedValue(new Response('unauthorized', { status: 401 }))
   vi.stubGlobal('fetch', fetch)
   expect(await authenticateWebHost('http://127.0.0.1:1234/?token=owned')).toBe('session=owned')
   await expect(authenticateWebHost('http://127.0.0.1:1234/')).rejects.toThrow('authentication failed')
+})
+
+it('retries one proxy rejection and reads the cookie from the followed session response', async () => {
+  const send = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>()
+    .mockResolvedValueOnce(new Response(null, { status: 407 }))
+    .mockResolvedValueOnce(new Response('<html></html>', { status: 200 }))
+  expect(await authenticateWebHost('http://127.0.0.1:1234/?token=owned', send, async () => 'session=jar')).toBe('session=jar')
+  expect(send).toHaveBeenCalledTimes(2)
+  expect(send).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:1234/?token=owned', { credentials: 'include' })
+})
+
+it.each([401, 407, 502])('retries HTTP %s once and reports a typed authentication failure', async (status) => {
+  const send = vi.fn(async () => new Response(null, { status }))
+  const failed = authenticateWebHost('http://127.0.0.1:1234/', send)
+  await expect(failed).rejects.toBeInstanceOf(DesktopHostAuthenticationError)
+  await expect(failed).rejects.toMatchObject({ status })
+  expect(send).toHaveBeenCalledTimes(2)
+})
+
+it('retries a loopback transport failure once and retains its cause', async () => {
+  const cause = new Error('proxy connection refused')
+  const send = vi.fn(async () => { throw cause })
+  await expect(authenticateWebHost('http://127.0.0.1:1234/', send)).rejects.toMatchObject({
+    status: undefined, cause,
+  })
+  expect(send).toHaveBeenCalledTimes(2)
 })
 
 it('forwards upload bytes and cancellation with Host credentials while keeping the response streaming', async () => {

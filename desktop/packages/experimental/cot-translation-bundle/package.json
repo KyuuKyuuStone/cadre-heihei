@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-experimental-cot-translation-bundle",
   "description": "Experimental machine translation of expanded reasoning",
-  "version": "1.5.2",
+  "version": "1.6.1",
   "icon": "./icon.svg",
   "publishConfig": {
     "access": "public"

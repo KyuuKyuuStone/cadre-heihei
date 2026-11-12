@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopLocale } from '../src/locale.ts'
-import { needsWelcome, WELCOME_IPC } from '../src/welcome-api.ts'
+import { needsWelcome, WELCOME_IPC, type WelcomeNotice } from '../src/welcome-api.ts'
 
 const electron = vi.hoisted(() => ({
   create: vi.fn<(options: unknown) => ReturnType<typeof createWindow>>(),
@@ -117,14 +117,17 @@ describe('desktop welcome window', () => {
     const saveApiKey = vi.fn(operations.saveApiKey)
     const skip = vi.fn(operations.skip)
     const copySignInLink = vi.fn(operations.copySignInLink)
-    const takeNotice = vi.fn(async () => 'session-expired' as const)
+    const takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>()
+      .mockResolvedValueOnce('session-expired')
+      .mockResolvedValueOnce('backend-unavailable')
     await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, saveApiKey, skip, copySignInLink, takeNotice })
     const own = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
     const take = electron.handlers.get(WELCOME_IPC.takeNotice)!
     await expect(take({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
     expect(takeNotice).not.toHaveBeenCalled()
     expect(await take(own)).toBe('session-expired')
-    expect(takeNotice).toHaveBeenCalledOnce()
+    expect(await take(own)).toBe('backend-unavailable')
+    expect(takeNotice).toHaveBeenCalledTimes(2)
     const save = electron.handlers.get(WELCOME_IPC.saveApiKey)!
     await expect(save({ sender: {}, senderFrame: {} }, 'sk-test')).rejects.toThrow('unowned frame')
     await expect(save({ ...own, senderFrame: {} }, 'sk-test')).rejects.toThrow('unowned frame')

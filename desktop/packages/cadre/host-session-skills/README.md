@@ -38,16 +38,60 @@ disposed first).
 
 ## Model experience
 
-Only selected packs enter the system prompt through the skill registry. An
-unselected session has zero skill tokens from this plugin.
+- Skill packs: only the roster-selected packs enter the system prompt through the
+  skill registry. An unselected session has zero skill tokens from this plugin.
+- Conversational tools: eight tool schemas are registered once at the Cadre bundle
+  root, so every agent scope inherits them. Their English descriptions are pinned
+  verbatim by `tests/conversation-schema.spec.ts`, and the parameter limits are
+  part of the model-visible JSON schema, so a disallowed value never reaches the
+  executor. Schema tokens are paid by every session in every preset, including
+  sessions that never touch skills; keeping the eight descriptions to one sentence
+  each bounds that cost.
+- Failures return `{ok:false, code, message, remediation}`. `message` and
+  `remediation` are short Chinese sentences that name the next action, so a model
+  recovers without parsing an error table.
+
+## Conversational skill tools
+
+`./conversation` mounts `skill_catalog`, `skill_search`, `skill_preview`,
+`skill_install`, `skill_create`, `skill_check`, `skill_audit`, and `skill_plan`
+once at the bundle root; every shipped preset inherits that registration and the
+hidden `cadre-skill-admin` preset sees the same eight with its own eight shadowing
+them inside its scope. Disposing the root fiber removes all eight.
+
+- `skill_catalog` and `skill_preview` read the merged catalog; preview returns the
+  `SKILL.md` body and estimate without writing.
+- `skill_search` asks the injected provider first. Without a provider — or on a
+  timeout, a non-2xx response, or malformed JSON — it returns `source:'local'`,
+  `degraded:true`, local matches, and one Chinese `message`; only an unreadable
+  local catalog root fails with `SKILL_SEARCH_UNAVAILABLE`. No provider means no
+  remote request at all.
+- `skill_install` takes exactly one of `name`, `url`, or `text`. A warning-bearing
+  request (`missing-license`/`missing-hash`/`unknown-source`) returns
+  `requiresConfirmation:true` plus a preview and writes nothing; a non-supervisor
+  keeps getting `SKILL_CONFIRM_REQUIRED` even with `confirm:true`, and the
+  supervisor's confirmed call installs and audits the warnings.
+- `skill_create` writes a local pack; `overwrite:true` needs `confirm:true` and a
+  supervisor, so a worker's overwrite is `SKILL_FORBIDDEN` and a supervisor's
+  unconfirmed overwrite is `SKILL_INVALID`.
+- `skill_check` walks both catalog roots read-only and reports broken manifests,
+  empty `SKILL.md`, missing description, non-SPDX license, unknown roles,
+  duplicate ids, an oversized estimate, declared-but-unused tools, an unreadable
+  root, and builtin/installed conflicts. Every issue carries `code`, `message`,
+  and an actionable Chinese `remediation`.
+- `skill_audit` returns only rows visible to the calling actor's project;
+  `skill_plan` is supervisor-only and never writes.
+
+Authorization is per call, not per page: a session must belong to an existing
+project (an off-roster session gets `SKILL_PROJECT_REQUIRED`), a session rostered
+by another project is `SKILL_FORBIDDEN`, a departed member is `SKILL_FORBIDDEN`,
+and audit rows stay inside the project. `tests/conversation-auth.spec.ts` asserts
+each cell with its `code` and Chinese `remediation`; `skill-api-scope.spec.ts`
+remains the proof that `requireSupervisorConfirmation` is not loosened.
 
 ## Settings IPC
 
-POST JSON, project-scoped. `catalog`/`get`/`set` admit registered members:
-a worker may read and update its own selection, a supervisor may target any
-member. `add`/`remove`/`install-url`/`install-package` also admit any registered
-member; `preview` remains supervisor-only; admin message/read/install admit
-project members, while plan/apply remain supervisor-only.
+POST JSON, project-scoped. `catalog`/`get`/`set` admit any session of an existing project: an off-roster session reads no selection and its `set` validates and echoes without persisting, a rostered session reads and updates its own row, and a supervisor may target any member. `add`/`remove`/`install-url`/`install-package` also admit any project session. A missing project, a session rostered by another project, and a departed member stay rejected. Existence is proven by a `members` row or a `projects` row: the schema creates `projects` without filling it, so a roster-only ledger still serves its project. `preview` remains supervisor-only; warning-bearing installs still need a supervisor confirmation; admin message/read/install admit project sessions, while plan/apply remain supervisor-only.
 
 - `/cadre/skills/catalog` — `{projectId, actorSessionId, targetSessionId?}` →
   catalog entries with `selected`;
@@ -77,16 +121,11 @@ project members, while plan/apply remain supervisor-only.
 `cadre-skill-admin` is a hidden ordinary preset for the skills-page conversation.
 It never writes roster rows or team tools. Its backend routes are:
 
-- `/cadre/skills/admin/session` — `{projectId, cwd?}` creates an ordinary session
-  through the Host `sessionController`; the workspace (default
-  `~/.dsh/cadre-skill-admin/workspace`) is created with `mkdir -p`, registered
-  through `workspaceRegistry` as an internal `技能管理员工作区（内部）`, the
-  session is attached to it, and `{cwd, workspaceId}` are returned; the session
-  itself is the identity, no operator binding is recorded;
+- `/cadre/skills/admin/session` — `{projectId, cwd?}` creates an ordinary session through the Host `sessionController`; the workspace (default `~/.dsh/cadre-skill-admin/workspace`) is created with `mkdir -p`, registered through `workspaceRegistry` as an internal `技能管理员工作区（内部）`, the session is attached to it, and `{cwd, workspaceId}` are returned. The project only has to exist: no roster row is required, so a project without members still gets an administrator. The session is bound to its project in `~/.dsh/cadre-skill-admin/sessions.json`, and a session missing from that file is rebound when the Host still lists it and the ledger has exactly one project;
 - `/cadre/skills/admin/sessions` — lists sessions created for the project whose
   projection preset is `cadre-skill-admin`;
-- `/cadre/skills/admin/delete-session` — removes one listed project session when
-  the Host supports deletion;
+- `/cadre/skills/admin/delete-session` — removes one listed project session; the Host mapping archives it through `workspaceRegistry.archiveSession(sessionId, {stopActivity:true})` and answers 501 `SKILL_ADMIN_DELETE_UNSUPPORTED` when the Host exposes no deletion;
+- `/cadre/skills/admin/bind-session` — `{projectId, skillId, skillName}` binds one skill key to a fresh admin session titled `skillName` and returns `{sessionId, title, projectId}`. `skillId` is opaque (`__install__` is an ordinary value) and is never checked against the catalog or pack directories. The operator is the project's roster supervisor resolved server-side, so a project without one fails `SKILL_FORBIDDEN`. A key that already has a session deletes it before creating the replacement, and creation is skipped when that deletion fails (`SKILL_BIND_DELETE_FAILED`, or `SKILL_ADMIN_DELETE_UNSUPPORTED` when the Host cannot delete), so a failed replacement never leaves the key unbound; create failures report `SKILL_BIND_SESSION_FAILED`. Bindings are persisted in `~/.dsh/cadre-skill-admin/skill-sessions.json`, keyed by project and then skill key;
 - `/cadre/skills/admin/plan` — `{url}` or `{kind:'remove'|'update', packId}`;
   returns `planId`, hashes, target, actions and risk flags, plus a one-time
   `confirmToken`; it never writes;
@@ -111,21 +150,15 @@ itself carries no role prompt.
 
 ### Model tools (preset-scoped)
 
-`./admin` is mounted only by the `cadre-skill-admin` preset. It registers
-`skill_catalog`, `skill_preview`, `skill_install`, `skill_plan`, and
-`skill_audit`; tools resolve the session's project from the admin session.
-`skill_install` accepts one of `name`, `url`, or `text`, reuses
-`install-package`/`install-url`/`install-any`. A warning-bearing request
-(`missing-license`/`missing-hash`/`unknown-source`) installs nothing and returns
-`requiresConfirmation:true` plus a preview; a supervisor confirms by calling
-again with `confirm:true`, and the audit records the warnings and confirming
-session. Warning-free URL installs remain available to any member. `skill_plan` still returns a one-time `confirmToken`;
-execution remains `POST /cadre/skills/admin/apply` after the user confirms in
-the UI. The preset mounts read-only fs and fetch tools only — no shell, write,
-team, or email tools.
+`./admin` is mounted only by the `cadre-skill-admin` preset. It registers `skill_catalog`, `skill_preview`, `skill_install`, `skill_plan`, and `skill_audit`; tools resolve the session's project from the admin session binding and, when that resolution cannot be recovered, fail with a `code` and the corrective `remediation` instead of an anonymous error. Authoring needs no supervisor: all four read/plan tools serve a project with no roster row, `skill_preview` reads the pack directories directly, and `skill_install` accepts one of `name`, `url`, or `text`, reusing `install-package`/`install-url`/`install-any`. A warning-bearing request (`missing-license`/`missing-hash`/`unknown-source`) installs nothing and returns `requiresConfirmation:true` plus a preview; the admin session calls again with `confirm:true` once the user agrees, and the audit records the warnings and the confirming session. `skill_plan` returns a one-time `confirmToken`; execution remains `POST /cadre/skills/admin/apply` after the user confirms in the UI, and that route still requires a supervisor operator. The preset mounts read-only fs and fetch tools only — no shell, write, team, or email tools.
 
 ## Known Limitations and Deferred Work
 
 - No settings UI yet; the IPC above is the data surface.
 - Pack selection is stored as JSON in `members.skills_json`; the schema migration
   is additive and defaults to `[]`.
+- An off-roster session has no `members` row, so its `set` call validates the ids and echoes them back without persisting a selection; such a session reads every pack as unselected.
+- A warning-bearing install is authorized by the skill API's confirmation gate, which still requires a roster supervisor actor. Without one, `skill_install` returns `SKILL_CONFIRM_REQUIRED` even from an admin session; lifting that needs `requireSupervisorConfirmation` in `src/ipc.ts` to accept an admin-vouched operator, which a follow-up on that file owns.
+- The route error mapping forwards `code` and `message` only, so a recoverable failure carries its `remediation` inside the message rather than as its own response field.
+- Binding recovery needs an unambiguous project: when the ledger holds several projects and the session is missing from `sessions.json`, the tools fail with `SKILL_ADMIN_SESSION_NOT_FOUND` and the remediation asks the caller to pass `projectId` explicitly.
+- No keyless recorded-session snapshot was added for the new tool surface. The surface is pinned by `tests/conversation-schema.spec.ts` (names, verbatim English descriptions, limits) and by a real Loader composition spec whose log (`logs/fix/skill-conversational/composition.log`) lists all eight names per preset. A recorded-session replay needs a shipped profile prompt fixture owned by `snapshots/`, and this task builds none; tool-card rendering belongs to the UI task.
