@@ -36,6 +36,13 @@ interface LibraryError {
 type Translator = PropsLocale<'sidebar'>['t']
 
 const INSTALL_SKILL_ID = '__install__'
+const SKILL_SOURCES = {
+  skillhub: 'https://skillhub.cn',
+  clawhub: 'https://clawhub.ai',
+  aiDesign: 'https://github.com/elayadesign/ai-design-skills',
+  githubTopic: 'https://github.com/topics/agent-skills',
+} as const
+
 const BUILTIN_SOURCES = /^(builtin|internal|cadre)$/iu
 const isBuiltin = (entry: CadreSkillEntry): boolean =>
   entry.origin === 'builtin' || (entry.origin === undefined && BUILTIN_SOURCES.test(entry.source.trim()))
@@ -106,6 +113,20 @@ function BindingErrorNotice({ code, t }: { readonly code: string; readonly t: Tr
       <p>{message}</p>
       <p>{remediation}</p>
     </div>
+  )
+}
+
+function SkillSourcesNavigation({ t }: { readonly t: Translator }) {
+  const label = t('skills.sources.label')
+  return (
+    <nav className={css.sources} aria-label={label} data-skill-sources>
+      <span className={css.sourcesLabel}>{label}</span>
+      <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
+      <a href={SKILL_SOURCES.clawhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.clawhub')}</a>
+      <a href={SKILL_SOURCES.aiDesign} target="_blank" rel="noopener noreferrer">{t('skills.sources.aiDesign')}</a>
+      <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
+      <p>{t('skills.sources.caution')}</p>
+    </nav>
   )
 }
 
@@ -205,6 +226,7 @@ export function CadreSkillLibraryPage({
       <section className={css.page}>
         <h1>{t('skills.library.title')}</h1>
         <p>{t('skills.library.readOnly')}</p>
+        <SkillSourcesNavigation t={t} />
       </section>
     )
   }
@@ -344,6 +366,7 @@ export function CadreSkillLibraryPage({
           </Button>
         </div>
       </header>
+      <SkillSourcesNavigation t={t} />
       {bindingErrors[INSTALL_SKILL_ID] !== undefined && <BindingErrorNotice code={bindingErrors[INSTALL_SKILL_ID]} t={t} />}
       {error !== null && (
         <div className={css.errorPanel} role="alert">

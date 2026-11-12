@@ -156,9 +156,15 @@ describe('ui-sidebar apply', () => {
     }
   })
 
-  it('registers the skill Conversation view without a header chip or status strip', async () => {
-    const b = await mounted()
+  it('registers the skill Conversation view for every Session without a header chip or status strip', async () => {
+    const b = await bench()
+    const register = vi.spyOn(b.slots, 'register')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
     expect(entryIds(b.slots, 'conversation.view')).toEqual(['skills'])
+    const skillRegistration = register.mock.calls.find(([options]) => options.name === 'conversation.view')
+    expect(skillRegistration?.[0]).not.toHaveProperty('available')
+    const skillView = b.slots.entries('conversation.view')[0]!
+    expect(skillView.inject?.()['defaultProjectId']).toEqual(expect.any(Function))
     // The removed header chip and status strip were surfaces of their own; no
     // Cadre entry may name one.
     expect(surfaceIds(b.slots).filter(id => /chip|status/i.test(id))).toEqual([])

@@ -885,9 +885,9 @@ export function apply(ctx: ClientContext): void {
     order: 5,
     locale: NS,
     label: () => ctx.locale.bind(NS)('skills.tab'),
-    available: (sessionId: string) => roster.getSnapshot().members
-      .some(member => member.sessionId === sessionId && member.state !== 'departed'),
-    inject: (): CadreSkillTabInjected => ({ hooks: { roster }, projectOfSession }),
+    inject: (): CadreSkillTabInjected => ({
+      hooks: { roster }, projectOfSession, defaultProjectId: () => resolveDefaultProject() ?? undefined,
+    }),
   } as never, CadreSkillTab as never))
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
     name: 'sidebar.workspaces.session.menu.item',

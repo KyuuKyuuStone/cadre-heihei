@@ -268,7 +268,7 @@ describe('Cadre skill library', () => {
     expect(fetchMock.mock.calls.filter(([input]) => requestUrl(input).endsWith('/admin/bind-session'))).toHaveLength(1)
   })
 
-  it('groups skills, localizes descriptions, and renders only conversation actions and metadata', async () => {
+  it('groups skills, localizes descriptions, and renders conversation actions and metadata', async () => {
     vi.stubGlobal('fetch', catalogFetch())
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
     expect(await screen.findByText('内置技能')).toBeTruthy()
@@ -280,7 +280,33 @@ describe('Cadre skill library', () => {
     expect(screen.getByText('约 100 tokens')).toBeTruthy()
     expect(screen.getByText('作者：Elaya')).toBeTruthy()
     expect(screen.getAllByText('许可：MIT')).toHaveLength(2)
-    expect(document.querySelector('a, input, textarea, select, form, code, pre')).toBeNull()
+    expect(document.querySelector('input, textarea, select, form, code, pre')).toBeNull()
+  })
+
+  it.each([
+    { locale: 'zh-CN', dictionary: zh, translate: t },
+    { locale: 'en-US', dictionary: en, translate: tEn },
+  ])('renders four safe external source links and a caution in $locale', async ({ dictionary, translate }) => {
+    vi.stubGlobal('fetch', catalogFetch())
+    render(<CadreSkillLibraryPage {...pageProps('worker', translate)} />)
+    await screen.findByText('员工技能')
+    const sources = screen.getByRole('navigation', { name: dictionary['skills.sources.label'] })
+    expect(within(sources).getByText(dictionary['skills.sources.label'])).toBeTruthy()
+    const expected = [
+      ['skillhub', 'https://skillhub.cn'],
+      ['clawhub', 'https://clawhub.ai'],
+      ['aiDesign', 'https://github.com/elayadesign/ai-design-skills'],
+      ['githubTopic', 'https://github.com/topics/agent-skills'],
+    ] as const
+    for (const [key, href] of expected) {
+      const link = within(sources).getByRole('link', { name: dictionary[`skills.sources.${key}`] })
+      expect(link.getAttribute('href')).toBe(href)
+      expect(link.getAttribute('target')).toBe('_blank')
+      expect(link.getAttribute('rel')?.split(/\s+/)).toEqual(expect.arrayContaining(['noopener', 'noreferrer']))
+    }
+    expect(sources.querySelectorAll('a')).toHaveLength(4)
+    expect(within(sources).getByText(dictionary['skills.sources.caution'])).toBeTruthy()
+    expect(sources.querySelector('button, input, textarea, select, form, code, pre')).toBeNull()
   })
 
   it('renders health states with expandable issue details', async () => {
@@ -496,6 +522,9 @@ describe('Cadre skill library', () => {
     const props = pageProps('worker')
     render(<CadreSkillLibraryPage {...{ ...props, projectOfSession: () => undefined, defaultProjectId: () => undefined }} />)
     expect(screen.getByText('当前没有可用项目或会话，暂时无法读取技能。')).toBeTruthy()
+    const sources = screen.getByRole('navigation', { name: '去哪里找技能：' })
+    expect(within(sources).getAllByRole('link')).toHaveLength(4)
+    expect(within(sources).getByText('第三方技能请先审查再安装。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '对话安装新技能' })).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -514,6 +543,9 @@ describe('Cadre skill library', () => {
       defaultProjectId: () => 'p1',
     }} />)
     expect(screen.getByText('当前没有可用项目或会话，暂时无法读取技能。')).toBeTruthy()
+    const sources = screen.getByRole('navigation', { name: '去哪里找技能：' })
+    expect(within(sources).getAllByRole('link')).toHaveLength(4)
+    expect(within(sources).getByText('第三方技能请先审查再安装。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '对话安装新技能' })).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
   })
