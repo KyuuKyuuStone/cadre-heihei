@@ -51,6 +51,28 @@ export interface AdminSessionPort {
   messages?(input: { readonly sessionId: string; readonly afterSeq: number }): Promise<AdminMessages>
 }
 
+/** Input for {@link SkillAdminApi.bindSession}. */
+export interface BindSessionInput {
+  readonly projectId: string
+  /** Opaque binding key: a real pack id or the reserved `__install__` value. */
+  readonly skillId: string
+  /** Session title shown in the session list. */
+  readonly skillName: string
+}
+
+/** One project skill key answered by a freshly bound admin session. */
+export interface BoundSkillSession {
+  readonly sessionId: string
+  readonly title: string
+  readonly projectId: string
+}
+
+/** The persisted session bound to one project's skill key. */
+interface SkillSessionBinding {
+  readonly sessionId: string
+  readonly updatedAt: string
+}
+
 /** The dedicated workspace registry surface used by the admin conversation. */
 export interface AdminWorkspacePort {
   create(path: string, title?: string): Promise<{
@@ -140,6 +162,9 @@ export class SkillAdminApi {
   private readonly pending = new Map<string, PendingPlan>()
   private readonly projects = new Map<string, string>()
   private readonly bindingsFile: string
+  private readonly skillSessionsFile: string
+  private readonly skillSessions = new Map<string, Map<string, SkillSessionBinding>>()
+  private skillSessionsLoaded = false
   private bindingsLoaded = false
   private readonly db: DatabaseSync
 
@@ -173,6 +198,7 @@ export class SkillAdminApi {
     mkdirSync(auditDir, { recursive: true })
     this.auditFile = join(auditDir, 'audit.jsonl')
     this.bindingsFile = join(auditDir, 'sessions.json')
+    this.skillSessionsFile = join(auditDir, 'skill-sessions.json')
   }
 
   /** Catalog for an admin session's project. */
@@ -311,8 +337,9 @@ export class SkillAdminApi {
 
   /** Create or list ordinary admin sessions; never writes a roster row. */
   async createSession(input: {
-    readonly projectId: string; readonly cwd: string
+    readonly projectId: string; readonly cwd: string; readonly title?: string
   }): Promise<AdminSession> {
+    const title = input.title ?? '技能管理员'
     this.requireProject(input.projectId)
     try {
       mkdirSync(input.cwd, { recursive: true })
@@ -330,7 +357,7 @@ export class SkillAdminApi {
       throw new SkillIpcError('SKILL_ADMIN_WORKSPACE_FAILED', 500,
         `无法注册技能管理员工作区：${error instanceof Error ? error.message : String(error)}`)
     }
-    const created = await this.sessions.create({ preset: SKILL_ADMIN_PRESET, cwd: workspace.path, title: '技能管理员' })
+    const created = await this.sessions.create({ preset: SKILL_ADMIN_PRESET, cwd: workspace.path, title })
     try {
       await workspace.attachSession(created.sessionId)
     } catch (error) {
@@ -339,7 +366,7 @@ export class SkillAdminApi {
     }
     this.bind(created.sessionId, input.projectId)
     return {
-      sessionId: created.sessionId, title: '技能管理员', updatedAt: this.now(),
+      sessionId: created.sessionId, title, updatedAt: this.now(),
       cwd: workspace.path, workspaceId: workspace.id,
     }
   }
@@ -348,6 +375,60 @@ export class SkillAdminApi {
   async listSessions(input: { readonly projectId: string }): Promise<readonly AdminSession[]> {
     const sessions = await this.sessions.list({ preset: SKILL_ADMIN_PRESET })
     return sessions.filter(session => this.bindingOf(session.sessionId) === input.projectId)
+  }
+
+  /**
+   * Bind one skill key to a fresh admin session, deleting the session bound to that key before.
+   * A failed deletion aborts before any session is created, so a failed replacement never leaves
+   * the key without a session. `skillId` is opaque: it is never checked against the catalog or a
+   * directory, and `__install__` is an ordinary value.
+   * @param input - project, opaque skill key, and the title the new session carries.
+   * @returns the created session's identity, its title, and its project.
+   */
+  async bindSession(input: BindSessionInput): Promise<BoundSkillSession> {
+    this.requireProject(input.projectId)
+    // Binding requests carry no session id, so the operator is the project's roster supervisor.
+    const supervisor = this.supervisorOf(input.projectId)
+    if (supervisor === undefined) {
+      throw new SkillIpcError('SKILL_FORBIDDEN', 403, `项目 ${input.projectId} 没有在册主管，不能绑定技能会话`)
+    }
+    // Re-prove the resolved operator so a departed or reassigned roster row cannot bind.
+    this.api.assertSupervisor({ projectId: input.projectId, actorSessionId: supervisor })
+    const previous = this.skillBindingOf(input.projectId, input.skillId)
+    if (previous !== undefined) {
+      if (this.sessions.delete === undefined) {
+        throw new SkillAdminRecoveryError('SKILL_ADMIN_DELETE_UNSUPPORTED', 501,
+          `技能键 ${input.skillId} 已绑定会话 ${previous.sessionId}，当前 Host 不支持删除会话`,
+          '换用支持会话删除的 Host，或先结束旧会话再重试绑定')
+      }
+      try {
+        await this.sessions.delete({ sessionId: previous.sessionId })
+      } catch (error) {
+        // An unsupported Host keeps its own 501: the capability is missing, the deletion did not fail.
+        if (error instanceof SkillIpcError && error.code === 'SKILL_ADMIN_DELETE_UNSUPPORTED') throw error
+        throw new SkillAdminRecoveryError('SKILL_BIND_DELETE_FAILED', 502,
+          `删除旧绑定会话 ${previous.sessionId} 失败，未创建新会话：${error instanceof Error ? error.message : String(error)}`,
+          '确认 Host 会话控制器可用且旧会话未被占用后重试绑定')
+      }
+      this.unbind(previous.sessionId)
+      this.unbindSkill(input.projectId, input.skillId)
+    }
+    let created: AdminSession
+    try {
+      created = await this.createSession({
+        projectId: input.projectId,
+        cwd: join(homedir(), '.dsh', 'cadre-skill-admin', 'workspace'),
+        title: input.skillName,
+      })
+    } catch (error) {
+      // Guard failures keep their route status; everything else is one binding failure.
+      if (error instanceof SkillIpcError && error.status === 403) throw error
+      throw new SkillAdminRecoveryError('SKILL_BIND_SESSION_FAILED', 500,
+        `创建技能会话失败：${error instanceof Error ? error.message : String(error)}`,
+        '检查 cadre-skill-admin preset 与 Host sessionController 后重试')
+    }
+    this.bindSkill(input.projectId, input.skillId, created.sessionId)
+    return { sessionId: created.sessionId, title: created.title, projectId: input.projectId }
   }
 
   async deleteSession(input: {
@@ -551,10 +632,19 @@ export class SkillAdminApi {
    * @returns a non-departed supervisor's session id, else the calling session id.
    */
   private operatorFor(projectId: string, sessionId: string): string {
+    return this.supervisorOf(projectId) ?? sessionId
+  }
+
+  /**
+   * The roster supervisor that may act for a project, resolved without a calling session.
+   * @param projectId - project whose roster row is read.
+   * @returns a non-departed supervisor's session id, or undefined when the project has none.
+   */
+  private supervisorOf(projectId: string): string | undefined {
     const row = this.db.prepare(
       "SELECT session_id FROM members WHERE project_id = ? AND state != 'departed' AND role = 'supervisor' ORDER BY session_id LIMIT 1",
     ).get(projectId) as { session_id?: unknown } | undefined
-    return typeof row?.session_id === 'string' ? row.session_id : sessionId
+    return typeof row?.session_id === 'string' ? row.session_id : undefined
   }
 
   /**
@@ -716,8 +806,95 @@ export class SkillAdminApi {
 
   /** Drop one admin session binding and persist the removal. */
   private unbind(sessionId: string): void {
+    // Load first so a binding written by an earlier run is removed rather than left behind.
+    this.loadBindings()
     if (!this.projects.delete(sessionId)) return
     this.saveBindings()
+  }
+
+  /**
+   * Resolve the session bound to one project's skill key.
+   * @param projectId - project the binding is scoped to.
+   * @param skillId - opaque binding key, including the reserved `__install__` value.
+   * @returns the binding, or undefined when this key has no session yet.
+   */
+  private skillBindingOf(projectId: string, skillId: string): SkillSessionBinding | undefined {
+    this.loadSkillSessions()
+    return this.skillSessions.get(projectId)?.get(skillId)
+  }
+
+  /**
+   * Read the persisted skill bindings once per instance, keeping bindings written or deleted
+   * in this process authoritative over the file. The file maps project to skill key to session,
+   * so the reserved `__install__` key stays separate per project.
+   */
+  private loadSkillSessions(): void {
+    if (this.skillSessionsLoaded) return
+    this.skillSessionsLoaded = true
+    if (!existsSync(this.skillSessionsFile)) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(readFileSync(this.skillSessionsFile, 'utf8'))
+    } catch {
+      // A truncated or hand-edited file only costs the delete-old step; the next bind rewrites it.
+      return
+    }
+    if (typeof parsed !== 'object' || parsed === null) return
+    for (const [projectId, entries] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof entries !== 'object' || entries === null) continue
+      for (const [skillId, raw] of Object.entries(entries as Record<string, unknown>)) {
+        if (typeof raw !== 'object' || raw === null) continue
+        const binding = raw as { sessionId?: unknown; updatedAt?: unknown }
+        if (typeof binding.sessionId !== 'string' || binding.sessionId === '') continue
+        const project = this.skillSessions.get(projectId) ?? new Map<string, SkillSessionBinding>()
+        project.set(skillId, {
+          sessionId: binding.sessionId,
+          updatedAt: typeof binding.updatedAt === 'string' ? binding.updatedAt : '',
+        })
+        this.skillSessions.set(projectId, project)
+      }
+    }
+  }
+
+  /** Persist every project→skill→session binding atomically, sorted for stable diffs. */
+  private saveSkillSessions(): void {
+    this.loadSkillSessions()
+    const sorted: Record<string, Record<string, SkillSessionBinding>> = {}
+    for (const [projectId, skills] of [...this.skillSessions.entries()]
+      .sort(([first], [second]) => first.localeCompare(second))) {
+      if (skills.size === 0) continue
+      sorted[projectId] = Object.fromEntries(
+        [...skills.entries()].sort(([first], [second]) => first.localeCompare(second)),
+      )
+    }
+    const temporaryPath = `${this.skillSessionsFile}.tmp`
+    try {
+      writeFileSync(temporaryPath, `${JSON.stringify(sorted, null, 2)}\n`, 'utf8')
+      renameSync(temporaryPath, this.skillSessionsFile)
+    } catch (error) {
+      // Losing durability must not fail the binding that already succeeded.
+      rmSync(temporaryPath, { force: true })
+      console.error(`host-session-skills: cannot persist skill session bindings to ${this.skillSessionsFile}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /** Bind one skill key to its session and persist the change. */
+  private bindSkill(projectId: string, skillId: string, sessionId: string): void {
+    this.loadSkillSessions()
+    const project = this.skillSessions.get(projectId) ?? new Map<string, SkillSessionBinding>()
+    project.set(skillId, { sessionId, updatedAt: new Date(this.now()).toISOString() })
+    this.skillSessions.set(projectId, project)
+    this.saveSkillSessions()
+  }
+
+  /** Drop one skill key's binding and persist the removal. */
+  private unbindSkill(projectId: string, skillId: string): void {
+    // Load first so a binding written by an earlier run is removed rather than left behind.
+    this.loadSkillSessions()
+    const project = this.skillSessions.get(projectId)
+    if (project === undefined || !project.delete(skillId)) return
+    if (project.size === 0) this.skillSessions.delete(projectId)
+    this.saveSkillSessions()
   }
 
   private readAudit(limit?: number): readonly Record<string, unknown>[] {
