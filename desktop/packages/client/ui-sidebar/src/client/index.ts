@@ -591,6 +591,7 @@ export function apply(ctx: ClientContext): void {
     hooks: { roster, sessions: sessionsSource },
     projectOfSession,
     defaultProjectId: () => resolveDefaultProject() ?? undefined,
+    openSession: (sessionId) => { workspaceNavigation.openSession(sessionId) },
   })
   // @ts-expect-error -- ui-tool owns the tool slot declaration; importing it statically would form a project-reference cycle.
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({

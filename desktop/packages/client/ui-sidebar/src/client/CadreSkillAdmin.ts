@@ -146,6 +146,27 @@ export async function fetchSkillHealth(projectId: string, operatorSessionId: str
   return parseSkillHealth(result)
 }
 
+export interface SkillSessionBinding {
+  readonly sessionId: string
+  readonly title: string
+  readonly projectId: string
+}
+
+/**
+ * Bind a skill action to its conversation.
+ * @param projectId - project that owns the skill conversation.
+ * @param skillId - real pack id, or the backend's reserved install key.
+ * @param skillName - conversation title supplied by the localized action.
+ * @returns the session to open and its confirmed binding metadata.
+ */
+export async function bindSkillSession(
+  projectId: string,
+  skillId: string,
+  skillName: string,
+): Promise<SkillSessionBinding> {
+  return await adminCall<SkillSessionBinding>('bind-session', { projectId, skillId, skillName })
+}
+
 /** Create an ordinary admin session and bind it to the supervisor operator. */
 export function createSkillAdminSession(projectId: string): Promise<SkillAdminSession> {
   return adminCall('session', { projectId })

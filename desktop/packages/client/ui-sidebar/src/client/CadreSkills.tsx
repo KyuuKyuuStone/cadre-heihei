@@ -74,7 +74,7 @@ export class SkillOperationError extends Error {
 }
 
 async function skillCall(
-  method: 'catalog' | 'set' | 'preview' | 'add' | 'remove' | 'install-url' | 'install-package' | 'install-any',
+  method: 'catalog' | 'set' | 'preview' | 'remove',
   body: Record<string, unknown>,
 ): Promise<unknown> {
   const response = await fetch(`/cadre/skills/${method}`, {
@@ -116,65 +116,10 @@ export async function previewSkill(
   return await skillCall('preview', { projectId, actorSessionId, packId }) as CadreSkillPreview
 }
 
-export async function addSkillToLibrary(
-  projectId: string, actorSessionId: string, pack: Record<string, unknown>,
-): Promise<void> {
-  await skillCall('add', { projectId, actorSessionId, ...pack })
-}
-
 export async function removeSkillFromLibrary(
   projectId: string, actorSessionId: string, packId: string,
 ): Promise<void> {
   await skillCall('remove', { projectId, actorSessionId, packId, confirm: true })
-}
-
-export async function installSkillFromUrl(
-  projectId: string, actorSessionId: string, url: string, confirm: boolean,
-): Promise<void> {
-  await skillCall('install-url', { projectId, actorSessionId, url, confirm })
-}
-
-export async function installSkillPackage(
-  projectId: string, actorSessionId: string, name: string,
-): Promise<{ name: string; visible: boolean; durationMs: number }> {
-  return await skillCall('install-package', { projectId, actorSessionId, name }) as {
-    name: string
-    visible: boolean
-    durationMs: number
-  }
-}
-
-export interface CadreInstallPreview {
-  readonly name: string
-  readonly source: string
-  readonly license: string
-  readonly author?: string
-  readonly hasHash: boolean
-}
-
-interface CadreInstallSuccess {
-  readonly kind: 'package' | 'url'
-  readonly target: string
-  readonly installed: true
-  readonly warnings: readonly string[]
-  readonly result: unknown
-}
-
-interface CadreInstallConfirmation {
-  readonly kind: 'package' | 'url'
-  readonly target: string
-  readonly installed: false
-  readonly requiresConfirmation: true
-  readonly warnings: readonly string[]
-  readonly preview: CadreInstallPreview
-}
-
-export type CadreInstallAnyResult = CadreInstallSuccess | CadreInstallConfirmation
-
-export async function installSkillAny(
-  projectId: string, actorSessionId: string, text: string,
-): Promise<CadreInstallAnyResult> {
-  return await skillCall('install-any', { projectId, actorSessionId, text }) as CadreInstallAnyResult
 }
 
 export function skillTokenTotal(entries: readonly CadreSkillEntry[], selected: readonly string[]): number {

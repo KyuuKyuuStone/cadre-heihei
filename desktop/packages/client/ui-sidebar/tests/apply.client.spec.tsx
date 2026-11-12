@@ -34,7 +34,7 @@ async function bench(declare = true) {
   if (ctx === undefined) throw new Error('the sidebar fixture owner did not activate')
   await ctx.plugin(SlotRegistry).await()
   const layout = { toggleSidebar: vi.fn(), selectPanel: vi.fn() }
-  const uiWorkspace = { startSession: vi.fn() }
+  const uiWorkspace = { startSession: vi.fn(), openSession: vi.fn() }
   ctx.provide('shortcuts', { catalog: createSnapshotStore([]) } as never)
   ctx.provide('theme', { overrideTokens: vi.fn() } as never)
   ctx.provide('sessions', {
@@ -185,7 +185,7 @@ describe('ui-sidebar apply', () => {
     expect(b.slots.spec('sidebar.settings')).toEqual({ kind: 'single', scope: 'root' })
     expect(b.slots.spec('sidebar.footer.action')).toEqual({ kind: 'list', scope: 'root' })
     expect(b.slots.spec('sidebar.panellist')).toEqual({ kind: 'list', scope: 'root' })
-    // Copy rides the standard locale seat, not the inject face.
+    // Localized text rides the standard locale seat, not the inject face.
     expect(b.slots.entries('sidebar')[0]!.locale).toBe('sidebar')
     // The window-chrome occupant reuses the shell's inject face and locale.
     const leading = b.slots.entries('shell.leading')
@@ -199,6 +199,11 @@ describe('ui-sidebar apply', () => {
       { id: 'cadre-skills', order: 10, label: 'Skills' },
     ])
     expect(b.slots.entries('main').map(entry => entry.options.key)).toEqual(['cadre-skills'])
+    const skillInjected = b.slots.entries('main')[0]!.inject?.()
+    const openSession = skillInjected?.['openSession']
+    if (typeof openSession !== 'function') throw new Error('skill library openSession injection is missing')
+    openSession('skill-session')
+    expect(b.uiWorkspace.openSession).toHaveBeenCalledExactlyOnceWith('skill-session')
     // Both arms delegate to the Workspace UI's shared New Session action.
     injected.startSession('workspace' as never)
     expect(b.uiWorkspace.startSession).toHaveBeenCalledWith('workspace')
