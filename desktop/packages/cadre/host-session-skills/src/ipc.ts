@@ -363,11 +363,15 @@ function projectExists(db: DatabaseSync, projectId: string, hasProjects: boolean
  * Authorize one project-scoped call. Any session may use the skill API while its
  * project exists, so an off-roster session is admitted with `undefined`; a
  * missing project, a session rostered by another project, and a departed member
- * stay rejected.
+ * stay rejected. A read-only call may also admit a project the ledger cannot
+ * prove exists: an empty team's Workspace owns that project id while no roster
+ * row does, and the catalog it reads is machine-global with its selection empty
+ * for the off-roster actor.
  * @param db - readonly ledger connection.
  * @param projectId - project the call is scoped to.
  * @param sessionId - calling session.
  * @param hasProjects - whether the ledger has the `projects` table.
+ * @param allowUnprovenProject - admit an off-roster session when the ledger carries no evidence of the project.
  * @returns the roster row of a member actor, or undefined for an off-roster session.
  */
 function requireActor(
@@ -375,8 +379,12 @@ function requireActor(
   projectId: string,
   sessionId: string,
   hasProjects: boolean,
+  allowUnprovenProject = false,
 ): MemberRow | undefined {
-  if (!projectExists(db, projectId, hasProjects)) throw new SkillIpcError('SKILL_FORBIDDEN', 403, `项目不存在：${projectId}`)
+  const proven = projectExists(db, projectId, hasProjects)
+  if (!proven && !allowUnprovenProject) {
+    throw new SkillIpcError('SKILL_FORBIDDEN', 403, `项目不存在：${projectId}`)
+  }
   const actor = readMember(db, projectId, sessionId)
   if (actor !== undefined) {
     if (actor.state === 'departed') {
@@ -472,8 +480,8 @@ export function createSkillApi(options: {
   const doFetch = options.fetch ?? globalThis.fetch
   const runPackageCommand = options.runPackageCommand ?? runWslCommand
   const hasProjects = detectProjectsTable(db)
-  const actorOf = (projectId: string, sessionId: string): MemberRow | undefined =>
-    requireActor(db, projectId, sessionId, hasProjects)
+  const actorOf = (projectId: string, sessionId: string, allowUnprovenProject = false): MemberRow | undefined =>
+    requireActor(db, projectId, sessionId, hasProjects, allowUnprovenProject)
   const auditFile = join(options.auditDir ?? join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'cadre-skill-admin'), 'audit.jsonl')
   const auditPackage = (record: Record<string, unknown>): void => {
     try {
@@ -501,7 +509,8 @@ export function createSkillApi(options: {
 
   return {
     catalog(input) {
-      const actor = actorOf(input.projectId, input.actorSessionId)
+      // Read-only: an empty team's Workspace owns the project id before any roster row exists.
+      const actor = actorOf(input.projectId, input.actorSessionId, true)
       const target = input.targetSessionId ?? input.actorSessionId
       if (target !== input.actorSessionId && actor?.role !== 'supervisor') {
         throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以查看其他成员的技能')
@@ -515,7 +524,8 @@ export function createSkillApi(options: {
       return [...catalog().values()].map(pack => entryOf(pack, selected.has(pack.id), input.locale))
     },
     get(input) {
-      const actor = actorOf(input.projectId, input.actorSessionId)
+      // Read-only, matching `catalog`: the empty-team project id stays readable.
+      const actor = actorOf(input.projectId, input.actorSessionId, true)
       if (input.targetSessionId !== input.actorSessionId && actor?.role !== 'supervisor') {
         throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以查看其他成员的技能')
       }

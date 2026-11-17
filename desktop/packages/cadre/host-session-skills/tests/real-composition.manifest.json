@@ -1,0 +1,39 @@
+{
+  "layer": "assembly",
+  "scope": "real-Host composition evidence for the ordinary-session skill catalog and skill-admin session binding; additions are confined to packages/cadre/host-session-skills/tests/ and touch no production code, no existing tests, and no bundle yml",
+  "files": [
+    {
+      "path": "packages/cadre/host-session-skills/tests/real-composition-host.ts",
+      "sha256": "7604c04fcbae4c3089d7145f29d043172c8ab3f8924afd300088dbf43a3ae742",
+      "bytes": 8962,
+      "role": "shared boot helpers: composition paths, ledger seeding, real skill pack writing, Loader boot of a test-only cordis.yml, real HTTP postJson, service polling, recursive file-tree snapshot"
+    },
+    {
+      "path": "packages/cadre/host-session-skills/tests/catalog-real-composition.spec.ts",
+      "sha256": "62c529747362c7959cae89a43e49948fb3ca367d8115fe62e1a8e4e612ba68d2",
+      "bytes": 9584,
+      "role": "real webserver + real ledger + real on-disk skill packs: catalog/off-roster/permission boundaries/unproven project/bind-echo/sqlite read-back/preview/405 through real HTTP"
+    },
+    {
+      "path": "packages/cadre/host-session-skills/tests/admin-bind-real-composition.spec.ts",
+      "sha256": "5aa02901c4439c520453f598871df9a30f8367fefb917a50d6e27fa2be6827da",
+      "bytes": 17413,
+      "role": "real session stack (jsonl persistence, session query, typert, remote access, sqlite storage domain, workspace registry, attachment store, session controller, agent-preset registry) + real webserver + real host-session-skills: bind/reuse, cross-run stale rebind, real 503 on persistence failure, 405"
+    }
+  ],
+  "gates": [
+    { "gate": "targeted vitest (the two new specs)", "command": "pnpm exec vitest run packages/cadre/host-session-skills/tests/catalog-real-composition.spec.ts packages/cadre/host-session-skills/tests/admin-bind-real-composition.spec.ts", "result": "11 passed (11)", "exitCode": 0, "log": "D:/xxw_p/chh/logs/fix/skill-real-composition/targeted-real-composition.log" },
+    { "gate": "full-package vitest", "command": "pnpm exec vitest run packages/cadre/host-session-skills", "result": "14 files / 89 tests passed", "exitCode": 0, "log": "D:/xxw_p/chh/logs/fix/skill-real-composition/package-vitest.log" },
+    { "gate": "package typecheck", "command": "pnpm exec tsc -p packages/cadre/host-session-skills/tsconfig.json --noEmit", "result": "no errors", "exitCode": 0, "log": "D:/xxw_p/chh/logs/fix/skill-real-composition/package-typecheck.log" },
+    { "gate": "host-aggregate typecheck (exactOptionalPropertyTypes/noUncheckedIndexedAccess)", "command": "pnpm exec tsc -b tsconfig.host.json", "result": "no errors", "exitCode": 0, "log": "D:/xxw_p/chh/logs/fix/skill-real-composition/host-aggregate-typecheck.log" },
+    { "gate": "git diff --check", "command": "git diff --check", "result": "clean", "exitCode": 0, "log": "D:/xxw_p/chh/logs/fix/skill-real-composition/git-gates.log" },
+    { "gate": "git status --short", "command": "git status --short", "result": "4 new untracked files under tests/ (3 test sources + this manifest); no modifications from this task", "exitCode": 0, "log": "D:/xxw_p/chh/logs/fix/skill-real-composition/git-gates.log" }
+  ],
+  "composition": {
+    "boot": "test-only cordis.yml through the real Loader (conversation-composition template); rows are namespace-imported real packages",
+    "catalogSpecRows": ["test:host-services (connection admission seam)", "webserver 127.0.0.1:0", "host-session-skills (real ledger/skills dirs/audit dir)"],
+    "bindSpecRows": ["test:host-services + real agent-loop testkit mounts", "session-persistence-jsonl", "typert-registry", "agent-preset-registry (default cadre-skill-admin)", "agent-preset cadre-skill-admin", "session-query", "api-remote-access", "storage", "storage-sqlite", "storage-domain sqlite", "workspace", "attachment-local", "api-session-controller", "host-webserver 127.0.0.1:0", "host-session-skills"],
+    "stubs": "externally uncontrollable inputs only: connection admission seam, agentDefaultModel/fileUploads (bind flow never reaches a model), and one injected persistence.list rejection for the 503 case; AdminSessionPort, sessions, workspace, storage, persistence, webserver, preset registry are all real",
+    "staleRebindDurability": "a bind-only session records no events and the jsonl backend materializes the log on the first append or flush, so the cross-run test drives the real `sessions.flush` durability entry (the same call the session checkpoint policy makes at turn boundaries) on the live run1 agent to publish the session record, then pins the JSONL tree (paths + exact bytes) and the sqlite bytes across the rebind"
+  }
+}

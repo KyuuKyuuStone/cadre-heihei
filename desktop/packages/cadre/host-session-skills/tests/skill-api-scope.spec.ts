@@ -166,16 +166,23 @@ describe('skill API project scope', () => {
     db.close()
   })
 
-  it('rejects a missing project, a session of another project, and a departed member', () => {
+  it('rejects writes to a missing project, and a session of another project or a departed member', () => {
     const root = workspace()
     const packs = join(root, 'installed')
     pack(packs, 'design')
     const db = ledger(root)
     const api = createSkillApi({ db, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs })
 
-    expect(() => api.catalog({ projectId: 'p9', actorSessionId: 'guest' })).toThrow(/项目不存在/)
+    // Writes stay project-scoped; the read-only catalog is the only surface that admits an
+    // unproven project (the empty-team Workspace owns its id before a roster row exists).
     expect(() => api.add(addInput('p9', 'guest', 'any-pack'))).toThrow(/项目不存在/)
+    expect(() => api.set({ projectId: 'p9', actorSessionId: 'guest', targetSessionId: 'guest', skills: [] }))
+      .toThrow(/项目不存在/)
+    expect(() => { api.assertMember({ projectId: 'p9', actorSessionId: 'guest' }) }).toThrow(/项目不存在/)
+    expect(api.catalog({ projectId: 'p9', actorSessionId: 'guest' }))
+      .toEqual([expect.objectContaining({ id: 'design', selected: false })])
     expect(() => api.catalog({ projectId: 'p1', actorSessionId: 'x1' })).toThrow(/其他项目/)
+    expect(() => api.add(addInput('p1', 'x1', 'any-pack'))).toThrow(/其他项目/)
     expect(() => api.set({ projectId: 'p1', actorSessionId: 'x1', targetSessionId: 'x1', skills: [] }))
       .toThrow(/其他项目/)
     expect(() => api.catalog({ projectId: 'p1', actorSessionId: 'd1' })).toThrow(/已退出/)
@@ -226,7 +233,11 @@ describe('skill API project scope', () => {
     const api = createSkillApi({ db, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs })
     expect(api.catalog({ projectId: 'p1', actorSessionId: 'guest' }))
       .toEqual([expect.objectContaining({ id: 'design' })])
-    expect(() => api.catalog({ projectId: 'p9', actorSessionId: 'guest' })).toThrow(/项目不存在/)
+    // Without the projects table the ledger proves no project at all, so the read-only catalog
+    // stays open while a write keeps the strict judge.
+    expect(api.catalog({ projectId: 'p9', actorSessionId: 'guest' }))
+      .toEqual([expect.objectContaining({ id: 'design' })])
+    expect(() => api.add(addInput('p9', 'guest', 'any-pack'))).toThrow(/项目不存在/)
     db.close()
   })
 
@@ -258,15 +269,39 @@ describe('skill API project scope', () => {
       .toMatchObject({ id: 'design', content: '# design' })
     expect(api.add(addInput(REAL_PROJECT, 's1', 'rostered-pack'))).toMatchObject({ id: 'rostered-pack' })
 
-    // Without roster evidence the fixed judge still rejects, so the change is not a blanket bypass.
+    // Without roster evidence the strict judge still rejects a write, so the change is not a
+    // blanket bypass; only the read-only reads are admitted.
     const withoutRoster = realLedger(join(root, 'empty'), false)
     const empty = createSkillApi({
       db: withoutRoster, ledgerPath: join(root, 'empty', 'ledger.sqlite'), skillsDir: packs,
     })
     expect(legacyProjectJudge(withoutRoster, REAL_PROJECT)).toBe(false)
-    expect(() => empty.catalog({ projectId: REAL_PROJECT, actorSessionId: 'guest' }))
-      .toThrowError(/项目不存在/u)
+    // The catalog is machine-global, so earlier adds from this fixture are still listed.
+    expect(empty.catalog({ projectId: REAL_PROJECT, actorSessionId: 'guest' }))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: 'design', selected: false })]))
+    expect(() => empty.add(addInput(REAL_PROJECT, 'guest', 'team-pack'))).toThrowError(/项目不存在/u)
     withRoster.close()
     withoutRoster.close()
+  })
+
+  it('serves the read-only catalog for an empty team while writes stay project-scoped', () => {
+    const root = workspace()
+    const packs = join(root, 'installed')
+    pack(packs, 'design')
+    // The empty team: a Workspace with no roster rows, which the ledger cannot prove exists.
+    const db = realLedger(join(root, 'empty'), false)
+    const api = createSkillApi({ db, ledgerPath: join(root, 'empty', 'ledger.sqlite'), skillsDir: packs })
+
+    expect(api.catalog({ projectId: REAL_PROJECT, actorSessionId: 'guest' }))
+      .toEqual([expect.objectContaining({ id: 'design', selected: false })])
+    expect(api.get({ projectId: REAL_PROJECT, actorSessionId: 'guest', targetSessionId: 'guest' }))
+      .toEqual({ skills: [] })
+    // Read-only relaxation never reaches a call that would write.
+    expect(() => api.set({ projectId: REAL_PROJECT, actorSessionId: 'guest', targetSessionId: 'guest', skills: ['design'] }))
+      .toThrowError(/项目不存在/u)
+    expect(() => api.add(addInput(REAL_PROJECT, 'guest', 'team-pack'))).toThrowError(/项目不存在/u)
+    expect(() => { api.assertMember({ projectId: REAL_PROJECT, actorSessionId: 'guest' }) })
+      .toThrowError(/项目不存在/u)
+    db.close()
   })
 })

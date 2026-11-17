@@ -1,4 +1,4 @@
-/** One-key skill session binding: delete-old-then-create, persistence, and the HTTP route. */
+/** One-key skill session binding: reuse-or-replace, persistence, and the HTTP route. */
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -61,20 +61,26 @@ interface Sessions {
   readonly deleted: string[]
   /** Failure injected into the next delete; cleared by the test that sets it. */
   readonly deleteFailure: { error?: Error }
+  /** Failure injected into the next session listing; cleared by the test that sets it. */
+  readonly listFailure: { error?: Error }
 }
 
-/** Session store whose create/delete calls stay observable to the assertions. */
-function sessions(deleteSupported = true): Sessions {
+/** Session store whose create/delete/list calls stay observable to the assertions. */
+function sessions(deleteSupported = true, prefix = 'admin'): Sessions {
   const created: { sessionId: string; title: string }[] = []
   const deleted: string[] = []
   const deleteFailure: { error?: Error } = {}
+  const listFailure: { error?: Error } = {}
   const port: AdminSessionPort = {
     create: async input => {
-      const sessionId = `admin-${String(created.length + 1)}`
+      const sessionId = `${prefix}-${String(created.length + 1)}`
       created.push({ sessionId, title: input.title })
       return { sessionId }
     },
-    list: async () => created.map(item => ({ sessionId: item.sessionId, title: item.title, updatedAt: 1 })),
+    list: async () => {
+      if (listFailure.error !== undefined) throw listFailure.error
+      return created.map(item => ({ sessionId: item.sessionId, title: item.title, updatedAt: 1 }))
+    },
     ...(deleteSupported
       ? {
         delete: async input => {
@@ -84,7 +90,7 @@ function sessions(deleteSupported = true): Sessions {
       }
       : {}),
   }
-  return { port, created, deleted, deleteFailure }
+  return { port, created, deleted, deleteFailure, listFailure }
 }
 
 function apiAt(root: string, store: Sessions, extra: Record<string, unknown> = {}): SkillAdminApi {
@@ -126,46 +132,46 @@ describe('bindSession', () => {
     expect(sessionBindings(root)).toEqual({ 'admin-1': 'p1' })
   })
 
-  it('deletes the session bound before and only then creates the replacement', async () => {
+  it('reuses the session bound before instead of replacing it', async () => {
     const root = workspace()
     const store = sessions()
     const first = await apiAt(root, store).bindSession({ projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a' })
     expect(first.sessionId).toBe('admin-1')
+    const before = skillSessions(root)
 
+    // A later instance reads the persisted binding, proves the session still exists, and reuses it.
     const rebound = await apiAt(root, store).bindSession({ projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a（新）' })
 
-    expect(store.deleted).toEqual(['admin-1'])
-    expect(rebound.sessionId).toBe('admin-2')
-    expect(rebound.title).toBe('技能 pack-a（新）')
-    expect(skillSessions(root)).toEqual({
-      p1: { 'pack-a': { sessionId: 'admin-2', updatedAt: expect.any(String) } },
-    })
-    // The replaced session's project binding is gone; only the live session keeps one.
-    expect(sessionBindings(root)).toEqual({ 'admin-2': 'p1' })
+    expect(rebound).toEqual({ sessionId: 'admin-1', title: '技能 pack-a', projectId: 'p1' })
+    expect(store.created).toHaveLength(1)
+    expect(store.deleted).toEqual([])
+    // Reuse touches no binding file: the session and its timestamp stay the ones already persisted.
+    expect(skillSessions(root)).toEqual(before)
+    expect(sessionBindings(root)).toEqual({ 'admin-1': 'p1' })
   })
 
-  it('aborts before creating when deleting the old session fails, and keeps the old binding', async () => {
+  it('aborts without creating when the Host cannot list sessions, and keeps the bound session', async () => {
     const root = workspace()
     const store = sessions()
     await apiAt(root, store).bindSession({ projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a' })
-    store.deleteFailure.error = new Error('会话控制器忙')
+    store.listFailure.error = new Error('会话列表不可用')
 
     const failure = await apiAt(root, store)
       .bindSession({ projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a（新）' })
       .then(() => Promise.reject(new Error('bindSession unexpectedly resolved')), (error: unknown) => error)
 
-    expect(failure).toMatchObject({ code: 'SKILL_BIND_DELETE_FAILED', status: 502 })
-    expect(String((failure as Error).message)).toMatch(/会话控制器忙/u)
+    expect(failure).toMatchObject({ code: 'SKILL_BIND_LOOKUP_FAILED', status: 503 })
+    expect(String((failure as Error).message)).toMatch(/会话列表不可用/u)
     // The remediation travels in the message, so HTTP and locale surfaces both see it.
     expect(String((failure as Error).message)).toMatch(/处理方式：/u)
     expect(store.created).toHaveLength(1)
+    // A failed liveness check never deletes or forgets the working binding.
     expect(store.deleted).toEqual([])
-    // A failed replacement never forgets the working binding.
     expect(skillSessions(root)).toEqual({ p1: { 'pack-a': { sessionId: 'admin-1', updatedAt: expect.any(String) } } })
     expect(sessionBindings(root)).toEqual({ 'admin-1': 'p1' })
   })
 
-  it('refuses a replacement while the Host cannot delete, but still binds an unbound key', async () => {
+  it('reuses a live binding on a Host that cannot delete, and still binds an unbound key', async () => {
     const root = workspace()
     const store = sessions(false)
     const admin = apiAt(root, store)
@@ -173,11 +179,12 @@ describe('bindSession', () => {
     const first = await admin.bindSession({ projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a' })
     expect(first.sessionId).toBe('admin-1')
 
-    await expect(admin.bindSession({ projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a（新）' }))
-      .rejects.toMatchObject({ code: 'SKILL_ADMIN_DELETE_UNSUPPORTED', status: 501 })
+    // A live binding needs no deletion, so a Host without deletion still answers the repeated bind.
+    const reused = await admin.bindSession({ projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a（新）' })
+    expect(reused.sessionId).toBe('admin-1')
     expect(store.created).toHaveLength(1)
 
-    // A key with no old binding needs no deletion, so an undeletable Host still binds it.
+    // A key with no binding needs no listing either, so an undeletable Host still binds it.
     const other = await admin.bindSession({ projectId: 'p1', skillId: 'pack-b', skillName: '技能 pack-b' })
     expect(other.sessionId).toBe('admin-2')
     expect(store.created).toHaveLength(2)
@@ -228,15 +235,33 @@ describe('bindSession', () => {
     const second = await admin.bindSession({ projectId: 'p2', skillId: '__install__', skillName: '安装技能' })
     expect([first.sessionId, second.sessionId]).toEqual(['admin-1', 'admin-2'])
 
-    // Rebinding p1 must delete only p1's session; p2 keeps its own install conversation.
+    // Rebinding p1 reuses p1's install conversation; p2 keeps its own.
     const rebound = await admin.bindSession({ projectId: 'p1', skillId: '__install__', skillName: '安装技能' })
-    expect(store.deleted).toEqual(['admin-1'])
-    expect(store.created.map(item => item.sessionId)).toEqual(['admin-1', 'admin-2', 'admin-3'])
-    expect(rebound.sessionId).toBe('admin-3')
+    expect(store.deleted).toEqual([])
+    expect(store.created.map(item => item.sessionId)).toEqual(['admin-1', 'admin-2'])
+    expect(rebound.sessionId).toBe('admin-1')
     expect(skillSessions(root)).toEqual({
-      p1: { __install__: { sessionId: 'admin-3', updatedAt: expect.any(String) } },
+      p1: { __install__: { sessionId: 'admin-1', updatedAt: expect.any(String) } },
       p2: { __install__: { sessionId: 'admin-2', updatedAt: expect.any(String) } },
     })
+  })
+
+  it('creates a replacement only when the bound session is stale', async () => {
+    const root = workspace()
+    // The earlier Host run created its own session id that the later run cannot list.
+    const oldRun = sessions(true, 'old')
+    await apiAt(root, oldRun).bindSession({ projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a' })
+
+    const newRun = sessions(true, 'new')
+    const rebound = await apiAt(root, newRun).bindSession({ projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a' })
+
+    expect(rebound.sessionId).toBe('new-1')
+    expect(newRun.created).toEqual([{ sessionId: 'new-1', title: '技能 pack-a' }])
+    expect(newRun.deleted).toEqual([])
+    // A session the Host no longer lists needs no deletion; the stale binding is replaced instead.
+    expect(oldRun.deleted).toEqual([])
+    expect(skillSessions(root)).toEqual({ p1: { 'pack-a': { sessionId: 'new-1', updatedAt: expect.any(String) } } })
+    expect(sessionBindings(root)).toEqual({ 'new-1': 'p1' })
   })
 
   it('resolves the operator from the roster and refuses projects without a supervisor', async () => {
@@ -294,7 +319,14 @@ function host(root: string, deleteSupported = true): Harness {
         created.push(sessionId)
         return { sessionId, cwd: request.cwd }
       },
-      list: async () => ({ items: [] }),
+      // The listing carries the admin preset projection, so a reused binding looks live here.
+      list: async () => ({
+        items: created.map(sessionId => ({
+          sessionId,
+          updatedAt: 1,
+          projections: { values: { agentPreset: 'cadre-skill-admin' } },
+        })),
+      }),
     },
     workspaceRegistry: {
       create: async (path: string, title?: string) => ({
@@ -376,7 +408,7 @@ describe('POST /cadre/skills/admin/bind-session', () => {
     expect(host0.created).toEqual([])
   })
 
-  it('answers 502 and creates nothing when the old session cannot be deleted', async () => {
+  it('reuses the bound session instead of archiving it, even when archiving would fail', async () => {
     const root = workspace()
     const host0 = host(root)
     const first = await host0.call('/cadre/skills/admin/bind-session', {
@@ -388,15 +420,16 @@ describe('POST /cadre/skills/admin/bind-session', () => {
     const response = await host0.call('/cadre/skills/admin/bind-session', {
       projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a（新）',
     })
-    expect(response.status).toBe(502)
-    expect(response.body).toMatchObject({ ok: false, code: 'SKILL_BIND_DELETE_FAILED' })
-    // The route forwards code and message; the message carries the remediation sentence.
-    expect(JSON.stringify(response.body)).toMatch(/处理方式：/u)
+    expect(response.status).toBe(200)
+    // The listed session's title replaces the requested one, so the reply describes the live session.
+    expect(response.body).toMatchObject({
+      ok: true, result: { sessionId: 'admin-1', title: '技能管理员', projectId: 'p1' },
+    })
     expect(host0.created).toHaveLength(1)
     expect(host0.deleted).toEqual([])
   })
 
-  it('answers 501 for a replacement when the Host cannot delete, and binds an unbound key', async () => {
+  it('reuses a live binding on a Host that cannot delete, and binds an unbound key', async () => {
     const root = workspace()
     const host0 = host(root, false)
     const first = await host0.call('/cadre/skills/admin/bind-session', {
@@ -404,12 +437,20 @@ describe('POST /cadre/skills/admin/bind-session', () => {
     })
     expect(first.status).toBe(200)
 
-    const blocked = await host0.call('/cadre/skills/admin/bind-session', {
+    const reused = await host0.call('/cadre/skills/admin/bind-session', {
       projectId: 'p1', skillId: 'pack-a', skillName: '技能 pack-a（新）',
     })
-    expect(blocked.status).toBe(501)
-    expect(blocked.body).toMatchObject({ ok: false, code: 'SKILL_ADMIN_DELETE_UNSUPPORTED' })
+    expect(reused.status).toBe(200)
+    expect(reused.body).toMatchObject({ ok: true, result: { sessionId: 'admin-1', projectId: 'p1' } })
     expect(host0.created).toHaveLength(1)
+
+    // A key with no binding needs no listing, so an undeletable Host still binds it.
+    const other = await host0.call('/cadre/skills/admin/bind-session', {
+      projectId: 'p1', skillId: 'pack-b', skillName: '技能 pack-b',
+    })
+    expect(other.status).toBe(200)
+    expect(other.body).toMatchObject({ ok: true, result: { sessionId: 'admin-2', projectId: 'p1' } })
+    expect(host0.created).toHaveLength(2)
   })
 
   it('answers 405 for a method other than POST', async () => {

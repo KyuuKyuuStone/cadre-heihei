@@ -1,5 +1,6 @@
 /** Skill catalog and health with conversation-bound install and use actions. */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import clsx from 'clsx'
 import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreRosterMember, CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
@@ -110,8 +111,8 @@ function BindingErrorNotice({ code, t }: { readonly code: string; readonly t: Tr
   return (
     <div className={css.bindError} role="alert">
       <span className={css.errorCode}>{code}</span>
-      <p>{message}</p>
-      <p>{remediation}</p>
+      <p className={css.errorMessage}>{message}</p>
+      <p className={css.remediation}>{remediation}</p>
     </div>
   )
 }
@@ -120,12 +121,16 @@ function SkillSourcesNavigation({ t }: { readonly t: Translator }) {
   const label = t('skills.sources.label')
   return (
     <nav className={css.sources} aria-label={label} data-skill-sources>
-      <span className={css.sourcesLabel}>{label}</span>
-      <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
-      <a href={SKILL_SOURCES.clawhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.clawhub')}</a>
-      <a href={SKILL_SOURCES.aiDesign} target="_blank" rel="noopener noreferrer">{t('skills.sources.aiDesign')}</a>
-      <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
-      <p>{t('skills.sources.caution')}</p>
+      <div className={css.sourcesRow}>
+        <span className={css.sourcesLabel}>{label}</span>
+        <div className={css.sourceLinks}>
+          <a href={SKILL_SOURCES.skillhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.skillhub')}</a>
+          <a href={SKILL_SOURCES.clawhub} target="_blank" rel="noopener noreferrer">{t('skills.sources.clawhub')}</a>
+          <a href={SKILL_SOURCES.aiDesign} target="_blank" rel="noopener noreferrer">{t('skills.sources.aiDesign')}</a>
+          <a href={SKILL_SOURCES.githubTopic} target="_blank" rel="noopener noreferrer">{t('skills.sources.githubTopic')}</a>
+        </div>
+      </div>
+      <p className={css.sourcesCaution}>{t('skills.sources.caution')}</p>
     </nav>
   )
 }
@@ -224,8 +229,13 @@ export function CadreSkillLibraryPage({
   if (projectId === undefined || actorSessionId === undefined) {
     return (
       <section className={css.page}>
-        <h1>{t('skills.library.title')}</h1>
-        <p>{t('skills.library.readOnly')}</p>
+        <header className={css.header}>
+          <div className={css.headerCopy}>
+            <h1>{t('skills.library.title')}</h1>
+            <p className={css.headerDescription}>{t('skills.library.description')}</p>
+            <p className={css.readOnly} role="status">{t('skills.library.readOnly')}</p>
+          </div>
+        </header>
         <SkillSourcesNavigation t={t} />
       </section>
     )
@@ -278,9 +288,12 @@ export function CadreSkillLibraryPage({
     }
   }
 
-  const group = (title: string, rows: readonly CadreSkillEntry[], removable: boolean) => (
-    <section className={css.group} key={title}>
-      <h2>{title}</h2>
+  const group = (id: 'builtin' | 'installed', title: string, rows: readonly CadreSkillEntry[], removable: boolean) => (
+    <section className={css.group} key={id} aria-label={title}>
+      <div className={css.groupHeader}>
+        <h2>{title}</h2>
+        <Tag tone="quiet" className={css.groupCount}>{rows.length}</Tag>
+      </div>
       {rows.length === 0
         ? <p className={css.groupEmpty}>{t('skills.library.groupEmpty')}</p>
         : (
@@ -292,23 +305,21 @@ export function CadreSkillLibraryPage({
               const binding = bindingTarget === entry.id
               const bindingError = bindingErrors[entry.id]
               return (
-                <article className={css.card} key={entry.id} data-skill-id={entry.id}>
+                <article className={clsx(css.card, binding && css.cardBusy)} key={entry.id} data-skill-id={entry.id} aria-busy={binding}>
                   <div className={css.cardHead}>
-                    <span className={css.cardName}>{entry.name}</span>
-                    {healthState === undefined
-                      ? <Tag tone="neutral">{t(healthUnavailable ? 'skills.health.unavailableTag' : 'skills.health.loading')}</Tag>
-                      : <Tag tone={healthTone(healthState)}>{healthLabel(healthState, t)}</Tag>}
-                    {entry.selected && <span className={css.selected}>{t('skills.selected')}</span>}
+                    <div className={css.cardHeading}>
+                      <h3 className={css.cardName}>{entry.name}</h3>
+                      <span className={css.cardId}>{entry.id}</span>
+                    </div>
+                    <div className={css.cardTags}>
+                      {entry.selected && <Tag tone="solid">{t('skills.selected')}</Tag>}
+                      {healthState === undefined
+                        ? <Tag tone="neutral">{t(healthUnavailable ? 'skills.health.unavailableTag' : 'skills.health.loading')}</Tag>
+                        : <Tag tone={healthTone(healthState)}>{healthLabel(healthState, t)}</Tag>}
+                    </div>
                   </div>
                   <p className={css.cardDescription}>{localizedDescription(entry, t)}</p>
                   <div className={css.cardBody}>
-                    <div className={css.meta}>
-                      <span>{entry.roles.join(' / ')}</span>
-                      <span>{t('skills.tokenEstimate', { count: String(entry.tokenEstimate) })}</span>
-                      <span>{entry.tools.join(', ') || t('skills.toolsNone')}</span>
-                      {entry.author !== undefined && <span>{t('skills.author', { author: entry.author })}</span>}
-                      <span>{t('skills.licenseLabel', { license: entry.license })}</span>
-                    </div>
                     {healthUnavailable && <p className={css.healthFallback}>{t('skills.health.unavailable')}</p>}
                     {packHealth !== undefined && packHealth.issues.length > 0 && healthFailure === null && (
                       <details className={css.healthIssues}>
@@ -325,6 +336,13 @@ export function CadreSkillLibraryPage({
                         </div>
                       </details>
                     )}
+                    <div className={css.meta}>
+                      <span>{entry.roles.join(' / ')}</span>
+                      <span>{t('skills.tokenEstimate', { count: String(entry.tokenEstimate) })}</span>
+                      {entry.author !== undefined && <span>{t('skills.author', { author: entry.author })}</span>}
+                      <span>{t('skills.licenseLabel', { license: entry.license })}</span>
+                      <span className={css.metaTools}>{entry.tools.join(', ') || t('skills.toolsNone')}</span>
+                    </div>
                   </div>
                   <div className={css.cardActions}>
                     <Button
@@ -335,7 +353,7 @@ export function CadreSkillLibraryPage({
                     >
                       {binding ? t('skills.library.openingConversation') : t('skills.library.useConversation')}
                     </Button>
-                    {removable && <Button variant="ghost" size="sm" disabled={busy || bindingTarget !== null} onClick={() => { void remove(entry.id) }}>{t('skills.remove')}</Button>}
+                    {removable && <Button className={css.removeAction} variant="ghost" size="sm" disabled={busy || bindingTarget !== null} onClick={() => { void remove(entry.id) }}>{t('skills.remove')}</Button>}
                   </div>
                   {bindingError !== undefined && <BindingErrorNotice code={bindingError} t={t} />}
                 </article>
@@ -351,14 +369,23 @@ export function CadreSkillLibraryPage({
   return (
     <section className={css.page}>
       <header className={css.header}>
-        <div>
+        <div className={css.headerCopy}>
           <h1>{t('skills.library.title')}</h1>
-          <p>{t('skills.library.description')}</p>
+          <p className={css.headerDescription}>{t('skills.library.description')}</p>
+          {entries.length > 0 && (
+            <p className={css.headerSummary}>
+              {t('skills.library.catalogSummary', {
+                total: String(entries.length),
+                builtin: String(builtin.length),
+                installed: String(installed.length),
+              })}
+            </p>
+          )}
         </div>
         <div className={css.headerActions}>
           <Button
             variant="primary"
-            size="sm"
+            size="md"
             disabled={busy || bindingTarget !== null}
             onClick={() => { void openSkillConversation(INSTALL_SKILL_ID, t('skills.library.installConversation')) }}
           >
@@ -375,7 +402,7 @@ export function CadreSkillLibraryPage({
           <p className={css.remediation}>{error.remediation}</p>
           {error.recoverable && (
             <>
-              <p>{t('skills.library.errorHint')}</p>
+              <p className={css.errorHint}>{t('skills.library.errorHint')}</p>
               <Button variant="outline" size="sm" disabled={busy} onClick={() => { void load() }}>
                 {t('skills.library.retry')}
               </Button>
@@ -384,11 +411,20 @@ export function CadreSkillLibraryPage({
         </div>
       )}
       {notice !== null && <p role="status" className={css.notice}>{notice}</p>}
-      {entries.length === 0 && error === null && (
-        <p className={css.emptyState}>{t(busy ? 'skills.library.loading' : 'skills.library.empty')}</p>
+      {entries.length === 0 && error === null && busy && (
+        <div className={css.loadingState} role="status">
+          <span className={css.loadingLabel}>{t('skills.library.loading')}</span>
+          <div className={css.loadingGrid} aria-hidden="true">
+            <div className={css.loadingCard}><span /><span /><span /></div>
+            <div className={css.loadingCard}><span /><span /><span /></div>
+          </div>
+        </div>
       )}
-      {entries.length > 0 && group(t('skills.group.builtin'), builtin, false)}
-      {entries.length > 0 && group(t('skills.group.installed'), installed, true)}
+      {entries.length === 0 && error === null && !busy && (
+        <div className={css.emptyState}><p>{t('skills.library.empty')}</p></div>
+      )}
+      {entries.length > 0 && group('builtin', t('skills.group.builtin'), builtin, false)}
+      {entries.length > 0 && group('installed', t('skills.group.installed'), installed, true)}
     </section>
   )
 }

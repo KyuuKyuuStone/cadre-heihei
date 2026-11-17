@@ -1,0 +1,16 @@
+# Opt the isolated evidence scaffold into the shipped account Host and Client.
+# Cadre Heihei's default product surface intentionally omits both rows.
+- insert:
+    - id: deepseek-account
+      name: '@deepseek-ai/dsh-deepseek-account-platform'
+      config:
+        platformOrigin: '{{origin}}'
+        allowLoopbackHttp: true
+    - id: account-controller
+      name: '@deepseek-ai/dsh-api-account-controller'
+      config: {}
+    - id: ui-settings-account
+      name: '@deepseek-ai/dsh-client-ui-settings-account'
+      config:
+        step: done
+        completion: completed

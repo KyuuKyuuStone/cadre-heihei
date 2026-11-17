@@ -515,9 +515,11 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         sessionId: required(body, 'sessionId'),
       }))
       /*
-       * Rebinding one skill key: the old bound session is deleted first, and a deletion
-       * failure aborts before the replacement is created. `skillId` is opaque, so no catalog
-       * or directory check applies; `result` carries exactly the bound session's three fields.
+       * Rebinding one skill key: a session the Host still lists is reused as-is, so nothing is
+       * created, deleted, or rebound; only a stale binding is replaced locally and exactly one
+       * new session is created. A session listing failure leaves the binding untouched. `skillId`
+       * is opaque, so no catalog or directory check applies; `result` carries exactly the bound
+       * session's three fields.
        */
       route('/cadre/skills/admin/bind-session', body => requireAdmin().bindSession({
         projectId: required(body, 'projectId'),

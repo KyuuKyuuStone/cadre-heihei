@@ -1,6 +1,9 @@
-- dialog "开始使用":
-  - heading "开始使用" [level=2]
-  - button "关闭"
-  - paragraph: 登录 DeepSeek 账号，或添加 API Key，即可开始使用。你的项目和文件保存在本地。
-  - button "添加 API Key"
-  - button "登录"
+- dialog "添加一个 API Key 开始使用":
+  - heading "添加一个 API Key 开始使用" [level=2]
+  - paragraph: 配置 DeepSeek 官方模型，即可开始使用。
+  - text: API 密钥
+  - button "认证说明": "?"
+  - textbox "API 密钥":
+    - /placeholder: 输入 API 密钥
+  - button "稍后配置"
+  - button "保存并继续" [disabled]

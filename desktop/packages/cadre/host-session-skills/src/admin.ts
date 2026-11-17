@@ -378,12 +378,13 @@ export class SkillAdminApi {
   }
 
   /**
-   * Bind one skill key to a fresh admin session, deleting the session bound to that key before.
-   * A failed deletion aborts before any session is created, so a failed replacement never leaves
-   * the key without a session. `skillId` is opaque: it is never checked against the catalog or a
-   * directory, and `__install__` is an ordinary value.
-   * @param input - project, opaque skill key, and the title the new session carries.
-   * @returns the created session's identity, its title, and its project.
+   * Bind one skill key to its admin session. A key whose bound session the Host still lists is
+   * reused as-is: no session is created, deleted, or rewritten, so a repeated bind opens the
+   * same conversation. A binding the Host no longer lists is stale, so the key is rebound to
+   * exactly one fresh session without a deletion. `skillId` is opaque: it is never checked
+   * against the catalog or a directory, and `__install__` is an ordinary value.
+   * @param input - project, opaque skill key, and the title a newly created session carries.
+   * @returns the reused or created session's identity, its title, and its project.
    */
   async bindSession(input: BindSessionInput): Promise<BoundSkillSession> {
     this.requireProject(input.projectId)
@@ -396,20 +397,14 @@ export class SkillAdminApi {
     this.api.assertSupervisor({ projectId: input.projectId, actorSessionId: supervisor })
     const previous = this.skillBindingOf(input.projectId, input.skillId)
     if (previous !== undefined) {
-      if (this.sessions.delete === undefined) {
-        throw new SkillAdminRecoveryError('SKILL_ADMIN_DELETE_UNSUPPORTED', 501,
-          `技能键 ${input.skillId} 已绑定会话 ${previous.sessionId}，当前 Host 不支持删除会话`,
-          '换用支持会话删除的 Host，或先结束旧会话再重试绑定')
+      const listed = await this.listedSessions()
+      const existing = listed.find(session => session.sessionId === previous.sessionId)
+      if (existing !== undefined) {
+        // The key's session is live, so a repeated bind returns the conversation it already has.
+        return { sessionId: existing.sessionId, title: existing.title, projectId: input.projectId }
       }
-      try {
-        await this.sessions.delete({ sessionId: previous.sessionId })
-      } catch (error) {
-        // An unsupported Host keeps its own 501: the capability is missing, the deletion did not fail.
-        if (error instanceof SkillIpcError && error.code === 'SKILL_ADMIN_DELETE_UNSUPPORTED') throw error
-        throw new SkillAdminRecoveryError('SKILL_BIND_DELETE_FAILED', 502,
-          `删除旧绑定会话 ${previous.sessionId} 失败，未创建新会话：${error instanceof Error ? error.message : String(error)}`,
-          '确认 Host 会话控制器可用且旧会话未被占用后重试绑定')
-      }
+      // The Host no longer lists the bound session: nothing is left to delete, so only the
+      // stale binding is dropped and exactly one replacement is created below.
       this.unbind(previous.sessionId)
       this.unbindSkill(input.projectId, input.skillId)
     }
@@ -736,6 +731,21 @@ export class SkillAdminApi {
     const pack = packs.get(packId)
     if (pack === undefined) throw new SkillIpcError('SKILL_NOT_FOUND', 400, `未知技能包：${packId}`)
     return pack
+  }
+
+  /**
+   * Admin sessions the Host currently lists, which is the only proof that a bound session still
+   * exists. A listing failure cannot prove the session is gone, so it never triggers a replacement.
+   * @returns the listed `cadre-skill-admin` sessions.
+   */
+  private async listedSessions(): Promise<readonly AdminSession[]> {
+    try {
+      return await this.sessions.list({ preset: SKILL_ADMIN_PRESET })
+    } catch (error) {
+      throw new SkillAdminRecoveryError('SKILL_BIND_LOOKUP_FAILED', 503,
+        `读取技能会话列表失败，未创建新会话：${error instanceof Error ? error.message : String(error)}`,
+        '确认 Host 会话控制器可用后重试绑定')
+    }
   }
 
   private async requireSession(projectId: string, sessionId: string): Promise<void> {

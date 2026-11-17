@@ -108,6 +108,7 @@
     "apps/web/tests/bonus-notice.e2e.ts",
     "apps/web/tests/account-login.e2e.ts",
     "apps/web/tests/onboarding-usable-provider.e2e.ts",
+    "apps/web/tests/api-only-onboarding.e2e.ts",
     "apps/web/tests/remote-settings.e2e.ts",
     "apps/web/tests/public-mount.e2e.ts",
     "apps/web/tests/workspace-new-session-folding.e2e.ts",
