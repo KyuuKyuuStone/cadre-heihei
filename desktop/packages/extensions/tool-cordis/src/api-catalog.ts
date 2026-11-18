@@ -3362,6 +3362,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'tokenLedger',
+    summary: '`ctx.tokenLedger`: records provider usage as ignorable plugin records and answers cumulative totals from those records.',
+    description: '`ctx.tokenLedger`: records provider usage as ignorable plugin records and answers cumulative totals from those records.\n\nTotals are per Session log — live or retired — and process-wide over every Session this process has observed. The process-wide view is intentionally not durable across restarts: a restart recovers per-Session totals from each Session\'s records when that Session is opened, and the global total starts from the Sessions this process observes.\n\nThe plugin is an effect-driven contribution: unloading its fiber removes the projection unit and the event listener, so later turns append no records.',
+    methods: [
+      {
+        signature: 'get(session: Session): TokenLedgerReport',
+        description: 'Read one live Session\'s ledger.',
+        parameters: [{ name: 'session', description: 'the live Session to report.' }],
+        returns: 'its entries in commit order and their aggregate totals.',
+      },
+      {
+        signature: 'forSession(sessionId: SessionId): TokenLedgerReport | undefined',
+        description: 'Read a ledger by Session id, including a Session this process already disposed.',
+        parameters: [{ name: 'sessionId', description: 'the Session to report.' }],
+        returns: 'the report, or `undefined` when this process never observed it.',
+      },
+      {
+        signature: 'global(): TokenLedgerGlobalReport',
+        description: 'Read cumulative totals across every Session this process has observed: every live Session plus every Session disposed during this process.',
+        parameters: [],
+        returns: 'the contributing Session count and the process-wide totals.',
+      },
+    ],
+  },
+  {
     key: 'tokenMeter',
     summary: 'Replay owner for one service-wide estimator and isolated per-session folds.',
     description: 'Replay owner for one service-wide estimator and isolated per-session folds.',
@@ -4731,7 +4756,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AgentPresetComposition',
-    declaration: 'export interface AgentPresetComposition {\n    readonly id: string;\n    readonly name?: string;\n    readonly isDefault: boolean;\n    readonly broken?: string;\n    readonly rows: readonly AgentPresetCompositionRow[];\n}',
+    declaration: 'export interface AgentPresetComposition {\n    readonly id: string;\n    readonly name?: string;\n    readonly source?: \'deepseek\' | \'cadre\';\n    readonly isDefault: boolean;\n    readonly broken?: string;\n    readonly rows: readonly AgentPresetCompositionRow[];\n}',
   },
   {
     name: 'AgentPresetCompositionRow',
@@ -4739,7 +4764,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AgentPresetDocument',
-    declaration: 'export interface AgentPresetDocument {\n    readonly agentPreset: string;\n    readonly content: string;\n    readonly name?: string;\n    readonly description?: string;\n}',
+    declaration: 'export interface AgentPresetDocument {\n    readonly agentPreset: string;\n    readonly content: string;\n    readonly name?: string;\n    readonly description?: string;\n    readonly source?: \'deepseek\' | \'cadre\';\n}',
   },
   {
     name: 'AgentPresetInspection',
@@ -4751,7 +4776,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AgentPresetRow',
-    declaration: 'export interface AgentPresetRow {\n    readonly id: string;\n    readonly isDefault: boolean;\n    readonly name?: string;\n    readonly description?: string;\n    readonly broken?: string;\n}',
+    declaration: 'export interface AgentPresetRow {\n    readonly id: string;\n    readonly isDefault: boolean;\n    readonly name?: string;\n    readonly description?: string;\n    readonly source?: \'deepseek\' | \'cadre\';\n    readonly broken?: string;\n}',
   },
   {
     name: 'AgentResolver',
@@ -6475,7 +6500,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PresetDefinition',
-    declaration: 'export interface PresetDefinition {\n    readonly id: string;\n    readonly name?: string;\n    readonly description?: string;\n    readonly order?: number;\n    readonly plugins: readonly (Omit<EntryOptions, \'id\' | \'disabled\'> & {\n        id?: string;\n        disabled?: EntryOptions[\'disabled\'] | JsExpr;\n    })[];\n}',
+    declaration: 'export interface PresetDefinition {\n    readonly id: string;\n    readonly name?: string;\n    readonly description?: string;\n    readonly source?: \'deepseek\' | \'cadre\';\n    readonly hidden?: boolean;\n    readonly order?: number;\n    readonly plugins: readonly (Omit<EntryOptions, \'id\' | \'disabled\'> & {\n        id?: string;\n        disabled?: EntryOptions[\'disabled\'] | JsExpr;\n    })[];\n}',
   },
   {
     name: 'PresetOption',
@@ -6770,10 +6795,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type RequestErrorAction = {\n    kind: \'retry\';\n} | undefined;',
   },
   {
-    name: 'RequestHeaderReason',
-    declaration: 'export type RequestHeaderReason = \'initial\' | \'resume\' | \'change\' | \'series\';',
-  },
-  {
     name: 'RequestImageAttachment',
     declaration: 'export interface RequestImageAttachment {\n    variantId: ImageVariantId;\n    attachment: ImageAttachmentRef;\n    data: Uint8Array;\n    mediaType: ImageMediaType;\n    bytes: number;\n    width: number;\n    height: number;\n    depth: \'uchar\';\n    space: \'srgb\';\n    hasAlpha: boolean;\n}',
   },
@@ -6995,27 +7016,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Session',
-    declaration: 'export class Session {\n    get surface(): SessionSurface;\n    readonly header: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n    get id(): SessionId;\n    readonly firstLiveSeq: SessionLogOffset;\n    readonly firstLifecycleSeq: SessionLogOffset;\n    static create(id: SessionId, seed?: readonly SessionEvent[], header?: SessionHeader, inheritedEventCount?: SessionLogOffset, projections?: readonly SessionMessageProjection[]): Session;\n    static fromRestore(id: SessionId, seed: readonly SessionEvent[], header: SessionHeader, inheritedEventCount: SessionLogOffset, eventState: SessionSeedEventState, projections?: readonly SessionMessageProjection[]): Session;\n    eventAt(seq: SessionSeq): SessionEvent | undefined;\n    snapshotEvents(fromSeq: SessionLogOffset = SessionLogOffset(0), toSeqExclusive: SessionLogOffset = this.seq): readonly SessionEvent[];\n    ownEvents(): readonly SessionEvent[];\n    isOwnSeq(seq: SessionSeq): boolean;\n    get seq(): SessionLogOffset;\n    append<T extends SessionEventType>(type: T, data: SessionEventMap[T], ...opts: T extends SurfaceEventType ? [\n        opts: SurfaceIntent<T>\n    ] : [\n    ]): SessionEvent<T>;\n    requestHeader(): EpochHeader | undefined;\n    requestContext(): RequestContext | undefined;\n    toolHistory(): ToolHistory;\n    deriveMessages(): Message[];\n    deriveEventMessage(event: SessionEvent): Message | null;\n}',
+    declaration: 'export class Session {\n    get surface(): SessionSurface;\n    readonly header: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n    get id(): SessionId;\n    readonly firstLiveSeq: SessionLogOffset;\n    readonly firstLifecycleSeq: SessionLogOffset;\n    static create(id: SessionId, seed?: readonly SessionEvent[], header?: SessionHeader, inheritedEventCount?: SessionLogOffset, projections?: readonly SessionMessageProjection[]): Session;\n    static fromRestore(id: SessionId, seed: readonly SessionEvent[], header: SessionHeader, inheritedEventCount: SessionLogOffset, eventState: SessionSeedEventState, projections?: readonly SessionMessageProjection[]): Session;\n    eventAt(seq: SessionSeq): SessionEvent | undefined;\n    snapshotEvents(fromSeq: SessionLogOffset = SessionLogOffset(0), toSeqExclusive: SessionLogOffset = this.seq): readonly SessionEvent[];\n    ownEvents(): readonly SessionEvent[];\n    isOwnSeq(seq: SessionSeq): boolean;\n    get seq(): SessionLogOffset;\n    append<T extends SessionEventType>(type: T, data: SessionEventMap[T], ...opts: T extends SurfaceEventType ? [\n        opts: SurfaceIntent<T>\n    ] : [\n    ]): SessionEvent<T>;\n    appendIgnorable<T extends SessionEventType>(type: T, data: SessionEventMap[T]): SessionEvent<T>;\n    requestHeader(): EpochHeader | undefined;\n    requestContext(): RequestContext | undefined;\n    toolHistory(): ToolHistory;\n    deriveMessages(): Message[];\n    deriveEventMessage(event: SessionEvent): Message | null;\n}',
   },
   {
     name: 'SessionAccess',
     declaration: 'export type SessionAccess = \'read\' | \'write\';',
-  },
-  {
-    name: 'SessionActivity',
-    declaration: 'export interface SessionActivity {\n    readonly kind: SessionActivityKind;\n    readonly items?: readonly SessionActivityItem[];\n}',
-  },
-  {
-    name: 'SessionActivityItem',
-    declaration: 'export interface SessionActivityItem {\n    readonly id: string;\n    readonly label?: string;\n}',
-  },
-  {
-    name: 'SessionActivityKind',
-    declaration: 'export type SessionActivityKind = keyof SessionActivityKindMap;',
-  },
-  {
-    name: 'SessionActivityKindMap',
-    declaration: 'export interface SessionActivityKindMap {\n}',
   },
   {
     name: 'SessionActivityRequest',
@@ -7091,7 +7096,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionEventMap',
-    declaration: 'export interface SessionEventMap {\n    \'turn/start\': {\n        turn: number;\n    };\n    \'turn/end\': {\n        turn: number;\n        reason: TurnEndReason;\n    };\n    \'step/start\': {\n        turn: number;\n        step: number;\n    };\n    \'step/end\': {\n        turn: number;\n        step: number;\n    };\n    \'user/message\': UserMessage;\n    \'developer/message\': {\n        turn: number;\n        step: number;\n        message: DeveloperMessage;\n        headerSeq?: SessionSeq;\n    };\n    \'system/message\': {\n        turn: number;\n        step: number;\n        message: SystemMessage;\n    };\n    \'assistant/message\': {\n        turn: number;\n        step: number;\n        message: AssistantMessage;\n        stream: AssistantStreamRecord[];\n        usage?: TokenUsage;\n        interrupted?: true;\n    };\n    \'assistant/attempt\': {\n        turn: number;\n        step: number;\n        stream: AssistantStreamRecord[];\n    };\n    \'tool/call\': {\n        turn: number;\n        step: number;\n        callId: ToolCallId;\n        name: string;\n        arguments: string;\n    };\n    \'tool/result\': {\n        turn: number;\n        step: number;\n        message: ToolResultMessage;\n        error?: {\n            name: string;\n            code: string;\n            reason?: string;\n        };\n        meta?: JsonValue;\n    };\n    \'request/header\': {\n        header: EpochHeader;\n        reason: RequestHeaderReason;\n        startsSeries?: true;\n    };\n    \'request/context\': RequestContext;\n    \'session/end-seed\': {\n   /* …truncated — full shape in source */',
+    declaration: 'export interface SessionEventMap {\n    \'turn/start\': {\n        turn: number;\n    };\n    \'turn/end\': {\n        turn: number;\n        reason: TurnEndReason;\n    };\n    \'turn/received\': {\n        turn: number;\n    };\n    \'model_call/started\': {\n        turn: number;\n        step: number;\n        provider: string;\n        model: string;\n    };\n    \'model_call/first_token\': {\n        turn: number;\n        step: number;\n    };\n    \'turn/completed\': {\n        turn: number;\n    };\n    \'turn/aborted\': {\n        turn: number;\n        reason: TurnEndReason;\n        hadFirstToken: boolean;\n    };\n    \'step/start\': {\n        turn: number;\n        step: number;\n    };\n    \'step/end\': {\n        turn: number;\n        step: number;\n    };\n    \'user/message\': UserMessage;\n    \'developer/message\': {\n        turn: number;\n        step: number;\n        message: DeveloperMessage;\n        headerSeq?: SessionSeq;\n    };\n    \'system/message\': {\n        turn: number;\n        step: number;\n        message: SystemMessage;\n    };\n    \'assistant/message\': {\n        turn: number;\n        step: number;\n        message: AssistantMessage;\n        stream: AssistantStreamRecord[];\n        usage?: TokenUsage;\n        interrupted?: true;\n    };\n    \'assistant/attempt\': {\n        turn: number;\n        step: number;\n        stream: AssistantStreamRecord[];\n    };\n    \'tool/call\': {\n        turn: number;\n        step: number;\n        callId: ToolCallId;\n        name: string;\n        arguments: string;\n    };\n    \'to /* …truncated — full shape in source */',
   },
   {
     name: 'SessionEventMetadataFilter',
@@ -8174,6 +8179,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ToastOptions {\n    timeoutMs?: number;\n}',
   },
   {
+    name: 'TokenLedgerEntry',
+    declaration: 'export interface TokenLedgerEntry extends TokenUsageRecord {\n    readonly seq: SessionSeq;\n    readonly time: number;\n}',
+  },
+  {
+    name: 'TokenLedgerGlobalReport',
+    declaration: 'export interface TokenLedgerGlobalReport {\n    readonly sessions: number;\n    readonly totals: TokenLedgerTotals;\n}',
+  },
+  {
+    name: 'TokenLedgerReport',
+    declaration: 'export interface TokenLedgerReport {\n    readonly sessionId: SessionId;\n    readonly entries: readonly TokenLedgerEntry[];\n    readonly totals: TokenLedgerTotals;\n}',
+  },
+  {
+    name: 'TokenLedgerTotals',
+    declaration: 'export interface TokenLedgerTotals {\n    readonly requests: number;\n    readonly inputTokens: number;\n    readonly outputTokens: number;\n    readonly cacheReadTokens: number;\n    readonly cacheWriteTokens: number;\n    readonly reasoningTokens: number;\n    readonly billedTokens: number;\n}',
+  },
+  {
     name: 'TokenMeasurement',
     declaration: 'export interface TokenMeasurement {\n    readonly logRevision: SessionLogOffset;\n    readonly baseline: TokenMeasurementBaseline;\n    readonly surfaceDeltaTokens: number;\n    readonly totalTokens: number;\n    readonly surfaceTokens: number;\n    readonly nodes: readonly TokenSurfaceNode[];\n}',
   },
@@ -8188,6 +8209,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TokenUsage',
     declaration: 'export interface TokenUsage {\n    inputTokens: number;\n    outputTokens: number;\n    totalTokens?: number;\n    cacheReadTokens?: number;\n    cacheWriteTokens?: number;\n    reasoningTokens?: number;\n}',
+  },
+  {
+    name: 'TokenUsageRecord',
+    declaration: 'export interface TokenUsageRecord {\n    readonly sourceSeq: SessionSeq;\n    readonly turn: number;\n    readonly step: number;\n    readonly provider: string;\n    readonly model: string;\n    readonly usage: TokenUsage;\n}',
   },
   {
     name: 'ToolAdditionBlock',

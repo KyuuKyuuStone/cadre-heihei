@@ -38,11 +38,12 @@ function assertSupportedTarget(target) {
 /**
  * Return the mutable preparation and artifact directories owned by one release target.
  * @param {'mac-arm64' | 'mac-x64' | 'win-x64'} target - Supported Desktop target name.
- * @returns {{ root: string, artifacts: string, unsignedArtifacts: string, unnotarizedArtifacts: string, runtime: string, packageSet: string, dsh: string, dshPnpm: string, electron: string, packedDsh: string, packedVendor: string, packedLandlock: string, downloads: string }} Target paths plus the shared immutable download cache.
+ * @param {string} [buildRoot] - Build tree root the target tree and the shared caches hang off; defaults to the app build root.
+ * @returns {{ root: string, artifacts: string, unsignedArtifacts: string, unnotarizedArtifacts: string, runtime: string, packageSet: string, dsh: string, dshPnpm: string, electron: string, packedDsh: string, packedVendor: string, packedLandlock: string, downloads: string, packagingRuns: string }} Target paths plus the shared immutable download cache and the shared packaging-run journal root.
  */
-export function desktopTargetBuildPaths(target) {
+export function desktopTargetBuildPaths(target, buildRoot = BUILD_ROOT) {
   assertSupportedTarget(target)
-  const root = join(BUILD_ROOT, 'targets', target)
+  const root = join(buildRoot, 'targets', target)
   const packed = join(root, 'packed')
   return {
     root,
@@ -57,7 +58,8 @@ export function desktopTargetBuildPaths(target) {
     packedDsh: join(packed, 'dsh'),
     packedVendor: join(packed, 'vendor'),
     packedLandlock: join(packed, 'landlock'),
-    downloads: join(BUILD_ROOT, 'downloads'),
+    downloads: join(buildRoot, 'downloads'),
+    packagingRuns: join(buildRoot, 'packaging-runs'),
   }
 }
 

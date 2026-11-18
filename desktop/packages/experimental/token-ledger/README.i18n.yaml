@@ -1,0 +1,37 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/experimental/token-ledger/README.md
+/:
+  en: b0d03f42c1643a68
+  zh: 1f28cd5e85d1823c
+/deepseek-ai-dsh-experimental-token-ledger:
+  en: 87ab90683ef7ba7e
+  zh: 580e67f37b40d6ab
+/deepseek-ai-dsh-experimental-token-ledger/summary:
+  en: 67cd8dda5633f1c8
+  zh: 0ef1e7a4ddd17c35
+/deepseek-ai-dsh-experimental-token-ledger/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 988e839059414d27
+/deepseek-ai-dsh-experimental-token-ledger/use-this-package:
+  en: 35e173ce744e7d9c
+  zh: 93415e37dda5518e
+/deepseek-ai-dsh-experimental-token-ledger/understand-the-implementation:
+  en: 10f313f7820a189c
+  zh: 76c166005f61900c
+/deepseek-ai-dsh-experimental-token-ledger/further-exploration:
+  en: 40284cab474c721c
+  zh: 4b9c490fc223c780
+/deepseek-ai-dsh-experimental-token-ledger/model-experience:
+  en: 806cc33aa6ac9ae8
+  zh: 007f4b2913215563
+/deepseek-ai-dsh-experimental-token-ledger/model-experience/kv-cache-effect:
+  en: 0921c03e68c934d0
+  zh: 0ea2ed48370a63c4
+/deepseek-ai-dsh-experimental-token-ledger/known-limitations-and-deferred-work:
+  en: 91da4070bc41fd83
+  zh: aba0ab282462f570
+/deepseek-ai-dsh-experimental-token-ledger/known-limitations-and-deferred-work/dev-note:
+  en: e869ac2827e0abbe
+  zh: 94c77e9442cc1911

@@ -2,7 +2,7 @@
 
 import { createHmac } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
+import type { CredentialProvider, CredentialRecord } from '@deepseek-ai/dsh-credentials'
 import type { PeerId } from '@deepseek-ai/dsh-typert-protocol'
 import { BrowserAuth } from '../src/browser-auth.ts'
 import type { ConnectionIndexRequest, ConnectionIndexResponse } from '../src/rpc.ts'
@@ -347,23 +347,37 @@ describe('BrowserAuth', () => {
     expect(store).toMatchObject({ reads: 0, modifies: 2 })
   })
 
-  it('fails loud on an invalid owner record instead of replacing it', async () => {
-    const unsupported = new RecordCredentials()
-    unsupported.record = { kind: 'api-key', key: 'not-a-cookie-secret' }
-    await expect(createAuth(unsupported)).rejects.toThrow(/unsupported format/u)
+  it('replaces unusable owner records instead of blocking activation', async () => {
+    const records: readonly [string, CredentialRecord][] = [
+      ['an unsupported record kind', { kind: 'api-key', key: 'not-a-cookie-secret' }],
+      ['a malformed payload', { kind: 'grant', payload: { version: 1, secret: 'short' } }],
+      ['a non-string secret', { kind: 'grant', payload: { version: 1, secret: 42 } }],
+      ['an unsupported payload version', { kind: 'grant', payload: { version: 2, secret: 'short' } }],
+    ]
+    for (const [label, record] of records) {
+      const store = new RecordCredentials()
+      store.record = record
+      const warn = vi.fn()
+      const auth = await BrowserAuth.create({}, credentials(store), 30, warn)
+      expect(store.record, label).toMatchObject({ kind: 'grant', payload: { version: 1 } })
+      const login = exchange(auth)
+      expect(auth.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: login.cookie })), label).toBe(true)
+      expect(warn, label).toHaveBeenCalledOnce()
+      expect(String(warn.mock.calls[0]?.[0]), label).toContain('replaced')
+    }
+  })
 
-    const malformed = new RecordCredentials()
-    malformed.record = { kind: 'grant', payload: { version: 1, secret: 'short' } }
-    await expect(createAuth(malformed)).rejects.toThrow(/invalid secret/u)
-
-    const nonString = new RecordCredentials()
-    nonString.record = { kind: 'grant', payload: { version: 1, secret: 42 } }
-    await expect(createAuth(nonString)).rejects.toThrow(/invalid secret/u)
-
+  it('continues with the generated secret when the provider discards the write', async () => {
     const discarded = new RecordCredentials()
     discarded.discardWrites = true
-    await expect(createAuth(discarded)).rejects.toThrow(/was not created/u)
+    const auth = await createAuth(discarded)
+    const login = exchange(auth)
 
+    expect(discarded.record).toBeUndefined()
+    expect(auth.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: login.cookie }))).toBe(true)
+  })
+
+  it('rejects a lifetime outside the safe timestamp range before activation', async () => {
     await expect(createAuth(new RecordCredentials(), Number.MAX_SAFE_INTEGER))
       .rejects.toThrow(/safe timestamp range/u)
   })

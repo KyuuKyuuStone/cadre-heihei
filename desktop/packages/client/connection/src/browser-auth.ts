@@ -94,17 +94,21 @@ function canonicalSecret(value: unknown): Buffer | undefined {
   return decoded
 }
 
-function storedSecret(record: CredentialRecord | undefined): Buffer | undefined {
+type StoredSecret =
+  | { readonly kind: 'valid'; readonly secret: Buffer }
+  | { readonly kind: 'invalid'; readonly reason: string }
+
+function inspectStoredSecret(record: CredentialRecord | undefined): StoredSecret | undefined {
   if (record === undefined) return undefined
   if (record.kind !== 'grant' || !isRecord(record.payload)
     || record.payload.version !== STORED_SECRET_VERSION) {
-    throw new Error('client-connection: browser-session credential record has an unsupported format')
+    return { kind: 'invalid', reason: 'an unsupported browser-session credential record' }
   }
   const secret = canonicalSecret(record.payload.secret)
   if (secret === undefined) {
-    throw new Error('client-connection: browser-session credential record has an invalid secret')
+    return { kind: 'invalid', reason: 'a browser-session credential record with an invalid secret' }
   }
-  return secret
+  return { kind: 'valid', secret }
 }
 
 function tokenMatches(actual: string, expected: string): boolean {
@@ -179,23 +183,44 @@ function decodeCookie(value: string, secret: Buffer): CookiePayload | undefined 
   return { version: 2, ...payload, id: decoded.id as PeerId }
 }
 
-async function initializeSecret(credentials: CredentialProvider): Promise<Buffer> {
+async function initializeSecret(
+  credentials: CredentialProvider,
+  onWarning: (error: Error) => void,
+): Promise<Buffer> {
   const generated: StoredSecretPayload = {
     version: STORED_SECRET_VERSION,
     secret: encodeBase64Url(randomBytes(SECRET_BYTES)),
   }
-  const record = await credentials.modifyRecord(AUTH_RECORD_KEY, (current) => {
-    if (current !== undefined) {
-      storedSecret(current)
-      return Promise.resolve(undefined)
-    }
-    return Promise.resolve({ kind: 'grant', payload: generated })
-  })
-  const secret = storedSecret(record)
-  if (secret === undefined) {
-    throw new Error('client-connection: browser-session credential record was not created')
+  let replaced: string | undefined
+  let record: CredentialRecord | undefined
+  try {
+    record = await credentials.modifyRecord(AUTH_RECORD_KEY, (current) => {
+      const existing = inspectStoredSecret(current)
+      if (existing === undefined) return Promise.resolve({ kind: 'grant', payload: generated })
+      if (existing.kind === 'valid') return Promise.resolve(undefined)
+      replaced = existing.reason
+      return Promise.resolve({ kind: 'grant', payload: generated })
+    })
+  } catch (cause) {
+    onWarning(new Error(
+      'client-connection: could not load or create the browser-session credential record; '
+      + 'using an in-memory signing secret for this activation',
+      { cause },
+    ))
+    return Buffer.from(generated.secret, 'base64url')
   }
-  return secret
+  const existing = inspectStoredSecret(record)
+  if (existing?.kind === 'valid') {
+    if (replaced !== undefined) {
+      onWarning(new Error(`client-connection: replaced ${replaced}; existing browser cookies are invalid`))
+    }
+    return existing.secret
+  }
+  onWarning(new Error(
+    'client-connection: the browser-session credential record was not persisted; '
+    + 'using an in-memory signing secret for this activation',
+  ))
+  return Buffer.from(generated.secret, 'base64url')
 }
 
 /**
@@ -222,18 +247,24 @@ export class BrowserAuth {
 
   /**
    * Initialize browser authentication and create its durable signing secret
-   * when this Harness home has none.
+   * when this Harness home has none. An unusable record is replaced so a
+   * corrupted cookie-secret entry cannot prevent the Host from starting; a
+   * provider that cannot read or write the record falls back to this
+   * activation's in-memory secret.
    * @param processOwner - root application context retaining one token across Connection reloads.
    * @param credentials - persistent credential provider for the Web profile.
    * @param maxAgeDays - positive absolute browser-cookie lifetime in days.
+   * @param onWarning - receives a recoverable credential-store failure; the
+   * caller reports it because authentication continues with rotated material.
    * @returns initialized authentication owner with the process owner's launch token.
    */
   static async create(
     processOwner: object,
     credentials: CredentialProvider,
     maxAgeDays: number,
+    onWarning: (error: Error) => void = () => {},
   ): Promise<BrowserAuth> {
-    return new BrowserAuth(processOwner, await initializeSecret(credentials), maxAgeDays)
+    return new BrowserAuth(processOwner, await initializeSecret(credentials, onWarning), maxAgeDays)
   }
 
   /**

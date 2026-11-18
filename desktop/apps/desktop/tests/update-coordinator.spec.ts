@@ -47,7 +47,7 @@ describe('desktop release metadata', () => {
 const coordinators: InstanceType<typeof DesktopUpdateCoordinator>[] = []
 afterEach(() => { for (const item of coordinators.splice(0)) item.dispose() })
 
-function fixture(channel: 'nightly' | 'latest' = 'nightly', version = '1.1.0-alpha.1') {
+function fixture(channel: 'nightly' | 'latest' = 'nightly', version = '1.1.0-alpha.1', checkDeadlineMs = 20_000) {
   const events = new EventEmitter()
   const checkForUpdates = vi.fn(async () => ({
     isUpdateAvailable: true,
@@ -66,7 +66,7 @@ function fixture(channel: 'nightly' | 'latest' = 'nightly', version = '1.1.0-alp
   const updater = Object.assign(events, { checkForUpdates, downloadUpdate, quitAndInstall }) as unknown as AppUpdater
   const coordinator = new DesktopUpdateCoordinator(
     (state) => { states.push(state); return state },
-    beforeRestart, updater, () => true, () => version, downloadResult, channel,
+    beforeRestart, updater, () => true, () => version, downloadResult, channel, checkDeadlineMs,
   )
   coordinators.push(coordinator)
   return { coordinator, updater, events, states, checkForUpdates, downloadUpdate, quitAndInstall, beforeRestart, downloadResult }
@@ -129,6 +129,19 @@ describe('desktop update coordinator', () => {
     expect(f.events.listenerCount('error')).toBe(0)
   })
 
+  it('answers a proxy authentication challenge instead of leaving the request waiting for credentials', () => {
+    const f = fixture()
+    const credential = vi.fn<(username: string, password: string) => void>()
+    f.events.emit('login', { isProxy: true }, credential)
+    expect(credential).toHaveBeenCalledOnce()
+    // Empty credentials cancel the challenged request rather than waiting for an absent credential prompt.
+    expect(credential).toHaveBeenCalledWith('', '')
+    f.coordinator.dispose()
+    credential.mockClear()
+    f.events.emit('login', { isProxy: true }, credential)
+    expect(credential).not.toHaveBeenCalled()
+  })
+
   it('checks, downloads on demand, then requires separate installation approval', async () => {
     const f = fixture()
     await f.coordinator.check()
@@ -175,6 +188,52 @@ describe('desktop update coordinator', () => {
     await Promise.all([f.coordinator.check(), f.coordinator.check(true)])
     expect(f.states).toEqual([expect.objectContaining({ phase: 'error', failedOperation: 'check' })])
     expect(f.downloadUpdate).not.toHaveBeenCalled()
+  })
+
+  it('reports a check that exceeds its total deadline instead of awaiting the updater forever', async () => {
+    vi.useFakeTimers()
+    try {
+      const f = fixture('nightly', '1.1.0-alpha.1', 1000)
+      const hung = Promise.withResolvers<{ isUpdateAvailable: boolean; updateInfo: { version: string } }>()
+      f.checkForUpdates.mockImplementation(() => hung.promise)
+      const manual = f.coordinator.check(true)
+      await vi.advanceTimersByTimeAsync(999)
+      expect(f.checkForUpdates).toHaveBeenCalledOnce()
+      expect(f.coordinator.state).toEqual({ phase: 'idle' })
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await manual).toMatchObject({
+        phase: 'error', failedOperation: 'check',
+        message: 'Desktop update check did not finish within the deadline',
+      })
+      expect(f.states).toEqual([expect.objectContaining({ phase: 'error', failedOperation: 'check' })])
+      // The unsettled updater promise still occupies the library, so a retry reports it without re-checking.
+      expect(await f.coordinator.check(true)).toMatchObject({ phase: 'error', failedOperation: 'check' })
+      expect(f.checkForUpdates).toHaveBeenCalledOnce()
+      hung.resolve({ isUpdateAvailable: true, updateInfo: { version: '1.1.0-rc.2' } })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(f.states.filter(state => state.phase === 'available')).toEqual([])
+      expect(f.coordinator.state).toMatchObject({ phase: 'error', failedOperation: 'check' })
+      // Settlement releases the latch; the next check reaches the updater again.
+      expect(await f.coordinator.check()).toMatchObject({ phase: 'available', version: '1.1.0-rc.2' })
+      expect(f.checkForUpdates).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('keeps an automatic deadline failure silent and never opens a download', async () => {
+    vi.useFakeTimers()
+    try {
+      const f = fixture('nightly', '1.1.0-alpha.1', 1000)
+      f.checkForUpdates.mockImplementation(() => new Promise(() => {}))
+      const automatic = f.coordinator.check()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(await automatic).toMatchObject({ phase: 'error', failedOperation: 'check' })
+      expect(f.states).toEqual([])
+      expect(f.downloadUpdate).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('rejects a check deadline outside the supported millisecond range', () => {
+    expect(() => fixture('nightly', '1.1.0-alpha.1', 999)).toThrow(/check deadline must be an integer/u)
   })
 
   it.each(['1.0.0', '1.1.0-alpha.1', 'invalid'])('does not download or install inapplicable version %s', async (version) => {

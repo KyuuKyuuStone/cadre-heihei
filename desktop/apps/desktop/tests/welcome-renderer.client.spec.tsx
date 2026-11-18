@@ -289,6 +289,20 @@ it.each(['zh-CN', 'en'])('keeps the expiry notice visible after returning to Wel
   } finally { cleanup(); vi.useRealTimers() }
 })
 
+it.each(['zh-CN', 'en'])('keeps the degraded-backend recovery notice visible across Welcome pages: %s', async (language) => {
+  const takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue('backend-unavailable')
+  const view = mount(language, takeNotice)
+  await act(async () => {})
+  const notice = screen.getByRole('alert')
+  expect(notice.textContent).toBe(view.api.messages.welcomeBackendUnavailable)
+  expect(notice.textContent).toContain('127.0.0.1')
+  expect(notice.textContent).toContain('localhost')
+  expect(notice.textContent).toMatch(language === 'zh-CN' ? /重启应用/u : /Restart the app/u)
+  await expect(`${notice.textContent}\n`).toMatchFileSnapshot(`./expected/welcome/${language}-backend-unavailable.expected.txt`)
+  fireEvent.click(view.button('#api-key'))
+  expect(screen.getByRole('alert')).toBe(notice)
+})
+
 it('does not infer a notification from a retained expired account snapshot', async () => {
   const view = mount()
   await act(async () => {

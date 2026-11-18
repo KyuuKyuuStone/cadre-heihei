@@ -16,7 +16,6 @@ import {
   powerMonitor,
   nativeImage,
   nativeTheme,
-  net,
   protocol,
   session,
   shell,
@@ -63,6 +62,7 @@ import { DesktopPlatformView, PLATFORM_IPC, platformBounds } from './platform-vi
 import { installDesktopDirectoryPicker } from './directory-picker.ts'
 import { installMicrophonePermissions } from './microphone-permissions.ts'
 import { DesktopBackendController } from './backend-controller.ts'
+import { openLoopbackSession, readLoopbackCookies } from './loopback-session.ts'
 import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
 import { readDeviceInfo } from './device-info.ts'
 import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
@@ -70,12 +70,12 @@ import { claimDesktopSingleInstance } from './single-instance.ts'
 import { desktopUpdateChannel } from './update-channel.ts'
 import { DesktopUpdateCoordinator } from './update-coordinator.ts'
 import { DesktopCommandManager } from './command-management.ts'
-import { serveWebDocument, authenticateWebHost, forwardWebRequest } from './web-document.ts'
+import { serveWebDocument, forwardWebRequest } from './web-document.ts'
 import { DesktopFatalRecovery } from './fatal-recovery.ts'
 import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashReportSource } from './crash-report.ts'
 import { openWelcomeWindow } from './welcome-window.ts'
 import { WELCOME_IPC, needsWelcome, type WelcomeNotice } from './welcome-api.ts'
-import { connectDesktopWelcome, type DesktopWelcomeBackend } from './welcome-backend.ts'
+import { startDesktopWelcome, type DesktopWelcomeBackend, type WelcomeState } from './welcome-backend.ts'
 import { DesktopUpdateJournal } from './update-journal.ts'
 import { DesktopUpdatePreparationError } from './update-error.ts'
 import { DesktopUpdateSchedule, resolveDesktopUpdateScheduleConfig } from './update-schedule.ts'
@@ -755,21 +755,31 @@ async function main(): Promise<void> {
     return {
       start: async () => {
         const ready = await host.start()
-        hostCookie = await authenticateWebHost(ready.url)
         hostUrl = ready.url
+        // Loopback must not inherit the system proxy: a proxy can answer the
+        // unreachable 127.0.0.1 launch with 401/407/502. This dedicated session
+        // is direct and separate from the default session used by updaters.
+        const loopback = await openLoopbackSession()
+        const welcome = await startDesktopWelcome(
+          ready.url,
+          (input, init) => loopback.fetch(input, init),
+          () => readLoopbackCookies(loopback, ready.url),
+        )
+        hostCookie = welcome.hostCookie
         // Compose enabled providers into llm-pi-ai once the Host owns settings.
-        if (cadreProviders !== undefined) {
+        if (cadreProviders !== undefined && hostCookie !== undefined) {
           void syncProvidersToHost(ready.url, hostCookie, cadreProviders.list(), message => console.log(message))
             .catch(error => console.warn(`cadre-providers sync failed reason=${error instanceof Error ? error.message : String(error)}`))
         }
         if (ready.injections === undefined) throw new Error('Desktop Host did not provide boot injections')
         injections = ready.injections
-        welcomeBackend = await connectDesktopWelcome(ready.url, (input, init) => net.fetch(input, init), async () => (await session.defaultSession.cookies.get({ url: ready.url })).map(cookie => `${cookie.name}=${cookie.value}`).join('; '))
-        analyticsEnabled = await welcomeBackend.analyticsEnabled().catch(() => false)
+        welcomeBackend = welcome.backend
+        if (welcomeBackend === undefined) pendingWelcomeNotice = 'backend-unavailable'
+        analyticsEnabled = welcomeBackend === undefined ? false : await welcomeBackend.analyticsEnabled().catch(() => false)
         if (!reportedLaunch) { reportedLaunch = true; void track('desktop_app_launch', {}) }
         stopAccount?.()
-        const accountBackend = welcomeBackend.account
-        stopAccount = accountBackend.watch((state) => {
+        const accountBackend = welcomeBackend?.account
+        stopAccount = accountBackend?.watch((state) => {
           if (quitting) return
           if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.webContents.send(WELCOME_IPC.state, state)
           const attempt = state.attempt
@@ -802,7 +812,9 @@ async function main(): Promise<void> {
             enteredWorkspace = false
             await showWelcome()
             const state = await accountBackend.state()
-            if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.webContents.send(WELCOME_IPC.state, state)
+            if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) {
+              welcomeWindow.webContents.send(WELCOME_IPC.state, state)
+            }
           }).catch(() => undefined)
         }, (enabled) => { analyticsEnabled = enabled })
       },
@@ -870,8 +882,11 @@ async function main(): Promise<void> {
     return state
   }
 
-  const readWelcomeState = async () => {
-    if (backend.host === undefined || welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
+  const readWelcomeState = async (): Promise<WelcomeState> => {
+    if (backend.host === undefined) throw new Error('desktop welcome: backend unavailable')
+    // Loopback authentication degraded before the welcome backend connected.
+    // Render welcome with unauthenticated defaults instead of rejecting startup.
+    if (welcomeBackend === undefined) return { loggedIn: false, hasApiKey: false, writable: false, localePreference: null }
     return welcomeBackend.read()
   }
   stopForRecovery = () => backend.close()

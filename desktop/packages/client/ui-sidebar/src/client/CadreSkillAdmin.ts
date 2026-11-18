@@ -1,4 +1,4 @@
-/** Skill-admin session/plan transport shared by the library entry and the plan card. */
+/** Skill-admin session/plan transport and optional skill-health reads. */
 
 export interface SkillAdminSession {
   readonly sessionId: string
@@ -43,6 +43,26 @@ export interface ApplyResult {
   readonly error?: string
 }
 
+export type SkillHealthStatus = 'ok' | 'warning' | 'error'
+
+export interface SkillHealthIssue {
+  readonly code: string
+  readonly message: string
+  readonly remediation: string
+  readonly field?: string
+}
+
+export interface SkillPackHealth {
+  readonly packId: string
+  readonly status: SkillHealthStatus
+  readonly issues: readonly SkillHealthIssue[]
+}
+
+export interface SkillHealth {
+  readonly status: SkillHealthStatus
+  readonly items: readonly SkillPackHealth[]
+}
+
 interface Envelope<T> {
   readonly ok?: boolean
   readonly result?: T
@@ -68,6 +88,83 @@ async function adminCall<T>(path: string, body: Record<string, unknown>): Promis
     throw new SkillAdminError(payload?.code ?? `HTTP_${response.status}`, payload?.message ?? `技能管理员请求失败（HTTP ${response.status}）`)
   }
   return payload.result
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+const isHealthStatus = (value: unknown): value is SkillHealthStatus =>
+  value === 'ok' || value === 'warning' || value === 'error'
+
+const parseHealthIssue = (value: unknown): SkillHealthIssue | undefined => {
+  if (!isRecord(value) || typeof value.code !== 'string' || typeof value.message !== 'string'
+    || typeof value.remediation !== 'string') return undefined
+  return {
+    code: value.code,
+    message: value.message,
+    remediation: value.remediation,
+    ...(typeof value.field === 'string' ? { field: value.field } : {}),
+  }
+}
+
+const parsePackHealth = (value: unknown): SkillPackHealth | undefined => {
+  if (!isRecord(value) || typeof value.packId !== 'string' || !isHealthStatus(value.status)
+    || !Array.isArray(value.issues)) return undefined
+  const issues: SkillHealthIssue[] = []
+  for (const rawIssue of value.issues) {
+    const issue = parseHealthIssue(rawIssue)
+    if (issue === undefined) return undefined
+    issues.push(issue)
+  }
+  return { packId: value.packId, status: value.status, issues }
+}
+
+const parseSkillHealth = (value: unknown): SkillHealth | undefined => {
+  if (!isRecord(value) || !Array.isArray(value.items)) return undefined
+  const items: SkillPackHealth[] = []
+  for (const rawItem of value.items) {
+    const item = parsePackHealth(rawItem)
+    if (item === undefined) return undefined
+    items.push(item)
+  }
+  const status = isHealthStatus(value.status)
+    ? value.status
+    : items.some(item => item.status === 'error')
+      ? 'error'
+      : items.some(item => item.status === 'warning') ? 'warning' : 'ok'
+  return { status, items }
+}
+
+/**
+ * Read optional per-pack health without making the catalog depend on diagnostics.
+ * @param projectId - project whose diagnostics are requested.
+ * @param operatorSessionId - foreground session making the read-only request.
+ * @returns validated per-pack health, or undefined when the response has only totals.
+ */
+export async function fetchSkillHealth(projectId: string, operatorSessionId: string): Promise<SkillHealth | undefined> {
+  const result = await adminCall('diag', { projectId, operatorSessionId })
+  return parseSkillHealth(result)
+}
+
+export interface SkillSessionBinding {
+  readonly sessionId: string
+  readonly title: string
+  readonly projectId: string
+}
+
+/**
+ * Bind a skill action to its conversation.
+ * @param projectId - project that owns the skill conversation.
+ * @param skillId - real pack id, or the backend's reserved install key.
+ * @param skillName - conversation title supplied by the localized action.
+ * @returns the session to open and its confirmed binding metadata.
+ */
+export async function bindSkillSession(
+  projectId: string,
+  skillId: string,
+  skillName: string,
+): Promise<SkillSessionBinding> {
+  return await adminCall<SkillSessionBinding>('bind-session', { projectId, skillId, skillName })
 }
 
 /** Create an ordinary admin session and bind it to the supervisor operator. */

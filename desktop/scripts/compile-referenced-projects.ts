@@ -165,24 +165,31 @@ function pnpmStep(id: LibraryStepId, label: string, args: readonly string[], nee
 }
 
 /**
- * List the package-library build steps in Host, Desktop, then Client dependency order.
- * Host bundling runs Typert, whose Remote declarations Client compilation imports.
+ * List the package-library build steps in dependency order: Host compilation, the Typert pass,
+ * Client compilation, then the Host, Desktop, and Client bundles. Client compilation reads the
+ * Typert pass's declarations and emits the engine client entry (`lib/types/client/index.js`)
+ * that Host bundling resolves, so a cold tree without prior build outputs builds in one pass;
+ * Host bundling still runs the Typert plugin, which rewrites the same files.
  * @param root - Repository root containing the compiler and bundle configurations.
- * @param faces - `host` lists Host compilation and bundling, which produce the Typert outputs; `all` adds Desktop and Client.
+ * @param faces - `host` lists Host compilation and bundling, which produce the Typert outputs; `all` adds the Typert pass, Client compilation, and the Desktop and Client bundles.
  * @param mode - Check package types by default; benchmark emission defers diagnostics to required full builds.
- * @returns The ordered steps; each step needs its predecessor.
+ * @returns The ordered steps; each step needs its predecessors.
  * @throws If an aggregate configuration is invalid.
  */
 export function libraryBuildSteps(root: string, faces: 'host' | 'all', mode: CompilationMode = 'checked'): LibraryStep[] {
-  const host: LibraryStep[] = [
-    compilerStep(root, 'host', mode, []),
-    pnpmStep('host-bundle', 'Host bundle', ['exec', 'tsdown', '--config-loader', 'native', '--env.DSH_BUILD_FACE', 'host'], ['host-src']),
-  ]
-  if (faces === 'host') return host
+  const hostBundleArgs = ['exec', 'tsdown', '--config-loader', 'native', '--env.DSH_BUILD_FACE', 'host'] as const
+  if (faces === 'host') {
+    return [
+      compilerStep(root, 'host', mode, []),
+      pnpmStep('host-bundle', 'Host bundle', hostBundleArgs, ['host-src']),
+    ]
+  }
   return [
-    ...host,
+    compilerStep(root, 'host', mode, []),
+    typertStep(),
+    compilerStep(root, 'client', mode, ['host-src', 'host-typert']),
+    pnpmStep('host-bundle', 'Host bundle', hostBundleArgs, ['host-src', 'client-src']),
     pnpmStep('desktop-bundle', 'Desktop bundle', ['--filter', 'cadre-heihei-desktop', 'run', 'bundle'], ['host-bundle']),
-    compilerStep(root, 'client', mode, ['desktop-bundle']),
     pnpmStep('client-bundle', 'Client bundle', ['exec', 'tsdown', '--config-loader', 'native', '--env.DSH_BUILD_FACE', 'client'], ['client-src']),
   ]
 }
@@ -225,7 +232,7 @@ function stepFailure(step: LibraryStep, exit: number | NodeJS.Signals | null): E
 }
 
 /**
- * Emit package libraries serially in Host, Desktop, then Client dependency order.
+ * Emit package libraries serially in the {@link libraryBuildSteps} dependency order.
  * @param root - Repository root containing the compiler and bundle configurations.
  * @param hostOnly - Stop after Host compilation and bundling, which produce the Typert outputs.
  * @param mode - Check package types by default; benchmark emission defers diagnostics to required full builds.

@@ -9,7 +9,7 @@
  * check:package` (package-target.ts --check). Doctor runs it first and
  * classifies its output; the remaining checks cover new-machine pitfalls that
  * command does not inspect (engines, disk, mirror/cache coupling, proxy
- * loopback bypass, path hygiene, git dirty state).
+ * loopback bypass, path hygiene, git dirty state, source commit fallback).
  *
  * Output: one line per check, PASS/WARN/FAIL, each failure with a directly
  * pastable fix command. Exit codes: 0 all PASS, 1 at least one WARN (no FAIL),
@@ -416,12 +416,14 @@ const checkPaths = () => {
 }
 
 // ---------------------------------------------------------------------------
-// 9. Git dirty state lands in the artifact manifest.
+// 9. What the artifact manifest records: Git dirty state, and the source
+//    commit with its fallbacks (CADRE_SOURCE_COMMIT, then 'unknown').
 // ---------------------------------------------------------------------------
 const checkGit = () => {
   const git = run('git', ['rev-parse', '--show-toplevel'], { cwd: repo })
   if (!git.ok) {
-    record('git', 'FAIL', `git does not see a repository at ${repo}`, `Install git and clone the source instead of copying it`)
+    // A tree without Git history packages with a fallback commit (P0-3); the
+    // source-commit check below owns that classification and its fix commands.
     return
   }
   const toplevel = git.stdout.trim().split(/\r?\n/).at(-1) ?? resolve(repo, '..')
@@ -433,6 +435,36 @@ const checkGit = () => {
     record('git', 'WARN', `working tree at ${toplevel} is dirty (${lines.length} entries); builds record dshBuildDirty=true and dshBuildCommit in the artifact manifest, which blocks trusted releases`,
       `git -C ${toplevel} status --porcelain  # commit, stash, or restore before packaging a release`)
   }
+}
+
+// Mirrors readDesktopBuildCommit (apps/desktop/scripts/desktop-build-commit.mjs):
+// Git first; without Git history CADRE_SOURCE_COMMIT, else 'unknown'. The
+// not-a-repository / no-commits patterns must stay in sync with that file.
+const checkSourceCommit = () => {
+  const head = run('git', ['rev-parse', 'HEAD'], { cwd: repo })
+  if (head.ok) {
+    record('source-commit', 'PASS', `build commit ${head.stdout.trim()} comes from the Git checkout at ${repo}`, undefined)
+    return
+  }
+  const noHistory = /not a git repository|ambiguous argument|unknown revision/iu.test(head.stderr)
+  if (!noHistory) {
+    const reason = head.error?.code ?? head.stderr.trim().split(/\r?\n/).at(-1) ?? 'unknown error'
+    record('source-commit', 'FAIL', `git could not read HEAD at ${repo}: ${reason}`,
+      `Install git and put it on PATH; packaging reads the build commit with git rev-parse`)
+    return
+  }
+  const override = process.env.CADRE_SOURCE_COMMIT?.trim()
+  if (override === undefined || override === '') {
+    record('source-commit', 'WARN', `${repo} has no Git history and CADRE_SOURCE_COMMIT is unset: unsigned builds record commit 'unknown' with a warning and the client build step then fails without a real commit; release builds fail until the commit is real`,
+      `$env:CADRE_SOURCE_COMMIT='<40-hex commit hash being packaged>'  # or git clone <url> and package inside the clone`)
+    return
+  }
+  if (!/^[0-9a-f]{40}$/u.test(override)) {
+    record('source-commit', 'FAIL', `CADRE_SOURCE_COMMIT is "${override}", which is not a 40-hex commit hash; packaging refuses it in every mode`,
+      `$env:CADRE_SOURCE_COMMIT='<40-hex commit hash being packaged>'`)
+    return
+  }
+  record('source-commit', 'PASS', `build commit ${override} comes from CADRE_SOURCE_COMMIT (the tree at ${repo} has no Git history, so the manifest records dshBuildDirty=false)`, undefined)
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +524,7 @@ checkMirrors()
 checkProxy()
 checkPaths()
 checkGit()
+checkSourceCommit()
 checkPackageCommand()
 
 for (const { id, status, detail, fix } of results) {

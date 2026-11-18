@@ -9,6 +9,22 @@ const MIME: Readonly<Record<string, string>> = {
 }
 const BOOT = '<script>globalThis.__DSH_BOOT_READY__ = Promise.withResolvers()</script>'
 
+/** One retry absorbs a proxy's transient 401/407/502 before startup degrades. */
+export const HOST_AUTH_ATTEMPTS = 2
+
+/** A Host launch exchange that produced no usable cookie. */
+export class DesktopHostAuthenticationError extends Error {
+  /**
+   * @param message - Operation-specific failure without proxy credentials.
+   * @param status - Final HTTP status, or undefined when the transport failed.
+   * @param options - Original transport failure retained for crash reports.
+   */
+  constructor(message: string, readonly status?: number, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'DesktopHostAuthenticationError'
+  }
+}
+
 /**
  * Read an application-owned static asset; the index waits for asynchronous Host injections.
  * @param request - Local application request.
@@ -37,16 +53,55 @@ export async function serveWebDocument(request: Request, root: string): Promise<
 
 /**
  * Exchange the Host launch URL for an authority-bound browser cookie.
+ * The Chromium session follows the launch redirect to the authenticated index;
+ * an unauthenticated response or transport failure is retried once, after which
+ * the typed failure lets startup continue into welcome without treating the
+ * proxy as fatal. `redirect: 'manual'` is deliberately not used: Electron's
+ * `session.fetch` cancels a manual redirect, so a followed 2xx is the success
+ * signal and the cookie comes from the session jar.
  * @param url - Authenticated URL reported by the owned Host process.
+ * @param send - Loopback transport; defaults to Node fetch for direct unit use.
+ * @param cookies - Cookie reader for transports that hide `set-cookie`.
  * @returns Cookie header for requests forwarded to that Host.
  */
-export async function authenticateWebHost(url: string): Promise<string> {
-  const response = await fetch(url, { redirect: 'manual' })
-  const cookie = response.headers.get('set-cookie')
-  await response.body?.cancel()
-  if (response.status !== 303 || cookie === null) throw new Error('Desktop Host authentication failed')
-  const end = cookie.indexOf(';')
-  return end < 0 ? cookie : cookie.slice(0, end)
+export async function authenticateWebHost(
+  url: string,
+  send: (input: string, init?: RequestInit) => Promise<Response> = fetch,
+  cookies: () => Promise<string> = () => Promise.resolve(''),
+): Promise<string> {
+  let status: number | undefined
+  let cause: unknown
+  for (let attempt = 0; attempt < HOST_AUTH_ATTEMPTS; attempt++) {
+    try {
+      const response = await send(url, { credentials: 'include' })
+      const header = cookieHeader(response.headers.get('set-cookie'))
+      await response.body?.cancel()
+      if (response.ok || response.status === 303) {
+        const stored = await cookies()
+        const value = stored === '' ? header : stored
+        if (value !== undefined) return value
+      }
+      status = response.status
+      cause = undefined
+    } catch (error) {
+      status = undefined
+      cause = error
+    }
+  }
+  throw new DesktopHostAuthenticationError('Desktop Host authentication failed', status,
+    cause === undefined ? undefined : { cause })
+}
+
+/**
+ * Reduce a `set-cookie` header to the request cookie value.
+ * @param header - First `set-cookie` header, if any.
+ * @returns Cookie pair without attributes, or undefined when absent/empty.
+ */
+function cookieHeader(header: string | null): string | undefined {
+  if (header === null) return undefined
+  const end = header.indexOf(';')
+  const value = end < 0 ? header : header.slice(0, end)
+  return value === '' ? undefined : value
 }
 
 /**

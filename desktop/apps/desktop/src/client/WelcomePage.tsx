@@ -4,7 +4,7 @@ import type { FormEvent } from 'react'
 import { Toast } from '@deepseek-ai/dsh-client-ui-primitives/src/Toast.tsx'
 import { StateDot } from '@deepseek-ai/dsh-client-ui-primitives/src/StateDot.tsx'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
-import type { WelcomeApi } from '../welcome-api.ts'
+import type { WelcomeApi, WelcomeNotice } from '../welcome-api.ts'
 
 type Page = 'entry' | 'key' | 'account'
 
@@ -17,6 +17,7 @@ type Page = 'entry' | 'key' | 'account'
 export function Welcome({ api }: { api: WelcomeApi }) {
   const { messages: m } = api
   const [expiryNotice, setExpiryNotice] = useState(false)
+  const [backendUnavailable, setBackendUnavailable] = useState(false)
   const [page, setPage] = useState<Page>('entry')
   const pageRef = useRef<Page>('entry')
   const visiblePage = useRef<Page>('entry')
@@ -54,8 +55,10 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     document.documentElement.lang = api.id
     document.title = m.welcomeTitle
     const takeNotice = (): void => {
-      void api.takeNotice().then((notice) => {
-        if (mounted.current && notice === 'session-expired') setExpiryNotice(true)
+      void api.takeNotice().then((notice: WelcomeNotice | undefined) => {
+        if (!mounted.current) return
+        if (notice === 'session-expired') setExpiryNotice(true)
+        else if (notice === 'backend-unavailable') setBackendUnavailable(true)
       }).catch((_closedChannel: unknown) => {
         // A closed Welcome IPC channel must not interrupt the sign-in page.
       })
@@ -174,6 +177,9 @@ export function Welcome({ api }: { api: WelcomeApi }) {
   return <>
     {expiryNotice && <Toast text={m.welcomeSessionExpired} onDone={() => { setExpiryNotice(false) }} />}
     <div className="titlebar" aria-hidden="true" />
+    {backendUnavailable && (
+      <p className="welcome-backend-unavailable" role="alert">{m.welcomeBackendUnavailable}</p>
+    )}
     <main className="welcome" aria-labelledby={heading}>
       <img className="brand" src="assets/welcome-brand.svg" alt={m.welcomeBrand} width="472" height="40" />
       <div id="tagline" className="tagline" hidden={page !== 'entry'}>

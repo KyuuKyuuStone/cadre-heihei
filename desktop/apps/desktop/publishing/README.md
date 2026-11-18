@@ -31,14 +31,14 @@ Publication requires completed release artifacts and explicit operator authoriza
 
 ## Deployment and test release identity
 
-`DSH_DESKTOP_AUTO_UPDATE_ENV` selects `test` or `production` for both the URL embedded during packaging and the later COS upload; an absent value selects `test`. Test packaging requires its HTTPS origin in `DOWNLOAD_TEST_ORIGIN`; production uses `https://download.deepseek.com`. Upload requires the selected bucket in `DOWNLOAD_TEST_COS_BUCKET` or `DOWNLOAD_PROD_COS_BUCKET`. Production feeds use `dsh-desk/feeds/<target>/` and binaries use `dsh-desk/bin/<target>/`. Test releases require `DOWNLOAD_TEST_RELEASE_ID`: 32 lowercase hexadecimal characters inserted as `dsh-desk/<release-id>/feeds/<target>/` and `dsh-desk/<release-id>/bin/<target>/`. YAML references, stable-channel aliases, and blockmaps stay inside that release directory. Targets are `mac-arm64`, `mac-x64`, and `win-x64`.
+`DSH_DESKTOP_AUTO_UPDATE_ENV` selects `test` or `production` for the later COS upload; an absent value selects `test`. Packaging seals the GitHub release source `KyuuKyuuStone/cadre-heihei` into every build, so a build without release credentials still checks that source; a test build that also sets `DOWNLOAD_TEST_ORIGIN` keeps the generic feed used by installed-update qualification. Upload requires the selected bucket in `DOWNLOAD_TEST_COS_BUCKET` or `DOWNLOAD_PROD_COS_BUCKET` and the deployment's HTTPS origin in `DOWNLOAD_TEST_ORIGIN` or `DOWNLOAD_PROD_ORIGIN`. Production feeds use `dsh-desk/feeds/<target>/` and binaries use `dsh-desk/bin/<target>/`. Test releases require `DOWNLOAD_TEST_RELEASE_ID`: 32 lowercase hexadecimal characters inserted as `dsh-desk/<release-id>/feeds/<target>/` and `dsh-desk/<release-id>/bin/<target>/`. YAML references, stable-channel aliases, and blockmaps stay inside that release directory. Targets are `mac-arm64`, `mac-x64`, and `win-x64`.
 
-The update destination and upload credentials follow the selected deployment:
+The upload destination and COS credentials follow the selected deployment:
 
 | Environment | Public origin | COS bucket | COS credentials |
 |---|---|---|---|
 | `test` or unset | `DOWNLOAD_TEST_ORIGIN` | `DOWNLOAD_TEST_COS_BUCKET` | `DOWNLOAD_TEST_COS_SECRET_ID`, `DOWNLOAD_TEST_COS_SECRET_KEY` |
-| `production` | `https://download.deepseek.com` | `DOWNLOAD_PROD_COS_BUCKET` | `DOWNLOAD_PROD_COS_SECRET_ID`, `DOWNLOAD_PROD_COS_SECRET_KEY` |
+| `production` | `DOWNLOAD_PROD_ORIGIN` | `DOWNLOAD_PROD_COS_BUCKET` | `DOWNLOAD_PROD_COS_SECRET_ID`, `DOWNLOAD_PROD_COS_SECRET_KEY` |
 
 Generate a fresh ID for each test release batch with the command below and copy its output into `DOWNLOAD_TEST_RELEASE_ID` in `.env.macos` or `.env.windows`. These Git-ignored platform files own the value; shell variables do not override it, and dotenv values are not shell-expanded. Keep the ID through packaging, upload, and retries; upload rejects a completion record with a different update URL. To test an upgrade between versions, reuse the installed client’s ID for the later version. Production does not use this field.
 
@@ -69,7 +69,7 @@ Windows NSIS uploads require the generated, nonempty `.exe.blockmap` beside the 
 
 ## Fixed installer downloads
 
-Fixed installer downloads use `pnpm run upload:latest:mac:arm64`, `pnpm run upload:latest:mac:x64`, or `pnpm run upload:latest:win:x64` from the repository root. They upload the completed target's DMG or EXE to `desktop/dsh-latest-macos-arm64.dmg`, `desktop/dsh-latest-macos-x64.dmg`, or `desktop/dsh-latest-windows-x64.exe`. Production URLs start with `https://download.deepseek.com/`; test URLs use `DOWNLOAD_TEST_ORIGIN`. Both deployments reuse the target dotenv's deployment, bucket, and credentials, all normal release validation, and the upload audit below. Each command replaces one fixed object without publishing feeds, blockmaps, or release tags. Test fixed downloads are shared across release IDs in the test bucket; the packaged update URL still requires its original release ID. Publication is explicit, including prerelease versions. Deployment infrastructure must configure revalidation or purge cached fixed downloads after replacement. Local loopback tests cover the upload; release operators own real COS and CDN acceptance.
+Fixed installer downloads use `pnpm run upload:latest:mac:arm64`, `pnpm run upload:latest:mac:x64`, or `pnpm run upload:latest:win:x64` from the repository root. They upload the completed target's DMG or EXE to `desktop/dsh-latest-macos-arm64.dmg`, `desktop/dsh-latest-macos-x64.dmg`, or `desktop/dsh-latest-windows-x64.exe`. Production URLs start with the `DOWNLOAD_PROD_ORIGIN` origin; test URLs use `DOWNLOAD_TEST_ORIGIN`. Both deployments reuse the target dotenv's deployment, bucket, and credentials, all normal release validation, and the upload audit below. Each command replaces one fixed object without publishing feeds, blockmaps, or release tags. Test fixed downloads are shared across release IDs in the test bucket; the packaged update URL still requires its original release ID. Publication is explicit, including prerelease versions. Deployment infrastructure must configure revalidation or purge cached fixed downloads after replacement. Local loopback tests cover the upload; release operators own real COS and CDN acceptance.
 
 <a id="credentials"></a>
 

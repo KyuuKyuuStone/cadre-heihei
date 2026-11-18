@@ -1,18 +1,27 @@
-/** Account choice inside the model credential onboarding step. */
-import { useEffect } from 'react'
+/** API Key credential onboarding for users without a stored account credential. */
+import { useEffect, useRef } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-models/client'
 import type { AccountSectionInjected } from './AccountSection.tsx'
-import { SignInDialog } from './SignInDialog.tsx'
 
-/** @param props - onboarding completion, account state and actions. @returns account dialog while signed out. */
-export function AccountOnboarding({ complete, useApiKey, useAccount, useTheme, setOnboarding, showLogin, start, cancel, t }:
+/** Enter the API Key step once for a keyless account; preserve completion for stored account credentials.
+ * @param props - onboarding completion, account state and API Key action.
+ * @returns no account authorization UI.
+ */
+export function AccountOnboarding({ complete, useApiKey, useAccount, setOnboarding }:
   PropsRuntime<'settings.models.sign-in'> & PropsLocale<'settings.account'> & InjectFace<AccountSectionInjected>) {
-  const account = useAccount(value => value)
-  const colorScheme = useTheme(snapshot => snapshot.active.colorScheme)
+  const accountStatus = useAccount(value => value.view?.status)
+  const apiKeyRequested = useRef(false)
   useEffect(() => { setOnboarding(true); return () => { setOnboarding(false) } }, [setOnboarding])
-  useEffect(() => { if (account.view?.status === 'credential-stored') complete() }, [account.view?.status, complete])
-  if (!account.view || account.view.status === 'credential-stored') return null
-  return <SignInDialog account={account} colorScheme={colorScheme} start={start} cancel={cancel} t={t}
-    close={() => { showLogin(false); complete() }} useApiKey={() => { showLogin(false); useApiKey() }} />
+  useEffect(() => {
+    if (accountStatus === 'credential-stored') {
+      apiKeyRequested.current = false
+      complete()
+      return
+    }
+    if (accountStatus !== 'signed-out' || apiKeyRequested.current) return
+    apiKeyRequested.current = true
+    useApiKey()
+  }, [accountStatus, complete, useApiKey])
+  return null
 }

@@ -14,6 +14,7 @@ import { startCosLoopback } from './cos-loopback.ts'
 
 const temporaryDirectories: string[] = []
 const TEST_ORIGIN = 'https://desktop-updates.example.com'
+const PRODUCTION_ORIGIN = 'https://downloads.example.com'
 const TEST_BUCKET = 'test-download-bucket-1250000000'
 const RELEASE_ID = '0123456789abcdef0123456789abcdef'
 const PRODUCTION_BUCKET = 'production-download-bucket-1250000000'
@@ -53,7 +54,7 @@ async function fixture(
   const base = `deepseek-harness-${version}-${os}-${arch}`
   const origin = environment === 'test'
     ? TEST_ORIGIN
-    : 'https://download.deepseek.com'
+    : PRODUCTION_ORIGIN
   await writeFile(join(artifactsRoot, `${target}-release.json`), `${JSON.stringify({
     schemaVersion: 1,
     channel,
@@ -104,6 +105,7 @@ async function fixture(
       : {
         DSH_DESKTOP_UPDATE_CHANNEL: channel,
         DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
+        DOWNLOAD_PROD_ORIGIN: PRODUCTION_ORIGIN,
         DOWNLOAD_PROD_COS_BUCKET: PRODUCTION_BUCKET,
       },
   }
@@ -196,7 +198,7 @@ describe('desktop upload plan', () => {
     expect(load(plan.artifacts[2]!.contents!)).toMatchObject({
       version: '1.2.3',
       files: [{
-        url: 'https://download.deepseek.com/dsh-desk/bin/win-x64/deepseek-harness-1.2.3-win-x64.exe',
+        url: `${PRODUCTION_ORIGIN}/dsh-desk/bin/win-x64/deepseek-harness-1.2.3-win-x64.exe`,
         sha512: digest('signed NSIS executable fixture'),
       }],
     })
@@ -271,7 +273,7 @@ describe('desktop upload plan', () => {
       'nightly.yml',
     ])
     expect(plan).toMatchObject({
-      publicUrl: 'https://download.deepseek.com/dsh-desk/feeds/win-x64/',
+      publicUrl: `${PRODUCTION_ORIGIN}/dsh-desk/feeds/win-x64/`,
       bucket: PRODUCTION_BUCKET,
     })
   })

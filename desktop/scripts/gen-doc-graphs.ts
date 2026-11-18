@@ -264,6 +264,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns isolated per-session replay folds; pressure consumers share immutable revisioned measurements.',
   },
   {
+    key: 'tokenLedger',
+    pkg: 'experimental-token-ledger',
+    title: 'Durable token usage ledger',
+    mode: 'service',
+    note: 'Records provider-reported usage from committed assistant messages as ignorable plugin records, then answers per-Session and process-wide totals.',
+  },
+  {
     key: 'toolResultPruner',
     pkg: 'compaction-tool-result-pruner',
     title: 'Model-free tool-result pruning',

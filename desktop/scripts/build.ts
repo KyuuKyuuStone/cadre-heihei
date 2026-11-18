@@ -68,9 +68,10 @@ export function parseBuildArguments(args: readonly string[]): BuildArguments {
 
 /**
  * Construct the build steps of one scope as a gate dependency graph.
- * Artifact steps keep the serial order native, Host compilation, Host bundle (Typert),
- * Desktop bundle, Client compilation, Client bundle, then Web. The typecheck scope runs Host
- * compilation beside the bundle-free Typert pass, which reads only source, and then Client
+ * Artifact steps keep the serial order native, Host compilation, Typert pass, Client compilation,
+ * Host bundle, Desktop bundle, Client bundle, then Web; Client compilation precedes Host bundling
+ * because the bundle resolves the engine client entry that only the compiler emits. The typecheck
+ * scope runs Host compilation beside the bundle-free Typert pass, which reads only source, and then Client
  * compilation, which needs both outputs; it writes no bundle. In the complete and typecheck
  * scopes each aggregate check waits only for its own face's package compilation; alone, the
  * checks have no predecessors and read whatever declarations already exist. The typecheck scope

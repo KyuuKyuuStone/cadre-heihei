@@ -1,0 +1,34 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write apps/desktop/publishing/github-release/README.md
+/:
+  en: b14122e07f42c396
+  zh: 8d19359772c40c51
+/desktop-github-release-publication:
+  en: 0375b6890144a903
+  zh: fbbdad9cf194be41
+/desktop-github-release-publication/summary:
+  en: a34e642ca75581d7
+  zh: 84b6a85e01f2f0b2
+/desktop-github-release-publication/table-of-contents:
+  en: e3f5e90c4b3f4137
+  zh: 4599a7959ca1a559
+/desktop-github-release-publication/release-rules:
+  en: d788ebda90bb7805
+  zh: 576109361c7c644c
+/desktop-github-release-publication/before-you-publish:
+  en: b03d615a5d9000e0
+  zh: 5ca03c566d771bdc
+/desktop-github-release-publication/publish-with-the-release-script:
+  en: b30fc87449cb78ca
+  zh: 2057af631a77f782
+/desktop-github-release-publication/failure-messages-and-recovery:
+  en: 30debdd994fea915
+  zh: dea8d28353d4868b
+/desktop-github-release-publication/incident-reference-v1-5-3:
+  en: 89668ed87ca279d7
+  zh: 9d8ec6f0d19a930d
+/desktop-github-release-publication/dev-note:
+  en: c20ed86f199914f0
+  zh: 8f50186a6ba345ec

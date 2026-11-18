@@ -42,6 +42,19 @@ describe('desktop build paths', () => {
     expect(arm64.downloads).not.toContain(`${sep}targets${sep}`)
   })
 
+  it('shares the packaging-run journal and honors an explicit build root', () => {
+    const arm64 = desktopTargetBuildPaths('mac-arm64')
+    const windows = desktopTargetBuildPaths('win-x64')
+    expect(arm64.packagingRuns).toBe(windows.packagingRuns)
+    expect(arm64.packagingRuns).not.toContain(`${sep}targets${sep}`)
+    const buildRoot = join(sep, 'scratch', 'build')
+    const overridden = desktopTargetBuildPaths('win-x64', buildRoot)
+    expect(overridden.root).toBe(join(buildRoot, 'targets', 'win-x64'))
+    expect(overridden.unsignedArtifacts).toBe(join(buildRoot, 'targets', 'win-x64', 'unsigned-artifacts'))
+    expect(overridden.packagingRuns).toBe(join(buildRoot, 'packaging-runs'))
+    expect(overridden.downloads).toBe(join(buildRoot, 'downloads'))
+  })
+
   it('resolves the development primary runtime from the build target rather than the host architecture', () => {
     expect(developmentRuntimeDirectory({}, 'darwin', 'arm64'))
       .toContain(join('targets', 'mac-arm64', 'runtime', 'primary-runtime'))

@@ -61,6 +61,44 @@ Surface order is authoritative; replacement nodes can have higher durable seqs t
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxtokenledger--tokenledger"></a>
+
+### `ctx.tokenLedger` — `TokenLedger`
+
+`ctx.tokenLedger`: records provider usage as ignorable plugin records and answers cumulative totals from those records.
+
+Totals are per Session log — live or retired — and process-wide over every Session this process has observed. The process-wide view is intentionally not durable across restarts: a restart recovers per-Session totals from each Session's records when that Session is opened, and the global total starts from the Sessions this process observes.
+
+The plugin is an effect-driven contribution: unloading its fiber removes the projection unit and the event listener, so later turns append no records.
+
+```ts cordis-catalog
+/**
+ * Read one live Session's ledger.
+ * @param session - the live Session to report.
+ * @returns its entries in commit order and their aggregate totals.
+ */
+get(session: Session): TokenLedgerReport
+
+/**
+ * Read a ledger by Session id, including a Session this process already
+ * disposed.
+ * @param sessionId - the Session to report.
+ * @returns the report, or `undefined` when this process never observed it.
+ */
+forSession(sessionId: SessionId): TokenLedgerReport | undefined
+
+/**
+ * Read cumulative totals across every Session this process has observed:
+ * every live Session plus every Session disposed during this process.
+ * @returns the contributing Session count and the process-wide totals.
+ */
+global(): TokenLedgerGlobalReport
+```
+
+Types: [Session](session.md) · [SessionId](core.md)
+
+Source: [`packages/experimental/token-ledger/src/index.ts`](../../packages/experimental/token-ledger/src/index.ts)
+
 <a id="ctxtokenmeter--tokenmeter"></a>
 
 ### `ctx.tokenMeter` — `TokenMeter`

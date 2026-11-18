@@ -1,15 +1,33 @@
 /** Environment variable that selects the Desktop update deployment. */
 export const DESKTOP_AUTO_UPDATE_ENV: 'DSH_DESKTOP_AUTO_UPDATE_ENV'
 
+/** GitHub repository that hosts every Desktop release artifact, including update metadata. */
+export const DESKTOP_GITHUB_REPOSITORY: 'KyuuKyuuStone/cadre-heihei'
+
+/** Environment variable replacing the GitHub repository that hosts Desktop releases. */
+export const DESKTOP_GITHUB_REPOSITORY_ENV: 'DSH_DESKTOP_UPDATE_GITHUB_REPOSITORY'
+
 /** Supported Desktop update deployment. */
 export type DesktopAutoUpdateEnvironment = 'test' | 'production'
 
 /** Directory name of one supported Desktop release target. */
 export type DesktopAutoUpdateTarget = 'mac-arm64' | 'mac-x64' | 'win-x64'
 
-/** Public updater URL and object prefixes for one release target. */
-export interface DesktopAutoUpdateConfig {
+/** GitHub source one packaged application reads its updates from. */
+export interface DesktopGithubUpdateSource {
   readonly environment: DesktopAutoUpdateEnvironment
+  readonly provider: 'github'
+  readonly channel: 'nightly' | 'latest'
+  readonly target: DesktopAutoUpdateTarget
+  readonly owner: string
+  readonly repo: string
+  readonly releaseType: 'prerelease' | 'release'
+}
+
+/** Generic feed the installed-update qualification deployment reads its updates from. */
+export interface DesktopGenericUpdateSource {
+  readonly environment: DesktopAutoUpdateEnvironment
+  readonly provider: 'generic'
   readonly channel: 'nightly' | 'latest'
   readonly target: DesktopAutoUpdateTarget
   readonly origin: string
@@ -18,8 +36,11 @@ export interface DesktopAutoUpdateConfig {
   readonly binaryKeyPrefix: string
 }
 
+/** Update source sealed into one packaged application. */
+export type DesktopUpdateSource = DesktopGithubUpdateSource | DesktopGenericUpdateSource
+
 /** Public updater URL and private COS destination for one upload target. */
-export interface DesktopUploadConfig extends DesktopAutoUpdateConfig {
+export interface DesktopUploadConfig extends DesktopGenericUpdateSource {
   readonly bucket: string
   readonly secretIdEnvName: string
   readonly secretKeyEnvName: string
@@ -65,18 +86,18 @@ export function desktopUpdateMetadataFilename(
 ): string
 
 /**
- * Resolve the public updater URL and object prefixes for one release target.
- * @param env - Packaging or upload environment.
+ * Resolve the update source sealed into one packaged application.
+ * @param env - Packaging environment.
  * @param platform - Target Node.js platform.
  * @param arch - Target Node.js architecture.
- * @returns Resolved updater configuration.
+ * @returns GitHub Releases, or the generic test feed when its loopback origin is configured.
  * @throws When the test deployment lacks a valid HTTPS origin or a 32-character lowercase hexadecimal release ID.
  */
 export function resolveDesktopAutoUpdateConfig(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
   arch: string,
-): DesktopAutoUpdateConfig
+): DesktopUpdateSource
 
 /**
  * Resolve the public updater URL and private COS destination for one upload target.
@@ -84,13 +105,23 @@ export function resolveDesktopAutoUpdateConfig(
  * @param platform - Target Node.js platform.
  * @param arch - Target Node.js architecture.
  * @returns Resolved upload configuration.
- * @throws When the selected deployment lacks a bucket or valid updater configuration.
+ * @throws When the selected deployment lacks a bucket or a valid HTTPS origin.
  */
 export function resolveDesktopUploadConfig(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
   arch: string,
 ): DesktopUploadConfig
+
+/**
+ * Resolve the GitHub repository that receives Desktop releases.
+ * @param env - Packaging or upload environment.
+ * @returns Repository owner and name.
+ * @throws When the configured repository is not an owner/name pair.
+ */
+export function resolveDesktopGithubRepository(
+  env: NodeJS.ProcessEnv,
+): { readonly owner: string, readonly repo: string }
 
 /**
  * Resolve the packaged update channel, defaulting omitted local settings to nightly.

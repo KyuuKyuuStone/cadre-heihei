@@ -79,19 +79,31 @@ describe('ordinary update polling', () => {
     f.checkForUpdates.mockImplementationOnce(() => pending.promise)
     const automatic = f.schedule.check()
     const manual = f.schedule.check(true)
-    try {
-      await vi.advanceTimersByTimeAsync(100_000)
-      expect(f.checkForUpdates).toHaveBeenCalledOnce()
-      expect(vi.getTimerCount()).toBe(0)
-    } finally {
-      pending.reject(new Error('offline'))
-      await Promise.all([automatic, manual])
-    }
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(f.checkForUpdates).toHaveBeenCalledOnce()
+    // Polling holds no timer while a check is pending; only one check deadline per joined caller is armed.
+    expect(vi.getTimerCount()).toBe(2)
+    pending.reject(new Error('offline'))
+    await Promise.all([automatic, manual])
     expect(f.states).toEqual([expect.objectContaining({ phase: 'error', failedOperation: 'check' })])
     await vi.advanceTimersByTimeAsync(19_999)
     expect(f.checkForUpdates).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(1)
     expect(f.checkForUpdates).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers polling when the updater never settles by reporting the stalled check', async () => {
+    const f = fixture()
+    f.checkForUpdates.mockImplementation(() => new Promise(() => {}))
+    const manual = f.schedule.check(true)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(await manual).toMatchObject({ phase: 'error', failedOperation: 'check' })
+    await vi.advanceTimersByTimeAsync(19_999)
+    expect(f.checkForUpdates).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(1)
+    // The abandoned updater promise still holds the library, so polling fails fast instead of hanging again.
+    expect(f.checkForUpdates).toHaveBeenCalledOnce()
+    expect(f.states).toEqual([expect.objectContaining({ phase: 'error', failedOperation: 'check' })])
   })
 
   it('ignores wall-clock changes and lets policy arrival bypass the automatic deadline silently', async () => {

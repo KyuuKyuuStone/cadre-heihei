@@ -52,6 +52,11 @@ export interface Config {
   readonly emailEnabled?: boolean
   /** Approximate token cap for the automatic task-memory prompt block. */
   readonly taskMemoryTokens?: number
+  /**
+   * Inclusive current-context floor for archive compaction; defaults to 60,000 tokens.
+   * A configured value must be a positive safe integer; anything else fails activation.
+   */
+  readonly taskMemoryCompactionThresholdTokens?: number
 }
 
 interface SessionController {
@@ -92,8 +97,29 @@ interface GoalsLike {
   disarm(agent: unknown): GoalViewLike
 }
 
-interface AgentLike { readonly id: string; readonly status?: string }
+interface AgentLike {
+  readonly id: string
+  readonly status?: string
+  readonly session: SessionLike
+  readonly ctx: { get(name: string): unknown }
+}
 interface AgentsLike { get(id: string): AgentLike | undefined }
+
+interface CompactionLike {
+  compactIfNeeded(agent: never, trigger: 'pressure', signal: AbortSignal): Promise<unknown>
+  compactNow(agent: never, signal: AbortSignal): Promise<unknown>
+}
+
+interface SystemPromptLike {
+  context(section: {
+    name: string; order: number; text: (context: { scope?: unknown }) => string; required?: boolean
+  }): () => void
+}
+
+/** Current-context measurement; resolved per event because registration order is not fixed. */
+interface TokenMeterLike {
+  measure(session: SessionLike): { readonly totalTokens: number }
+}
 
 interface HostContext {
   readonly tools: { register(definition: unknown): void }
@@ -102,16 +128,22 @@ interface HostContext {
   readonly sessionQuery?: SessionQueryLike
   readonly agents: AgentsLike
   readonly goals: GoalsLike
-  readonly systemPrompt?: {
-    context(section: {
-      name: string; order: number; text: (context: { scope?: unknown }) => string; required?: boolean
-    }): () => void
-  }
   effect(setup: () => () => void): void
   get?(name: string): unknown
   provide?(name: string, value: unknown): void
   on?(event: string, handler: (session: { readonly id: string }, event: unknown) => void): () => void
   inject?(dependencies: readonly string[], callback: (scope: unknown) => void): void
+}
+
+interface AgentPresetsLike {
+  serviceFor(agent: AgentLike, name: 'compaction'): CompactionLike | undefined
+}
+
+/** Resolve the compaction engine owned by the Agent's retained preset revision. */
+function compactionFor(ctx: HostContext, agent: AgentLike): CompactionLike | undefined {
+  const presets = ctx.get?.('agentPresets') as AgentPresetsLike | undefined
+  if (presets !== undefined) return presets.serviceFor(agent, 'compaction')
+  return agent.ctx.get('compaction') as CompactionLike | undefined
 }
 
 export const name = 'host-governance'
@@ -160,7 +192,8 @@ class LedgerReader {
   }
 
   projects(): string[] {
-    return (this.#db.prepare('SELECT DISTINCT project_id FROM tasks').all() as { project_id?: unknown }[])
+    return (this.#db.prepare(`SELECT DISTINCT project_id FROM tasks
+      UNION SELECT DISTINCT project_id FROM members`).all() as { project_id?: unknown }[])
       .map(row => String(row.project_id))
   }
 
@@ -263,6 +296,20 @@ function numberOrZero(value: unknown): number {
 }
 
 /**
+ * Validate the archive compaction floor from the plugin row.
+ * @param configured - Raw `taskMemoryCompactionThresholdTokens`; unset keeps the 60,000 default.
+ * @returns The configured floor.
+ * @throws When the value is not a positive safe integer; a rejected floor would compact on every idle archive.
+ */
+function resolveCompactionThreshold(configured: number | undefined): number {
+  if (configured === undefined) return 60_000
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    throw new Error(`host-governance: taskMemoryCompactionThresholdTokens must be a positive integer, got ${String(configured)}`)
+  }
+  return configured
+}
+
+/**
  * Register the watchdog, supervisor tools, loopback action route, and goal lifecycle.
  * @param ctx - Host context with sessions, goals, tools, and the prompt channel.
  * @param config - Optional threshold overrides from the plugin row.
@@ -273,10 +320,24 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     console.error('host-governance: CADRE_LEDGER_PATH is unset; stall watchdog is not registered')
     return
   }
+  // Validate the configured floor before acquiring the ledger handle so a bad
+  // plugin row fails activation without leaving resources behind.
+  const compactionThresholdTokens = resolveCompactionThreshold(config.taskMemoryCompactionThresholdTokens)
   const ledger = new LedgerReader(databasePath)
   const projectOf = (sessionId: string): string | undefined => ledger.projects().find(projectId =>
     ledger.members(projectId).some(member =>
       member.sessionId === sessionId && member.role === 'supervisor' && member.state !== 'departed'))
+  // Telemetry needs worker identity too; keep supervisor-only authorization above unchanged.
+  const tokenAttribution = (sessionId: string): { projectId: string; role: string; taskId?: string } | undefined => {
+    for (const projectId of ledger.projects()) {
+      const member = ledger.members(projectId).find(candidate =>
+        candidate.sessionId === sessionId && candidate.state !== 'departed')
+      if (member === undefined) continue
+      const task = ledger.openTask(projectId, sessionId)
+      return { projectId, role: member.role, ...(task === undefined ? {} : { taskId: task.taskId }) }
+    }
+    return undefined
+  }
   const supervisorAgent = (projectId: string): AgentLike | undefined => {
     const member = activeSupervisor(ledger.members(projectId))
     if (member === undefined) return undefined
@@ -334,10 +395,8 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     file: `${databasePath}.token-usage.jsonl`,
     onThreshold: record => {
       appendFileSync(`${databasePath}.plugin.log`, `${JSON.stringify(record)}\n`, 'utf8')
-      const compaction = ctx.get?.('compaction') as {
-        compactIfNeeded(agent: never, trigger: 'pressure', signal: AbortSignal): Promise<unknown>
-      } | undefined
       const agent = ctx.agents.get(record.sessionId)
+      const compaction = agent === undefined ? undefined : compactionFor(ctx, agent)
       if (compaction !== undefined && agent !== undefined) {
         // Automatic compaction at the cross-round threshold; failure only logs
         // and never blocks or asks the user.
@@ -351,32 +410,38 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   ctx.provide?.('tokenUsage', tokenUsage)
   const taskMemory = new TaskMemoryReader(databasePath)
   ctx.provide?.('taskMemory', taskMemory)
-  const memoryCompactionGate = new TaskMemoryCompactionGate()
-  const memoryCompaction = ctx.get?.('compaction') as {
-    compactNow(agent: never, signal: AbortSignal): Promise<unknown>
-  } | undefined
+  const memoryCompactionGate = new TaskMemoryCompactionGate(compactionThresholdTokens)
   const disposeMemoryCompaction = ctx.on === undefined
     ? undefined
     : ctx.on('agent/status', ((payload: { readonly agent: { readonly id: string; readonly status?: string }; readonly status: string }) => {
       const projectId = projectOf(payload.agent.id)
-      if (projectId === undefined || memoryCompaction === undefined) return
+      if (projectId === undefined) return
+      // Resolve per event: tokenMeter is optional and may register after this plugin loads.
+      const tokenMeter = ctx.get?.('tokenMeter') as TokenMeterLike | undefined
+      if (tokenMeter === undefined) return
       const latest = taskMemory.latest(projectId)
-      if (!memoryCompactionGate.shouldCompact(payload.agent.id, latest, payload.status) || latest === undefined) return
       const agent = ctx.agents.get(payload.agent.id)
-      if (agent === undefined) return
+      const memoryCompaction = agent === undefined ? undefined : compactionFor(ctx, agent)
+      if (agent === undefined || memoryCompaction === undefined) return
+      const currentContextTokens = tokenMeter.measure(agent.session).totalTokens
+      if (!memoryCompactionGate.shouldCompact(payload.agent.id, latest, payload.status, currentContextTokens)
+        || latest === undefined) return
       // A completed task's archive is the trigger: force one compaction so the
-      // task's original messages leave the next request. Failures stay visible
-      // and do not mark the gate, so a later idle event retries.
+      // task's original messages leave the next request. Failures and resolved
+      // no-ops do not mark the gate, so a later idle event retries.
       void memoryCompaction.compactNow(agent as never, new AbortController().signal)
-        .then(() => { memoryCompactionGate.markCompacted(payload.agent.id, latest.updatedAt) })
+        .then(result => {
+          if (result !== null) memoryCompactionGate.markCompacted(payload.agent.id, latest.updatedAt)
+        })
         .catch((error: unknown) => {
           console.warn(`host-governance: completed-task compaction failed: ${String(error)}`)
         })
     }) as never)
   ctx.effect(() => {
     const disposers: (() => void)[] = []
-    if (ctx.systemPrompt !== undefined) {
-      disposers.push(ctx.systemPrompt.context({
+    const systemPrompt = ctx.get?.('systemPrompt') as SystemPromptLike | undefined
+    if (systemPrompt !== undefined) {
+      disposers.push(systemPrompt.context({
         name: 'cadre/task-memory', order: 850,
         text: context => {
           const agent = context.scope as { session?: { id?: unknown } } | undefined
@@ -402,23 +467,30 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       if (typed.type === 'user/message') presence.mark(session.id, false)
       if (typed.type === 'assistant/message' && typeof typed.data === 'object' && typed.data !== null) {
         const data = typed.data as { turn?: unknown; usage?: Record<string, unknown> }
-        if (data.usage !== undefined) {
-          const projectId = projectOf(session.id)
-          const task = projectId === undefined ? undefined : ledger.openTask(projectId, session.id)
-          if (projectId !== undefined) {
-            tokenUsage.ingest({
-              projectId, sessionId: session.id,
-              ...(task === undefined ? {} : { taskId: task.taskId }),
-              round: typeof data.turn === 'number' ? data.turn : 1,
-              usage: {
-                inputTokens: numberOrZero(data.usage.inputTokens),
-                outputTokens: numberOrZero(data.usage.outputTokens),
-                totalTokens: numberOrZero(data.usage.totalTokens),
-                cacheReadTokens: numberOrZero(data.usage.cacheReadTokens),
-                cacheWriteTokens: numberOrZero(data.usage.cacheWriteTokens),
-              },
-            })
-          }
+        const attribution = data.usage === undefined ? undefined : tokenAttribution(session.id)
+        if (data.usage !== undefined && attribution !== undefined) {
+          tokenUsage.ingest({
+            ...attribution, sessionId: session.id,
+            round: typeof data.turn === 'number' ? data.turn : 1,
+            usage: {
+              inputTokens: numberOrZero(data.usage.inputTokens),
+              outputTokens: numberOrZero(data.usage.outputTokens),
+              totalTokens: numberOrZero(data.usage.totalTokens),
+              cacheReadTokens: numberOrZero(data.usage.cacheReadTokens),
+              cacheWriteTokens: numberOrZero(data.usage.cacheWriteTokens),
+            },
+          })
+        }
+      }
+      if (typed.type === 'compaction/end' && typeof typed.data === 'object' && typed.data !== null) {
+        const data = typed.data as { turn?: unknown; error?: unknown }
+        const attribution = tokenAttribution(session.id)
+        if (attribution !== undefined) {
+          tokenUsage.ingestCompaction({
+            ...attribution, sessionId: session.id,
+            round: typeof data.turn === 'number' ? data.turn : null,
+            ...(typeof data.error === 'string' ? { error: data.error } : {}),
+          })
         }
       }
       idleReminder.handle(session.id, event as { type?: unknown; data?: unknown })

@@ -136,7 +136,7 @@ describe('desktop macOS release signature', () => {
     }, 'win32')).toThrow(/DSH_DESKTOP_WINDOWS_CER_FILE/u)
   })
 
-  it('isolates unsigned Windows artifacts and omits updater metadata without release credentials', async () => {
+  it('keeps local Windows artifacts separate while embedding the GitHub update source without release credentials', async () => {
     const { createElectronBuilderConfig } = await import('../electron-builder.config.mjs')
     const config = createElectronBuilderConfig({
       DSH_DESKTOP_APP_ID: RELEASE_ENVIRONMENT.DSH_DESKTOP_APP_ID,
@@ -149,11 +149,17 @@ describe('desktop macOS release signature', () => {
     expect(portablePath(config.nsis.include)).toMatch(/\/scripts\/installer\.nsh$/u)
     expect(config).toMatchObject({
       win: { forceCodeSigning: false, signtoolOptions: { sign: undefined } },
-      publish: null,
+      publish: [{
+        provider: 'github',
+        owner: 'KyuuKyuuStone',
+        repo: 'cadre-heihei',
+        channel: 'nightly',
+        releaseType: 'prerelease',
+      }],
     })
   })
 
-  it.each(['arm64', 'x64'])('builds local macOS %s DMGs without release credentials or update metadata', async (arch) => {
+  it.each(['arm64', 'x64'])('builds local macOS %s DMGs without release credentials while embedding the GitHub update source', async (arch) => {
     const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
     const config = createElectronBuilderConfig({
       DSH_DESKTOP_APP_ID: RELEASE_ENVIRONMENT.DSH_DESKTOP_APP_ID,
@@ -163,7 +169,13 @@ describe('desktop macOS release signature', () => {
     expect(config.artifactName).toBe('deepseek-harness-${version}-${os}-${arch}-unsigned.${ext}')
     expect(config.mac).toMatchObject({ identity: '-', forceCodeSigning: false, notarize: false, target: ['dmg'] })
     expect(config.dmg).toMatchObject({ sign: false, writeUpdateInfo: false })
-    expect(config.publish).toBeNull()
+    expect(config.publish).toEqual([{
+      provider: 'github',
+      owner: 'KyuuKyuuStone',
+      repo: 'cadre-heihei',
+      channel: 'nightly',
+      releaseType: 'prerelease',
+    }])
     expect(config.extraMetadata).not.toHaveProperty('dshMandatoryUpdatePolicy')
     await expect(config.afterSign({ electronPlatformName: 'darwin' } as Parameters<typeof config.afterSign>[0])).resolves.toBeUndefined()
     expect(config.artifactBuildCompleted({ file: '/tmp/local-unsigned.dmg' })).toBeUndefined()
@@ -173,7 +185,11 @@ describe('desktop macOS release signature', () => {
     const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
     const config = createElectronBuilderConfig({ ...RELEASE_ENVIRONMENT, DSH_DESKTOP_UNSIGNED: '1' }, 'darwin', 'arm64')
     expect(config.extraMetadata).not.toHaveProperty('dshMandatoryUpdatePolicy')
-    expect(config.publish).toBeNull()
+    expect(config.publish).toEqual([{
+      provider: 'generic',
+      url: 'https://desktop-updates.example.com/dsh-desk/0123456789abcdef0123456789abcdef/feeds/mac-arm64/',
+      channel: 'nightly',
+    }])
   })
 
   it('rejects malformed signing modes', async () => {

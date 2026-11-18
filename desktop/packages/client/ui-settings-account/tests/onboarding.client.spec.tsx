@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-/** The credential onboarding step owns login until dismissal or completion. */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+/** Keyless onboarding enters the API Key step without exposing account authorization. */
+import { StrictMode } from 'react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
@@ -15,9 +16,13 @@ const theme: ThemeSnapshot = {
   preference: 'light', fontSizes: { text: 14, code: 11, terminal: 13 }, fontFamilies: { text: '', code: '', terminal: '' },
   active: { id: 'light', colorScheme: 'light', tokens: {} }, themes: [], revision: 0,
 }
+const signedOut: AccountSnapshot = {
+  view: { status: 'signed-out', attempt: null, links: { usageUrl: '', topUpUrl: '' } },
+  details: undefined, avatar: undefined, failed: false,
+}
 
-it('claims onboarding while loading, offers API key fallback, and completes after login', () => {
-  let account: AccountSnapshot = { view: undefined, details: undefined, avatar: undefined, failed: false }
+function fixture(initial: AccountSnapshot) {
+  let account = initial
   const unused = (): never => { throw new Error('AccountOnboarding does not consume global hooks') }
   const globals: GlobalStandardProps = {
     usePanelInfo: unused, useSessions: unused, useSessionStatus: unused,
@@ -35,20 +40,46 @@ it('claims onboarding while loading, offers API key fallback, and completes afte
     refreshAccount: vi.fn(async () => {}), bonusNoticeShown: vi.fn(), bonusNoticeDismissed: vi.fn(),
     avatarFailed: vi.fn(),
   }
-  const view = render(<AccountOnboarding {...props} />)
-  expect(props.setOnboarding).toHaveBeenCalledExactlyOnceWith(true)
+  return { props, setAccount: (next: AccountSnapshot) => { account = next } }
+}
+
+it('enters API Key once when keyless and never renders account authorization', () => {
+  const state = fixture({ ...signedOut, view: undefined })
+  const view = render(<AccountOnboarding {...state.props} />)
+  expect(state.props.setOnboarding).toHaveBeenCalledExactlyOnceWith(true)
+  expect(state.props.useApiKey).not.toHaveBeenCalled()
   expect(screen.queryByRole('dialog')).toBeNull()
-  account = { ...account, view: { status: 'signed-out', attempt: null, links: { usageUrl: '', topUpUrl: '' } } }
-  view.rerender(<AccountOnboarding {...props} />)
-  fireEvent.click(screen.getByRole('button', { name: en.addApiKey }))
-  expect(props.showLogin).toHaveBeenLastCalledWith(false)
-  expect(props.useApiKey).toHaveBeenCalledOnce()
-  fireEvent.click(screen.getByRole('button', { name: en.close }))
-  expect(props.complete).toHaveBeenCalledOnce()
-  account = { ...account, view: { ...account.view!, status: 'credential-stored' } }
-  view.rerender(<AccountOnboarding {...props} />)
-  expect(props.complete).toHaveBeenCalledTimes(2)
+  state.setAccount(signedOut)
+  view.rerender(<AccountOnboarding {...state.props} />)
+  expect(state.props.useApiKey).toHaveBeenCalledOnce()
+  view.rerender(<AccountOnboarding {...state.props} />)
+  view.rerender(<AccountOnboarding {...state.props} />)
+  expect(state.props.useApiKey).toHaveBeenCalledOnce()
+  expect(state.props.start).not.toHaveBeenCalled()
+  expect(state.props.showLogin).not.toHaveBeenCalled()
   expect(screen.queryByRole('dialog')).toBeNull()
   view.unmount()
-  expect(props.setOnboarding).toHaveBeenLastCalledWith(false)
+  expect(state.props.setOnboarding).toHaveBeenLastCalledWith(false)
+  expect(state.props.useApiKey).toHaveBeenCalledOnce()
+})
+
+it('does not repeat the API Key route across StrictMode effect cleanup', () => {
+  const state = fixture(signedOut)
+  const view = render(<StrictMode><AccountOnboarding {...state.props} /></StrictMode>)
+  view.rerender(<StrictMode><AccountOnboarding {...state.props} /></StrictMode>)
+  expect(state.props.useApiKey).toHaveBeenCalledOnce()
+  expect(state.props.start).not.toHaveBeenCalled()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  view.unmount()
+  expect(state.props.useApiKey).toHaveBeenCalledOnce()
+})
+
+it('completes an existing account credential without entering API Key onboarding', () => {
+  const state = fixture({ ...signedOut, view: { ...signedOut.view!, status: 'credential-stored' } })
+  const view = render(<AccountOnboarding {...state.props} />)
+  view.rerender(<AccountOnboarding {...state.props} />)
+  expect(state.props.complete).toHaveBeenCalledOnce()
+  expect(state.props.useApiKey).not.toHaveBeenCalled()
+  expect(state.props.start).not.toHaveBeenCalled()
+  expect(screen.queryByRole('dialog')).toBeNull()
 })

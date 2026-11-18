@@ -1,10 +1,14 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  CADRE_SOURCE_COMMIT_ENV,
+  CLIENT_BUILD_COMMIT_ENV,
   DESKTOP_BUILD_COMMIT_ENV,
   DESKTOP_BUILD_DIRTY_ENV,
+  UNKNOWN_DESKTOP_BUILD_COMMIT,
   desktopBuildCommitEnvironment,
   readDesktopBuildCommit,
   resolveDesktopBuildCommit,
@@ -13,6 +17,32 @@ import { probeDesktopToolchain } from '../scripts/desktop-toolchain-preflight.ts
 
 const COMMIT = '0123456789abcdef0123456789abcdef01234567'
 const directories: string[] = []
+
+// Ambient Git variables would make `git rev-parse` succeed against some other
+// repository, and a machine-set CADRE_SOURCE_COMMIT would change the fallback,
+// so the fallback tests pin both for their duration.
+const gitEnvironmentNames = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR'] as const
+const inFallbackEnvironment = (override: string | undefined, run: () => void): void => {
+  const savedCommit = process.env[CADRE_SOURCE_COMMIT_ENV]
+  const savedGit = gitEnvironmentNames.map(name => [name, process.env[name]] as const)
+  if (override === undefined) delete process.env[CADRE_SOURCE_COMMIT_ENV]
+  else process.env[CADRE_SOURCE_COMMIT_ENV] = override
+  for (const name of gitEnvironmentNames) delete process.env[name]
+  try { run() } finally {
+    if (savedCommit === undefined) delete process.env[CADRE_SOURCE_COMMIT_ENV]
+    else process.env[CADRE_SOURCE_COMMIT_ENV] = savedCommit
+    for (const [name, value] of savedGit) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+}
+
+const temporaryTree = async (prefix: string): Promise<string> => {
+  const tree = await mkdtemp(join(tmpdir(), prefix))
+  directories.push(tree)
+  return tree
+}
 
 afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
@@ -44,6 +74,71 @@ describe('desktop build commit', () => {
     const packaged = readDesktopBuildCommit(join(import.meta.dirname, '..', '..', '..'))
     expect(packaged.commit).toMatch(/^[0-9a-f]{40}$/u)
     expect(typeof packaged.dirty).toBe('boolean')
+  })
+
+  it('round-trips the unknown fallback commit through a child environment', () => {
+    for (const dirty of [true, false]) {
+      expect(resolveDesktopBuildCommit(desktopBuildCommitEnvironment({ commit: UNKNOWN_DESKTOP_BUILD_COMMIT, dirty })))
+        .toEqual({ commit: UNKNOWN_DESKTOP_BUILD_COMMIT, dirty })
+    }
+  })
+
+  it('falls back to unknown with a warning outside a Git repository', async () => {
+    const tree = await temporaryTree('dsh-no-git-')
+    inFallbackEnvironment(undefined, () => {
+      const warn = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+      let warning = ''
+      try {
+        expect(readDesktopBuildCommit(tree)).toEqual({ commit: UNKNOWN_DESKTOP_BUILD_COMMIT, dirty: false })
+        warning = warn.mock.calls.map(call => String(call[0])).join('')
+      } finally { warn.mockRestore() }
+      expect(warning).toContain(CADRE_SOURCE_COMMIT_ENV)
+    })
+  })
+
+  it('falls back to unknown in a repository without commits', async () => {
+    const tree = await temporaryTree('dsh-unborn-')
+    execFileSync('git', ['init', tree], { stdio: 'ignore' })
+    inFallbackEnvironment(undefined, () => {
+      expect(readDesktopBuildCommit(tree)).toEqual({ commit: UNKNOWN_DESKTOP_BUILD_COMMIT, dirty: false })
+    })
+  })
+
+  it('reads CADRE_SOURCE_COMMIT outside a Git repository, for local and release builds alike', async () => {
+    const tree = await temporaryTree('dsh-no-git-')
+    inFallbackEnvironment(COMMIT, () => {
+      expect(readDesktopBuildCommit(tree)).toEqual({ commit: COMMIT, dirty: false })
+      expect(readDesktopBuildCommit(tree, { requireRealCommit: true })).toEqual({ commit: COMMIT, dirty: false })
+    })
+  })
+
+  it('rejects a CADRE_SOURCE_COMMIT that is not a commit hash', async () => {
+    const tree = await temporaryTree('dsh-no-git-')
+    inFallbackEnvironment('not-a-hash', () => {
+      expect(() => readDesktopBuildCommit(tree)).toThrow(/CADRE_SOURCE_COMMIT must be a commit hash/u)
+    })
+  })
+
+  it('fails a release build whose only commit would be unknown', async () => {
+    const tree = await temporaryTree('dsh-no-git-')
+    inFallbackEnvironment(undefined, () => {
+      expect(() => readDesktopBuildCommit(tree, { requireRealCommit: true })).toThrow(/real source commit/u)
+    })
+  })
+
+  it('hands a real packaged commit to the client build', () => {
+    expect(desktopBuildCommitEnvironment({ commit: COMMIT, dirty: true }, {}))
+      .toMatchObject({ [CLIENT_BUILD_COMMIT_ENV]: COMMIT })
+  })
+
+  it('leaves a client commit the packaging environment already carries untouched', () => {
+    expect(desktopBuildCommitEnvironment({ commit: COMMIT, dirty: false }, { [CLIENT_BUILD_COMMIT_ENV]: 'abc1234' }))
+      .not.toHaveProperty(CLIENT_BUILD_COMMIT_ENV)
+  })
+
+  it('hands no client commit when the packaged commit is unknown', () => {
+    expect(desktopBuildCommitEnvironment({ commit: UNKNOWN_DESKTOP_BUILD_COMMIT, dirty: false }, {}))
+      .not.toHaveProperty(CLIENT_BUILD_COMMIT_ENV)
   })
 })
 
