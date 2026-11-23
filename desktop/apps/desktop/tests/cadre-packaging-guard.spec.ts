@@ -113,11 +113,11 @@ describe('compaction wiring', () => {
   it('keeps the Cadre budget on the effective preset row, not a dead host row', () => {
     const preset = readFileSync('packages/bundle/web-app/presets/standard.patch.yml', 'utf8')
     expect(preset).toMatch(
-      /- id: compaction-basic\n\s+name: '@deepseek-ai\/dsh-compaction-basic'\n\s+config:\n\s+thresholdTokens: 120000/u,
+      /- id: compaction-basic\n\s+name: '@deepseek-ai\/dsh-compaction-basic'\n\s+config:\n\s+thresholdTokens: 727040/u,
     )
     expect(preset).toMatch(/retainTokens:\s*10000/u)
     expect(preset).toMatch(/stepPressureCheck:\s*true/u)
-    expect(preset).toMatch(/stepPressureThresholdTokens:\s*120000/u)
+    expect(preset).toMatch(/stepPressureThresholdTokens:\s*727040/u)
     expect(preset).toMatch(/stepMinToolCallsBetweenChecks:\s*0/u)
 
     const cadre = readFileSync('packages/bundle/cadre-app/cordis.patch.yml', 'utf8')

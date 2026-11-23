@@ -48,7 +48,7 @@ You can verify success by watching the conversation continue past the point wher
 ```yaml
 - name: '@deepseek-ai/dsh-compaction-basic'
   config:
-    thresholdRatio: 0.8
+    thresholdRatio: 0.9
     retainRatio: 0.16
     modelPolicies:
       - provider: local
@@ -59,11 +59,11 @@ You can verify success by watching the conversation continue past the point wher
 
 ### Tuning when condensation starts
 
-All settings are optional. With context window `W`, effective request output cap `O`, and headroom `B`, the default trigger is `floor(min(W × 0.8, W − O − B))`, where `B = 65,536` tokens. Retention keeps the newest 16% of `W − O` verbatim. The table below lists every setting; the generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-compaction-basic) also includes their types.
+All settings are optional. With context window `W`, effective request output cap `O`, and headroom `B`, the default trigger is `floor(min((W − O − B) × 0.9, thresholdTokens))`, where `B = 65,536` tokens and `thresholdTokens` is the optional absolute ceiling. The ratio applies to the usable pressure budget after the output reservation and headroom, so it still delays the trigger when those reservations consume a material part of the window; the `W − O − B` term remains the hard capacity ceiling, so raising the ratio can never push the trigger past the reserved capacity. Retention keeps the newest 16% of `W − O` verbatim. The table below lists every setting; the generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-compaction-basic) also includes their types.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `thresholdRatio` | `0.8` | Window fraction used in `floor(min(W × thresholdRatio, W − O − headroomTokens))`. |
+| `thresholdRatio` | `0.9` | Fraction of `W − O − headroomTokens` in `(0, 1]` used in `floor(min((W − O − headroomTokens) × thresholdRatio, thresholdTokens))`; the capacity term stays the hard ceiling. |
 | `headroomTokens` | `65536` | Additional pressure headroom beyond the routed output reservation; a non-negative integer. |
 | `retainRatio` | `0.16` | Recent conversation kept verbatim as a fraction of `W − O`; mutually exclusive with `retainTokens`. |
 | `retainTokens` | — | Absolute recent-conversation budget kept verbatim; mutually exclusive with `retainRatio` and must be below the resolved threshold. |
@@ -79,6 +79,10 @@ All settings are optional. With context window `W`, effective request output cap
 | `stepMinToolCallsBetweenChecks` | `2` | Minimum current-surface tool results before a step-level check runs. |
 
 Misconfiguration fails fast: unknown settings, duplicate per-model overrides, invalid token counts, both retention forms together, or a retention ratio at least as large as the threshold ratio reject the plugin at load. When the model is first used, `W − O − B` must be positive and the resolved retained budget must be below the trigger. Zero headroom requires an explicit positive `maxTokens`, globally or in that model policy. Small-window deployments must configure headroom that fits their capacity; lower `thresholdRatio` to compact earlier.
+
+### Live deployment settings
+
+A deployment can mount the companion entry `@deepseek-ai/dsh-compaction-basic/settings` (id `compaction-settings` in the Cadre bundle) to expose the volatile `auto` and `thresholdRatio` fields to the Settings service. A successful write persists to the active profile's `cordis.patch.yml` and updates the running engine without remounting its fiber: the next automatic or manual decision reads the new value. The override applies only to the default policy; an exact `modelPolicies` entry for the routed target still wins, and the capacity ceiling (`W − O − headroomTokens`; `thresholdTokens` when set) always caps the ratio. `auto: false` stops proactive checks and overflow retries but keeps `/compact` available. Safety fields — absolute thresholds, both retention budgets, step thresholds, and `maxOverflowRetries` — are not writable through this namespace: the schema omits them, so the Settings write path rejects them, and a ratio outside `(0, 1]` is rejected before persistence.
 
 ### What happens when condensation runs
 
@@ -257,7 +261,7 @@ These limits define when automatic condensation is a poor fit or needs special c
 
 This Dev Note is working context for maintainers and is explicitly non-authoritative; shipped behavior lives in the sections above, the package code, and the linked Agent Notes.
 
-- **Default ratios, undecided** — `thresholdRatio: 0.8` and `retainRatio: 0.16` are fixed defaults; per-model tuning via `modelPolicies` exists, but no corpus-backed guidance on ideal values is recorded.
+- **Default ratios, tunable** — `thresholdRatio: 0.9` and `retainRatio: 0.16` are fixed defaults; per-model tuning via `modelPolicies` exists, but no corpus-backed guidance on ideal values is recorded.
 - **Tokenizer-accurate measurement, deferred** — the token meter's four-characters-per-token heuristic underprices CJK text and JSON Schema documents; exact tokenization remains an open direction for the measurement service.
 - **Overflow recovery beyond canonical errors, undecided** — recovery triggers on `CONTEXT_WINDOW_EXCEEDED` only; other provider-side context failures are not classified.
 

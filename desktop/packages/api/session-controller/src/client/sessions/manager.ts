@@ -824,7 +824,7 @@ export class SessionManager {
   }
 }
 
-/** Apply one list mutation without deriving display order. */
+/** Apply one list mutation, moving only an active row across strictly older neighbors. */
 function applyMutation(summaries: readonly SessionSummary[], mutation: SessionListMutation): SessionSummary[] {
   switch (mutation.kind) {
     case 'upsert':
@@ -863,11 +863,23 @@ function applyMutation(summaries: readonly SessionSummary[], mutation: SessionLi
           || summary.agentAvailable !== mutation.agentAvailable || (mutation.running && summary.blank))
         ? { ...summary, running: mutation.running, agentAvailable: mutation.agentAvailable, blank: summary.blank && !mutation.running }
         : summary)
-    case 'activity':
-      return summaries.map(summary => summary.sessionId === mutation.sessionId
-        && mutation.updatedAt > summary.updatedAt
-        ? { ...summary, updatedAt: mutation.updatedAt }
-        : summary)
+    case 'activity': {
+      const index = summaries.findIndex(summary => summary.sessionId === mutation.sessionId)
+      const existing = summaries[index]
+      if (existing === undefined || mutation.updatedAt <= existing.updatedAt) return [...summaries]
+      const updated = { ...existing, updatedAt: mutation.updatedAt }
+      let target = index
+      // Equal timestamps retain their prior relative order; only the active
+      // row crosses strictly older neighbors, without sorting the list.
+      while (target > 0 && summaries[target - 1]!.updatedAt < mutation.updatedAt) target -= 1
+      if (target === index) {
+        return summaries.map(summary => summary.sessionId === mutation.sessionId ? updated : summary)
+      }
+      const reordered = [...summaries]
+      reordered.splice(index, 1)
+      reordered.splice(target, 0, updated)
+      return reordered
+    }
     case 'engaged':
       return summaries.map(summary => summary.sessionId === mutation.sessionId && summary.blank
         ? { ...summary, blank: false }

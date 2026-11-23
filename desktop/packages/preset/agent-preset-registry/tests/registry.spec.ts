@@ -90,14 +90,14 @@ describe('declarative preset revisions', () => {
   it('publishes preset source metadata in list, document and composition', async () => {
     const ctx = await setup()
     await declare(ctx, { ...contribution('standard'), source: 'deepseek' })
-    await declare(ctx, { ...contribution('cadre'), source: 'cadre' })
+    await declare(ctx, { ...contribution('cadre-skill-admin'), source: 'cadre' })
     expect(await ctx.agentPresets.list()).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'standard', source: 'deepseek' }),
-      expect.objectContaining({ id: 'cadre', source: 'cadre' }),
+      expect.objectContaining({ id: 'cadre-skill-admin', source: 'cadre' }),
     ]))
-    expect(await ctx.agentPresets.readDocument('cadre')).toMatchObject({ agentPreset: 'cadre', source: 'cadre' })
+    expect(await ctx.agentPresets.readDocument('cadre-skill-admin')).toMatchObject({ agentPreset: 'cadre-skill-admin', source: 'cadre' })
     expect(await ctx.agentPresets.compositionInventory()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'cadre', source: 'cadre' }),
+      expect.objectContaining({ id: 'cadre-skill-admin', source: 'cadre' }),
     ]))
   })
 

@@ -92,13 +92,13 @@ describe('search tools over the real subprocess service + the packaged rg', () =
     })
 
     it('reports zero discoveries as No files found', async () => {
-      expect(text(await call('glob', { pattern: '*.nomatch' }, agent()))).toBe('No files found')
+      expect(text(await call('glob', { pattern: '*.nomatch' }, agent()))).toContain('No files found')
     })
 
     it('excludes VCS internals even when the search root IS the VCS directory', async () => {
       // The prune glob alone never matches root-prefixed paths when rg is
       // rooted at .git; the paired contents glob keeps the exclusion airtight.
-      expect(text(await call('glob', { pattern: '*', path: '.git' }, agent()))).toBe('No files found')
+      expect(text(await call('glob', { pattern: '*', path: '.git' }, agent()))).toContain('No files found')
     })
 
     it('classifies an invalid glob as SEARCH_INVALID_PATTERN', async () => {

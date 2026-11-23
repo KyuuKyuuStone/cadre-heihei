@@ -849,7 +849,7 @@ describe('ToolRuntime', () => {
 
       const result = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('c1'), name: 'echo', arguments: {}, agent: fakeAgent() })
       expect(result.isError).toBe(true)
-      expect(result.content[0]).toMatchObject({ text: 'Error: the user rejected tool "echo"' })
+      expect(result.content[0]).toMatchObject({ text: 'Error: APPROVAL_REJECTED: the user rejected tool "echo". Do not retry the same call; use a read-only alternative, ask the user, or dispatch the action to an employee.' })
     })
 
     it('denies with the cancellation reason on cancelled', async () => {
@@ -859,7 +859,7 @@ describe('ToolRuntime', () => {
 
       const result = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('c1'), name: 'echo', arguments: {}, agent: fakeAgent() })
       expect(result.isError).toBe(true)
-      expect(result.content[0]).toMatchObject({ text: 'Error: approval for tool "echo" was cancelled' })
+      expect(result.content[0]).toMatchObject({ text: 'Error: APPROVAL_CANCELLED: approval for tool "echo" was cancelled. Do not retry the same call; use a read-only alternative or ask the user.' })
     })
 
     it('returns ABORTED_BEFORE_DISPATCH when caller cancellation overtakes approval', async () => {
@@ -903,7 +903,7 @@ describe('ToolRuntime', () => {
 
       const result = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('c1'), name: 'echo', arguments: {}, agent: fakeAgent() })
       expect(result.isError).toBe(true)
-      expect(result.content[0]).toMatchObject({ text: 'Error: tool "echo" requires approval, but no approval channel is available' })
+      expect(result.content[0]).toMatchObject({ text: 'Error: APPROVAL_UNAVAILABLE: tool "echo" requires approval, but approval prompts are disabled in this session, so the call is auto-denied (environment policy, not a permission judgment). Do not retry; use read/grep for diagnosis, dispatch execution to an employee, or ask the user to enable approval prompts.' })
     })
 
     it('denies an agent-less execution without asking — nothing to route or audit through', async () => {

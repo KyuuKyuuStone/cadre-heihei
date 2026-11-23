@@ -2,10 +2,10 @@
  * Workspace browser tree row components (figma Cell set 14:3080): pure presentational —
  * all data and callbacks arrive via props. Hover swaps (folder->chevron,
  * time->ellipsis, action buttons) are CSS-only, and a session row's clipped
- * title marquees programmatically while the row is hovered. Workspace row
- * menus are visual-only except Rename/Delete. A Session row's "..." menu and
- * its hover buttons are the `sidebar.workspaces.session.menu.item` and
- * `sidebar.workspaces.session.row.action` lists, rendered through the
+ * title marquees programmatically while the row is hovered. A Workspace row's
+ * "..." menu and a Session row's "..." menu (plus its hover buttons) are the
+ * `sidebar.workspaces.project.menu.item`, `sidebar.workspaces.session.menu.item`,
+ * and `sidebar.workspaces.session.row.action` lists, rendered through the
  * browser's `renderSlot` with the menu's open state as the occurrence's hook
  * context; this package's own actions are entries like any plugin's. The
  * session and workspace hover cards are suppressed while a menu is open.
@@ -15,9 +15,9 @@ import type { RefObject } from 'react'
 import clsx from 'clsx'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  HoverCard, IconArchiveOutlineRegular, IconEditOutlineRegular,
+  HoverCard, IconArchiveOutlineRegular,
   IconEllipsisOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
-  IconNewChatOutlineRegular, IconPinFillRegular, IconTrashOutlineRegular,
+  IconNewChatOutlineRegular, IconPinFillRegular,
   IconTriangleRightFillRegular, IconUnarchiveOutlineRegular, Menu, relativeTime, StateDot, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
@@ -246,16 +246,19 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
   home?: string | undefined
   t: RowTranslate
-} & Partial<Pick<PropsRenderSlots<'sidebar.workspaces.project.row.action'>, 'renderSlot'>>) {
+} & Partial<Pick<PropsRenderSlots<
+  | 'sidebar.workspaces.project.row.action'
+  | 'sidebar.workspaces.project.menu.item'
+>, 'renderSlot'>>) {
   const row = group
   // The ungrouped bucket has no workspace title: its label is dictionary copy.
   const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
+  const projectPath = row.cwd === undefined || row.cwd === '' ? undefined : abbreviateHomePath(row.cwd, home)
   const active = containsCurrentDescendant || (group.expanded && group.containsCurrent)
   const [menuOpen, setMenuOpen] = useState(false)
-  const workspaceMenuItems = [
-    { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
-    { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true },
-  ]
+  // The project-menu entries dismiss the menu through the same open-state
+  // pair the anchor toggles; bind it once per open-state change.
+  const menuOpenState = useMemo((): MenuOpenState => [menuOpen, setMenuOpen], [menuOpen])
   // A product-furnished project action strip replaces the shipped single
   // New Session button; an empty slot keeps the official interaction.
   const projectActions = row.workspaceId === undefined || renderSlot === undefined
@@ -265,6 +268,21 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
       label,
       ...(row.cwd === undefined ? {} : { cwd: row.cwd }),
     })
+  // The shipped rename/delete rows are slot entries like any plugin's; the
+  // browser-local dialog requests travel on the owner share.
+  const projectMenuRows = row.workspaceId === undefined || renderSlot === undefined || actions === undefined
+    ? null
+    : renderSlot(
+      'sidebar.workspaces.project.menu.item',
+      {
+        workspaceId: row.workspaceId,
+        label,
+        ...(row.cwd === undefined ? {} : { cwd: row.cwd }),
+        requestRename: actions.rename,
+        requestDelete: actions.delete,
+      },
+      { hookContext: menuOpenState },
+    )
   const ownRow = (
     <div
       className={clsx(css.projectRow, menuOpen && css.menuOpen)}
@@ -289,9 +307,10 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
         <IconTriangleRightFillRegular className={clsx(css.arrow, row.expanded && css.arrowOpen)} />
       </span>
       <span className={css.projectText}>
-        <span className={css.title}>{label}</span>
-        {row.cwd !== undefined && row.cwd !== '' && (
-          <span className={css.projectPath}>{abbreviateHomePath(row.cwd, home)}</span>
+        <span className={css.title} title={label}>{label}</span>
+        {/* The path cell clips from the left; bdi keeps the path segments LTR. */}
+        {projectPath !== undefined && (
+          <span className={css.projectPath} title={projectPath}><bdi dir="ltr">{projectPath}</bdi></span>
         )}
       </span>
       <span className={css.rowActions}>
@@ -299,16 +318,6 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
           <Menu
             open={menuOpen}
             onClose={() => { setMenuOpen(false) }}
-            items={workspaceMenuItems}
-            onSelect={(id) => {
-              setMenuOpen(false)
-              // Unknown ids leave before the dispatch: a future menu row must
-              // not inherit the destructive branch as an else fallback.
-              /* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
-              if (id !== 'rename' && id !== 'delete') return
-              if (id === 'rename') actions.rename()
-              else actions.delete()
-            }}
             portal
             closeOnPointerLeave
             anchor={(
@@ -321,7 +330,9 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
                 <IconEllipsisOutlineRegular />
               </button>
             )}
-          />
+          >
+            {projectMenuRows}
+          </Menu>
         )}
         {projectActions ?? (
           <Tooltip label={t('actions.newSession')} shortcutKeys={newShortcut?.keys} side="bottom" align="end" delayMs={500} portal>
@@ -346,7 +357,7 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
       anchor={ownRow}
       content={<WorkspaceHoverContent
         label={row.label}
-        cwd={row.cwd === undefined ? undefined : abbreviateHomePath(row.cwd, home)}
+        cwd={projectPath}
         createdAt={row.createdAt}
         t={t}
       />}

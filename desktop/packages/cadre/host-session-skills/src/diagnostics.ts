@@ -76,13 +76,8 @@ export interface AdminDiagnostics {
     readonly serviceAvailable: boolean
     readonly toolsPluginExpected: boolean
   }
-  /** Skill-pack health summary; omitted when no pack snapshot was supplied. */
-  readonly packs?: {
-    readonly total: number
-    readonly ok: number
-    readonly warning: number
-    readonly error: number
-  }
+  /** Per-pack health with aggregate summary; omitted when no pack snapshot was supplied. */
+  readonly packs?: PackHealth
   /** Whether the conversational tools can reach a remote skill search. */
   readonly remoteSearch: { readonly available: boolean }
 }
@@ -126,7 +121,7 @@ export async function collectAdminDiagnostics(input: DiagnosticsInput): Promise<
       serviceAvailable: input.adminService !== undefined,
       toolsPluginExpected: true,
     },
-    ...(health === undefined ? {} : { packs: health.summary }),
+    ...(health === undefined ? {} : { packs: health }),
     remoteSearch: { available: input.remoteSearchAvailable === true },
   }
 }

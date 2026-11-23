@@ -104,7 +104,7 @@ test('supervisor reads the real on-disk catalog over real HTTP', async () => {
   expect(beta.origin).toBe('builtin')
 })
 
-test('a session rostered nowhere reads the catalog and echoes a set without any durable write', async () => {
+test('a session rostered nowhere reads the catalog and persists its selection in session_skills', async () => {
   const listReply = await postJson(origin, '/cadre/skills/catalog', { projectId: 'p1', actorSessionId: 's-off' })
   expect(listReply.status).toBe(200)
   const entries = listReply.result as CatalogEntry[]
@@ -123,12 +123,14 @@ test('a session rostered nowhere reads the catalog and echoes a set without any 
   try {
     expect(verify.prepare('SELECT skills_json FROM members WHERE project_id = ? AND session_id = ?')
       .get('p1', 's-off')).toBeUndefined()
+    expect(verify.prepare('SELECT skills_json FROM session_skills WHERE session_id = ?')
+      .get('s-off')).toMatchObject({ skills_json: '["pack-alpha"]' })
   } finally {
     verify.close()
   }
 
   const again = await postJson(origin, '/cadre/skills/catalog', { projectId: 'p1', actorSessionId: 's-off' })
-  expect((again.result as CatalogEntry[]).every(entry => entry.selected === false)).toBe(true)
+  expect((again.result as CatalogEntry[]).find(entry => entry.id === 'pack-alpha')?.selected).toBe(true)
 })
 
 test('roster boundaries reject departed, cross-project, and unauthorized cross-member access', async () => {

@@ -24,7 +24,7 @@ import type { ToolRun } from '../src/conversation-tools.ts'
 
 const TOOL_NAMES = [
   'skill_catalog', 'skill_search', 'skill_preview', 'skill_install',
-  'skill_create', 'skill_check', 'skill_audit', 'skill_plan',
+  'skill_create', 'skill_check', 'skill_set_categories', 'skill_audit', 'skill_plan',
 ]
 
 /** The shipped preset ids the host row must serve, with their product names. */
@@ -33,7 +33,6 @@ const PRESETS = [
   { preset: 'ptc', label: 'PTC 模式' },
   { preset: 'minimal', label: '极简模式' },
   { preset: 'cordis', label: '创造模式' },
-  { preset: 'cadre', label: 'Cadre 对话' },
 ]
 
 let root: string | undefined

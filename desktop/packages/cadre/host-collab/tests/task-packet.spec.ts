@@ -47,6 +47,20 @@ describe('task packet', () => {
     ]))
   })
 
+  it('keeps a realistic 30-clause acceptance spec intact (1.6.6-test.20261120.4 bounds)', () => {
+    const clauses = Array.from({ length: 30 }, (_, index) =>
+      `验收条款 ${String(index + 1)}：${'细节'.repeat(150)}`)
+    const normalized = normalizeTaskPacket({ goal: '字段级规格', acceptance: clauses }, { title: 't', body: 'b' })
+    expect(normalized.packet.acceptance).toEqual(clauses)
+    expect(normalized.warnings).toEqual([])
+    // One clause past the raised item bound still truncates loudly.
+    const over = normalizeTaskPacket({
+      goal: 'g', acceptance: ['x'.repeat(TASK_PACKET_LIMITS.itemChars + 1)],
+    }, { title: 't', body: 'b' })
+    expect(over.packet.acceptance[0]!.length).toBe(TASK_PACKET_LIMITS.itemChars)
+    expect(over.warnings).toContain('acceptance-truncated')
+  })
+
   it('builds employee context from the packet and one turn only, with ambiguity rules', () => {
     const { packet } = normalizeTaskPacket({
       goal: '目标', constraints: ['约束'], fileRefs: ['src/a.ts'],
@@ -56,9 +70,9 @@ describe('task packet', () => {
     expect(context).toContain('【员工任务包】')
     expect(context).toContain('目标：目标')
     expect(context).toContain('【上一轮摘要】\n上轮结论')
-    expect(context).toContain('先向主管提问')
-    expect(context).toContain('不要读取、推断或复述主管完整历史')
-    expect(context).not.toContain('主管完整历史原文')
+    expect(context).toContain('先向组长提问')
+    expect(context).toContain('不要读取、推断或复述组长完整历史')
+    expect(context).not.toContain('组长完整历史原文')
     expect(ambiguityAction(599_999)).toBe('none')
     expect(ambiguityAction(600_000)).toBe('remind')
     expect(ambiguityAction(1_800_000)).toBe('escalate')

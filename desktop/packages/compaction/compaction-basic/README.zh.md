@@ -48,7 +48,7 @@ kind: "package-reference"
 ```yaml
 - name: '@deepseek-ai/dsh-compaction-basic'
   config:
-    thresholdRatio: 0.8
+    thresholdRatio: 0.9
     retainRatio: 0.16
     modelPolicies:
       - provider: local
@@ -59,11 +59,11 @@ kind: "package-reference"
 
 ### 调整压缩开始的时机
 
-所有设置都可选。设上下文窗口为 `W`、生效请求输出上限为 `O`、余量为 `B`，默认触发阈值为 `floor(min(W × 0.8, W − O − B))`，其中 `B = 65,536` tokens。逐字保留的近期历史预算仍为 `W − O` 的 16%。下表列出全部设置；生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-compaction-basic)还包含字段类型。
+所有设置都可选。设上下文窗口为 `W`、生效请求输出上限为 `O`、余量为 `B`，默认触发阈值为 `floor(min((W − O − B) × 0.9, thresholdTokens))`，其中 `B = 65,536` tokens，`thresholdTokens` 是可选的绝对上限。比例作用于扣除输出预留和余量后的可用压力预算，因此当这些预留占用窗口的较大比例时，提高比例仍会推迟触发；`W − O − B` 项仍是硬容量上限，所以提高比例不会把触发点推过已预留的容量。逐字保留的近期历史预算仍为 `W − O` 的 16%。下表列出全部设置；生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-compaction-basic)还包含字段类型。
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
-| `thresholdRatio` | `0.8` | 用于 `floor(min(W × thresholdRatio, W − O − headroomTokens))` 的窗口比例。 |
+| `thresholdRatio` | `0.9` | 用于 `floor(min((W − O − headroomTokens) × thresholdRatio, thresholdTokens))` 的可用压力预算比例，取值于 `(0, 1]`；容量项仍是硬上限。 |
 | `headroomTokens` | `65536` | 路由请求输出预留之外的额外压力余量；必须为非负整数。 |
 | `retainRatio` | `0.16` | 以 `W − O` 的一部分表示逐字保留的近期对话；与 `retainTokens` 互斥。 |
 | `retainTokens` | — | 逐字保留的近期对话绝对预算；与 `retainRatio` 互斥，并且必须低于已解析阈值。 |
@@ -76,6 +76,10 @@ kind: "package-reference"
 | `auto` | `true` | 启用自动压缩与溢出恢复；设为 `false` 则仅手动执行。 |
 
 配置错误会快速失败：未知设置、重复的按模型覆盖、无效 token 数、两种保留形式同时出现，或保留比例不小于阈值比例，都会在加载时拒绝插件。模型首次使用时，`W − O − B` 必须为正，且解析出的保留预算必须低于触发阈值。余量为零时，必须在全局或对应模型策略中显式设置正数 `maxTokens`。小窗口部署必须配置适合其容量的余量；降低 `thresholdRatio` 可以提早压缩。
+
+### 部署级实时设置
+
+部署可以挂载配套入口 `@deepseek-ai/dsh-compaction-basic/settings`（Cadre 包中的 id 为 `compaction-settings`），把 volatile 的 `auto` 与 `thresholdRatio` 暴露给 Settings 服务。写入成功后，值持久化到活动 profile 的 `cordis.patch.yml`，并在不重挂载 fiber 的情况下更新运行中的引擎：下一次自动或手动决策读取新值。覆盖只作用于默认策略；被路由目标若有精确的 `modelPolicies` 条目，该条目仍然优先，且容量硬上限（`W − O − headroomTokens`；设置 `thresholdTokens` 时取该值）始终限制比例。`auto: false` 停止主动检查与溢出重试，但 `/compact` 仍可用。安全字段——绝对阈值、两种保留预算、步级阈值与 `maxOverflowRetries`——不能通过该命名空间写入：这些字段不在 schema 中，Settings 写入路径会拒绝它们；`(0, 1]` 之外的比例也会在持久化前被拒绝。
 
 ### 压缩运行时会发生什么
 
@@ -254,7 +258,7 @@ Rules:
 
 本开发备注是维护者的工作上下文，明确不具权威性；已交付行为以上文、包代码与所链接的 Agent Note 为准。
 
-- **默认比例，尚未决定**——`thresholdRatio: 0.8` 与 `retainRatio: 0.16` 是固定默认值；存在通过 `modelPolicies` 进行的按模型调优，但没有基于语料的理想值指引记录。
+- **默认比例，可调**——`thresholdRatio: 0.9` 与 `retainRatio: 0.16` 是固定默认值；存在通过 `modelPolicies` 进行的按模型调优，但没有基于语料的理想值指引记录。
 - **tokenizer 精确测量，暂缓**——token meter 每 token 四字符的启发式对 CJK 文本与 JSON Schema 定价偏低；精确 token 化仍是测量服务的开放方向。
 - **规范错误之外的溢出恢复，尚未决定**——恢复仅针对 `CONTEXT_WINDOW_EXCEEDED` 触发；其他提供方侧上下文失败不参与分类。
 

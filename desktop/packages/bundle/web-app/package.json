@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-web-app",
   "description": "The dsh browser-surface bundle: the web patch layer over dsh-base plus the runtime glue plugin (frontend dist serving, bash runtime variables, URL line)",
-  "version": "1.6.2",
+  "version": "1.6.6",
   "publishConfig": {
     "access": "public"
   },
@@ -39,7 +39,6 @@
     "presets/ptc.patch.yml",
     "presets/minimal.patch.yml",
     "presets/cordis.patch.yml",
-    "presets/cadre.patch.yml",
     "lib/public-url-*.js",
     "lib/types/**/*.d.ts"
   ],
@@ -51,8 +50,7 @@
         "./presets/standard.patch.yml",
         "./presets/ptc.patch.yml",
         "./presets/minimal.patch.yml",
-        "./presets/cordis.patch.yml",
-        "./presets/cadre.patch.yml"
+        "./presets/cordis.patch.yml"
       ]
     }
   },
@@ -109,6 +107,7 @@
     "@deepseek-ai/dsh-client-ui-settings-plugins": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-shell": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-agent-loop": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-settings-compaction": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-subagent": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-web-search": "workspace:*",
     "@deepseek-ai/dsh-client-ui-sidebar": "workspace:*",

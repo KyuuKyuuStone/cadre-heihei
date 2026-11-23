@@ -6,7 +6,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button, Checkbox, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CadreRosterState, CadreSessionsState } from './CadreSidebar.tsx'
+import { zhTranslate, type SidebarKey } from './locales.ts'
 import css from './CadreSkills.module.css'
+
+/** Locale seat for transport failure copy; defaults to the zh dictionary. */
+type SkillTranslate = (key: SidebarKey, params?: Record<string, unknown>) => string
 
 export interface CadreSkillEntry {
   readonly id: string
@@ -14,6 +18,8 @@ export interface CadreSkillEntry {
   readonly description: string
   readonly origin?: 'builtin' | 'installed'
   readonly roles: readonly string[]
+  /** Admin-assigned topic tags; one pack may carry several. */
+  readonly categories?: readonly string[]
   readonly tokenEstimate: number
   readonly tools: readonly string[]
   readonly source: string
@@ -76,6 +82,7 @@ export class SkillOperationError extends Error {
 async function skillCall(
   method: 'catalog' | 'set' | 'preview' | 'remove',
   body: Record<string, unknown>,
+  t: SkillTranslate = zhTranslate,
 ): Promise<unknown> {
   const response = await fetch(`/cadre/skills/${method}`, {
     method: 'POST',
@@ -86,7 +93,7 @@ async function skillCall(
   if (!response.ok || result.ok !== true) {
     throw new SkillOperationError(
       result.code ?? `HTTP_${String(response.status)}`,
-      result.message ?? '请求失败',
+      result.message ?? t('skills.requestFailed'),
       result.remediation,
     )
   }
@@ -94,32 +101,32 @@ async function skillCall(
 }
 
 export async function fetchSkillCatalog(
-  projectId: string, actorSessionId: string, targetSessionId?: string, locale?: string,
+  projectId: string, actorSessionId: string, targetSessionId?: string, locale?: string, t: SkillTranslate = zhTranslate,
 ): Promise<CadreSkillEntry[]> {
   const result = await skillCall('catalog', {
     projectId, actorSessionId,
     ...(targetSessionId === undefined ? {} : { targetSessionId }),
     ...(locale === undefined ? {} : { locale }),
-  })
+  }, t)
   return Array.isArray(result) ? result as CadreSkillEntry[] : []
 }
 
 export async function saveMemberSkills(
-  projectId: string, actorSessionId: string, targetSessionId: string, skills: readonly string[],
+  projectId: string, actorSessionId: string, targetSessionId: string, skills: readonly string[], t: SkillTranslate = zhTranslate,
 ): Promise<void> {
-  await skillCall('set', { projectId, actorSessionId, targetSessionId, skills })
+  await skillCall('set', { projectId, actorSessionId, targetSessionId, skills }, t)
 }
 
 export async function previewSkill(
-  projectId: string, actorSessionId: string, packId: string,
+  projectId: string, actorSessionId: string, packId: string, t: SkillTranslate = zhTranslate,
 ): Promise<CadreSkillPreview> {
-  return await skillCall('preview', { projectId, actorSessionId, packId }) as CadreSkillPreview
+  return await skillCall('preview', { projectId, actorSessionId, packId }, t) as CadreSkillPreview
 }
 
 export async function removeSkillFromLibrary(
-  projectId: string, actorSessionId: string, packId: string,
+  projectId: string, actorSessionId: string, packId: string, t: SkillTranslate = zhTranslate,
 ): Promise<void> {
-  await skillCall('remove', { projectId, actorSessionId, packId, confirm: true })
+  await skillCall('remove', { projectId, actorSessionId, packId, confirm: true }, t)
 }
 
 export function skillTokenTotal(entries: readonly CadreSkillEntry[], selected: readonly string[]): number {
@@ -202,6 +209,7 @@ function SkillEditor({
         request.actorSessionId,
         request.sessionId,
         navigator.language,
+        t,
       )).filter(entry => entry.roles.includes(request.role))
       setEntries(next)
       setSelected(next.filter(entry => entry.selected || entry.id === selectId).map(entry => entry.id))
@@ -210,7 +218,7 @@ function SkillEditor({
     } finally {
       setBusy(false)
     }
-  }, [request.projectId, request.actorSessionId, request.sessionId, request.role])
+  }, [request.projectId, request.actorSessionId, request.sessionId, request.role, t])
 
   useEffect(() => { void load() }, [load])
 
@@ -221,7 +229,7 @@ function SkillEditor({
   const openPreview = async (id: string): Promise<void> => {
     setError(null)
     try {
-      setPreview(await previewSkill(projectId, request.actorSessionId, id))
+      setPreview(await previewSkill(projectId, request.actorSessionId, id, t))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -232,7 +240,7 @@ function SkillEditor({
     setError(null)
     setNotice(null)
     try {
-      await saveMemberSkills(projectId, request.actorSessionId, request.sessionId, selected)
+      await saveMemberSkills(projectId, request.actorSessionId, request.sessionId, selected, t)
       setNotice(t('skills.notice.saved'))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))

@@ -2,6 +2,13 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* border-box: the 24px inset rides INSIDE the capped width. Content-box
+     made the page 48px wider than the conversation scrollport, clipping the
+     trailing filter chip and the save button at narrow windows (the 880px
+     cap only hid the overflow once the port grew past 928px). Mirrors
+     CadreSkillLibrary `.page`. */
+  box-sizing: border-box;
+  min-width: 0;
   width: min(100%, 880px);
   margin: 0 auto;
   padding: 24px;
@@ -41,6 +48,18 @@
   flex-wrap: wrap;
 }
 
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filters > :first-child {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
 .count {
   padding: 2px 8px;
   border: 0.5px solid var(--dsw-alias-border-l1);
@@ -59,7 +78,7 @@
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
   gap: 12px;
   list-style: none;
   margin: 0;
@@ -154,29 +173,21 @@
   margin: 0;
 }
 
-.preview {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 12px;
-  background: var(--dsw-alias-bg-layer-1);
+.previewDialog {
+  width: min(720px, 100%);
+  max-height: 100%;
 }
 
-.previewHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  line-height: 16px;
+.previewContent {
+  min-height: 0;
+  overflow: auto;
 }
 
 .previewBody {
   margin: 0;
-  max-height: 240px;
-  overflow: auto;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--dsw-font-mono);
   font-size: 12px;
   line-height: 20px;
 }
@@ -213,4 +224,75 @@
   .cards {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.categoryCards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.categoryRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.categoryRow > .categoryCards {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.categoryLabel {
+  flex: none;
+  margin-top: 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.categoryCard {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.categoryCard:hover {
+  border-color: var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.categoryCard:focus-visible {
+  outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+
+.categoryCardSelected {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.categoryCardName {
+  font-weight: 500;
+}
+
+.categoryCardCount {
+  padding: 0 6px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
 }

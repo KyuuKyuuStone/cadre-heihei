@@ -61,3 +61,4 @@ LangString INSTALLER_EXTRACT_UNSAVED ${LANG_ENGLISH} "The full report could not 
 LangString INSTALLER_EXTRACT_UNSAVED ${LANG_SIMPCHINESE} "无法保存完整错误报告，请使用“复制错误信息”保留。"
 LangString INSTALLER_EXTRACT_COPIED ${LANG_ENGLISH} "Error details were copied to the clipboard."
 LangString INSTALLER_EXTRACT_COPIED ${LANG_SIMPCHINESE} "错误信息已复制到剪贴板。"
+

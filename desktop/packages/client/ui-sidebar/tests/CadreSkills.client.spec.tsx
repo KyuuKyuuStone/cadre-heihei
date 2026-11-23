@@ -8,7 +8,7 @@ import { zh } from '../src/client/locales.ts'
 const REQUEST: CadreSkillsRequest = { sessionId: 'w1', actorSessionId: 'sup', projectId: 'p1', label: '员工', role: 'worker', token: 1 }
 const ENTRIES = [
   { id: 'worker-only', name: '员工技能', description: '只给员工', roles: ['worker'], tokenEstimate: 10, tools: [], source: 's', author: '前端作者', homepage: 'https://example.test/worker', license: 'MIT', selected: true },
-  { id: 'sup-only', name: '主管技能', description: '只给主管', roles: ['supervisor'], tokenEstimate: 20, tools: [], source: 's', license: 'MIT', selected: false },
+  { id: 'sup-only', name: '组长技能', description: '只给组长', roles: ['supervisor'], tokenEstimate: 20, tools: [], source: 's', license: 'MIT', selected: false },
 ]
 
 const t = ((key: keyof typeof zh, params?: Record<string, unknown>) => {
@@ -46,7 +46,7 @@ describe('Cadre skill settings', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillSettingsDialog {...dialogProps()} />)
     expect(await screen.findByText('员工技能')).toBeTruthy()
-    expect(screen.queryByText('主管技能')).toBeNull()
+    expect(screen.queryByText('组长技能')).toBeNull()
     expect(screen.getByText(/已选技能 token 估算合计：10/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '预览' }))
     expect(await screen.findByText('# 员工技能正文')).toBeTruthy()

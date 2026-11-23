@@ -90,17 +90,17 @@ it('replaces the default preset group tag with its new-task default status', () 
   expect(within(standard).queryByText(en.setDefault)).toBeNull()
   expect(within(rowFor('mine')).getByText(en.customGroup)).toBeTruthy()
 })
-it('keeps Cadre in the built-in group, removes per-card upstream badges, and attributes at the footer', () => {
+it('keeps shipped presets in the built-in group without upstream badges and attributes at the footer', () => {
   view({ rows: [
-    { id: 'cadre', name: 'Cadre', isDefault: true, source: 'cadre' },
-    { id: 'standard', isDefault: false, source: 'deepseek' },
+    { id: 'standard', isDefault: true },
+    { id: 'cordis', isDefault: false, source: 'deepseek' },
   ] })
   const builtIn = screen.getByRole('heading', { name: en.builtInGroup }).closest('section')!
-  expect(within(builtIn).getByText('Cadre')).toBeTruthy()
-  expect(within(rowFor('cadre')).getByText(en.cadreDefault)).toBeTruthy()
-  expect(within(rowFor('cadre')).queryByText(en.customGroup)).toBeNull()
-  expect(within(rowFor('standard')).queryByText(/DeepSeek Harness/)).toBeNull()
-  expect(within(rowFor('cadre')).getByText('Cadre', { selector: 'span' }).getAttribute('title')).toBe('Cadre')
+  expect(within(builtIn).getByText(en.presetStandardName)).toBeTruthy()
+  expect(within(rowFor('standard')).getByText(en.inUse)).toBeTruthy()
+  expect(within(rowFor('standard')).queryByText(en.customGroup)).toBeNull()
+  expect(within(rowFor('cordis')).queryByText(/DeepSeek Harness/)).toBeNull()
+  expect(within(rowFor('standard')).getByText(en.presetStandardName, { selector: 'span' }).getAttribute('title')).toBe(en.presetStandardName)
   const attribution = screen.getByText(en.attribution, { exact: false }).closest('footer')
   expect(attribution).not.toBeNull()
   expect(within(attribution!).getByText(en.attributionLink).getAttribute('href'))

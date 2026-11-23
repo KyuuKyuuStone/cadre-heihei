@@ -3,6 +3,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CadreReportNodeView } from '../src/client/chat/CadreReportCard.tsx'
+import { zh } from '../src/client/locale.ts'
+
+/** zh translate double: verbatim dictionary lookup with {name} substitution. */
+const t = ((key: keyof typeof zh, params?: Record<string, unknown>) => {
+  let text: string = zh[key]
+  for (const [name, value] of Object.entries(params ?? {})) {
+    text = text.split(`{${name}}`).join(String(value))
+  }
+  return text
+}) as never
 
 const CONTENT = [
   '【员工汇报】',
@@ -39,7 +49,7 @@ afterEach(() => {
 
 describe('CadreReportNodeView', () => {
   it('renders one compact line by default, hiding the full body and actions', () => {
-    render(<CadreReportNodeView content={CONTENT} projectId="ws-1" sessionId="s-supervisor" />)
+    render(<CadreReportNodeView content={CONTENT} projectId="ws-1" sessionId="s-supervisor" t={t} />)
     expect(screen.getByText('员工汇报')).toBeTruthy()
     expect(screen.getByText('task-fff2')).toBeTruthy()
     expect(screen.getByText(/已完成折叠行实现/)).toBeTruthy()
@@ -49,22 +59,22 @@ describe('CadreReportNodeView', () => {
   })
 
   it('expands to the full report with deliverables and acceptance actions, then collapses', async () => {
-    render(<CadreReportNodeView content={CONTENT} projectId="ws-1" sessionId="s-supervisor" />)
+    render(<CadreReportNodeView content={CONTENT} projectId="ws-1" sessionId="s-supervisor" t={t} />)
     fireEvent.click(screen.getByRole('button', { name: '展开' }))
     expect(screen.getByText(/详情：折叠态只占一行/)).toBeTruthy()
     expect(screen.getByText('src/client/a.ts')).toBeTruthy()
     expect(screen.getByText('src/client/b.ts')).toBeTruthy()
-    await waitFor(() => { expect(screen.getByText('待主管审')).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByText('待组长审')).toBeTruthy() })
     expect(screen.getByRole('button', { name: '打回重做' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '收起' }))
     expect(screen.queryByText(/详情：折叠态只占一行/)).toBeNull()
   })
 
   it('remembers an expanded report across a remount', () => {
-    const first = render(<CadreReportNodeView content={CONTENT} projectId="ws-1" sessionId="s-supervisor" />)
+    const first = render(<CadreReportNodeView content={CONTENT} projectId="ws-1" sessionId="s-supervisor" t={t} />)
     fireEvent.click(screen.getByRole('button', { name: '展开' }))
     first.unmount()
-    render(<CadreReportNodeView content={CONTENT} projectId="ws-1" sessionId="s-supervisor" />)
+    render(<CadreReportNodeView content={CONTENT} projectId="ws-1" sessionId="s-supervisor" t={t} />)
     expect(screen.getByText(/详情：折叠态只占一行/)).toBeTruthy()
     expect(screen.getByRole('button', { name: '收起' })).toBeTruthy()
   })
@@ -72,9 +82,9 @@ describe('CadreReportNodeView', () => {
   it('keeps three reports as three compact rows', () => {
     render(
       <>
-        <CadreReportNodeView content={reportFor('task-1')} projectId="ws-1" sessionId="s-supervisor" />
-        <CadreReportNodeView content={reportFor('task-2')} projectId="ws-1" sessionId="s-supervisor" />
-        <CadreReportNodeView content={reportFor('task-3')} projectId="ws-1" sessionId="s-supervisor" />
+        <CadreReportNodeView content={reportFor('task-1')} projectId="ws-1" sessionId="s-supervisor" t={t} />
+        <CadreReportNodeView content={reportFor('task-2')} projectId="ws-1" sessionId="s-supervisor" t={t} />
+        <CadreReportNodeView content={reportFor('task-3')} projectId="ws-1" sessionId="s-supervisor" t={t} />
       </>,
     )
     expect(screen.getAllByRole('button', { name: '展开' })).toHaveLength(3)

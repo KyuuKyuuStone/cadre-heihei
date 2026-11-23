@@ -39,6 +39,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import {
   type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
+  projectMenuOpenStateFactory,
   type SessionArchiveConfirmInjected, type SessionArchiveConfirmRequest,
   type RenameSessionInjected, type RowToast, type RowToastInjected, type RowToastState, type SessionRenameDialogInjected,
   type SessionIdInjected, type WorkspaceBrowserInjected, type WorkspacePickerInjected,
@@ -47,6 +48,7 @@ import { createWorkspaceShortcutControls, installWorkspaceShortcuts } from './sh
 import { UiWorkspaceService } from './navigation.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
+import { DeleteWorkspaceMenuItem, RenameWorkspaceMenuItem } from './rows/ProjectMenuItems.tsx'
 import { ArchiveSessionMenuItem, ArchiveSessionRowButton, SessionArchiveConfirmDialog } from './session-actions/ArchiveSession.tsx'
 import { derive } from './session-actions/derived.ts'
 import { ForkSessionMenuItem } from './session-actions/ForkSession.tsx'
@@ -61,7 +63,8 @@ import { en, zh, type WorkspaceKey } from './locales.ts'
 export type { StartSessionOptions, UiWorkspace } from './navigation.ts'
 export type {
   DirectoryFlowOwnerProps, DirectoryFlowSlotName, DirectoryPickingHooks, DirectoryPickingInjected,
-  MenuOpenState, RowToast, SessionRenameTarget, SessionRowOwnerProps, UseMenuOpenState, WorkspaceBrowserInjected,
+  MenuOpenState, ProjectMenuItemProps, ProjectMenuOwnerProps, RowToast, SessionRenameTarget, SessionRowOwnerProps,
+  UseMenuOpenState, WorkspaceBrowserInjected,
   SessionRowScheduleOwnerProps,
   WorkspaceBrowserProps,
   WorkspacePickerInjected, WorkspacePickerProps,
@@ -302,6 +305,11 @@ export function apply(ctx: Context): void {
         'sidebar.workspaces.directoryFlow': { kind: 'single', scope: 'root' },
         'sidebar.workspaces.project.row.action': { kind: 'list', scope: 'root' },
         'sidebar.workspaces.project.row.create': { kind: 'list', scope: 'root' },
+        // Project-menu entries read the same per-occurrence open-state hook
+        // as the Session menu below.
+        'sidebar.workspaces.project.menu.item': {
+          kind: 'list', scope: 'root', inject: { hooks: { menuOpenState: projectMenuOpenStateFactory } },
+        },
         // Every row entry reads the menu's open state through a hook bound
         // from the row's render occurrence (the owner passes the state pair
         // as hookContext).
@@ -329,6 +337,10 @@ export function apply(ctx: Context): void {
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'fork', order: 300, locale: NS, inject: forkInjected }, ForkSessionMenuItem)
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'archive', order: 400, locale: NS, inject: archiveInjected }, ArchiveSessionMenuItem)
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'session-id', order: 600, locale: NS, inject: sessionIdInjected }, SessionIdMenuItem)
+  })
+  ctx.slots.inject('sidebar.workspaces.project.menu.item', function* () {
+    yield ctx.slots.register({ name: 'sidebar.workspaces.project.menu.item', id: 'rename', order: 200, locale: NS }, RenameWorkspaceMenuItem)
+    yield ctx.slots.register({ name: 'sidebar.workspaces.project.menu.item', id: 'delete', order: 400, locale: NS }, DeleteWorkspaceMenuItem)
   })
   ctx.slots.inject('sidebar.workspaces.session.row.action', function* () {
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'archive', order: 100, locale: NS, inject: archiveInjected }, ArchiveSessionRowButton)

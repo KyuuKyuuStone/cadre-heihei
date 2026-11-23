@@ -123,9 +123,9 @@ describe('skill API project scope', () => {
       .toEqual({ skills: [] })
     expect(api.set({ projectId: 'p1', actorSessionId: 'guest', targetSessionId: 'guest', skills: ['design'] }))
       .toEqual({ skills: ['design'] })
-    // An off-roster session has no members row, so the echoed selection is not stored.
+    // Off-roster selections persist in session_skills, not members.
     expect(api.get({ projectId: 'p1', actorSessionId: 'guest', targetSessionId: 'guest' }))
-      .toEqual({ skills: [] })
+      .toEqual({ skills: ['design'] })
     expect(db.prepare("SELECT COUNT(*) AS count FROM members WHERE session_id = 'guest'").get())
       .toMatchObject({ count: 0 })
     expect(() => { api.assertMember({ projectId: 'p1', actorSessionId: 'guest' }) }).not.toThrow()

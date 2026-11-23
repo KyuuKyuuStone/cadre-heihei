@@ -25,6 +25,23 @@ import {
 export const name = 'tool-skill'
 export const inject = ['agents', 'tools', 'skills', 'workingDirectory']
 
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Optional per-session skill selection; when served, unselected skills stay invisible. */
+    skillSelection?: { selectedFor(sessionId: string): readonly string[] | undefined }
+  }
+}
+
+/** Whether one catalog entry is enabled for the session under the active selection. */
+function selectionAllows(
+  selected: readonly string[] | undefined,
+  skill: { name: string; metadata?: Readonly<Record<string, unknown>> },
+): boolean {
+  if (selected === undefined) return true
+  const id = skill.metadata?.id
+  return selected.includes(skill.name) || (typeof id === 'string' && selected.includes(id))
+}
+
 const DEFAULT_CATALOG_DESCRIPTION_MAX_LENGTH = 500
 /**
  * Durable provider and item records for one published session skill catalog. The catalog is a
@@ -137,6 +154,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (!summary) {
         throw new Error(`skill "${args.name}" is unknown or no longer available`)
       }
+      if (!selectionAllows(ctx.get('skillSelection')?.selectedFor(exec.agent?.id ?? ''), summary)) {
+        throw new Error(`skill "${args.name}" is not enabled for this session`)
+      }
       if (!isModelInvocable(summary)) {
         throw new Error(`skill "${args.name}" is not available for model invocation`)
       }
@@ -195,6 +215,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       // on the loaded definition — the single lookup that produces what is
       // actually injected.
       if (skill === undefined || !isUserInvocable(skill)) continue
+      if (!selectionAllows(ctx.get('skillSelection')?.selectedFor(agent.id), skill)) continue
       const source: SkillInvocationSource = { kind: 'skill-invocation', name, form: 'instructions' }
       injections.push(createUserMessage({
         content: [{ type: 'text', text: renderSkillContent(skill) }],
@@ -225,7 +246,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       : { skills: [], complete: true }
     signal.throwIfAborted()
     if (!snapshot.complete) return decision
+    const selected = ctx.get('skillSelection')?.selectedFor(agent.id)
     const skills = snapshot.skills.filter(isModelInvocable)
+      .filter(skill => selectionAllows(selected, skill))
     const entries = catalogSourceEntries(skills, catalogDescriptionMaxLength)
     const digest = digestCatalogEntries(entries)
     const history = catalogHistory(agent)

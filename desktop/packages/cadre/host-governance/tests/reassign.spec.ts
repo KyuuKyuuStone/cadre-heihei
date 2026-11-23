@@ -26,7 +26,7 @@ function seed(): string {
     const member = db.prepare(`INSERT INTO members
       (project_id, session_id, role, display_name, state, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'available', ?, ?)`)
-    member.run(PROJECT, SUP, 'supervisor', '主管', AT, AT)
+    member.run(PROJECT, SUP, 'supervisor', '组长', AT, AT)
     member.run(PROJECT, FROM, 'worker', '甲', AT, AT)
     member.run(PROJECT, TO, 'worker', '乙', AT, AT)
     db.prepare(`INSERT INTO tasks (task_id, project_id, seq, title, body, body_bytes, body_sha256,

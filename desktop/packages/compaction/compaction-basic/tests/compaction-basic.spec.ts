@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
@@ -10,8 +11,10 @@ import { CompactionId, toolPairingBalancedAfter, toolPairingBalancedBefore } fro
 import {
   resolveCompactSpec,
   resolveConfig,
+  resolveEffectiveConfig,
   resolveTargetPolicy,
 } from '@deepseek-ai/dsh-compaction-basic/src/config.ts'
+import { CompactionSettings, type Config as CompactionSettingsConfig } from '@deepseek-ai/dsh-compaction-basic/src/settings.ts'
 import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
 import LlmRuntime, { createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, createSystemMessage, createToolResultMessage, LlmAdapter , createMessage } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
@@ -311,7 +314,7 @@ describe('compact configuration and defaults', () => {
     const resolved = resolveConfig({})
 
     expect(resolved).toEqual({
-      thresholdRatio: 0.8,
+      thresholdRatio: 0.9,
       headroomTokens: 65_536,
       retainRatio: 0.16,
       summarizationProvider: '',
@@ -328,31 +331,177 @@ describe('compact configuration and defaults', () => {
     expect(Object.isFrozen(resolved)).toBe(true)
   })
 
+  it('fires later than the former 0.8 default when the ratio, not the budget, binds', () => {
+    const target = { provider: MODEL, model: MODEL }
+    const at = (thresholdRatio?: number) => resolveCompactSpec(resolveTargetPolicy(resolveConfig({
+      headroomTokens: 0,
+      maxTokens: 32,
+      ...thresholdRatio === undefined ? {} : { thresholdRatio },
+    }), target), 1_000, 0)
+
+    expect(at().thresholdTokens).toBe(900)
+    expect(at(0.8).thresholdTokens).toBe(800)
+  })
+
+  it('compacts later by default than an explicit 0.8 policy on the same conversation', async () => {
+    const text = 'x'.repeat(380)
+    const defaultCtx = createContext(1_000)
+    const defaultSession = conversation(4, text)
+    expect(defaultCtx.tokenMeter.measure(defaultSession).totalTokens).toBeGreaterThan(800)
+    expect(defaultCtx.tokenMeter.measure(defaultSession).totalTokens).toBeLessThan(900)
+
+    const oldCtx = createContext(1_000)
+    const oldSession = conversation(4, text)
+
+    expect(await compactIfNeeded(service({ auto: false }, defaultCtx), defaultSession)).toBeNull()
+    expect(await compactIfNeeded(service({ auto: false, thresholdRatio: 0.8 }, oldCtx), oldSession))
+      .not.toBeNull()
+  })
+
+  it('keeps the absolute thresholdTokens cap as the hard ceiling and compacts at it', async () => {
+    const target = { provider: MODEL, model: MODEL }
+    const policy = resolveTargetPolicy(resolveConfig({
+      headroomTokens: 0,
+      maxTokens: 32,
+      thresholdTokens: 300,
+    }), target)
+    expect(resolveCompactSpec(policy, 1_000, 0).thresholdTokens).toBe(300)
+
+    const ctx = createContext(1_000)
+    const session = conversation(4, 'x'.repeat(380))
+    expect(ctx.tokenMeter.measure(session).totalTokens).toBeGreaterThan(300)
+    expect(await compactIfNeeded(service({ auto: false, thresholdTokens: 300 }, ctx), session))
+      .not.toBeNull()
+  })
+
+  it('still compacts after a confirmed overflow at the maximum allowed ratio', async () => {
+    const ctx = createContext(1_000)
+    const compact = service({ auto: false, thresholdRatio: 1 }, ctx)
+    const session = conversation(4, 'x'.repeat(380))
+
+    expect(await compactIfNeeded(compact, session)).toBeNull()
+    expect(await compactIfNeeded(compact, session, 'context-overflow')).not.toBeNull()
+  })
+
+  it('overlays live auto and ratio on the default policy while exact model policies still win', () => {
+    const target = { provider: MODEL, model: MODEL }
+    const resolved = resolveConfig({ headroomTokens: 0, maxTokens: 32 })
+    const effective = resolveEffectiveConfig(resolved, { auto: false, thresholdRatio: 0.8 })
+
+    expect(effective.auto).toBe(false)
+    expect(resolveCompactSpec(resolveTargetPolicy(effective, target), 1_000, 0).thresholdTokens).toBe(800)
+    expect(resolveEffectiveConfig(resolved, {})).toBe(resolved)
+
+    const pinned = resolveConfig({
+      headroomTokens: 0,
+      maxTokens: 32,
+      modelPolicies: [{ ...target, thresholdRatio: 0.5 }],
+    })
+    const overridden = resolveEffectiveConfig(pinned, { thresholdRatio: 0.9 })
+    expect(resolveCompactSpec(resolveTargetPolicy(overridden, target), 1_000, 0).thresholdTokens).toBe(500)
+  })
+
+  it('applies a live ratio write to the running engine without rebuilding it', async () => {
+    const ctx = createContext(1_000)
+    const [config] = z.resolve({ auto: false }, CompactionSettings.Config, {}) as [CompactionSettingsConfig]
+    new CompactionSettings(ctx, config)
+    const compact = service({ auto: false }, ctx)
+    const session = conversation(4, 'x'.repeat(380))
+
+    expect(await compactIfNeeded(compact, session)).toBeNull()
+    const write = Symbol.for('cosmokit.volatile.write')
+    Reflect.apply(Reflect.get(config.thresholdRatio, write) as (value: number) => void, config.thresholdRatio, [0.5])
+    expect(ctx.compactionSettings.thresholdRatio).toBe(0.5)
+    expect(await compactIfNeeded(compact, session)).not.toBeNull()
+  })
+
   it('caps pressure at an absolute thresholdTokens', () => {
     const resolved = resolveConfig({ thresholdTokens: 150_000 })
     const policy = resolveTargetPolicy(resolved, { provider: MODEL, model: MODEL })
     const spec = resolveCompactSpec(policy, 1_000_000, 32_000)
     expect(spec.thresholdTokens).toBe(150_000)
-    expect(spec.thresholdRatio).toBe(0.8)
+    expect(spec.thresholdRatio).toBe(0.9)
   })
 
-  it('applies the Cadre 60k pressure, 10k retain, and 40k step budgets', () => {
+  it('applies the shipped Cadre 727,040 ceiling and resolves the 275,817 pressure point', () => {
     const resolved = resolveConfig({
-      thresholdTokens: 60_000, retainTokens: 10_000, stepPressureThresholdTokens: 40_000,
+      thresholdTokens: 727_040, retainTokens: 10_000, stepPressureThresholdTokens: 727_040,
     })
     const policy = resolveTargetPolicy(resolved, { provider: MODEL, model: MODEL })
-    const spec = resolveCompactSpec(policy, 1_000_000, 32_000)
-    expect(spec.thresholdTokens).toBe(60_000)
+    const spec = resolveCompactSpec(policy, 500_000, 128_000)
+    expect(spec.thresholdTokens).toBe(275_817)
     expect(spec.retainTokens).toBe(10_000)
-    expect(resolved.stepPressureThresholdTokens).toBe(40_000)
+    expect(resolved.stepPressureThresholdTokens).toBe(727_040)
+
+    const earlier = resolveTargetPolicy(
+      resolveConfig({
+        thresholdTokens: 727_040, retainTokens: 10_000, thresholdRatio: 0.8,
+      }),
+      { provider: MODEL, model: MODEL },
+    )
+    expect(resolveCompactSpec(earlier, 500_000, 128_000).thresholdTokens).toBe(245_171)
   })
 
-  it('actually compacts a conversation above the Cadre 60k threshold', async () => {
-    const compact = service({ auto: false, thresholdTokens: 60_000, retainTokens: 10_000 }, createContext(200_000))
-    const session = conversation(4, 'x'.repeat(100_000))
-    const result = await compactIfNeeded(compact, session)
-    expect(result).not.toBeNull()
-    expect(compact.calls.length).toBe(1)
+  it('keeps the old 120k budget earlier while the shipped higher pressure point still compacts', async () => {
+    const capRequest = (session: Session): void => {
+      session.append('request/header', {
+        header: { config: { provider: MODEL, model: MODEL, maxTokens: 128_000 } },
+        reason: 'change',
+      })
+    }
+    const oldLow = conversation(4, 'x'.repeat(75_000))
+    capRequest(oldLow)
+    const lowCtx = createContext(500_000)
+    const oldBudget = service(
+      { auto: false, thresholdTokens: 120_000, retainTokens: 10_000, headroomTokens: 65_536 },
+      lowCtx,
+    )
+    expect(await compactIfNeeded(oldBudget, oldLow)).not.toBeNull()
+    expect(oldBudget.calls.length).toBe(1)
+
+    const shippedLow = conversation(4, 'x'.repeat(75_000))
+    capRequest(shippedLow)
+    const shippedCtx = createContext(500_000)
+    const shipped = service(
+      {
+        auto: false, thresholdTokens: 727_040, retainTokens: 10_000, headroomTokens: 65_536,
+      },
+      shippedCtx,
+    )
+    expect(await compactIfNeeded(shipped, shippedLow)).toBeNull()
+
+    const high = conversation(4, 'x'.repeat(150_000))
+    capRequest(high)
+    expect(await compactIfNeeded(shipped, high)).not.toBeNull()
+    expect(shipped.calls.length).toBe(1)
+  })
+
+  it('delays the shipped pressure trigger when the live ratio rises from 0.8 to 0.9', async () => {
+    const capRequest = (session: Session): void => {
+      session.append('request/header', {
+        header: { config: { provider: MODEL, model: MODEL, maxTokens: 128_000 } },
+        reason: 'change',
+      })
+    }
+    const earlierSession = conversation(4, 'x'.repeat(130_000))
+    capRequest(earlierSession)
+    const earlier = service(
+      {
+        auto: false, thresholdTokens: 727_040, retainTokens: 10_000, headroomTokens: 65_536, thresholdRatio: 0.8,
+      },
+      createContext(500_000),
+    )
+    expect(await compactIfNeeded(earlier, earlierSession)).not.toBeNull()
+
+    const laterSession = conversation(4, 'x'.repeat(130_000))
+    capRequest(laterSession)
+    const later = service(
+      {
+        auto: false, thresholdTokens: 727_040, retainTokens: 10_000, headroomTokens: 65_536, thresholdRatio: 0.9,
+      },
+      createContext(500_000),
+    )
+    expect(await compactIfNeeded(later, laterSession)).toBeNull()
   })
 
   it('defaults summary generation to headroom and preserves explicit caps', () => {
@@ -392,7 +541,7 @@ describe('compact configuration and defaults', () => {
       retainTokens: 70,
     })
     expect(retentionOnly).toMatchObject({
-      thresholdRatio: 0.8,
+      thresholdRatio: 0.9,
       retainTokens: 70,
     })
     expect(retentionOnly).not.toHaveProperty('retainRatio')
@@ -422,7 +571,7 @@ describe('compact configuration and defaults', () => {
     })
 
     expect(resolveCompactSpec(small, 1_000, 0)).toMatchObject({
-      thresholdTokens: 400,
+      thresholdTokens: 200,
       retainTokens: 120,
     })
     expect(resolveCompactSpec(otherProvider, 2_000, 0)).toMatchObject({
@@ -458,11 +607,11 @@ describe('compact configuration and defaults', () => {
   })
 
   it.each([
-    [1_048_576, 256_000, 727_040, 126_812],
-    [1_000_000, 0, 800_000, 160_000],
-    [1_000_000, 100_000, 800_000, 144_000],
-    [1_000_000, 134_464, 800_000, 138_485],
-    [1_000_000, 256_000, 678_464, 119_040],
+    [1_048_576, 256_000, 654_336, 126_812],
+    [1_000_000, 0, 841_017, 160_000],
+    [1_000_000, 100_000, 751_017, 144_000],
+    [1_000_000, 134_464, 720_000, 138_485],
+    [1_000_000, 256_000, 610_617, 119_040],
   ])('reserves 64K headroom in window %i with output cap %i', (window, output, threshold, retained) => {
     const policy = resolveTargetPolicy(resolveConfig({}), { provider: MODEL, model: MODEL })
 
@@ -482,7 +631,7 @@ describe('compact configuration and defaults', () => {
   it('rejects ratio retention that reaches the headroom-limited threshold', () => {
     const policy = resolveTargetPolicy(resolveConfig({ headroomTokens: 420 }), { provider: MODEL, model: MODEL })
     expect(() => resolveCompactSpec(policy, 1_000, 500))
-      .toThrow(/retainTokens \(80\) must be less than threshold tokens 80/)
+      .toThrow(/retainTokens \(80\) must be less than threshold tokens 72/)
   })
 
   it('rejects a reserve that leaves no message budget or is not a count', () => {
@@ -551,7 +700,7 @@ describe('compact configuration and defaults', () => {
       [{ summarizationModel: '' }, /must be set together/],
       [{ thresholdRatio: 0 }, /number in \(0, 1\]/],
       [{ thresholdRatio: 1.1 }, /number in \(0, 1\]/],
-      [{ retainRatio: 0.9 }, /retainRatio \(0.9\) must be less than the resolved thresholdRatio \(0.8\)/],
+      [{ retainRatio: 0.9 }, /retainRatio \(0.9\) must be less than the resolved thresholdRatio \(0.9\)/],
       [{ thresholdRatio: 0.1 }, /retainRatio \(0.16\) must be less than the resolved thresholdRatio \(0.1\)/],
       [{ retainTokens: -1 }, /non-negative integer/],
       [{ retainRatio: 0.2, retainTokens: 100 }, /mutually exclusive/],
@@ -581,7 +730,7 @@ describe('compact configuration and defaults', () => {
       ],
       [
         { modelPolicies: [{ provider: MODEL, model: MODEL, retainRatio: 0.9 }] },
-        /modelPolicies\[0\]: retainRatio \(0.9\).*thresholdRatio \(0.8\)/,
+        /modelPolicies\[0\]: retainRatio \(0.9\).*thresholdRatio \(0.9\)/,
       ],
       [{ modelPolicies: [{ provider: MODEL, model: MODEL }, { provider: MODEL, model: MODEL }] }, /duplicate model policy/],
       [{ models: { [MODEL]: { retainTokens: 10 } } }, /BasicCompactionConfig: unknown key "models"/],

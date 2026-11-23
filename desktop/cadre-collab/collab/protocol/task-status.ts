@@ -39,7 +39,7 @@ export type NonTerminalTaskStatus = (typeof NON_TERMINAL_TASK_STATUSES)[number]
  */
 export const OPEN_REPORT_CANDIDATE_STATUSES = ['dispatched', 'accepted', 'in_progress', 'rework'] as const
 
-/** 迁移执行者：员工本人、主管、系统（以员工名义自动推进）。 */
+/** 迁移执行者：员工本人、组长、系统（以员工名义自动推进）。 */
 export type TransitionActorKind = 'assignee' | 'supervisor' | 'system'
 
 export interface TaskTransitionRule {
@@ -69,7 +69,7 @@ export const TASK_TRANSITION_RULES: readonly TaskTransitionRule[] = [
     from: 'delivered',
     to: 'review',
     actors: ['supervisor'],
-    note: 'review 为必经态；仅主管点名进入，不允许自动触发（U-10 已裁决，review/01 §4）',
+    note: 'review 为必经态；仅组长点名进入，不允许自动触发（U-10 已裁决，review/01 §4）',
   },
   { from: 'delivered', to: 'cancelled', actors: ['supervisor'], note: '非终态可取消' },
   { from: 'review', to: 'verified', actors: ['supervisor'], note: '验收通过' },
@@ -133,7 +133,7 @@ export type TaskTransitionActor =
       readonly kind: 'session'
       readonly sessionId: SessionId
       /**
-       * supervisor 身份由项目 `members.role` 解析（ADR-0019），允许同项目多主管；
+       * supervisor 身份由项目 `members.role` 解析（ADR-0019），允许同项目多组长；
        * 不得用 `dispatcherSessionId` 推断。
        */
       readonly role: 'assignee' | 'supervisor'

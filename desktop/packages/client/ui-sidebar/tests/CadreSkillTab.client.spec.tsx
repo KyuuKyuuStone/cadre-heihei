@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { CadreSkillTab } from '../src/client/CadreSkillTab.tsx'
 import type { CadreRosterState } from '../src/client/CadreSidebar.tsx'
 import { zh } from '../src/client/locales.ts'
@@ -15,14 +15,14 @@ const t = ((key: keyof typeof zh, params?: Record<string, unknown>) => {
 const roster: CadreRosterState = {
   status: 'ready',
   members: [
-    { sessionId: 'sup', role: 'supervisor', displayName: '主管', state: 'available' },
+    { sessionId: 'sup', role: 'supervisor', displayName: '组长', state: 'available' },
     { sessionId: 'w1', role: 'worker', displayName: '前端', state: 'available' },
   ],
   error: null,
 }
 const ENTRIES = [
   { id: 'worker-skill', name: '员工技能', description: '', origin: 'builtin', roles: ['worker'], tokenEstimate: 10, tools: [], source: 's', license: 'MIT', selected: true },
-  { id: 'sup-skill', name: '主管技能', description: '', origin: 'installed', roles: ['supervisor'], tokenEstimate: 20, tools: [], source: 's', license: 'MIT', selected: false },
+  { id: 'sup-skill', name: '组长技能', description: '', origin: 'installed', roles: ['supervisor'], tokenEstimate: 20, tools: [], source: 's', license: 'MIT', selected: false },
 ]
 
 function requestUrl(input: RequestInfo | URL): string {
@@ -87,7 +87,7 @@ describe('Cadre skill tab', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillTab {...props('sup')} />)
-    expect(await screen.findByText('主管技能')).toBeTruthy()
+    expect(await screen.findByText('组长技能')).toBeTruthy()
     expect(screen.queryByLabelText('编辑成员')).toBeNull()
     expect(screen.queryByRole('combobox')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '保存技能' }))
@@ -108,9 +108,11 @@ describe('Cadre skill tab', () => {
     }))
     render(<CadreSkillTab {...props('w1')} />)
     fireEvent.click(await screen.findByRole('button', { name: '预览' }))
-    expect(await screen.findByText('成员预览内容')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '收起预览' }))
-    expect(screen.queryByText('成员预览内容')).toBeNull()
+    const dialog = await screen.findByRole('dialog', { name: 'worker-skill' })
+    expect(within(dialog).getByText('成员预览内容')).toBeTruthy()
+    expect(within(dialog).getByText('MIT · 约 10 tokens')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('shows the empty state when no skill is available', async () => {
@@ -120,21 +122,41 @@ describe('Cadre skill tab', () => {
     expect(document.querySelector('[data-skill-tab-empty]')).toBeTruthy()
   })
 
-  it('lets an ordinary Session browse the full catalog without editing or preview controls', async () => {
+  it('renders category selector cards on their own labeled row and filters the grid', async () => {
+    const tagged = [
+      { id: 'design-skill', name: '设计技能', description: '', origin: 'installed', roles: ['worker'], tokenEstimate: 10, tools: [], source: 's', license: 'MIT', selected: false, categories: ['设计'] },
+      { id: 'plain-skill', name: '无标签技能', description: '', origin: 'installed', roles: ['worker'], tokenEstimate: 10, tools: [], source: 's', license: 'MIT', selected: false },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true, result: tagged })))
+    render(<CadreSkillTab {...props('w1')} />)
+    const selector = await screen.findByRole('radiogroup', { name: zh['skills.filter.category'] })
+    expect(selector.closest('[data-skill-tab-filters]')).toBeNull()
+    expect(selector.closest('[data-skill-category-row]')).toBeTruthy()
+    expect(screen.getByText(zh['skills.filter.categoryLabel'])).toBeTruthy()
+    fireEvent.click(within(selector).getByRole('radio', { name: '设计 1' }))
+    expect(document.querySelectorAll('[data-skill-card]')).toHaveLength(1)
+    expect(screen.getByRole('checkbox', { name: '设计技能' })).toBeTruthy()
+    fireEvent.click(within(selector).getByRole('radio', { name: '未分类 1' }))
+    expect(screen.getByRole('checkbox', { name: '无标签技能' })).toBeTruthy()
+    fireEvent.click(within(selector).getByRole('radio', { name: '全部 2' }))
+    expect(document.querySelectorAll('[data-skill-card]')).toHaveLength(2)
+  })
+
+  it('lets an ordinary Session browse and edit the full catalog with checkboxes and save', async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => json({ ok: true, result: ENTRIES }))
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillTab {...props('plain', null)} />)
     expect(await screen.findByText('员工技能')).toBeTruthy()
-    expect(screen.getByText('主管技能')).toBeTruthy()
-    expect(screen.getByText('内置技能')).toBeTruthy()
-    expect(screen.getByText('已安装')).toBeTruthy()
+    expect(screen.getByText('组长技能')).toBeTruthy()
+    expect(screen.getAllByText('内置技能').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('已安装').length).toBeGreaterThan(0)
     expect(screen.getByText('约 10 tokens')).toBeTruthy()
     expect(screen.getAllByText('MIT')).toHaveLength(2)
-    expect(screen.queryByRole('checkbox')).toBeNull()
-    expect(screen.queryByRole('button', { name: '保存技能' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '预览' })).toBeNull()
-    expect(screen.queryByText('勾选本会话使用的技能；只列内置与已安装。')).toBeNull()
-    expect(screen.queryByText('已选 0')).toBeNull()
+    expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '保存技能' })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '预览' }).length).toBeGreaterThan(0)
+    expect(screen.getByText('勾选本会话使用的技能；只列内置与已安装。')).toBeTruthy()
+    expect(screen.getByText('已选 1')).toBeTruthy()
     const catalogCall = fetchMock.mock.calls.find(([input]) => requestUrl(input).endsWith('/catalog'))
     const catalogBody = JSON.parse((catalogCall?.[1] as RequestInit).body as string) as Record<string, unknown>
     expect(catalogBody).toMatchObject({ projectId: 'p1', actorSessionId: 'plain' })
@@ -151,7 +173,7 @@ describe('Cadre skill tab', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     view.rerender(<CadreSkillTab {...props('w1')} />)
     expect(await screen.findByRole('checkbox', { name: '员工技能' })).toBeTruthy()
-    expect(screen.queryByText('主管技能')).toBeNull()
+    expect(screen.queryByText('组长技能')).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>
     expect(body).toMatchObject({ actorSessionId: 'w1', targetSessionId: 'w1' })
@@ -190,7 +212,7 @@ describe('Cadre skill tab', () => {
       await ordinaryResponse.promise
     })
     expect(document.querySelectorAll('[data-skill-card]')).toHaveLength(1)
-    expect(screen.queryByText('主管技能')).toBeNull()
+    expect(screen.queryByText('组长技能')).toBeNull()
     const firstBody = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>
     const secondBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string) as Record<string, unknown>
     expect(firstBody).not.toHaveProperty('targetSessionId')
@@ -201,7 +223,7 @@ describe('Cadre skill tab', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     render(<CadreSkillTab {...props('plain', null, null)} />)
-    expect(screen.getByText('无法确定本会话所属项目部，暂不能读取技能。')).toBeTruthy()
+    expect(screen.getByText('无法确定本会话所属项目组，暂不能读取技能。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '保存技能' })).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
   })

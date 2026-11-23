@@ -8,9 +8,9 @@ import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 
 /** Policy fields shared by the default policy and exact model overrides. */
 export interface CompactionPolicyConfig {
-  /** Window fraction for pressure; capped at context window minus reserved output and `headroomTokens`. Defaults to `0.8`. */
+  /** Fraction of the usable pressure budget (`contextWindow − reserved output − headroomTokens`) in (0, 1]; the capacity remains the hard ceiling. Defaults to `0.9`. */
   thresholdRatio?: number
-  /** Absolute pressure cap; the effective threshold is the smaller of this and the window-derived budget. */
+  /** Absolute pressure cap; the effective threshold is the smaller of this and the ratio-scaled pressure budget. */
   thresholdTokens?: number
   /** Additional pressure headroom beyond the routed output reservation. Non-negative integer; defaults to `65536`. */
   headroomTokens?: number

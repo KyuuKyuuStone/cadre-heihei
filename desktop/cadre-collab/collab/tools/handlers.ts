@@ -287,7 +287,7 @@ function toolListTasks(ctx: ToolContext, args: Args): ToolCallResult {
       reason,
       hint:
         reason === 'no_tasks'
-          ? '本项目还没有任务；主管派活后可在此查看'
+          ? '本项目还没有任务；组长派活后可在此查看'
           : '没有符合筛选条件的任务；可调整 status/assignee/since 后重试',
       ...base,
     })

@@ -138,12 +138,19 @@ export function workspaceLabel(cwd: string | undefined): string {
  * Project known account members by current Session recency.
  * @param sessionIds - authoritative account membership.
  * @param summaries - current Session summaries; members without a summary are omitted until it arrives.
- * @returns known members newest first, with Session identity as the deterministic tie-break.
+ * @param recencyOrder - authoritative manager order to filter without sorting; omitted sorts local search or newly discovered manual members by timestamp.
+ * @returns known members in authoritative order, or newest first with Session identity as the local-sort tie-break.
  */
 export function orderByRecency(
   sessionIds: readonly SessionId[],
   summaries: SessionListState['byId'],
+  recencyOrder?: readonly SessionId[],
 ): SessionId[] {
+  if (recencyOrder !== undefined) {
+    const members = new Set(sessionIds)
+    return recencyOrder.filter(id => members.has(id) && summaries[id] !== undefined)
+  }
+  if (sessionIds.length < 2) return sessionIds.filter(id => summaries[id] !== undefined)
   return sessionIds.flatMap((id) => {
     const summary = summaries[id]
     if (summary === undefined) return []
@@ -331,10 +338,11 @@ function orderedUngrouped(
   members: readonly SessionSummary[],
   stored: readonly string[] | undefined,
   summaries: SessionListState['byId'],
+  recencyOrder: readonly SessionId[],
 ): SessionSummary[] {
   const byId = new Map(members.map(session => [session.id as string, session]))
   const ids = stored === undefined
-    ? orderByRecency(members.map(session => session.id), summaries)
+    ? orderByRecency(members.map(session => session.id), summaries, recencyOrder)
     : reconcileManualOrder(members.map(session => session.id), stored, summaries)
   return ids.flatMap((id) => {
     const session = byId.get(id)
@@ -387,7 +395,7 @@ function groupByWorkspace(
       undefined,
       undefined,
       '',
-      orderedUngrouped(stray, ungroupedOrder, list.byId),
+      orderedUngrouped(stray, ungroupedOrder, list.byId, list.ids),
     ))
   }
   return groups

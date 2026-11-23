@@ -491,7 +491,9 @@ export class SessionCommandController {
 
   /**
    * Cancel one live ordinary Agent while retaining pending inbox work.
-   * @param request - Session whose active Agent turn is cancelled.
+   * An expected turn is checked synchronously against the durable open turn,
+   * so a stale caller cannot cancel work that started after its preflight.
+   * @param request - Session and optional exact active Agent turn to cancel.
    * @returns acknowledgement that cancellation was requested.
    */
   cancel(request: SessionCancelRequest): SessionCancelValue {
@@ -505,6 +507,24 @@ export class SessionCommandController {
     }
     if (hasApiSessionSubagentOwner(this.ctx, agent.session, agent)) {
       throw apiSessionSubagentOwnershipError(request.sessionId)
+    }
+    if (request.turn !== undefined) {
+      let activeTurn: number | undefined
+      for (const event of agent.session.snapshotEvents()) {
+        if (event.type === 'turn/start') activeTurn = event.data.turn
+        if (event.type === 'turn/end' && event.data.turn === activeTurn) activeTurn = undefined
+      }
+      if (activeTurn !== request.turn) {
+        throw new RemoteError(
+          'session/turn-conflict',
+          `session "${request.sessionId}" active turn does not match expected turn ${String(request.turn)}`,
+          {
+            sessionId: request.sessionId,
+            expectedTurn: request.turn,
+            ...(activeTurn === undefined ? {} : { activeTurn }),
+          },
+        )
+      }
     }
     agent.cancel({ kind: 'user' }, { keepInbox: true })
     return { accepted: true }

@@ -35,7 +35,16 @@ export interface StallPorts {
   sessionActivity(sessionId: string, windowStartAt: number): Promise<SessionActivity>
   members(projectId: string): readonly WatchMember[]
   prompt(sessionId: string, text: string): Promise<void>
-  cancelTask(input: { projectId: string; taskId: string; actorSessionId: string; reason: string }): Promise<PortResult>
+  cancelTask(input: {
+    projectId: string
+    taskId: string
+    actorSessionId: string
+    reason: string
+    expectedVersion: number
+    idempotencyKey: string
+    /** Retry only the runtime half of the cancellation already committed under this key. */
+    compensation: boolean
+  }): Promise<PortResult>
   reassignTask(input: {
     projectId: string
     taskId: string
@@ -146,7 +155,7 @@ function viewOf(episode: Episode, member: WatchMember | undefined, now: number):
     nudgeCount: episode.nudgeCount,
     lastNudgedAt: episode.lastNudgedAt ?? null,
     suggestedAction: actionable ? (episode.nudgeCount === 0 ? 'nudge' : 'escalate') : null,
-    capabilities: { nudge: actionable, reassign: actionable, cancel: actionable, escalate: actionable },
+    capabilities: { nudge: actionable, reassign: actionable, cancel: true, escalate: actionable },
     version: episode.task.version,
     stale: episode.stale || episode.lastActivityAt === undefined,
     updatedAt: episode.task.updatedAt,
@@ -182,6 +191,8 @@ export class StallService {
   readonly #episodes = new Map<string, Episode>()
   readonly #actionResults = new Map<string, { readonly fingerprint: string; readonly result: StallActionResult }>()
   readonly #lastViews = new Map<string, StallTaskView>()
+  /** Per-task dedupe for activity-unavailable warnings; cleared on recovery. */
+  readonly #activityFailLogged = new Map<string, { reason: string; count: number }>()
 
   constructor(ports: StallPorts, config: Partial<StallConfig> = {}) {
     this.#ports = ports
@@ -262,7 +273,9 @@ export class StallService {
     if (this.#ports.email === undefined) return
     try {
       const result = await this.#ports.email(event)
-      if (!result.ok) {
+      // A disabled feature is a deployment choice, not a per-task failure;
+      // logging it every task flooded plugin.log with 139 identical lines.
+      if (!result.ok && result.code !== 'EMAIL_FEATURE_DISABLED') {
         this.#ports.log(`email notify failed project=${event.projectId} kind=${event.kind} code=${result.code} reason=${result.message}`)
       }
     } catch (error) {
@@ -291,9 +304,23 @@ export class StallService {
         let activity: SessionActivity = { waitingQuestion: false }
         try {
           activity = await this.#ports.sessionActivity(task.assigneeSessionId, task.windowStartAt)
+          this.#activityFailLogged.delete(key)
         } catch (error) {
           episode.stale = true
-          this.#ports.log(`stall activity unavailable task=${task.taskId} reason=${error instanceof Error ? error.message : String(error)}`)
+          // Dedupe: a corrupt/unavailable session fails every scan; log the
+          // first failure per task+reason and a cumulative count every 100th
+          // repeat instead of flooding plugin.log (observed 1438 identical lines).
+          const reason = error instanceof Error ? error.message : String(error)
+          const prior = this.#activityFailLogged.get(key)
+          if (prior?.reason !== reason) {
+            this.#activityFailLogged.set(key, { reason, count: 1 })
+            this.#ports.log(`stall activity unavailable task=${task.taskId} reason=${reason}`)
+          } else {
+            prior.count += 1
+            if (prior.count % 100 === 0) {
+              this.#ports.log(`stall activity unavailable task=${task.taskId} reason=${reason} repeated=${String(prior.count)}`)
+            }
+          }
         }
         const taskEvent = this.#ports.lastTaskEventAt(task.taskId)
         const candidates = [activity.lastActivityAt, taskEvent].filter((value): value is number => value !== undefined)
@@ -343,6 +370,8 @@ export class StallService {
         const notifyState = async (next: 'possibly_stalled' | 'stalled'): Promise<void> => {
           episode.state = next
           episode.stateSince = now
+          // Transient warnings stay in task views; only confirmed stalls consume a supervisor turn.
+          if (next === 'possibly_stalled') return
           episode.notifiedState = next
           await this.notify(projectId, viewOf(episode, member, now), next)
         }
@@ -364,15 +393,15 @@ export class StallService {
           }
         } else if (activity.stepKind !== undefined) {
           // model_generation / tool_execution: long single-step work is normal.
-          // Only a step whose own age crosses the 10-minute ceiling is escalated;
-          // no_events keeps the classic 3/10-minute thresholds.
+          // Only a step whose own age crosses the step ceiling is escalated;
+          // idle silence between turns uses the shorter suspect/stalled thresholds.
           episode.stepKind = activity.stepKind
           episode.stepSince = activity.stepSince ?? episode.stepSince ?? last
           episode.toolName = activity.toolName
           episode.heartbeatAt = now
           episode.silenceStreak = 0
           const stepAge = Math.max(0, now - (episode.stepSince ?? last ?? now))
-          if (stepAge >= this.#config.stalledAfterMs) {
+          if (stepAge >= this.#config.stepStalledAfterMs) {
             if (episode.state !== 'stalled') {
               episode.state = 'stalled'
               episode.stateSince = now
@@ -382,7 +411,7 @@ export class StallService {
           } else {
             if (previouslyStalled) {
               const recovered = viewOf({ ...episode, state: 'normal' }, member, now)
-              await this.notify(projectId, recovered, 'recovered')
+              if (episode.notifiedState === 'stalled') await this.notify(projectId, recovered, 'recovered')
               episode.episodeId = `${task.taskId}:${new Date(now).toISOString()}`
               episode.nudgeCount = 0
               episode.lastNudgedAt = undefined
@@ -412,7 +441,7 @@ export class StallService {
               if (episode.recoveringSince !== undefined
                 && now - episode.recoveringSince >= this.#config.recoverAfterMs) {
                 const recovered = viewOf({ ...episode, state: 'normal' }, member, now)
-                await this.notify(projectId, recovered, 'recovered')
+                if (episode.notifiedState === 'stalled') await this.notify(projectId, recovered, 'recovered')
                 episode.episodeId = `${task.taskId}:${new Date(now).toISOString()}`
                 episode.state = 'normal'
                 episode.stateSince = now
@@ -527,19 +556,21 @@ export class StallService {
       request.toSessionId ?? '', request.reason ?? '',
     ])
     const replay = this.#actionResults.get(replayKey)
-    if (replay !== undefined) {
-      if (replay.fingerprint !== fingerprint) {
-        return { ok: false, code: 'IDEMPOTENCY_CONFLICT', message: '同一幂等键已用于不同的停摆动作' }
-      }
+    if (replay !== undefined && replay.fingerprint !== fingerprint) {
+      return { ok: false, code: 'IDEMPOTENCY_CONFLICT', message: '同一幂等键已用于不同的停摆动作' }
+    }
+    const retryRuntimeCancel = replay !== undefined && request.action === 'cancel'
+      && !replay.result.ok && replay.result.code === 'CANCEL_RUNTIME_FAILED'
+    if (replay !== undefined && !retryRuntimeCancel) {
       return replay.result.ok ? { ...replay.result, replayed: true } : replay.result
     }
 
-    const result = await this.#act(request)
+    const result = await this.#act(request, retryRuntimeCancel)
     this.#actionResults.set(replayKey, { fingerprint, result })
-    return result
+    return retryRuntimeCancel && result.ok ? { ...result, replayed: true } : result
   }
 
-  async #act(request: StallActionRequest): Promise<StallActionResult> {
+  async #act(request: StallActionRequest, compensation = false): Promise<StallActionResult> {
     const members = this.#ports.members(request.projectId)
     const actor = members.find(member => member.sessionId === request.actorSessionId)
     if (actor === undefined || actor.role !== 'supervisor' || actor.state === 'departed' || actor.sessionId === 'sup-1') {
@@ -554,12 +585,14 @@ export class StallService {
     // The CAS version is the task row's optimistic-lock column, read fresh at
     // action time; episode state changes never advance it.
     const fresh = this.#ports.listTasks(request.projectId).find(task => task.taskId === request.taskId)
-    if (fresh !== undefined) episode.task = fresh
-    const currentVersion = fresh?.version ?? episode.task.version
-    if (request.expectedVersion !== currentVersion) {
+    if (!compensation && fresh !== undefined) episode.task = fresh
+    // Runtime compensation belongs to the already committed CAS transition;
+    // the Host verifies its retained target instead of writing a new version.
+    const currentVersion = compensation ? request.expectedVersion : fresh?.version ?? episode.task.version
+    if (!compensation && request.expectedVersion !== currentVersion) {
       return { ok: false, code: 'VERSION_CONFLICT', message: `期望版本 ${String(request.expectedVersion)}，当前 ${String(currentVersion)}` }
     }
-    if (episode.state !== 'stalled') {
+    if (request.action !== 'cancel' && episode.state !== 'stalled') {
       return { ok: false, code: 'STALL_NOT_ACTIONABLE', message: `当前状态 ${episode.state} 不可执行 ${request.action}` }
     }
     const now = this.#ports.now()
@@ -579,7 +612,7 @@ export class StallService {
         }
         await this.#ports.prompt(episode.task.assigneeSessionId,
           `【主管催办】任务 ${episode.task.taskId}「${episode.task.title}」已 ${durationText(now - (episode.lastActivityAt ?? now))} 无活动。`
-          + ` stallBasis=${JSON.stringify(basis)}。请立即继续；如遇阻塞，请用 report_task 或请示主管说明。`)
+          + ` stallBasis=${JSON.stringify(basis)}。请立即继续；如遇阻塞，请用 report_task 或请示组长说明。`)
       } catch (error) {
         return { ok: false, code: 'NUDGE_FAILED', message: error instanceof Error ? error.message : String(error) }
       }
@@ -593,6 +626,7 @@ export class StallService {
       if (reason === undefined || reason === '') return { ok: false, code: 'CANCEL_NOT_ALLOWED', message: '取消必须填写原因' }
       const outcome = await this.#ports.cancelTask({
         projectId: request.projectId, taskId: request.taskId, actorSessionId: request.actorSessionId, reason,
+        expectedVersion: currentVersion, idempotencyKey: request.idempotencyKey, compensation,
       })
       if (!outcome.ok) return outcome
       const version = currentVersion + 1

@@ -414,11 +414,14 @@ CREATE TABLE IF NOT EXISTS idempotency (
   fingerprint TEXT NOT NULL, ledger_result_json TEXT, receipt_json TEXT, created_at TEXT NOT NULL,
   PRIMARY KEY (project_id, idempotency_key)
 );
+CREATE TABLE IF NOT EXISTS session_skills (
+  session_id TEXT PRIMARY KEY, skills_json TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL
+);
 `
 
 /** One Session mapped to several projects cannot be judged by any single one. */
 function ambiguityError(sessionId: string, projects: readonly string[]): Error {
-  return new Error(`会话同时属于多个项目部（session=${sessionId} projects=${projects.join(',')}），无法确定归属`)
+  return new Error(`会话同时属于多个项目组（session=${sessionId} projects=${projects.join(',')}），无法确定归属`)
 }
 
 /**
@@ -552,7 +555,7 @@ class Ledger {
   projectOf(sessionId: string): string {
     const member = this.member(sessionId)
     if (member === undefined) {
-      throw new Error(`会话不属于任何项目部（session=${sessionId}）；请先在项目部花名册登记该会话`)
+      throw new Error(`会话不属于任何项目组（session=${sessionId}）；请先在项目组花名册登记该会话`)
     }
     return member.projectId
   }
@@ -952,14 +955,19 @@ const MAX_RETRIES = 3
 
 /** Supervisor duties injected into every supervisor Session's prompt (product rule). */
 const SUPERVISOR_DUTY = [
-  '你是本项目的主管：负责拆解、派活、验收和向用户汇报；专业执行全部交给员工，有对应角色的员工时不得代劳。',
+  '你是本项目的组长：负责拆解、派活、验收和向用户汇报；专业执行全部交给员工，有对应角色的员工时不得代劳。',
   '派活',
   '1. 只派给下方花名册里的人（dispatch_task 对不在册的人返回 missing-employee）。缺少所需角色时，告诉用户缺哪个角色、为什么需要，由用户决定是否配置；不要自己补位执行，不要自行创建员工，不要声称已派出。',
   '2. 每条任务写清：目标与完成定义、可检验的验收项（命令/文件/预期输出）、约束与禁止项、截止时间。需要给人看的文档时，在验收项写明文档名称、读者和用途；未明确要求时，不要求员工另写说明性文档。',
   '3. 同一文件同一时间只交给一名员工；改派前先用 transition_task 把原任务置 cancelled 并写明原因。',
   `4. 一次最多派 ${String(MAX_DISPATCH_ITEMS)} 条（多了分批）；同一失败最多重试 ${String(MAX_RETRIES)} 次，超过就换人或请用户裁决。`,
+  '4b. 证据要求与任务规模相称：代码类以编译器/解释器/测试的真实运行结果为准，报错才定位修复，不要求逐字节比对、不要求造验证脚本或回扫仪式；文档类跑一次主流程、关键示例输出用重定向留原始日志即可。打回只列定点修补项，不要求全量重验。',
+  '4c. 你的价值在决策与调度，不在层层加码验收：专业检查岗（测试/代码审查/质量检查）同样默认抽检——独立实跑一次主流程加关键输出抽查，一次做完，不给它安排逐一穷尽验收。信任员工的自验与同事的抽查；高风险交付（数据/安全/对外发布）可加派检查岗一次独立实跑抽查并在任务包写明，但升级到逐一仍须 4d 的触发事实。',
+  '4d. 逐一穷尽检查是升级手段，不是默认验收：只有三个入口允许要求逐一穷尽验证（逐命令实跑日志、逐字节比对、全量回扫、独立验证脚本）——①交付物实跑、编译器/解释器/测试或编辑器报错；②同一问题连续两轮修复后仍不过（文本/创作等跑不了的交付物，以用户或检查岗连续两次指出同类问题为准）；③用户明确要求逐一/穷尽检查：先按 4e 反问时间与 token 成本是否接受，用户确认接受后必须执行逐一，不得再推脱；把用户要求原话与成本确认原话一并作为授权来源写进任务包，且只查用户点名的范围，不自行扩到全流程。①②须把触发事实（哪一步报错、报错原文、几轮未修好）写进任务包。三个入口都没有时，验收只写抽检项与主流程一次实跑；不得以「从严」「怕出错」为由把逐一穷尽证据写进验收，也不得暗示员工自行升级；高风险交付加派的独立抽查同样只在入口出现后才升级到逐一。',
+  '4e. 确认门槛：用户默认不喜欢被打扰，但关系到用户自身利益的动作必须先确认一次——明显烧 token（逐一穷尽验证、全量重跑、独立验证脚本）、明显耗时（长时间串行等待、大规模返工）、或成本/范围超出用户原请求。确认时说明成本量级与更轻的替代（抽检），由用户决定；用户确认接受后按授权执行，不再反复问；用户收回则回落抽检。正常进展与技术细节仍按 8、9 不汇报。',
+  '4f. 本平台是团队创作平台，默认节奏是快速产出、用户实跑/实读后给意见，不是跑一个月的自主任务：质量判断主要靠用户真实使用反馈，事前验证只保主流程能跑通、关键输出可抽查；不为「放心」安排长时间穷尽事前验证，也不把事前验证深度当交付质量。',
   '验收',
-  '5. 先用 list_tasks 核对台账状态，再逐条对照验收项检查交付物；口头说明不算证据。你不能运行命令，所以派活时就要求员工把命令和完整输出用重定向保存为原始日志并给出路径；不要把 AI 交接用的说明性文档作为交付要求。',
+  '5. 先用 list_tasks 核对台账状态，再抽查关键证据：交付物存在、原始日志与结论一致、关键验收项有真实运行结果；口头说明不算证据。你不能运行命令，所以派活时就要求员工把命令和完整输出用重定向保存为原始日志并给出路径。独立验收交给专业检查岗（测试/代码审查/质量检查）按抽检深度做一次即可，不要让每个员工各自重复验收，也不要自己逐条全量重验——真实缺陷大多在用户实跑时才暴露，事前逐条自证只烧 token，为了验收而验收是浪费。抽查发现问题才打回，打回只列定点修补项。不要把 AI 交接用的说明性文档作为交付要求。',
   '6. 验收结论对应具体版本（文件路径+哈希或 commit）；验收后内容又变了，需要重新验收。',
   '7. 用 transition_task 结案：verified / rework / failed / cancelled；后三者必须写 reason，rework 的 reason 要列出缺少的具体证据。',
 ].join('\n')
@@ -970,7 +978,7 @@ const SUPERVISOR_DUTY = [
  */
 const REPORTING_POLICY = [
   '对用户汇报',
-  '8. 默认不打扰；能自己判断的不要拿去问。只在以下情况汇报：任务失败、卡住或重试超限；结果偏离用户要求或与此前决定冲突；需要用户决策（选方案、缺角色是否加人、范围变更）；发现数据/安全/兼容性风险；一批任务阶段性完成、可以验收。',
+  '8. 默认不打扰；能自己判断的不要拿去问。只在以下情况汇报：任务失败、卡住或重试超限；结果偏离用户要求或与此前决定冲突；需要用户决策（选方案、缺角色是否加人、范围变更、按 4e 确认明显烧 token/耗时动作的成本接受）；发现数据/安全/兼容性风险；一批任务阶段性完成、可以验收。',
   '9. 正常进展、中间过程和技术细节（改了哪个文件）不汇报；攒一批一起说，只有必须立刻告知的风险才当下说。',
   '10. 用一段话说明发生了什么、结果如何、需要用户做什么；有不确定的地方在句中标明「已证实」或「未决」，不要把推测写成结论；不转贴员工原文。',
 ].join('\n')
@@ -978,13 +986,15 @@ const REPORTING_POLICY = [
 /**
  * Roster rows as prompt lines: 名字 + 角色（岗位描述前 80 字）.
  * @param rows - active project members, supervisors first.
- * @returns one `- 名字（主管|员工 · 描述）` line per member, or '' when empty.
+ * @returns one `- 名字（组长）` / `- 名字（描述）` / `- 名字` line per member, or '' when empty.
  */
 export function rosterLines(rows: readonly { name: string; role: string; description?: string }[]): string {
   return rows.map((row) => {
-    const title = row.role === 'supervisor' ? '主管' : '员工'
-    const duty = row.description === undefined ? '' : ` · ${row.description.slice(0, 80)}`
-    return `- ${row.name}（${title}${duty}）`
+    if (row.role === 'supervisor') {
+      const duty = row.description === undefined ? '' : ` · ${row.description.slice(0, 80)}`
+      return `- ${row.name}（组长${duty}）`
+    }
+    return row.description === undefined ? `- ${row.name}` : `- ${row.name}（${row.description.slice(0, 80)}）`
   }).join('\n')
 }
 
@@ -1010,11 +1020,14 @@ export function supervisorDuty(roster: string): string {
 /** Worker working rules shared by every employee; the role line precedes them. */
 const WORKER_POLICY = [
   '你是本项目的员工，任务来自【主管任务】消息：',
-  '1. 只做任务包范围内的事；目标、验收项或文件引用不清楚时，先用 ask_user_question 提问（会转给主管），不要猜。',
-  '2. 修改文件前确认没有别人正在改；发现文件被并发修改或被移动，停下来问主管，不要覆盖。',
+  '1. 只做任务包范围内的事；目标、验收项或文件引用不清楚时，先用 ask_user_question 提问（会转给组长），不要猜。',
+  '2. 修改文件前确认没有别人正在改；发现文件被并发修改或被移动，停下来问组长，不要覆盖。',
   '3. 完成后调用 report_task：summary 默认不超过 10 行，先写结论，再分「已证实（附关键命令结果和日志路径）」与「未决」；deliverables 列出改动文件和原始日志路径。没跑过的检查，不要说它通过了。',
   '4. 只有任务包的验收项明确要求给用户的文档，或交付对象是用户时，才编写方案、发布说明、README、CHANGELOG、交接文档等；否则不新建说明性 .md。原始日志必须保留，不用 AI 总结代替。',
   '5. 收到【任务打回】时，只补原因里列出的项，然后重新回报。',
+  '6. 结束回合前必须调用 report_task：做完就回报结论与交付物；没做完也要回报进度与卡点。不得干完不回报就结束回合，让组长空等。',
+  '7. 不得为验收编写独立验证脚本、自检工程或逐字节比对工具，除非组长任务包列明了触发事实（实跑报错或连续两轮修复仍不过）或用户显式授权原话。自验从简：跑一次主流程确认能跑通即可，用重定向留原始日志附在回报里；测试不通过会报错，到时候再修也来得及，不必事前自测到滴水不漏。相信同事：独立验收由专业检查岗按抽检深度做一次，你不需要自证到逐一深度。',
+  '8. 自验默认抽检，不是必须逐一检查：主流程一次实跑加关键输出抽查即可，不主动全量回扫、不逐条自证。只有实跑/编辑器报错、同一问题连续两轮修复后仍不过、或任务包带用户显式授权原话，才升级到逐一检查，并在回报里说明触发或授权来源。任务包的授权原话已含用户成本确认时，按授权执行逐一，不再反问成本（成本已由组长与用户确认过）。组长任务包要求逐一穷尽证据却没列触发事实也没列用户授权时，先用 ask_user_question 确认是否确需升级，不要默从并花时间逐一自证。',
 ].join('\n')
 
 /**
@@ -1183,10 +1196,10 @@ export function pageTaskRows(
   const hint = projectHasTasks
     ? supervisor
       ? '本项目有任务，但当前筛选或可见范围内没有匹配；去掉 scope/assignee 重查，或确认任务是否属于当前会话'
-      : '你名下没有匹配任务；员工只能看到派给自己的任务，去掉 scope 再查或向主管确认任务号与分派'
+      : '你名下没有匹配任务；员工只能看到派给自己的任务，去掉 scope 再查或向组长确认任务号与分派'
     : supervisor
       ? '本项目还没有任务；先用 list_employees 查在册员工，再 dispatch_task 派活'
-      : '本项目还没有任务；等主管派活后再用 list_tasks 查看自己的任务'
+      : '本项目还没有任务；等组长派活后再用 list_tasks 查看自己的任务'
   return {
     rows: page,
     total,
@@ -1484,7 +1497,13 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         ok: true,
         value: {
           taskId, assigneeName: assignee.name, role: 'worker', dueAt: item.dueAt,
-          estimatedTokens: metric.estimatedTokens, warnings: metric.warnings,
+          estimatedTokens: metric.estimatedTokens,
+          // Packet truncation must reach the supervisor: a silently shortened
+          // goal/acceptance produced "empty packet" round-trips in the field.
+          warnings: [
+            ...metric.warnings,
+            ...normalized.warnings.map(warning => `任务包字段被截断：${warning}（请精简后重派或把长内容落盘让 employee 用 read 读取）`),
+          ],
           ...(overlaps.length === 0 ? {} : { overlaps }),
         },
       }
@@ -1517,7 +1536,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
 
   const supervisorOnly = (dispatcher: string): void => {
     const role = ledger.member(dispatcher)?.role
-    if (role === 'worker') throw new Error(`员工不能派活（caller=${dispatcher} role=${String(role)}）；只有主管或用户会话可以派发任务`)
+    if (role === 'worker') throw new Error(`员工不能派活（caller=${dispatcher} role=${String(role)}）；只有组长或用户会话可以派发任务`)
   }
 
   /** Structured card data: the front end reads this meta, never the text. */
@@ -1754,7 +1773,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       },
       render: (_args: unknown, value: ReportValue) => [text(
         `已回报 ${value.taskId}，任务状态 ${value.status}` +
-        (value.supervisorNotified ? '，主管已收到消息。' : '；本项目暂无主管，消息已记录。'))],
+        (value.supervisorNotified ? '，组长已收到消息。' : '；本项目暂无组长，消息已记录。'))],
     },
     execute: async (args: ReportArgs, run: ToolRun) => {
       const reporter = callerOf(run)
@@ -1765,8 +1784,8 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       if (task.status === 'verified' || task.status === 'failed' || task.status === 'cancelled') {
         const notice = ledger.terminalNotice(projectId, task.taskId, task.status)
         const at = notice?.at ?? '（时间未知）'
-        const reason = notice?.reason?.trim() || '（主管未填写）'
-        throw new Error(`任务已于 ${at} 被主管置为 ${task.status}，原因：${reason}，无需再回报。`)
+        const reason = notice?.reason?.trim() || '（组长未填写）'
+        throw new Error(`任务已于 ${at} 被组长置为 ${task.status}，原因：${reason}，无需再回报。`)
       }
       if (typeof args.summary !== 'string' || args.summary.trim() === '') {
         throw new Error('汇报结论（summary）不能为空：必须写清做了什么与结果')
@@ -1898,7 +1917,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
               mode: 'queue',
               content: [text([
                 notice.title, `任务号：${task.taskId}`, `标题：${task.title}`, '',
-                `${notice.reasonLabel}${noticeReason === undefined || noticeReason === '' ? '（主管未填写）' : noticeReason}`, '',
+                `${notice.reasonLabel}${noticeReason === undefined || noticeReason === '' ? '（组长未填写）' : noticeReason}`, '',
                 notice.statusLine,
               ].join('\n'))],
             }, run.signal)

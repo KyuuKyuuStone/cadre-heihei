@@ -46,6 +46,7 @@ function harness(options: {
   readonly config?: Partial<StallConfig>
   readonly members?: WatchMember[]
   readonly taskEventAt?: number | undefined
+  readonly failInitialCancel?: boolean
 } = {}): Harness {
   let now = Date.UTC(2026, 9, 29, 12, 0, 0)
   let activity: SessionActivity = { lastActivityAt: now - 15 * MIN, kind: 'tool', waitingQuestion: false }
@@ -61,7 +62,7 @@ function harness(options: {
   const emails: EmailEvent[] = []
   let emailFailure = false
   const members: WatchMember[] = options.members ?? [
-    { sessionId: SUP, role: 'supervisor', state: 'available', displayName: '主管' },
+    { sessionId: SUP, role: 'supervisor', state: 'available', displayName: '组长' },
     { sessionId: WORKER, role: 'worker', state: 'available', displayName: '小明' },
   ]
   const ports: StallPorts = {
@@ -75,8 +76,14 @@ function harness(options: {
       : members.filter(member => member.role !== 'supervisor'),
     prompt: async (sessionId, text) => { prompts.push({ sessionId, text }) },
     cancelTask: async (input) => {
-      actions.push('cancel')
-      tasks = tasks.map(task => task.taskId === input.taskId ? { ...task, version: task.version + 1 } : task)
+      actions.push(input.compensation ? 'cancel:compensation' : 'cancel')
+      if (input.compensation) return { ok: true }
+      tasks = tasks.map(task => task.taskId === input.taskId
+        ? { ...task, version: task.version + 1, ...(options.failInitialCancel === true ? { status: 'cancelled' } : {}) }
+        : task)
+      if (options.failInitialCancel === true) {
+        return { ok: false, code: 'CANCEL_RUNTIME_FAILED', message: 'runtime unavailable' }
+      }
       return { ok: true }
     },
     reassignTask: async (input) => {
@@ -192,28 +199,28 @@ describe('stall detection', () => {
       stallState: 'normal',
       stale: true,
       suggestedAction: null,
-      capabilities: { nudge: false, reassign: false, cancel: false, escalate: false },
+      capabilities: { nudge: false, reassign: false, cancel: true, escalate: false },
     })
     expect(h.prompts).toEqual([])
   })
 
-  it('notifies once per level and never repeats while the state is unchanged', async () => {
+  it('queues only a confirmed stall and never repeats while the state is unchanged', async () => {
     const h = harness()
     const base = Date.UTC(2026, 9, 29, 12, 0, 0)
     h.setNow(base)
-    h.setActivity({ lastActivityAt: base - 5 * MIN, kind: 'tool', waitingQuestion: false })
+    h.setActivity({ lastActivityAt: base - 2 * MIN, kind: 'tool', waitingQuestion: false })
     await h.service.scan()
     await h.service.scan()
     expect(h.service.views()[0]?.stallState).toBe('possibly_stalled')
     await h.service.scan()
-    expect(h.prompts).toHaveLength(1)
+    expect(h.prompts).toHaveLength(0)
 
-    h.setNow(base + 8 * MIN)
+    h.setNow(base + 2 * MIN)
     await h.service.scan()
     expect(h.service.views()[0]?.stallState).toBe('stalled')
-    expect(h.prompts).toHaveLength(2)
+    expect(h.prompts).toHaveLength(1)
     await h.service.scan()
-    expect(h.prompts).toHaveLength(2)
+    expect(h.prompts).toHaveLength(1)
   })
 
   it('treats an unanswered ask_user_question as waiting, not stalled', async () => {
@@ -474,6 +481,34 @@ describe('goal lifecycle', () => {
 })
 
 describe('supervisor actions', () => {
+  it('allows cancellation in a normal episode while keeping other actions stall-only', async () => {
+    const h = harness()
+    await h.service.scan()
+    expect(h.service.views()[0]?.stallState).toBe('normal')
+    expect(await h.service.act(request(h, { idempotencyKey: 'normal-nudge' })))
+      .toMatchObject({ ok: false, code: 'STALL_NOT_ACTIONABLE' })
+    expect(await h.service.act(request(h, { action: 'cancel', reason: '取消当前任务', idempotencyKey: 'normal-cancel' })))
+      .toMatchObject({ ok: true, action: 'cancel', version: 4 })
+  })
+
+  it('retries a failed runtime cancellation under the same key without another ledger transition', async () => {
+    const h = harness({ failInitialCancel: true })
+    await h.service.scan()
+    const original = request(h, {
+      action: 'cancel', reason: '取消当前任务', idempotencyKey: 'runtime-retry',
+    })
+    expect(await h.service.act(original)).toMatchObject({ ok: false, code: 'CANCEL_RUNTIME_FAILED' })
+    expect(h.tasks[0]).toMatchObject({ status: 'cancelled', version: 4 })
+
+    expect(await h.service.act(original)).toMatchObject({
+      ok: true, action: 'cancel', version: 4, replayed: true,
+    })
+    expect(h.tasks[0]?.version).toBe(4)
+    expect(h.actions).toEqual(['cancel', 'cancel:compensation'])
+    expect(await h.service.act(original)).toMatchObject({ ok: true, replayed: true })
+    expect(h.actions).toEqual(['cancel', 'cancel:compensation'])
+  })
+
   it('nudges, reports cooldown, and replays the same idempotency key', async () => {
     const h = await stalled()
     const original = request(h)

@@ -57,7 +57,7 @@ export interface DispatchServiceOptions {
 
 const DEFAULT_SERVER_VERSION = 'cadre-heihei-dev'
 const MISSING_TASK_ID_HINT = '请从候选中选择一条并在汇报中显式提供 taskId 后重试'
-const MISSING_TASK_ID_EMPTY_HINT = '当前没有可汇报的未结任务；请确认 taskId，或请主管重新派单'
+const MISSING_TASK_ID_EMPTY_HINT = '当前没有可汇报的未结任务；请确认 taskId，或请组长重新派单'
 const CANDIDATES_EMPTY_HINT = '暂无待汇报任务；任务派发后可在此查看'
 const MESSAGES_EMPTY_HINT = '当前项目还没有投递记录'
 
@@ -126,7 +126,7 @@ function forbiddenTarget(
 }
 
 /**
- * 派活仅限本项目在册 supervisor（产品模型：主管派活、员工汇报）。
+ * 派活仅限本项目在册 supervisor（产品模型：组长派活、员工汇报）。
  *
  * 角色以 `members.role` 为准（ADR-0019），不信任调用方自报；不在册、
  * role=worker 或未知 role 一律拒绝，避免只靠前端禁用按钮。

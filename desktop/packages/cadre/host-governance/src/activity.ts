@@ -15,6 +15,69 @@ export interface ActivityEvent {
   readonly data?: unknown
 }
 
+/** Association between one task and the Session's currently open turn. */
+export type TaskTurnAssociation =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'current'; readonly turn: number }
+  | { readonly kind: 'other'; readonly turn: number; readonly taskId: string }
+  | { readonly kind: 'ambiguous'; readonly turn: number; readonly taskIds: readonly string[] }
+
+/**
+ * Return the exact task id from durable dispatch content.
+ * @param content - message content parts to inspect in order.
+ * @returns the first well-formed task identity, if present.
+ */
+export function dispatchTaskIdFromContent(
+  content: readonly { readonly type?: unknown; readonly text?: unknown }[] | undefined,
+): string | undefined {
+  for (const part of content ?? []) {
+    if (part.type !== 'text' || typeof part.text !== 'string') continue
+    const lines = part.text.split(/\r?\n/u)
+    if (lines[0] !== '【主管任务】' || !lines[1]?.startsWith('任务号：')) continue
+    const taskId = lines[1].slice('任务号：'.length).trim()
+    if (taskId !== '') return taskId
+  }
+  return undefined
+}
+
+/** Return the exact task id from the Host's durable dispatch message framing. */
+function dispatchTaskId(event: ActivityEvent): string | undefined {
+  if (event.type !== 'user/message') return undefined
+  const data = event.data as { content?: readonly { type?: unknown; text?: unknown }[] } | undefined
+  return dispatchTaskIdFromContent(data?.content)
+}
+
+/**
+ * Associate a task only with dispatch messages inside the currently open turn.
+ * Missing or multiple task identities are ambiguous and must not authorize a
+ * runtime cancellation; a turn belonging only to another task stays untouched.
+ * @param events - raw Session events in log order.
+ * @param taskId - task being cancelled.
+ * @returns the exact turn to cancel, an unrelated/idle result, or an ambiguity refusal.
+ */
+export function taskTurnAssociation(events: readonly ActivityEvent[], taskId: string): TaskTurnAssociation {
+  let open: { turn: number; taskIds: Set<string> } | undefined
+  for (const event of events) {
+    const data = event.data as { turn?: unknown } | undefined
+    if (event.type === 'turn/start' && typeof data?.turn === 'number') {
+      open = { turn: data.turn, taskIds: new Set() }
+      continue
+    }
+    if (event.type === 'turn/end' && data?.turn === open?.turn) {
+      open = undefined
+      continue
+    }
+    if (open === undefined) continue
+    const associatedTaskId = dispatchTaskId(event)
+    if (associatedTaskId !== undefined) open.taskIds.add(associatedTaskId)
+  }
+  if (open === undefined) return { kind: 'none' }
+  const taskIds = [...open.taskIds].sort()
+  if (taskIds.length === 1 && taskIds[0] === taskId) return { kind: 'current', turn: open.turn }
+  if (taskIds.length === 1 && taskIds[0] !== undefined) return { kind: 'other', turn: open.turn, taskId: taskIds[0] }
+  return { kind: 'ambiguous', turn: open.turn, taskIds }
+}
+
 function kindOf(event: ActivityEvent | undefined): ActivityKind | undefined {
   if (event === undefined) return undefined
   if (event.type === 'assistant/message' || event.type === 'assistant/attempt') return 'assistant'

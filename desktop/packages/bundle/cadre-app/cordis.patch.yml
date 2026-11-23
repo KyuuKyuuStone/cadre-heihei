@@ -73,7 +73,13 @@
 # The compaction budget lives on the preset row that actually runs:
 # `packages/bundle/web-app/presets/standard.patch.yml` (`compaction` group).
 # Patching `compaction-basic` from here targets the host-plane row that the web
-# bundle disables, so it would never take effect.
+# bundle disables, so it would never take effect. `compaction-settings` stays on
+# the host plane because Settings only edits entries in the active include tree;
+# it exposes only `auto` and `thresholdRatio`, which the effective preset engine
+# reads live without remounting.
+- insert:
+    - id: compaction-settings
+      name: '@deepseek-ai/dsh-compaction-basic/settings'
 
 # Tool results are 57% of measured prompts. The base bundle spills above 12.5k
 # estimated tokens; Cadre keeps only 2k inline (head/tail + locator) while the

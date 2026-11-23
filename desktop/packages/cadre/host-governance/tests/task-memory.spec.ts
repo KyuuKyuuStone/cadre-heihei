@@ -28,7 +28,7 @@ function seed(): string {
     const member = db.prepare(`INSERT INTO members
       (project_id, session_id, role, display_name, state, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'available', ?, ?)`)
-    member.run('p1', 'sup', 'supervisor', '主管', at, at)
+    member.run('p1', 'sup', 'supervisor', '组长', at, at)
     member.run('p1', 'w1', 'worker', '小王', at, at)
     member.run('p1', 'w2', 'worker', '小李', at, at)
     member.run('p2', 'other', 'worker', '外部', at, at)
@@ -205,6 +205,25 @@ describe('task memory', () => {
     expect(gate.shouldCompact('s1', { updatedAt: 't2' }, 'idle', 60_001)).toBe(true)
   })
 
+  it('stops retrying one archive after the attempt cap and resets on a newer archive', () => {
+    const gate = new TaskMemoryCompactionGate(1_000)
+    const cap = TaskMemoryCompactionGate.MAX_ATTEMPTS_PER_ARCHIVE
+    for (let attempt = 0; attempt < cap; attempt += 1) {
+      expect(gate.shouldCompact('s1', { updatedAt: 't1' }, 'idle', 1_000)).toBe(true)
+      gate.markAttempt('s1', 't1')
+    }
+    expect(gate.shouldCompact('s1', { updatedAt: 't1' }, 'idle', 1_000)).toBe(false)
+    // A newer archive gets a fresh attempt budget.
+    expect(gate.shouldCompact('s1', { updatedAt: 't2' }, 'idle', 1_000)).toBe(true)
+    gate.markAttempt('s1', 't2')
+    expect(gate.shouldCompact('s1', { updatedAt: 't2' }, 'idle', 1_000)).toBe(true)
+    // Success still settles the archive permanently and clears its attempts.
+    gate.markCompacted('s1', 't2')
+    expect(gate.shouldCompact('s1', { updatedAt: 't2' }, 'idle', 1_000)).toBe(false)
+    // Attempts are per session: another session keeps its own budget.
+    expect(gate.shouldCompact('s2', { updatedAt: 't1' }, 'idle', 1_000)).toBe(true)
+  })
+
   it('honors a custom inclusive current-context floor without consulting cumulative usage', () => {
     const gate = new TaskMemoryCompactionGate(1_000)
     expect(gate.shouldCompact('s1', { updatedAt: 't1' }, 'idle', 999)).toBe(false)
@@ -212,13 +231,13 @@ describe('task memory', () => {
     expect(gate.shouldCompact('s1', undefined, 'idle', 1_001)).toBe(false)
   })
 
-  it('uses the default inclusive 60k current-context floor and compacts an archive only once', async () => {
+  it('uses the default inclusive 500k current-context floor and compacts an archive only once', async () => {
     const mounted = mountCompaction()
-    mounted.setCurrentContextTokens(59_999)
+    mounted.setCurrentContextTokens(499_999)
     mounted.idle()
     await mounted.settle()
     expect(mounted.compactCalls()).toBe(0)
-    mounted.setCurrentContextTokens(60_000)
+    mounted.setCurrentContextTokens(500_000)
     mounted.idle()
     await mounted.settle()
     expect(mounted.compactCalls()).toBe(1)
@@ -229,7 +248,7 @@ describe('task memory', () => {
 
   it('reads a directly Agent-scoped engine when no preset registry is available', async () => {
     const mounted = mountCompaction({}, { agentPresets: false })
-    mounted.setCurrentContextTokens(60_000)
+    mounted.setCurrentContextTokens(500_000)
     mounted.idle()
     await mounted.settle()
     expect(mounted.compactCalls()).toBe(1)
@@ -277,7 +296,7 @@ describe('task memory', () => {
 
   it('resolves the optional tokenMeter per event so a late registration still governs compaction', async () => {
     const mounted = mountCompaction({}, { lateTokenMeter: true })
-    mounted.setCurrentContextTokens(60_000)
+    mounted.setCurrentContextTokens(500_000)
     mounted.idle()
     await mounted.settle()
     expect(mounted.compactCalls()).toBe(0)
@@ -287,9 +306,9 @@ describe('task memory', () => {
     expect(mounted.compactCalls()).toBe(1)
   })
 
-  it('retries a resolved compaction no-op until compactNow returns a result', async () => {
+  it('retries a resolved compaction no-op until compactNow returns a result, within the attempt cap', async () => {
     const mounted = mountCompaction()
-    mounted.setCurrentContextTokens(60_000)
+    mounted.setCurrentContextTokens(500_000)
     mounted.setCompactResult(null)
     mounted.idle()
     await mounted.settle()
@@ -304,11 +323,22 @@ describe('task memory', () => {
     expect(mounted.compactCalls()).toBe(3)
   })
 
+  it('stops retrying a permanently unresolved no-op after the per-archive attempt cap', async () => {
+    const mounted = mountCompaction()
+    mounted.setCurrentContextTokens(500_000)
+    mounted.setCompactResult(null)
+    for (let attempt = 0; attempt < TaskMemoryCompactionGate.MAX_ATTEMPTS_PER_ARCHIVE + 2; attempt += 1) {
+      mounted.idle()
+      await mounted.settle()
+    }
+    expect(mounted.compactCalls()).toBe(TaskMemoryCompactionGate.MAX_ATTEMPTS_PER_ARCHIVE)
+  })
+
   it('retries a failed archive compaction and marks only the successful settlement', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const mounted = mountCompaction()
-      mounted.setCurrentContextTokens(60_000)
+      mounted.setCurrentContextTokens(500_000)
       mounted.setCompactFailure(new Error('injected compaction failure'))
       mounted.idle()
       await mounted.settle()
@@ -321,6 +351,23 @@ describe('task memory', () => {
       mounted.idle()
       await mounted.settle()
       expect(mounted.compactCalls()).toBe(3)
+    } finally {
+      warning.mockRestore()
+    }
+  })
+
+  it('stops retrying a permanently failing archive after the per-archive attempt cap', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const mounted = mountCompaction()
+      mounted.setCurrentContextTokens(500_000)
+      mounted.setCompactFailure(new Error('summary is not smaller than the shadowed content'))
+      for (let attempt = 0; attempt < TaskMemoryCompactionGate.MAX_ATTEMPTS_PER_ARCHIVE + 2; attempt += 1) {
+        mounted.idle()
+        await mounted.settle()
+      }
+      expect(mounted.compactCalls()).toBe(TaskMemoryCompactionGate.MAX_ATTEMPTS_PER_ARCHIVE)
+      expect(warning).toHaveBeenCalledTimes(TaskMemoryCompactionGate.MAX_ATTEMPTS_PER_ARCHIVE)
     } finally {
       warning.mockRestore()
     }

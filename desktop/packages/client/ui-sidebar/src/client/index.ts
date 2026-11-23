@@ -37,8 +37,9 @@ import { applySkillPlan, SkillAdminError } from './CadreSkillAdmin.ts'
 import { CadreClaimBadge } from './CadreClaimBadge.tsx'
 import { isInternalWorkspaceTitle } from './workspace-filter.ts'
 import {
-  CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
+  CadreProjectLedgerMenuItem, CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
+  type CadreLedgerMenuInjected,
   type CadreProjectActionsInjected,
   type CadreRetireInjected, type CadreRetireRequest,
   type CadreProjectRosterState, type CadreRetireOptions, type CadreRetireResult,
@@ -180,7 +181,7 @@ export function apply(ctx: ClientContext): void {
     const target = bridge()
     const read = target?.listEmployees
     if (read === undefined) {
-      employees.set({ status: 'error', employees: employees.getSnapshot().employees, error: '员工通道未接入：window.cadre.listEmployees 未注册' })
+      employees.set({ status: 'error', employees: employees.getSnapshot().employees, error: ctx.locale.bind(NS)('employees.channelMissing') })
       return
     }
     const projects = projectItems().map(item => item.workspaceId)
@@ -209,21 +210,21 @@ export function apply(ctx: ClientContext): void {
           continue
         }
         failures.push(response?.ok === false
-          ? `${response.code ?? 'UNKNOWN'} · ${response.message ?? '未知错误'}`
-          : '响应缺少 employees')
+          ? `${response.code ?? 'UNKNOWN'} · ${response.message ?? ctx.locale.bind(NS)('error.unknown')}`
+          : ctx.locale.bind(NS)('employees.rowsMissing'))
       }
       if (succeeded === 0) {
         employees.set({
           status: 'error',
           employees: employees.getSnapshot().employees,
-          error: `EMPLOYEES_READ_FAILED · ${failures[0] ?? '未知错误'}`,
+          error: `EMPLOYEES_READ_FAILED · ${failures[0] ?? ctx.locale.bind(NS)('error.unknown')}`,
         })
         return
       }
       employees.set({
         status: 'ready',
         employees: rows,
-        error: failures.length === 0 ? null : `EMPLOYEES_PARTIAL · ${failures[0] ?? '未知错误'}`,
+        error: failures.length === 0 ? null : `EMPLOYEES_PARTIAL · ${failures[0] ?? ctx.locale.bind(NS)('error.unknown')}`,
       })
     })
   }
@@ -382,7 +383,7 @@ export function apply(ctx: ClientContext): void {
     roster.set({ ...roster.getSnapshot(), status: 'loading', error: null, projects: loadingProjects })
     const target = bridge()
     const read = target?.listRoster
-    const channelError = '花名册通道未接入：window.cadre.listRoster 未注册'
+    const channelError = ctx.locale.bind(NS)('roster.channelMissing')
     if (read === undefined) {
       supervisorByProject = new Map()
       const failedProjects = new Map<string, CadreProjectRosterState>(
@@ -471,7 +472,7 @@ export function apply(ctx: ClientContext): void {
         roster.set({
           status: 'error',
           members: roster.getSnapshot().members,
-          error: `ROSTER_READ_FAILED · ${failures[0] ?? '未知错误'}`,
+          error: `ROSTER_READ_FAILED · ${failures[0] ?? ctx.locale.bind(NS)('error.unknown')}`,
           notice: roster.getSnapshot().notice ?? null,
           projects: projectStates,
         })
@@ -492,7 +493,7 @@ export function apply(ctx: ClientContext): void {
       roster.set({
         status: 'ready',
         members,
-        error: failures.length === 0 ? null : `ROSTER_PARTIAL · ${failures[0] ?? '未知错误'}`,
+        error: failures.length === 0 ? null : `ROSTER_PARTIAL · ${failures[0] ?? ctx.locale.bind(NS)('error.unknown')}`,
         notice: members.length > 0 ? null : warnings[0] ?? null,
         projects: projectStates,
       })
@@ -605,9 +606,9 @@ export function apply(ctx: ClientContext): void {
           member.role === 'supervisor' && member.state !== 'departed'
           && projectOfSession(member.sessionId) === projectId)?.sessionId
         if (projectId === undefined || operatorSessionId === undefined) {
-          throw new SkillAdminError('SKILL_ADMIN_FORBIDDEN', '当前项目部没有可执行变更的主管')
+          throw new SkillAdminError('SKILL_ADMIN_FORBIDDEN', ctx.locale.bind(NS)('skills.admin.noOperator'))
         }
-        return applySkillPlan({ projectId, operatorSessionId, planId, token, action })
+        return applySkillPlan({ projectId, operatorSessionId, planId, token, action }, ctx.locale.bind(NS))
       },
     }),
   }, CadreSkillPlanCard as never))
@@ -632,10 +633,10 @@ export function apply(ctx: ClientContext): void {
   }): Promise<{ ok: true; sessionId: string } | { ok: false; code: string; message: string }> => {
     const target = bridge()
     if (target?.saveMember === undefined) {
-      return { ok: false, code: 'CHANNEL_MISSING', message: 'window.cadre.saveMember 未注册' }
+      return { ok: false, code: 'CHANNEL_MISSING', message: ctx.locale.bind(NS)('create.saveMemberMissing') }
     }
     if (input.workspaceId === undefined) {
-      return { ok: false, code: 'PROJECT_REQUIRED', message: '请先在侧栏创建一个项目部' }
+      return { ok: false, code: 'PROJECT_REQUIRED', message: ctx.locale.bind(NS)('create.projectRequired') }
     }
     const projectId = input.workspaceId
     let sessionId: string
@@ -658,7 +659,7 @@ export function apply(ctx: ClientContext): void {
         return {
           ok: false,
           code: saved?.code ?? 'MEMBER_WRITE_FAILED',
-          message: `会话已创建（${sessionId}）但花名册写入失败：${saved?.message ?? '未知错误'}`,
+          message: ctx.locale.bind(NS)('create.memberWriteFailed', { sessionId, message: saved?.message ?? ctx.locale.bind(NS)('error.unknown') }),
         }
       }
       if (input.role === 'worker' && input.description !== undefined && target.upsertEmployee !== undefined) {
@@ -706,9 +707,10 @@ export function apply(ctx: ClientContext): void {
       workspaceNavigation.startSession(workspaceId as Parameters<WorkspaceNavigation['startSession']>[0])
     },
     requestCadreCreate: requestCreate,
-    openLedger,
     retryRoster: refreshRoster,
   })
+
+  const ledgerMenuInjected = (): CadreLedgerMenuInjected => ({ openLedger })
 
   const retireInjected = (): CadreRetireInjected => ({
     hooks: { roster, request: cadreRetireRequest },
@@ -717,11 +719,11 @@ export function apply(ctx: ClientContext): void {
     retire: async (sessionId, options?: CadreRetireOptions) => {
       const target = bridge()
       if (target?.retireMember === undefined) {
-        return { ok: false, code: 'CHANNEL_MISSING', message: 'window.cadre.retireMember 未注册' }
+        return { ok: false, code: 'CHANNEL_MISSING', message: ctx.locale.bind(NS)('retire.channelMissing') }
       }
       const projectId = projectOfSession(sessionId)
       if (projectId === undefined) {
-        return { ok: false, code: 'PROJECT_NOT_FOUND', message: '该会话不属于任何项目部' }
+        return { ok: false, code: 'PROJECT_NOT_FOUND', message: ctx.locale.bind(NS)('retire.projectNotFound') }
       }
       try {
         const result = await target.retireMember({
@@ -796,6 +798,7 @@ export function apply(ctx: ClientContext): void {
   }, CadreBrandMark))
   ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({
     name: 'sidebar.brand.name',
+    locale: NS,
   }, CadreBrandName))
   ctx.slots.inject('conversation.hero.brand.mark' as never, () => ctx.slots.register({
     name: 'conversation.hero.brand.mark',
@@ -836,13 +839,24 @@ export function apply(ctx: ClientContext): void {
   // cycle. These registrations are therefore untyped here; the owner contract
   // in ui-workspace remains the authority for each key and owner share.
   //
-  // Project row: ＋ (supervisor/employee/plain) + 台账.
+  // Project row: the ＋ menu (supervisor/employee/plain).
   ctx.slots.inject('sidebar.workspaces.project.row.action' as never, () => ctx.slots.register({
     name: 'sidebar.workspaces.project.row.action',
     id: 'cadre-project-actions',
     order: 100,
+    locale: NS,
     inject: projectActionsInjected,
   } as never, CadreProjectRowActions as never))
+
+  // Project "..." menu: the read-only ledger entry ahead of the shipped
+  // rename (200) / delete (400) rows.
+  ctx.slots.inject('sidebar.workspaces.project.menu.item' as never, () => ctx.slots.register({
+    name: 'sidebar.workspaces.project.menu.item',
+    id: 'cadre-ledger',
+    order: 100,
+    locale: NS,
+    inject: ledgerMenuInjected,
+  } as never, CadreProjectLedgerMenuItem as never))
 
   // Session identity: role badge beside the title, which also tints the title.
   // The 16px leading cell stays empty — the title's own color carries the role.
@@ -850,6 +864,7 @@ export function apply(ctx: ClientContext): void {
     name: 'sidebar.session.row.badge',
     id: 'cadre-session-badge',
     order: 100,
+    locale: NS,
     inject: rosterBadgeInjected,
   } as never, CadreSessionBadge as never))
   ctx.slots.inject('sidebar.session.row.subtitle' as never, () => ctx.slots.register({
@@ -893,6 +908,7 @@ export function apply(ctx: ClientContext): void {
     name: 'sidebar.workspaces.session.menu.item',
     id: 'cadre-retire-member',
     order: 500,
+    locale: NS,
     inject: retireInjected,
   } as never, CadreRetireMenuItem as never))
 

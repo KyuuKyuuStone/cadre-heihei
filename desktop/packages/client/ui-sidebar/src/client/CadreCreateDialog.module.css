@@ -22,13 +22,28 @@
 }
 
 .stackWide {
-  gap: 12px;
+  gap: 10px;
 }
 
 .grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Template chips scroll inside a bounded band so the form below stays visible. */
+.templateGrid {
+  max-height: 132px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+/* Label + control pairs keep a tight inner gap inside the wider stack. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
 .customRole {

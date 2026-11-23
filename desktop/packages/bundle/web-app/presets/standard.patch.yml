@@ -75,13 +75,19 @@
               # web bundle, so this preset-scoped row is the one that runs. Keep
               # the budget on this row; a patch targeting `compaction-basic` by
               # id only reaches the (disabled) host row.
+              #
+              # Worst-case shipped DeepSeek route: 1,048,576-token context
+              # window, 256,000-token request output reservation, and the
+              # default 65,536 headroom leave 727,040 pressure tokens. That is
+              # the absolute ceiling; the default 0.9 ratio triggers at 654,336
+              # there and at 275,817 on the 500,000/128,000 Cadre profile.
               - id: compaction-basic
                 name: '@deepseek-ai/dsh-compaction-basic'
                 config:
-                  thresholdTokens: 120000
+                  thresholdTokens: 727040
                   retainTokens: 10000
                   stepPressureCheck: true
-                  stepPressureThresholdTokens: 120000
+                  stepPressureThresholdTokens: 727040
                   stepMinToolCallsBetweenChecks: 0
               - id: command-compact
                 name: '@deepseek-ai/dsh-command-compact'

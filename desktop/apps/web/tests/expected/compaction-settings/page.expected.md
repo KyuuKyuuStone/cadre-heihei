@@ -1,0 +1,37 @@
+- button "返回插件": 插件
+- heading "上下文压缩" [level=3]
+- paragraph: 控制自动压缩以及令牌压力何时触发压缩。
+- text: 自动压缩 已覆盖
+- button "恢复默认"
+- tablist "自动压缩":
+  - tab "跟随部署"
+  - tab "开启"
+  - tab "关闭" [selected]
+- tabpanel "关闭": 自动压力检查与溢出重试已关闭，仍可随时使用 /compact 手动压缩。
+- text: 压力触发比例 已覆盖
+- button "恢复默认"
+- textbox "压力触发比例":
+  - /placeholder: 部署值
+  - text: "0.72"
+- paragraph: 填写 (0, 1] 范围内的小数，例如 0.9；数值越小，压缩越早。特定模型策略与绝对容量上限仍优先；留空则跟随部署。
+- region "压缩行为说明":
+  - heading "压缩行为说明" [level=2]
+  - paragraph: 压力预算是模型上下文窗口扣除输出预留与安全余量后的可用空间。比例只作用于这部分预算，不会越过硬性容量上限。
+  - paragraph: 自动压缩开启时，确认发生上下文溢出后会尝试压缩，并在对话表面发生变化后重试一次；关闭自动压缩也会关闭此自动回退。
+  - paragraph: 在聊天中输入 /compact 可立即压缩，即使尚未达到阈值或已关闭自动压缩也可使用。
+- region "只读安全限制":
+  - heading "只读安全限制" [level=2]
+  - paragraph: 这些安全字段由部署组合管理。本页不能编辑，Host 也会拒绝绕过页面写入这些字段的请求。
+  - term:
+    - code: thresholdTokens
+  - definition: 绝对触发上限
+  - term:
+    - code: retainRatio / retainTokens
+  - definition: 近期对话保留预算
+  - term:
+    - code: stepPressureCheck / stepPressureThresholdTokens / stepMinToolCallsBetweenChecks
+  - definition: 步骤级压力检查与阈值
+  - term:
+    - code: maxOverflowRetries
+  - definition: 溢出重试次数上限
+- button "保存" [disabled]

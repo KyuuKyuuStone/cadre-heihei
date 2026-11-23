@@ -10,6 +10,7 @@ import { apply, inject } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { SidebarRootInjected } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { HeaderLeadingControls } from '../src/client/HeaderLeadingControls.tsx'
+import { CadreProjectLedgerMenuItem } from '../src/client/CadreSidebar.tsx'
 import { apply as hostApply } from '../src/index.ts'
 
 const owners = new Set<Fiber>()
@@ -63,6 +64,19 @@ async function bench(declare = true) {
         'shell.overlay': { kind: 'list', scope: 'root' },
         'settings.general.item': { kind: 'list', scope: 'root' },
         'sidebar.workspaces.project.row.action': { kind: 'list', scope: 'root' },
+        'sidebar.workspaces.project.menu.item': {
+          kind: 'list',
+          scope: 'root',
+          inject: {
+            hooks: {
+              // Same declaration-only stub as the Session menu below.
+              menuOpenState: ((
+                _standard: never,
+                state: readonly [boolean, (open: boolean) => void],
+              ) => () => state) as never,
+            },
+          },
+        },
         'sidebar.session.row.badge': { kind: 'list', scope: 'root' },
         'sidebar.session.row.subtitle': { kind: 'list', scope: 'root' },
         'sidebar.workspaces.session.menu.item': {
@@ -95,6 +109,7 @@ const CADRE_SURFACES = [
   'shell.overlay',
   'settings.general.item',
   'sidebar.workspaces.project.row.action',
+  'sidebar.workspaces.project.menu.item',
   'sidebar.session.row.badge',
   'sidebar.session.row.subtitle',
   'sidebar.workspaces.session.menu.item',
@@ -175,6 +190,19 @@ describe('ui-sidebar apply', () => {
     // The retire row is the only Cadre row-menu entry; an edit-profile row
     // would make this list longer.
     expect(entryIds(b.slots, 'sidebar.workspaces.session.menu.item')).toEqual(['cadre-retire-member'])
+  })
+
+  it('registers the ledger row in the project menu ahead of the shipped rows', async () => {
+    const b = await mounted()
+    const entries = b.slots.entries('sidebar.workspaces.project.menu.item')
+    expect(entries.map(entry => [entry.options.id, entry.options.order, entry.locale]))
+      .toEqual([['cadre-ledger', 100, 'sidebar']])
+    expect(entries[0]!.component).toBe(CadreProjectLedgerMenuItem)
+    const injected = entries[0]!.inject?.() as { openLedger?: unknown }
+    expect(typeof injected.openLedger).toBe('function')
+    // The action strip keeps only the ＋ menu; the ledger hop moved to the row above.
+    const strip = b.slots.entries('sidebar.workspaces.project.row.action')[0]!.inject?.() as Record<string, unknown>
+    expect(strip).not.toHaveProperty('openLedger')
   })
 
   it('declares only the services it uses', () => {

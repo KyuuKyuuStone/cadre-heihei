@@ -136,8 +136,8 @@ export function evaluatePolicy(
       allow: false,
       code: office ? 'WRITE_OFFICE_DENIED' : 'WRITE_SHELL_DENIED',
       message: office
-        ? '主管不能写 Office 文件；请派员工产出后验收'
-        : '主管不能执行 shell；请用 read/grep 只读诊断或派员工',
+        ? '组长不能写 Office 文件；请派员工产出后验收'
+        : '组长不能执行 shell；请用 read/grep 只读诊断或派员工',
       rule: `deny:${denyKind}`,
     }
   }
@@ -161,7 +161,7 @@ export function evaluatePolicy(
     return {
       allow: false,
       code: 'WRITE_EXTENSION_DENIED',
-      message: `主管只允许写 ${policy.allowExtensions.join('/')}：${candidate}`,
+      message: `组长只允许写 ${policy.allowExtensions.join('/')}：${candidate}`,
       path: candidate,
       rule: 'extension',
     }

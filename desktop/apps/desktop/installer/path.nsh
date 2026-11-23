@@ -198,3 +198,5 @@ Function InstallerPreflight
         StrCpy $InstallerError "$(INSTALLER_DISK_SPACE)"
     ${EndIf}
 FunctionEnd
+
+

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {
@@ -100,6 +100,34 @@ describe('Session ordering', () => {
       [sid('unknown'), sid('tie-b'), sid('older'), sid('tie-a')],
       summaries,
     )).toEqual([sid('tie-a'), sid('tie-b'), sid('older')])
+  })
+
+  it('filters authoritative manager order without sorting or breaking equal-timestamp stability', () => {
+    const summaries = list(summary('tie-b', 20), summary('older', 10), summary('tie-a', 20)).byId
+    const sort = vi.spyOn(Array.prototype, 'sort')
+    try {
+      expect(orderByRecency(
+        [sid('unknown'), sid('tie-b'), sid('older'), sid('tie-a')],
+        summaries,
+        [sid('tie-b'), sid('tie-a'), sid('older')],
+      )).toEqual([sid('tie-b'), sid('tie-a'), sid('older')])
+      expect(sort).not.toHaveBeenCalled()
+    } finally {
+      sort.mockRestore()
+    }
+  })
+
+  it('does not reorder a fully saved manual order when recency changes', () => {
+    const sessions = list(summary('older', 10), summary('newer', 20))
+    const saved = [sid('older'), sid('newer')]
+    const sort = vi.spyOn(Array.prototype, 'sort')
+    try {
+      const changed = list(summary('newer', 30), summary('older', 10)).byId
+      expect(reconcileManualOrder(sessions.ids, saved, changed, noRows)).toEqual(saved)
+      expect(sort).not.toHaveBeenCalled()
+    } finally {
+      sort.mockRestore()
+    }
   })
 
   it('orders each partition strictly by Session recency, independent of pin-array order', () => {
@@ -393,7 +421,7 @@ describe('deriveGroups', () => {
     expect(counts(statuses)).toEqual([0, 0, 0])
   })
 
-  it('ignores fork lineage and sorts every ungrouped session as a top-level row', () => {
+  it('ignores fork lineage and keeps every ungrouped session in authoritative list order', () => {
     const parent = summary('parent', 1)
     const oldChild = { ...summary('old-child', 10), parentId: parent.id }
     const newChild = { ...summary('new-child', 20), parentId: parent.id }
@@ -404,7 +432,7 @@ describe('deriveGroups', () => {
     const cycleA = { ...summary('cycle-a', 4), parentId: sid('cycle-b') }
     const cycleB = { ...summary('cycle-b', 5), parentId: sid('cycle-a') }
     const groups = deriveGroups(
-      list(parent, oldChild, newChild, tieB, tieA, self, orphan, cycleA, cycleB),
+      list(newChild, tieA, tieB, oldChild, cycleB, cycleA, orphan, self, parent),
       [],
       noRows,
       noAttention,
@@ -417,11 +445,11 @@ describe('deriveGroups', () => {
       cycleB.id, cycleA.id, orphan.id, self.id, parent.id,
     ])
 
-    // Equal timestamps use ids as a deterministic tiebreak in either input order.
+    // Equal timestamps retain Host baseline order rather than an identity tiebreak.
     expect(deriveGroups(
-      list(summary('tie-a', 1), summary('tie-b', 1)), [], noRows, noAttention, view([UNGROUPED_KEY]),
+      list(summary('tie-b', 1), summary('tie-a', 1)), [], noRows, noAttention, view([UNGROUPED_KEY]),
     )[0]!
-      .sessions.map(node => node.id)).toEqual([sid('tie-a'), sid('tie-b')])
+      .sessions.map(node => node.id)).toEqual([sid('tie-b'), sid('tie-a')])
   })
 
   it('tolerates Workspace membership arriving before its Session summary', () => {

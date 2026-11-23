@@ -229,6 +229,33 @@ describe('Session queue commands', () => {
     await ctx.fiber.dispose()
   })
 
+  it('checks an expected open turn synchronously and preserves both inbox destinations', async () => {
+    const { ctx, controller, agent, inbox, cancel } = await commandHarness()
+    agent.session.append('turn/start', { turn: 1 })
+    agent.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    agent.session.append('turn/start', { turn: 2 })
+    const queued = createUserMessage({ content: [{ type: 'text', text: 'next turn' }], source: { kind: 'user' } })
+    const steering = createUserMessage({ content: [{ type: 'text', text: 'next step' }], source: { kind: 'user' } })
+    inbox.append('next-turn', queued)
+    inbox.append('next-step', steering)
+
+    await expectFailure(Promise.resolve().then(() => controller.cancel({ sessionId: agent.id, turn: 1 })), 'session/turn-conflict')
+    expect(cancel).not.toHaveBeenCalled()
+    expect(controller.cancel({ sessionId: agent.id, turn: 2 })).toEqual({ accepted: true })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(cancel).toHaveBeenCalledWith({ kind: 'user' }, { keepInbox: true })
+    expect(inbox.nextTurn).toEqual([queued])
+    expect(inbox.nextStep).toEqual([steering])
+
+    agent.session.append('turn/end', { turn: 2, reason: { kind: 'aborted', reason: { kind: 'user' } } })
+    agent.session.append('turn/start', { turn: 3 })
+    await expectFailure(Promise.resolve().then(() => controller.cancel({ sessionId: agent.id, turn: 2 })), 'session/turn-conflict')
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(inbox.nextTurn).toEqual([queued])
+    expect(inbox.nextStep).toEqual([steering])
+    await ctx.fiber.dispose()
+  })
+
   it.each(['continuable', 'seeded-continuable'] as const)(
     'mutates both inbox destinations of a live %s child while its parent is offline',
     async (childMode) => {

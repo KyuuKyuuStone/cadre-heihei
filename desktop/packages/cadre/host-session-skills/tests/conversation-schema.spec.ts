@@ -13,6 +13,7 @@ const SURFACE: Readonly<Record<string, string>> = {
   skill_install: 'Install one skill by package name, HTTPS URL, or free text after the required confirmation.',
   skill_create: 'Create a local skill from explicit metadata and SKILL.md content.',
   skill_check: 'Check skill package health and return actionable issues without modifying files.',
+  skill_set_categories: 'Assign topic tags to one skill pack (e.g. 编程/工具/设计/文档/办公). One pack may carry several tags; the library and session skill pages group and filter by them. Supervisor/admin only; builtin packs are read-only.',
   skill_audit: 'Read skill operation audits visible to the current actor.',
   skill_plan: 'Create a non-executed install, update, or remove plan for user confirmation.',
 }
@@ -25,6 +26,7 @@ const executor: SkillToolExecutor = {
   install: unused,
   create: unused,
   check: unused,
+  setCategories: unused,
   audit: unused,
   plan: unused,
 }
@@ -44,9 +46,9 @@ function propertiesOf(name: string): Readonly<Record<string, unknown>> {
 }
 
 describe('DESIGN §2 model-visible tool surface', () => {
-  it('exports exactly the eight named tools in a stable order', () => {
+  it('exports exactly the nine named tools in a stable order', () => {
     expect(tools.map(entry => entry.name)).toEqual(Object.keys(SURFACE))
-    expect(tools).toHaveLength(8)
+    expect(tools).toHaveLength(9)
   })
 
   it('pins each English description verbatim', () => {

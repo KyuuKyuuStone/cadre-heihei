@@ -19,15 +19,9 @@ import {
   type CustomRole,
 } from './cadre-roster-source.ts'
 import css from './CadreCreateDialog.module.css'
-import {
-  CadreSkillPicker,
-  fetchSkillCatalog,
-  saveMemberSkills,
-  skillTokenTotal,
-  type CadreSkillEntry,
-} from './CadreSkills.tsx'
+import type { SidebarKey } from './locales.ts'
 
-const TEXT_PRIMARY = 'var(--dsw-alias-label-primary)'
+const INK_PRIMARY = 'var(--dsw-alias-label-primary)'
 const BODY_TEXTAREA: CSSProperties = {
   boxSizing: 'border-box',
   width: '100%',
@@ -37,7 +31,7 @@ const BODY_TEXTAREA: CSSProperties = {
   border: '0.5px solid var(--dsw-alias-border-l4)',
   borderRadius: 'var(--dsw-radius-md)',
   background: 'var(--dsw-alias-bg-layer-1)',
-  color: TEXT_PRIMARY,
+  color: INK_PRIMARY,
 }
 
 /** A create request raised by a ＋ menu. */
@@ -58,24 +52,24 @@ interface RoleTemplate {
   readonly duty: string
 }
 
-const ROLE_GROUPS: readonly { readonly id: RoleGroup; readonly label: string }[] = [
-  { id: 'dev', label: '软件开发' },
-  { id: 'novel', label: '小说' },
-  { id: 'general', label: '通用' },
+const ROLE_GROUPS: readonly { readonly id: RoleGroup; readonly labelKey: SidebarKey }[] = [
+  { id: 'dev', labelKey: 'create.group.dev' },
+  { id: 'novel', labelKey: 'create.group.novel' },
+  { id: 'general', labelKey: 'create.group.general' },
 ]
 
 /** Role templates (product-model §4); picking one fills name and duty. */
 const ROLE_TEMPLATES: Readonly<Record<RoleGroup, readonly RoleTemplate[]>> = {
   dev: [
-    { id: 'dev-backend', name: '后端', duty: '负责服务端接口、数据模型与业务逻辑。先读现有约定再改，保持兼容并可测试；交付时说明接口变更与验证方式。' },
-    { id: 'dev-frontend', name: '前端', duty: '负责界面与交互实现。复用既有组件与设计令牌，覆盖加载、空与错误状态；交付时附关键截图与自测结论。' },
-    { id: 'dev-test', name: '测试', duty: '负责用例设计、执行与回归。覆盖正常与边界路径，定位失败根因并给出可复现步骤，不为通过而修改产品代码。' },
-    { id: 'dev-review', name: '代码审查', duty: '负责审查改动的正确性、安全性与可维护性。指出具体文件与行号，区分必须修改与建议，不替作者直接重写。' },
-    { id: 'dev-design', name: '设计师', duty: '负责交互与视觉方案。基于现有设计体系给出可落地的布局、状态与文案，交付可实现规格而不是概念图。' },
-    { id: 'dev-docs', name: '技术文档', duty: '负责设计说明、使用指南与交付记录。以代码与实测为依据，写清结论、证据与未验证项，保持术语一致。' },
-    { id: 'dev-ops', name: '运维脚本', duty: '负责构建、部署与排障脚本。优先幂等与可回滚，危险操作必须显式确认并保留日志，不擅自修改共享配置。' },
+    { id: 'dev-backend', name: '后端', duty: '负责服务端接口、数据模型与业务逻辑。先读现有约定再改，保持兼容并可测试；交付说明接口变更与验证方式。不做界面视觉检查与代码审查，结构决策先问架构师。' },
+    { id: 'dev-frontend', name: '前端', duty: '负责按设计师规格实现界面与交互。复用既有组件与设计令牌，覆盖加载、空与错误状态；交付附关键截图与自测结论。不自行做视觉设计决策（争议交设计师），不替他人审查代码。' },
+    { id: 'dev-test', name: '测试', duty: '负责用例设计、执行与回归，黑盒优先：实际操作页面与接口验证，失败给截图与可复现步骤。覆盖正常与边界路径，定位根因给出证据，不为通过而修改产品代码，不做代码级审查。' },
+    { id: 'dev-review', name: '代码审查', duty: '负责深读改动代码，审查正确性、安全性与可维护性。指出具体文件与行号，区分必须修改与建议，不替作者重写。界面视觉问题交设计师，运行行为问题交测试，不重复它们的检查。' },
+    { id: 'dev-design', name: '设计师', duty: '负责 UI 与交互设计：基于现有设计体系给出可落地的布局、状态与文案规格。验证页面用浏览器截图检查对齐、间距、状态与交互反馈，交付附截图与位置说明的界面检查结论。非必要不读代码；确需定位视觉问题根因时只定点读对应组件，把线索交给前端，不改代码。' },
+    { id: 'dev-docs', name: '技术文档', duty: '负责使用指南、交付记录与说明文档，以代码与实测为依据，写清结论、证据与未验证项。项目结构文档与架构决策归架构师，本文档岗不重复；不改业务代码。' },
+    { id: 'dev-ops', name: '运维脚本', duty: '负责构建、部署与排障脚本。优先幂等与可回滚，危险操作显式确认并保留原始日志，不擅自修改共享配置。不改业务代码。' },
     { id: 'dev-ue', name: '虚幻引擎开发', duty: '负责 UE 蓝图、C++ 与资源集成。遵循项目现有模块划分与性能预算，交付可复现的构建与运行步骤。' },
-    { id: 'dev-architect', name: '架构师', duty: '负责边界划分、接口契约与技术取舍。先给约束、备选与代价，再落最小改动，避免为假设中的未来过度设计。' },
+    { id: 'dev-architect', name: '架构师', duty: '负责当前项目的结构思考与技术咨询：梳理模块边界、依赖关系与数据流，产出结构文档；回答组长的技术问题，给约束、备选与代价，体现专业判断。只写文档与方案，不改业务代码，不做代码审查与测试。' },
   ],
   novel: [
     { id: 'novel-writer', name: '写作', duty: '负责章节正文创作。保持人物口吻与叙事节奏一致，按大纲推进，交付成稿并标注本次修改点。' },
@@ -89,7 +83,7 @@ const ROLE_TEMPLATES: Readonly<Record<RoleGroup, readonly RoleTemplate[]>> = {
     { id: 'general-plan', name: '策划', duty: '负责把目标拆成可执行方案。给出范围、步骤、依赖与验收标准，标明假设与风险，不空谈方向。' },
     { id: 'general-research', name: '资料整理', duty: '负责检索、筛选与归纳资料。标注来源与时间，区分事实与推测，交付结构化摘要与原始链接。' },
     { id: 'general-proposal', name: '方案撰写', duty: '负责把需求写成可评审的方案。结论先行，论据可核查，列出备选与代价，控制篇幅。' },
-    { id: 'general-quality', name: '质量检查', duty: '负责按清单核验交付物。逐项给出通过或不通过及证据，发现缺口直接指出，不用口头保证代替检查。' },
+    { id: 'general-quality', name: '质量检查', duty: '负责按清单核验交付物（文档、界面截图、运行结果），逐项给通过/不通过与证据。代码改动审查归代码审查岗，界面视觉归设计师，不重复；不用口头保证代替检查。' },
     { id: 'general-coord', name: '协作协调', duty: '负责对齐任务边界与进度。记录谁在做什么、卡在哪里，及时升级冲突，不替他人做专业决策。' },
   ],
 }
@@ -150,7 +144,7 @@ interface CadreCreateBridge {
  * @returns the three radio groups, or a hint when no provider is configured.
  */
 function ProviderModelPicker({
-  providers, providerId, modelId, effortId, onProvider, onModel, onEffort,
+  providers, providerId, modelId, effortId, onProvider, onModel, onEffort, t,
 }: {
   readonly providers: readonly ProviderOption[]
   readonly providerId: string
@@ -159,17 +153,18 @@ function ProviderModelPicker({
   readonly onProvider: (providerId: string, defaultModel: string) => void
   readonly onModel: (modelId: string) => void
   readonly onEffort: (effortId: string) => void
+  readonly t: PropsLocale<'sidebar'>['t']
 }) {
   const selectedProvider = providers.find(provider => provider.providerId === providerId)
   const models = selectedProvider?.models ?? []
   const efforts = selectedProvider?.models?.find(model => model.id === modelId)?.reasoning?.efforts ?? []
   return (
     <>
-      <span className={css.sectionTitle}>服务商与模型（可选）</span>
+      <span className={css.sectionTitle}>{t('create.providerSection')}</span>
       {providers.length === 0
-        ? <span className={css.hint}>未配置服务商，将使用官方默认模型。</span>
+        ? <span className={css.hint}>{t('create.noProvider')}</span>
         : (
-          <div className={css.grid} role="radiogroup" aria-label="服务商">
+          <div className={css.grid} role="radiogroup" aria-label={t('create.providerAria')}>
             {providers.map(provider => (
               <Button
                 key={provider.providerId}
@@ -182,7 +177,7 @@ function ProviderModelPicker({
           </div>
         )}
       {models.length > 0 && (
-        <div className={css.grid} role="radiogroup" aria-label="模型">
+        <div className={css.grid} role="radiogroup" aria-label={t('create.modelAria')}>
           {models.map(model => (
             <Button
               key={model.id}
@@ -195,7 +190,7 @@ function ProviderModelPicker({
         </div>
       )}
       {efforts.length > 0 && (
-        <div className={css.grid} role="radiogroup" aria-label="思考强度">
+        <div className={css.grid} role="radiogroup" aria-label={t('create.effortAria')}>
           {efforts.map(effort => (
             <Button
               key={effort.id}
@@ -255,12 +250,13 @@ function CadreCreateForm({
   request, closeCreate, createRosterEntry, refreshSupervisor, t,
 }: {
   readonly request: CadreCreateRequest
-} & Omit<CadreCreateInjected, 'hooks' | 'useCreateRequest'> & PropsLocale<'sidebar'>) {
+  readonly t: PropsLocale<'sidebar'>['t']
+} & Omit<CadreCreateInjected, 'hooks' | 'useCreateRequest'>) {
   const bridge = (): CadreCreateBridge | undefined => (window as unknown as { cadre?: CadreCreateBridge }).cadre
   const kind = request.kind
   const [supervisor, setSupervisor] = useState<RosterRow | undefined>(undefined)
   // The supervisor is a singleton role: its default name is the role itself.
-  const [name, setName] = useState(kind === 'supervisor' ? '主管' : '')
+  const [name, setName] = useState(kind === 'supervisor' ? t('role.supervisor') : '')
   const [duty, setDuty] = useState('')
   const [position, setPosition] = useState('')
   const [templateGroup, setTemplateGroup] = useState<RoleGroup>('dev')
@@ -273,10 +269,6 @@ function CadreCreateForm({
   const [effortId, setEffortId] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [skillEntries, setSkillEntries] = useState<readonly CadreSkillEntry[]>([])
-  const [selectedSkills, setSelectedSkills] = useState<readonly string[]>([])
-  const [skillActor, setSkillActor] = useState<string | undefined>(undefined)
-  const [skillError, setSkillError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -286,13 +278,13 @@ function CadreCreateForm({
       // Model choice is optional for both roles; only the employee form has
       // always required the catalogue, so keep that error and leave the
       // supervisor form usable without it.
-      if (kind === 'worker') setError('服务商通道未接入：window.cadre.listProviders 未注册')
+      if (kind === 'worker') setError(t('create.providerChannelMissing'))
     } else {
       void read().then((result) => {
         if (cancelled) return
         if (result?.ok === false) {
           setProviders([])
-          if (kind === 'worker') setError(`读取官方模型目录失败：${result.message ?? result.code ?? '未知错误'}`)
+          if (kind === 'worker') setError(t('create.catalogFailed', { message: result.message ?? result.code ?? t('error.unknown') }))
           return
         }
         const usable = (result?.providers ?? []).filter(provider => provider.enabled !== false)
@@ -303,7 +295,7 @@ function CadreCreateForm({
           setModelId(first.defaultModel)
         }
       }).catch((reason: unknown) => {
-        if (!cancelled && kind === 'worker') setError(`读取服务商失败：${errorMessage(reason)}`)
+        if (!cancelled && kind === 'worker') setError(t('create.providersFailed', { message: errorMessage(reason) }))
       })
     }
     if (kind === 'supervisor') {
@@ -317,37 +309,7 @@ function CadreCreateForm({
       }).catch(() => { /* the create call remains the authority */ })
     }
     return () => { cancelled = true }
-  }, [kind])
-
-  useEffect(() => {
-    if (kind !== 'worker' || request.workspaceId === undefined) return
-    const list = bridge()
-    const roster = list?.listRoster?.bind(list)
-    if (roster === undefined) {
-      setSkillError(t('skills.error.channel'))
-      return
-    }
-    let cancelled = false
-    void roster({ projectId: request.workspaceId }).then(async (result) => {
-      if (cancelled) return
-      const supervisor = (result?.members ?? result?.rows ?? [])
-        .find(member => member.role === 'supervisor' && member.state !== 'departed')
-      if (supervisor === undefined) {
-        setSkillError(t('skills.error.noSupervisor'))
-        return
-      }
-      setSkillActor(supervisor.sessionId)
-      try {
-        const entries = await fetchSkillCatalog(request.workspaceId as string, supervisor.sessionId, undefined, navigator.language)
-        setSkillEntries(entries.filter(entry => entry.roles.includes('worker')))
-      } catch (cause) {
-        setSkillError(errorMessage(cause))
-      }
-    }).catch((cause: unknown) => {
-      if (!cancelled) setSkillError(errorMessage(cause))
-    })
-    return () => { cancelled = true }
-  }, [kind, request.workspaceId])
+  }, [kind, t])
 
   const applyTemplate = (template: RoleTemplate): void => {
     setTemplateId(template.id)
@@ -359,15 +321,15 @@ function CadreCreateForm({
   const submit = async (): Promise<void> => {
     const displayName = name.trim()
     if (displayName === '') {
-      setError(kind === 'supervisor' ? '请填写主管名字' : '请填写员工名称')
+      setError(kind === 'supervisor' ? t('create.nameRequired.supervisor') : t('create.nameRequired.worker'))
       return
     }
     if (kind === 'worker' && duty.trim() === '') {
-      setError('请填写岗位职责')
+      setError(t('create.dutyRequired'))
       return
     }
     if (kind === 'supervisor' && supervisor !== undefined) {
-      setError(`本项目部已有主管（${supervisor.displayName ?? supervisor.sessionId}），请先让其离职`)
+      setError(t('create.supervisorExists', { name: supervisor.displayName ?? supervisor.sessionId }))
       return
     }
     setCreating(true)
@@ -385,13 +347,6 @@ function CadreCreateForm({
         return
       }
       let warning: string | undefined
-      if (kind === 'worker' && selectedSkills.length > 0 && skillActor !== undefined && request.workspaceId !== undefined) {
-        try {
-          await saveMemberSkills(request.workspaceId, skillActor, result.sessionId, selectedSkills)
-        } catch (cause) {
-          warning = t('skills.error.saveAfterCreate', { message: errorMessage(cause) })
-        }
-      }
       // Both roles may pick a model; an empty pick means "official default",
       // which is why create still succeeds without binding anything.
       if (providerId !== '' && modelId !== '') {
@@ -406,8 +361,8 @@ function CadreCreateForm({
           if (bound?.ok === false) {
             // The Session and roster row exist; report the model step honestly
             // instead of claiming a complete create.
-            const roleLabel = kind === 'supervisor' ? '主管' : '员工'
-            warning = `${roleLabel}已创建，但模型未绑定（${bound.code ?? 'ERROR'} · ${bound.message ?? '未知错误'}）`
+            const roleLabel = kind === 'supervisor' ? t('role.supervisor') : t('role.worker')
+            warning = t('create.boundFailed', { role: roleLabel, code: bound.code ?? 'ERROR', message: bound.message ?? t('error.unknown') })
           }
         }
       }
@@ -420,7 +375,7 @@ function CadreCreateForm({
       const report = bridge()?.reportIn
       if (projectId !== undefined) {
         const welcomed = report === undefined
-          ? { ok: false, code: 'CHANNEL_MISSING', message: 'window.cadre.reportIn 未注册' }
+          ? { ok: false, code: 'CHANNEL_MISSING', message: t('create.reportInMissing') }
           : await report({
             sessionId: result.sessionId,
             projectId,
@@ -429,8 +384,10 @@ function CadreCreateForm({
             ...(kind === 'worker' ? { duty: duty.trim() } : {}),
           }).catch((reason: unknown) => ({ ok: false, code: 'REPORT_FAILED', message: errorMessage(reason) }))
         if (welcomed?.ok === false) {
-          const detail = `报到消息发送失败（${welcomed.code ?? 'ERROR'} · ${welcomed.message ?? '未知错误'}）`
-          warning = warning === undefined ? `${kind === 'supervisor' ? '主管' : '员工'}已创建，但${detail}` : `${warning}；${detail}`
+          const detail = t('create.reportFailed', { code: welcomed.code ?? 'ERROR', message: welcomed.message ?? t('error.unknown') })
+          warning = warning === undefined
+            ? t('create.createdBut', { role: kind === 'supervisor' ? t('role.supervisor') : t('role.worker'), detail })
+            : t('create.warningJoin', { warning, detail })
         }
       }
       refreshSupervisor()
@@ -446,54 +403,54 @@ function CadreCreateForm({
     }
   }
 
-  const projectName = request.projectLabel ?? request.workspaceId ?? '未选择项目部'
+  const projectName = request.projectLabel ?? request.workspaceId ?? t('create.noProject')
   return (
     <Modal
       open
       onClose={() => { if (!creating) closeCreate() }}
-      title={kind === 'supervisor' ? '新建主管' : '新建员工'}
+      title={kind === 'supervisor' ? t('create.title.supervisor') : t('create.title.worker')}
       description={kind === 'supervisor'
-        ? `项目部 ${projectName} · 主管只做调度与验收，每项目部限一名`
-        : `项目部 ${projectName} · 选模板自动填名称与职责，均可修改`}
-      closeLabel="关闭"
+        ? t('create.description.supervisor', { project: projectName })
+        : t('create.description.worker', { project: projectName })}
+      closeLabel={t('dialog.close')}
       className={css.wideDialog ?? ''}
       contentClassName={css.wideContent ?? ''}
       footer={(
         <>
-          <Button variant="outline" disabled={creating} onClick={() => { closeCreate() }}>取消</Button>
+          <Button variant="outline" disabled={creating} onClick={() => { closeCreate() }}>{t('dialog.cancel')}</Button>
           <Button
             variant="primary"
             disabled={creating || request.workspaceId === undefined || name.trim() === ''
               || (kind === 'supervisor' && supervisor !== undefined)}
             onClick={() => { void submit() }}
           >
-            {creating ? '创建中…' : kind === 'supervisor' ? '创建主管' : '创建员工'}
+            {creating ? t('create.creating') : kind === 'supervisor' ? t('create.submit.supervisor') : t('create.submit.worker')}
           </Button>
         </>
       )}
     >
       {request.workspaceId === undefined && (
         <p role="alert" className={css.error}>
-          还没有可用的项目部：请先在侧栏新建或添加一个工作区，再从该行「＋」建人。
+          {t('create.noProjectHint')}
         </p>
       )}
       {kind === 'supervisor'
         ? (
           <div className={css.stack}>
-            <label className={css.label} htmlFor="cadre-supervisor-name">名字</label>
+            <label className={css.label} htmlFor="cadre-supervisor-name">{t('create.nameLabel')}</label>
             <Input
               id="cadre-supervisor-name"
               value={name}
-              placeholder="主管"
+              placeholder={t('role.supervisor')}
               disabled={creating}
               onChange={(event) => { setName(event.target.value) }}
             />
             <span className={css.hint}>
-              主管不选职能、不建模板；每个项目部最多一名。已有主管时需先让其离职。
+              {t('create.supervisorHint')}
             </span>
             {supervisor !== undefined && (
               <p role="status" className={css.hint}>
-                本项目部已有主管（{supervisor.displayName ?? supervisor.sessionId}），请先让其离职。
+                {t('create.supervisorExistsHint', { name: supervisor.displayName ?? supervisor.sessionId })}
               </p>
             )}
             <div className={css.divider} />
@@ -509,27 +466,29 @@ function CadreCreateForm({
               }}
               onModel={(nextModelId) => { setModelId(nextModelId); setEffortId('') }}
               onEffort={setEffortId}
+              t={t}
             />
             <span className={css.hint}>
-              不选则用官方默认模型；选了会写入主管会话模型选择。
+              {t('create.supervisorModelHint')}
             </span>
             {error !== null && <p role="alert" className={css.error}>{error}</p>}
           </div>
         )
         : (
           <div className={css.stackWide}>
-            <div className={css.grid} role="radiogroup" aria-label="角色类别">
+            <span className={css.label}>{t('create.templatesLabel')}</span>
+            <div className={css.grid} role="radiogroup" aria-label={t('create.groupAria')}>
               {ROLE_GROUPS.map(group => (
                 <Button
                   key={group.id}
                   variant={templateGroup === group.id ? 'primary' : 'outline'}
                   onClick={() => { setTemplateGroup(group.id) }}
                 >
-                  {group.label} {ROLE_TEMPLATES[group.id].length}
+                  {t(group.labelKey)} {ROLE_TEMPLATES[group.id].length}
                 </Button>
               ))}
             </div>
-            <div className={css.grid} role="radiogroup" aria-label="角色模板">
+            <div className={`${css.grid} ${css.templateGrid}`} role="radiogroup" aria-label={t('create.templateAria')}>
               {ROLE_TEMPLATES[templateGroup].map(template => (
                 <Button
                   key={template.id}
@@ -550,12 +509,12 @@ function CadreCreateForm({
                       setDuty(role.description)
                     }}
                   >
-                    {role.name}（自定义）
+                    {role.name}{t('create.customSuffix')}
                   </Button>
                   <Button
                     variant="outline"
-                    aria-label={`删除自定义角色 ${role.name}`}
-                    title="删除这个自定义角色（不影响已创建的员工）"
+                    aria-label={t('create.removeCustomAria', { name: role.name })}
+                    title={t('create.removeCustomTitle')}
                     onClick={() => { setCustomRoles(removeCustomRole(role.id)) }}
                   >
                     ×
@@ -564,50 +523,36 @@ function CadreCreateForm({
               ))}
             </div>
 
-            <label className={css.label} htmlFor="cadre-worker-name">名称</label>
-            <Input
-              id="cadre-worker-name"
-              value={name}
-              placeholder="选模板后自动填入，可改"
-              disabled={creating}
-              onChange={(event) => { setName(event.target.value) }}
-            />
-            <label className={css.label} htmlFor="cadre-worker-duty">岗位职责（最多 2000 字）</label>
-            <textarea
-              id="cadre-worker-duty"
-              value={duty}
-              placeholder="选模板后自动填入；这是运行时注入的员工提示词，可改。"
-              rows={5}
-              maxLength={2000}
-              disabled={creating}
-              onChange={(event) => { setDuty(event.target.value) }}
-              style={BODY_TEXTAREA}
-            />
+            <div className={css.field}>
+              <label className={css.label} htmlFor="cadre-worker-name">{t('create.workerNameLabel')}</label>
+              <Input
+                id="cadre-worker-name"
+                value={name}
+                placeholder={t('create.workerNamePlaceholder')}
+                disabled={creating}
+                onChange={(event) => { setName(event.target.value) }}
+              />
+            </div>
+            <div className={css.field}>
+              <label className={css.label} htmlFor="cadre-worker-duty">{t('create.dutyLabel')}</label>
+              <textarea
+                id="cadre-worker-duty"
+                value={duty}
+                placeholder={t('create.dutyPlaceholder')}
+                rows={4}
+                maxLength={2000}
+                disabled={creating}
+                onChange={(event) => { setDuty(event.target.value) }}
+                style={BODY_TEXTAREA}
+              />
+              <span className={css.hint}>{t('create.skillsHint')}</span>
+            </div>
             <Checkbox
               checked={saveAsCustom}
-              label="保存为自定义角色，供下次复用"
+              label={t('create.saveCustom')}
               disabled={creating}
               onChange={setSaveAsCustom}
             />
-
-            <div className={css.divider} />
-            <h3 className={css.sectionTitle}>{t('skills.sectionTitle')}</h3>
-            <span className={css.hint}>{t('skills.createHint')}</span>
-            <CadreSkillPicker
-              entries={skillEntries}
-              selected={selectedSkills}
-              t={t}
-              onToggle={(id) => {
-                setSelectedSkills(current => current.includes(id)
-                  ? current.filter(item => item !== id)
-                  : [...current, id])
-              }}
-              onPreview={() => { /* preview is available in the member editor */ }}
-            />
-            <span className={css.hint}>
-              {t('skills.total', { count: String(skillTokenTotal(skillEntries, selectedSkills)) })}
-            </span>
-            {skillError !== null && <p role="alert" className={css.error}>{skillError}</p>}
 
             <div className={css.divider} />
             <ProviderModelPicker
@@ -622,9 +567,10 @@ function CadreCreateForm({
               }}
               onModel={(nextModelId) => { setModelId(nextModelId); setEffortId('') }}
               onEffort={setEffortId}
+              t={t}
             />
             <span className={css.hint}>
-              权限默认完全权限。思考强度按官方模型目录选择，未选则用模型默认；写入官方会话模型选择。
+              {t('create.workerModelHint')}
             </span>
             {error !== null && <p role="alert" className={css.error}>{error}</p>}
           </div>

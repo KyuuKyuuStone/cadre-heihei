@@ -6,6 +6,7 @@
  * wordmark live beside the sidebar that renders them.
  */
 import { useSyncExternalStore } from 'react'
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SidebarBrandMarkOwnerProps, SidebarBrandNameOwnerProps } from './contract/slots.ts'
 import sealLight from './CadreBrand.seal-light.svg'
 import sealDark from './CadreBrand.seal-dark.svg'
@@ -77,6 +78,6 @@ export function CadreHeroBrandMark({ size }: CadreHeroBrandMarkProps) {
  * Render the product name without a mark; the mark occupies its own slot.
  * @returns the Cadre Heihei wordmark.
  */
-export function CadreBrandName(_props: SidebarBrandNameOwnerProps) {
-  return <span className={css.name}>Cadre Heihei</span>
+export function CadreBrandName({ t }: SidebarBrandNameOwnerProps & PropsLocale<'sidebar'>) {
+  return <span className={css.name}>{t('brand.name')}</span>
 }

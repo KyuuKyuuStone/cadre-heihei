@@ -507,7 +507,8 @@ export class SessionController extends TypertRemoteService {
 
   /**
    * Cancel one active Agent turn without dropping its pending inbox.
-   * @param request - Session whose active Agent turn is cancelled.
+   * An optional expected turn rejects stale targeted cancellation.
+   * @param request - Session and optional exact active Agent turn to cancel.
    * @returns acknowledgement that cancellation was requested.
    */
   @Remote('cancel')

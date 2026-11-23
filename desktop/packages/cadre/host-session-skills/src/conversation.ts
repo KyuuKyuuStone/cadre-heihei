@@ -104,10 +104,10 @@ export interface SkillToolFailure {
 /** Corrective action per stable failure code, stated in user terms. */
 const REMEDIATION: Readonly<Record<string, string>> = {
   SKILL_PROJECT_REQUIRED: '提供当前会话对应的 projectId 后重试；不要选择其他项目',
-  SKILL_FORBIDDEN: '回到有效项目会话；需要主管的操作请转交主管，或改用只读工具',
-  SKILL_CONFIRM_REQUIRED: '请主管核对 preview/warnings，确认后以 confirm:true 重试',
+  SKILL_FORBIDDEN: '回到有效项目会话；需要组长的操作请转交组长，或改用只读工具',
+  SKILL_CONFIRM_REQUIRED: '请组长核对 preview/warnings，确认后以 confirm:true 重试',
   SKILL_NOT_FOUND: '先调用 skill_catalog 或 skill_search 获取有效 packId，再重试',
-  SKILL_EXISTS: '更换 id；确需覆盖时由主管使用 overwrite:true、confirm:true',
+  SKILL_EXISTS: '更换 id；确需覆盖时由组长使用 overwrite:true、confirm:true',
   SKILL_BUILTIN_READONLY: '复制内容并以新 id 调用 skill_create，不改内置目录',
   SKILL_INVALID: '按 message 的 field 修正 JSON 后重试',
   SKILL_SEARCH_UNAVAILABLE: '检查技能目录权限后重试；恢复远程连接前可使用 skill_catalog',
@@ -272,6 +272,8 @@ export interface SkillConversationPort {
   }): Promise<InstallView>
   /** @param projectId - resolved project; @param packId - optional single pack. */
   check(sessionId: string, projectId: string | undefined, packId?: string): Promise<CheckView>
+  /** Admin-assigned topic tags for one pack; persisted into its manifest. */
+  setCategories(sessionId: string, projectId: string | undefined, packId: string, categories: readonly string[]): Promise<SkillSummary>
   /** @param limit - rows to return, newest last. */
   audit(sessionId: string, projectId: string | undefined, limit: number): Promise<AuditItem[]>
   /** @param input - kind plus the url or packId the plan targets. */
@@ -518,6 +520,22 @@ export class SkillConversationExecutor {
     try {
       const binding = await this.port.resolve(sessionId, projectId)
       return succeed(await this.port.check(sessionId, binding.projectId, packId))
+    } catch (error) {
+      return failureOf(error)
+    }
+  }
+
+  /**
+   * @param sessionId - calling agent session id.
+   * @param packId - pack to tag.
+   * @param categories - topic tags replacing the previous set.
+   * @param projectId - optional explicit project.
+   * @returns the updated pack summary.
+   */
+  async setCategories(sessionId: string, packId: string, categories: readonly string[], projectId?: string): Promise<SkillToolResult<SkillSummary>> {
+    try {
+      const binding = await this.port.resolve(sessionId, projectId)
+      return succeed(await this.port.setCategories(sessionId, binding.projectId, packId, categories))
     } catch (error) {
       return failureOf(error)
     }
@@ -873,7 +891,7 @@ export function createSessionPort(options: SessionPortOptions): SkillConversatio
     async create(sessionId, projectId, input) {
       if (projectId === undefined) throw new SkillIpcError('SKILL_PROJECT_REQUIRED', 400, '无法确定项目')
       if (input.overwrite === true && resolver.resolve(sessionId, projectId).role !== 'supervisor') {
-        throw new SkillIpcError('SKILL_FORBIDDEN', 403, `会话 ${sessionId} 不是本项目主管，不能覆盖技能包 ${input.id}；请主管执行覆盖或更换技能 id`)
+        throw new SkillIpcError('SKILL_FORBIDDEN', 403, `会话 ${sessionId} 不是本项目组长，不能覆盖技能包 ${input.id}；请组长执行覆盖或更换技能 id`)
       }
       const created = createViaApi(api, { projectId, actorSessionId: actorOf(sessionId), pack: input })
       audit.append(auditItem({
@@ -907,6 +925,14 @@ export function createSessionPort(options: SessionPortOptions): SkillConversatio
         ...(builtinDir === undefined ? {} : { builtinDir }),
         ...(packId === undefined ? {} : { packId }),
       })
+    },
+    async setCategories(sessionId, projectId, packId, categories) {
+      if (projectId === undefined) throw new SkillIpcError('SKILL_PROJECT_REQUIRED', 400, '无法确定项目')
+      const updated = api.setMetadata({ projectId, actorSessionId: actorOf(sessionId), packId, categories })
+      audit.append(auditItem({
+        kind: 'set-categories', actorSessionId: sessionId, projectId, result: 'updated', packId,
+      }))
+      return summaryOfEntry(updated)
     },
     async audit(sessionId, projectId, limit) {
       if (projectId === undefined) throw new SkillIpcError('SKILL_PROJECT_REQUIRED', 400, '无法确定项目')

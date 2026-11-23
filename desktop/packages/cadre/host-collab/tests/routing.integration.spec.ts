@@ -39,7 +39,7 @@ function seed(): string {
     const member = db.prepare(`INSERT INTO members
       (project_id, session_id, role, display_name, state, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'active', ?, ?)`)
-    member.run(PROJECT, SUP, 'supervisor', '主管', AT, AT)
+    member.run(PROJECT, SUP, 'supervisor', '组长', AT, AT)
     member.run(PROJECT, WORKER, 'worker', '小明', AT, AT)
     db.prepare(`INSERT INTO tasks (task_id, project_id, seq, title, body, body_bytes, body_sha256,
       status, dispatcher_session_id, assignee_session_id, created_at, updated_at)
@@ -363,8 +363,8 @@ describe('DF-011 real Cordis composition (worker ask -> supervisor -> resolve)',
       expect(prompt).toContain('【员工任务包】')
       expect(prompt).toContain('目标：导出本月报表')
       expect(prompt).toContain('验收：CSV 可打开')
-      expect(prompt).toContain('先向主管提问')
-      expect(prompt).not.toContain('主管完整历史原文')
+      expect(prompt).toContain('先向组长提问')
+      expect(prompt).not.toContain('组长完整历史原文')
     } finally {
       await mounted.ctx.fiber.dispose()
     }

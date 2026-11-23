@@ -1,9 +1,9 @@
 /**
  * Host plugin: DF-014 stall watchdog plus the supervisor project goal.
  *
- * Read-only ledger access, Session activity from the live Session or the
- * persisted log, notifications through the official Session prompt channel.
- * No table, column, or Session event type is added.
+ * Ledger projections, supervised task transitions, Session activity from the
+ * live Session or persisted log, and notifications through the official Session
+ * prompt channel. No table, column, or Session event type is added.
  * @module @deepseek-ai/dsh-host-governance
  */
 import { appendFileSync } from 'node:fs'
@@ -27,7 +27,7 @@ import { ClaimVerifier } from './claims.ts'
 import { SessionPresence } from './presence.ts'
 import { TokenUsageLedger } from './token-usage.ts'
 import { TaskMemoryReader, TaskMemoryCompactionGate, capTaskMemory } from './task-memory.ts'
-import { activityFrom, type ActivityEvent } from './activity.ts'
+import { activityFrom, dispatchTaskIdFromContent, taskTurnAssociation, type ActivityEvent } from './activity.ts'
 import { StallService, activeSupervisor, type PortResult, type StallPorts } from './service.ts'
 import {
   type StallAction,
@@ -53,7 +53,7 @@ export interface Config {
   /** Approximate token cap for the automatic task-memory prompt block. */
   readonly taskMemoryTokens?: number
   /**
-   * Inclusive current-context floor for archive compaction; defaults to 60,000 tokens.
+   * Inclusive current-context floor for archive compaction; defaults to 500,000 tokens.
    * A configured value must be a positive safe integer; anything else fails activation.
    */
   readonly taskMemoryCompactionThresholdTokens?: number
@@ -66,6 +66,7 @@ interface SessionController {
     readonly mode: 'queue' | 'steer'
     readonly content: readonly { readonly type: 'text'; readonly text: string }[]
   }, signal: AbortSignal): Promise<unknown>
+  cancel(request: { readonly sessionId: string; readonly turn?: number }): Promise<unknown> | unknown
 }
 
 interface SessionLike {
@@ -97,10 +98,20 @@ interface GoalsLike {
   disarm(agent: unknown): GoalViewLike
 }
 
+interface QueuedMessageLike {
+  readonly id: string
+  readonly content: readonly { readonly type?: unknown; readonly text?: unknown }[]
+}
+interface InboxLike {
+  readonly nextTurn: readonly QueuedMessageLike[]
+  readonly nextStep: readonly QueuedMessageLike[]
+  remove(id: string): unknown
+}
 interface AgentLike {
   readonly id: string
   readonly status?: string
   readonly session: SessionLike
+  readonly inbox: InboxLike
   readonly ctx: { get(name: string): unknown }
 }
 interface AgentsLike { get(id: string): AgentLike | undefined }
@@ -297,12 +308,15 @@ function numberOrZero(value: unknown): number {
 
 /**
  * Validate the archive compaction floor from the plugin row.
- * @param configured - Raw `taskMemoryCompactionThresholdTokens`; unset keeps the 60,000 default.
+ * @param configured - Raw `taskMemoryCompactionThresholdTokens`; unset keeps the 500,000 default.
  * @returns The configured floor.
  * @throws When the value is not a positive safe integer; a rejected floor would compact on every idle archive.
  */
 function resolveCompactionThreshold(configured: number | undefined): number {
-  if (configured === undefined) return 60_000
+  // 500k keeps normal supervisor contexts (tens of thousands of tokens) far out
+  // of the forced archive-compaction loop; the old 60k floor re-compacted every
+  // archive on contexts that had barely grown.
+  if (configured === undefined) return 500_000
   if (!Number.isSafeInteger(configured) || configured <= 0) {
     throw new Error(`host-governance: taskMemoryCompactionThresholdTokens must be a positive integer, got ${String(configured)}`)
   }
@@ -411,6 +425,15 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   const taskMemory = new TaskMemoryReader(databasePath)
   ctx.provide?.('taskMemory', taskMemory)
   const memoryCompactionGate = new TaskMemoryCompactionGate(compactionThresholdTokens)
+  // Audit trail for the per-archive retry cap: once the cap is reached the gate
+  // stops retrying that archive, so the decision must be visible in plugin.log.
+  const logArchiveAttemptCap = (sessionId: string, updatedAt: string): void => {
+    if (memoryCompactionGate.shouldCompact(sessionId, { updatedAt }, 'idle', compactionThresholdTokens)) return
+    safeLog(databasePath, JSON.stringify({
+      kind: 'compaction-attempt-cap', at: new Date().toISOString(), sessionId,
+      archiveUpdatedAt: updatedAt, maxAttempts: TaskMemoryCompactionGate.MAX_ATTEMPTS_PER_ARCHIVE,
+    }))
+  }
   const disposeMemoryCompaction = ctx.on === undefined
     ? undefined
     : ctx.on('agent/status', ((payload: { readonly agent: { readonly id: string; readonly status?: string }; readonly status: string }) => {
@@ -428,12 +451,21 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         || latest === undefined) return
       // A completed task's archive is the trigger: force one compaction so the
       // task's original messages leave the next request. Failures and resolved
-      // no-ops do not mark the gate, so a later idle event retries.
+      // no-ops retry on later idle events, but only up to the gate's per-archive
+      // attempt cap: a summary that cannot shrink fails identically every time,
+      // and an uncapped retry loop re-runs the same failing summarization forever.
       void memoryCompaction.compactNow(agent as never, new AbortController().signal)
         .then(result => {
-          if (result !== null) memoryCompactionGate.markCompacted(payload.agent.id, latest.updatedAt)
+          if (result !== null) {
+            memoryCompactionGate.markCompacted(payload.agent.id, latest.updatedAt)
+            return
+          }
+          memoryCompactionGate.markAttempt(payload.agent.id, latest.updatedAt)
+          logArchiveAttemptCap(payload.agent.id, latest.updatedAt)
         })
         .catch((error: unknown) => {
+          memoryCompactionGate.markAttempt(payload.agent.id, latest.updatedAt)
+          logArchiveAttemptCap(payload.agent.id, latest.updatedAt)
           console.warn(`host-governance: completed-task compaction failed: ${String(error)}`)
         })
     }) as never)
@@ -520,6 +552,58 @@ export function apply(ctx: HostContext, config: Config = {}): void {
     taskMemory.close()
   })
 
+  const pendingRuntimeCancels = new Map<string, {
+    readonly taskId: string
+    readonly expectedVersion: number
+    readonly sessionId: string
+    readonly turn: number | undefined
+  }>()
+  const runtimeCancelFailure = (error: unknown): PortResult => ({
+    ok: false,
+    code: 'CANCEL_RUNTIME_FAILED',
+    message: `任务台账已取消，但目标任务运行时停止失败：${error instanceof Error ? error.message : String(error)}；请用相同参数和 idempotencyKey 重试，仅补取消原任务轮次和同任务排队输入`,
+  })
+  const discardTaskQueuedInput = (sessionId: string, taskId: string): void => {
+    const agent = ctx.agents.get(sessionId)
+    if (agent === undefined) return
+    for (const messages of [agent.inbox.nextTurn, agent.inbox.nextStep]) {
+      for (const message of [...messages]) {
+        if (dispatchTaskIdFromContent(message.content) === taskId) agent.inbox.remove(message.id)
+      }
+    }
+  }
+  const cancelTaskRuntime = async (
+    taskId: string, sessionId: string, turn: number | undefined, followReplacement = true,
+  ): Promise<PortResult> => {
+    try {
+      // Keep this synchronous with the exact-turn check so the aborted driver
+      // cannot claim targeted input before cancellation reaches the Agent.
+      discardTaskQueuedInput(sessionId, taskId)
+      if (turn === undefined) return { ok: true }
+      await ctx.sessionController.cancel({ sessionId, turn })
+      return { ok: true }
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : undefined
+      if (code !== 'session/turn-conflict' || turn === undefined) return runtimeCancelFailure(error)
+      const live = ctx.sessions.get(sessionId)
+      const association = live === undefined
+        ? { kind: 'none' as const }
+        : taskTurnAssociation(live.snapshotEvents(), taskId)
+      if (association.kind === 'current') {
+        if (followReplacement) return cancelTaskRuntime(taskId, sessionId, association.turn, false)
+        return runtimeCancelFailure(new Error(`同任务替换轮次 ${String(association.turn)} 连续变化，未继续重定向`))
+      }
+      if (association.kind === 'ambiguous') {
+        return runtimeCancelFailure(new Error(`替换轮次 ${String(association.turn)} 无法唯一关联任务 ${taskId}，未取消该轮次`))
+      }
+      // No open turn or a uniquely unrelated turn needs no Agent cancellation.
+      return { ok: true }
+    }
+  }
+  ctx.effect(() => () => { pendingRuntimeCancels.clear() })
+
   const ports: StallPorts = {
     now: () => Date.now(),
     email: event => emailNotifier.notify(event),
@@ -539,14 +623,63 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       }, AbortSignal.timeout(60_000))
     },
     cancelTask: async (input): Promise<PortResult> => {
+      const pendingKey = `${input.projectId}\u0000${input.idempotencyKey}`
+      if (input.compensation) {
+        const pending = pendingRuntimeCancels.get(pendingKey)
+        if (pending === undefined || pending.taskId !== input.taskId
+          || pending.expectedVersion !== input.expectedVersion) {
+          return {
+            ok: false,
+            code: 'CANCEL_RUNTIME_FAILED',
+            message: '首次取消的运行时目标不可用；未重定向或修改台账',
+          }
+        }
+        const outcome = await cancelTaskRuntime(input.taskId, pending.sessionId, pending.turn)
+        if (outcome.ok) pendingRuntimeCancels.delete(pendingKey)
+        return outcome
+      }
       try {
+        const task = ledger.task(input.taskId)
+        if (task === undefined || task.projectId !== input.projectId) {
+          return { ok: false, code: 'TASK_NOT_FOUND', message: `任务不存在：${input.taskId}` }
+        }
+        if (task.status === 'verified' || task.status === 'failed' || task.status === 'cancelled') {
+          return { ok: false, code: 'CANCEL_NOT_ALLOWED', message: `终态任务不可取消：${task.status}` }
+        }
+        if (task.version !== input.expectedVersion) {
+          return { ok: false, code: 'VERSION_CONFLICT', message: `期望版本 ${String(input.expectedVersion)}，当前 ${String(task.version)}` }
+        }
+        const live = ctx.sessions.get(task.assigneeSessionId)
+        const association = live === undefined
+          ? { kind: 'none' as const }
+          : taskTurnAssociation(live.snapshotEvents(), input.taskId)
+        if (association.kind === 'ambiguous') {
+          return {
+            ok: false,
+            code: 'TASK_TURN_AMBIGUOUS',
+            message: `当前活动轮次 ${String(association.turn)} 无法唯一关联任务 ${input.taskId}；未修改台账或运行时`,
+          }
+        }
         const outcome = loadBridge().transitionTask({
           databasePath, projectId: input.projectId, taskId: input.taskId, to: 'cancelled',
           actorSessionId: input.actorSessionId,
-          idempotencyKey: `stall-cancel:${input.taskId}:${randomUUID()}`,
+          idempotencyKey: `stall-cancel:${input.idempotencyKey}`,
           reason: input.reason,
         })
-        return outcome.ok ? { ok: true } : outcome
+        if (!outcome.ok) return outcome
+        // Retain the preflighted target across runtime retries. The service
+        // admits compensation only for the matching cached action failure.
+        pendingRuntimeCancels.set(pendingKey, {
+          taskId: input.taskId,
+          expectedVersion: input.expectedVersion,
+          sessionId: task.assigneeSessionId,
+          turn: association.kind === 'current' ? association.turn : undefined,
+        })
+        const runtime = await cancelTaskRuntime(
+          input.taskId, task.assigneeSessionId, association.kind === 'current' ? association.turn : undefined,
+        )
+        if (runtime.ok) pendingRuntimeCancels.delete(pendingKey)
+        return runtime
       } catch (error) {
         return { ok: false, code: 'CANCEL_NOT_ALLOWED', message: error instanceof Error ? error.message : String(error) }
       }
@@ -660,10 +793,12 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   const actionTool = (toolName: string, action: StallAction, label: string): void => {
     ctx.tools.register({
       name: toolName,
-      description: `${label}（仅本项目 supervisor；停摆任务处置，version 用 stall 视图里的值）。`,
+      description: action === 'cancel'
+        ? `${label}（仅本项目 supervisor；可取消非终态任务，并停止唯一关联的当前活动轮次，保留会话、历史和待办队列；version 用任务视图里的值）。`
+        : `${label}（仅本项目 supervisor；停摆任务处置，version 用 stall 视图里的值）。`,
       parameters: {
         type: 'object', additionalProperties: false,
-        required: ['taskId', 'episodeId', 'expectedVersion'],
+        required: ['taskId', 'episodeId', 'expectedVersion', ...(action === 'cancel' ? ['reason'] : [])],
         properties: {
           taskId: { type: 'string' },
           episodeId: { type: 'string' },
@@ -713,8 +848,64 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   }
   actionTool('nudge_task', 'nudge', '催办停摆任务')
   actionTool('reassign_task', 'reassign', '重派停摆任务')
-  actionTool('cancel_task', 'cancel', '取消停摆任务')
+  actionTool('cancel_task', 'cancel', '取消当前任务')
   actionTool('escalate_stall', 'escalate', '升级停摆任务')
+
+  // The task-memory prompt block truncates long archives; this tool is the
+  // retrieval path the truncation notice points at.
+  ctx.tools.register({
+    name: 'search_task_memory',
+    description: '检索本项目已归档任务的完整摘要（任务记忆被截断时用）。query 可为任务号、任务名或关键词；includeSnippet=true 附正文片段。',
+    parameters: {
+      type: 'object', additionalProperties: false, required: ['query'],
+      properties: {
+        query: { type: 'string' },
+        includeSnippet: { type: 'boolean' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object', additionalProperties: false, required: ['memories'],
+        properties: {
+          memories: {
+            type: 'array',
+            items: {
+              type: 'object', additionalProperties: false,
+              required: ['taskId', 'name', 'status', 'summary', 'updatedAt'],
+              properties: {
+                taskId: { type: 'string' }, name: { type: 'string' }, status: { type: 'string' },
+                summary: { type: 'string' }, updatedAt: { type: 'string' },
+                decisions: { type: 'array', items: { type: 'string' } },
+                artifacts: { type: 'array', items: { type: 'string' } },
+                transcriptRef: { type: 'string' },
+                snippet: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+      render: (_args: unknown, value: { memories: readonly { taskId: string; name: string; summary: string }[] }) => [{
+        type: 'text',
+        text: value.memories.length === 0
+          ? '没有匹配的归档任务记忆'
+          : value.memories.map(memory => `${memory.taskId} ${memory.name}\n${memory.summary}`).join('\n\n'),
+      }],
+    },
+    isConcurrencySafe: () => true,
+    execute: async (args: Record<string, unknown>, run: { agent?: { id: string } }) => {
+      const actor = callerOf(run)
+      const projectId = projectOf(actor)
+      if (projectId === undefined) throw new Error('FORBIDDEN_ACTOR: 只有本项目成员可以检索任务记忆')
+      const query = String(args.query ?? '').trim()
+      if (query === '') throw new Error('INVALID_ARGUMENT: query 不能为空')
+      return {
+        memories: taskMemory.search({
+          projectId, actorSessionId: actor, query,
+          includeSnippet: args.includeSnippet === true,
+        }),
+      }
+    },
+  })
 
   ctx.tools.register({
     name: 'list_stalled_tasks',

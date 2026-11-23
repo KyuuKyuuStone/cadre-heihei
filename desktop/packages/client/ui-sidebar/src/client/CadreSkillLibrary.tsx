@@ -37,6 +37,8 @@ interface LibraryError {
 type Translator = PropsLocale<'sidebar'>['t']
 
 const INSTALL_SKILL_ID = '__install__'
+/** Internal filter key for untagged packs; never matched against tag data. */
+const UNCATEGORIZED_FILTER = '__uncategorized__'
 const SKILL_SOURCES = {
   skillhub: 'https://skillhub.cn',
   clawhub: 'https://clawhub.ai',
@@ -177,6 +179,7 @@ export function CadreSkillLibraryPage({
   const [notice, setNotice] = useState<string | null>(null)
   const [bindingTarget, setBindingTarget] = useState<string | null>(null)
   const [bindingErrors, setBindingErrors] = useState<Readonly<Record<string, string>>>({})
+  const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const catalogGeneration = useRef(0)
   const scopeGeneration = useRef(0)
 
@@ -187,6 +190,7 @@ export function CadreSkillLibraryPage({
     setNotice(null)
     setBindingTarget(null)
     setBindingErrors({})
+    setCategoryFilter('all')
     return () => { scopeGeneration.current += 1 }
   }, [actorSessionId, projectId])
 
@@ -198,7 +202,7 @@ export function CadreSkillLibraryPage({
     setBusy(true)
     setError(null)
     try {
-      const rows = await fetchSkillCatalog(projectId, actorSessionId, actorSessionId, navigator.language)
+      const rows = await fetchSkillCatalog(projectId, actorSessionId, actorSessionId, navigator.language, t)
       if (current()) setEntries(rows)
     } catch (cause) {
       if (current()) setError(asError(cause, t))
@@ -216,7 +220,7 @@ export function CadreSkillLibraryPage({
     let cancelled = false
     setHealth(undefined)
     setHealthFailure(null)
-    void fetchSkillHealth(projectId, actorSessionId).then(result => {
+    void fetchSkillHealth(projectId, actorSessionId, t).then(result => {
       if (cancelled) return
       if (result === undefined) setHealthFailure(200)
       else setHealth(result)
@@ -224,7 +228,7 @@ export function CadreSkillLibraryPage({
       if (!cancelled) setHealthFailure(cause instanceof SkillAdminError && cause.code === 'SKILL_ADMIN_FORBIDDEN' ? 403 : 500)
     })
     return () => { cancelled = true }
-  }, [actorSessionId, projectId])
+  }, [actorSessionId, projectId, t])
 
   if (projectId === undefined || actorSessionId === undefined) {
     return (
@@ -253,7 +257,7 @@ export function CadreSkillLibraryPage({
     })
     let sessionId: string | undefined
     try {
-      const binding = await bindSkillSession(projectId, skillId, skillName)
+      const binding = await bindSkillSession(projectId, skillId, skillName, t)
       if (current()) sessionId = binding.sessionId
     } catch (cause) {
       if (current()) setBindingErrors(existing => ({ ...existing, [skillId]: bindingErrorCode(cause) }))
@@ -277,7 +281,7 @@ export function CadreSkillLibraryPage({
     setError(null)
     setNotice(null)
     try {
-      await removeSkillFromLibrary(projectId, actorSessionId, id)
+      await removeSkillFromLibrary(projectId, actorSessionId, id, t)
       if (!current()) return
       setNotice(t('skills.notice.removed'))
       await load()
@@ -288,17 +292,7 @@ export function CadreSkillLibraryPage({
     }
   }
 
-  const group = (id: 'builtin' | 'installed', title: string, rows: readonly CadreSkillEntry[], removable: boolean) => (
-    <section className={css.group} key={id} aria-label={title}>
-      <div className={css.groupHeader}>
-        <h2>{title}</h2>
-        <Tag tone="quiet" className={css.groupCount}>{rows.length}</Tag>
-      </div>
-      {rows.length === 0
-        ? <p className={css.groupEmpty}>{t('skills.library.groupEmpty')}</p>
-        : (
-          <div className={css.list}>
-            {rows.map(entry => {
+  const renderCard = (entry: CadreSkillEntry, removable: boolean) => {
               const packHealth = health?.items.find(item => item.packId === entry.id)
               const healthUnavailable = healthFailure !== null || (health !== undefined && packHealth === undefined)
               const healthState = health === undefined || healthFailure !== null || packHealth === undefined ? undefined : packHealth.status
@@ -312,6 +306,7 @@ export function CadreSkillLibraryPage({
                       <span className={css.cardId}>{entry.id}</span>
                     </div>
                     <div className={css.cardTags}>
+                      {(entry.categories ?? []).map(tag => <Tag tone="quiet" key={tag}>{tag}</Tag>)}
                       {entry.selected && <Tag tone="solid">{t('skills.selected')}</Tag>}
                       {healthState === undefined
                         ? <Tag tone="neutral">{t(healthUnavailable ? 'skills.health.unavailableTag' : 'skills.health.loading')}</Tag>
@@ -357,15 +352,32 @@ export function CadreSkillLibraryPage({
                   </div>
                   {bindingError !== undefined && <BindingErrorNotice code={bindingError} t={t} />}
                 </article>
-              )
-            })}
-          </div>
-        )}
-    </section>
   )
+  }
 
   const builtin = entries.filter(isBuiltin)
   const installed = entries.filter(entry => !isBuiltin(entry))
+  // Category selector cards filter one flat grid; a pack with several tags
+  // matches each of its tags. Untagged packs match the "uncategorized" card.
+  const categoryNames = [...new Set(entries.flatMap(entry => entry.categories ?? []))]
+  const uncategorized = entries.filter(entry => (entry.categories ?? []).length === 0)
+  const visible = categoryFilter === 'all' ? entries
+    : categoryFilter === UNCATEGORIZED_FILTER ? uncategorized
+      : entries.filter(entry => (entry.categories ?? []).includes(categoryFilter))
+  const categoryCard = (key: string, label: string, count: number) => (
+    <button
+      key={key}
+      type="button"
+      role="radio"
+      aria-checked={categoryFilter === key}
+      className={clsx(css.categoryCard, categoryFilter === key && css.categoryCardSelected)}
+      onClick={() => { setCategoryFilter(key) }}
+    >
+      <span className={css.categoryCardName}>{label}</span>
+      {' '}
+      <span className={css.categoryCardCount}>{count}</span>
+    </button>
+  )
   return (
     <section className={css.page}>
       <header className={css.header}>
@@ -423,8 +435,19 @@ export function CadreSkillLibraryPage({
       {entries.length === 0 && error === null && !busy && (
         <div className={css.emptyState}><p>{t('skills.library.empty')}</p></div>
       )}
-      {entries.length > 0 && group('builtin', t('skills.group.builtin'), builtin, false)}
-      {entries.length > 0 && group('installed', t('skills.group.installed'), installed, true)}
+      {entries.length > 0 && (
+        <div className={css.categoryRow} data-skill-category-row>
+          <span className={css.categoryLabel}>{t('skills.filter.categoryLabel')}</span>
+          <div className={css.categoryCards} role="radiogroup" aria-label={t('skills.filter.category')} data-skill-category-cards>
+            {categoryCard('all', t('skills.filter.all'), entries.length)}
+            {categoryNames.map(name => categoryCard(name, name, entries.filter(entry => (entry.categories ?? []).includes(name)).length))}
+            {uncategorized.length > 0 && categoryCard(UNCATEGORIZED_FILTER, t('skills.group.uncategorized'), uncategorized.length)}
+          </div>
+        </div>
+      )}
+      {entries.length > 0 && (visible.length === 0
+        ? <div className={css.emptyState}><p>{t('skills.search.noMatch')}</p></div>
+        : <div className={css.list}>{visible.map(entry => renderCard(entry, !isBuiltin(entry)))}</div>)}
     </section>
   )
 }

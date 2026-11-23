@@ -8,7 +8,7 @@ import { zh, type SidebarKey } from '../src/client/locales.ts'
 
 type Props = ComponentProps<typeof CadreLedgerOverlay>
 
-const REQUEST = { projectId: 'p1', label: '项目部 A', cwd: '/tmp/a', token: 1 }
+const REQUEST = { projectId: 'p1', label: '项目组 A', cwd: '/tmp/a', token: 1 }
 const EMPTY_STALL: CadreStallState = { byProject: new Map(), bySession: new Map() }
 const useStall = ((selector: (value: CadreStallState) => unknown) => selector(EMPTY_STALL)) as never
 const t = ((key: SidebarKey, params?: Record<string, unknown>) => {
@@ -176,9 +176,11 @@ function manyRows(): readonly Record<string, unknown>[] {
 
 describe('CadreLedgerOverlay overdue state', () => {
   it('marks a past due task and keeps a future due task unmarked', async () => {
-    expect(isCadreTaskOverdue('2020-01-01T00:00:00+08:00', Date.now())).toBe(true)
-    expect(isCadreTaskOverdue('2999-01-01T00:00:00+08:00', Date.now())).toBe(false)
-    expect(isCadreTaskOverdue(undefined, Date.now())).toBe(false)
+    expect(isCadreTaskOverdue('2020-01-01T00:00:00+08:00', Date.now(), 'in_progress')).toBe(true)
+    expect(isCadreTaskOverdue('2999-01-01T00:00:00+08:00', Date.now(), 'in_progress')).toBe(false)
+    expect(isCadreTaskOverdue(undefined, Date.now(), 'in_progress')).toBe(false)
+    expect(isCadreTaskOverdue('2020-01-01T00:00:00+08:00', Date.now(), 'verified')).toBe(false)
+    expect(isCadreTaskOverdue('2020-01-01T00:00:00+08:00', Date.now(), 'cancelled')).toBe(false)
 
     mount([
       row(),
@@ -188,6 +190,57 @@ describe('CadreLedgerOverlay overdue state', () => {
     expect(screen.getByText('已超期')).toBeTruthy()
     expect(document.querySelector('[data-overdue="true"]')).toBeTruthy()
     expect(document.querySelectorAll('[data-overdue="true"]')).toHaveLength(1)
+  })
+
+  it('keeps a closed task past its due as plain history, not an overdue row', async () => {
+    mount([
+      row({ taskId: 'task-done', title: '已完成任务', status: 'verified' }),
+      row(),
+    ])
+    expect(await screen.findByText('已完成任务')).toBeTruthy()
+    expect(screen.getAllByText('已超期')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-overdue="true"]')).toHaveLength(1)
+    expect(screen.getAllByText('01-01 00:00')).toHaveLength(2)
+  })
+
+  it('hides the unknown-activity line on closed rows but keeps it on open rows', async () => {
+    const ready = stalledView()
+    const project = ready.byProject.get('p1')
+    if (project === undefined) throw new Error('missing fixture project')
+    const emptyTasks: CadreStallState = {
+      byProject: new Map([['p1', { ...project, tasks: [] }]]),
+      bySession: new Map(),
+    }
+    mount([
+      row({ taskId: 'task-done', title: '已完成任务', status: 'verified' }),
+      row(),
+    ], emptyTasks)
+    expect(await screen.findByText('已完成任务')).toBeTruthy()
+    expect(screen.getAllByText('活动未知')).toHaveLength(1)
+  })
+
+  it('drops the repeated position when it equals the assignee name', async () => {
+    mount([
+      row({ assigneeName: '后端', assigneeTitle: '后端' }),
+      row({ taskId: 'task-2', title: '另一任务', assigneeName: '小明', assigneeTitle: '架构师' }),
+    ])
+    expect(await screen.findByText('后端')).toBeTruthy()
+    expect(screen.queryByText('后端（后端）')).toBeNull()
+    expect(screen.getByText('小明（架构师）')).toBeTruthy()
+  })
+
+  it('shows the created event as dispatch time and a short id with the full id as title', async () => {
+    mount([row({
+      taskId: 'abcdef12-3456-4789-8abc-def012345678',
+      status: 'verified',
+      updatedAt: '2026-10-29T10:00:00+08:00',
+      events: [
+        { fromStatus: null, toStatus: 'dispatched', actorSessionId: 's1', at: '2026-10-28T09:00:00+08:00' },
+        { fromStatus: 'dispatched', toStatus: 'verified', actorSessionId: 's1', at: '2026-10-29T10:00:00+08:00' },
+      ],
+    })])
+    const meta = await screen.findByText('派发 10-28 09:00 · abcdef12')
+    expect(meta.getAttribute('title')).toBe('abcdef12-3456-4789-8abc-def012345678')
   })
 
   it('keeps rows in an independent scroll container and the pager outside it', async () => {
@@ -204,7 +257,7 @@ describe('CadreLedgerOverlay overdue state', () => {
 
   it('shows the ledger empty state', async () => {
     mount([])
-    expect(await screen.findByText('这个项目部还没有台账记录。')).toBeTruthy()
+    expect(await screen.findByText('这个项目组还没有台账记录。')).toBeTruthy()
   })
 
   it('renders only 20 of 95 rows and pages through the ledger', async () => {
@@ -282,6 +335,6 @@ describe('CadreLedgerOverlay overdue state', () => {
       t,
     } as unknown as Props)} />)
     expect((await screen.findByRole('alert')).textContent).toContain('read failed')
-    expect(screen.queryByText('这个项目部还没有台账记录。')).toBeNull()
+    expect(screen.queryByText('这个项目组还没有台账记录。')).toBeNull()
   })
 })

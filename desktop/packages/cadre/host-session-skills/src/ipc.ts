@@ -4,11 +4,13 @@
  */
 import { DatabaseSync } from 'node:sqlite'
 import { homedir } from 'node:os'
-import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { loadSkillCatalog, localizedDescription, type SkillOrigin, type SkillPack } from './catalog.ts'
+import { collectPackHealth } from './diagnostics.ts'
+import { deriveCategories } from './auto-categories.ts'
 
 /** IPC failure with an HTTP status and stable code. */
 export class SkillIpcError extends Error {
@@ -32,6 +34,7 @@ export interface CatalogEntry {
   readonly homepage?: string
   readonly origin: SkillOrigin
   readonly roles: readonly string[]
+  readonly categories: readonly string[]
   readonly tokenEstimate: number
   readonly tools: readonly string[]
   readonly source: string
@@ -90,6 +93,11 @@ export interface SkillApi {
     author?: string; homepage?: string
   }
   add(input: AddSkillInput): CatalogEntry
+  /** Admin-assigned topic tags and check verdict; merged into the pack manifest. */
+  setMetadata(input: {
+    projectId: string; actorSessionId: string; packId: string
+    categories?: unknown; health?: unknown
+  }): CatalogEntry
   inspectUrl(input: {
     projectId: string; actorSessionId: string; url: unknown
   }): Promise<RemotePack>
@@ -284,6 +292,7 @@ function validatePack(input: AddSkillInput): ValidPack {
 function entryOf(pack: SkillPack, selected = false, locale?: string): CatalogEntry {
   return {
     id: pack.id, name: pack.name, description: localizedDescription(pack, locale), origin: pack.origin, roles: pack.roles,
+    categories: pack.categories,
     tokenEstimate: pack.tokenEstimate, tools: pack.tools, source: pack.source, license: pack.license, selected,
     ...(pack.author === undefined ? {} : { author: pack.author }),
     ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
@@ -301,6 +310,17 @@ function parseSkills(value: unknown): string[] {
 
 function isMissingSkillsColumn(error: unknown): boolean {
   return error instanceof Error && /no such column:\s*skills_json/iu.test(error.message)
+}
+
+/** Off-roster selection lives in session_skills; pre-migration ledgers read as empty. */
+function readSessionSkills(db: DatabaseSync, sessionId: string): string[] {
+  try {
+    const row = db.prepare('SELECT skills_json FROM session_skills WHERE session_id = ? LIMIT 1')
+      .get(sessionId) as { skills_json?: unknown } | undefined
+    return parseSkills(row?.skills_json)
+  } catch {
+    return []
+  }
 }
 
 function readMember(db: DatabaseSync, projectId: string, sessionId: string): MemberRow | undefined {
@@ -412,7 +432,7 @@ function requireSupervisorConfirmation(
 ): InstallConfirmation | undefined {
   if (warnings.length === 0) return undefined
   if (actor?.role !== 'supervisor') {
-    throw new SkillIpcError('SKILL_CONFIRM_REQUIRED', 403, '该技能缺少安全信息，需主管确认后才能安装')
+    throw new SkillIpcError('SKILL_CONFIRM_REQUIRED', 403, '该技能缺少安全信息，需组长确认后才能安装')
   }
   if (confirm === true) return undefined
   return { requiresConfirmation: true, installed: false, warnings, preview }
@@ -501,6 +521,37 @@ export function createSkillApi(options: {
     }
     return merged
   }
+  /** Read-merge-atomic-write one installed manifest; shared by setMetadata and install-time health. */
+  const patchManifest = (id: string, patch: {
+    readonly categories?: readonly string[]
+    readonly health?: { readonly status: string; readonly checkedAt: string; readonly issues?: unknown }
+  }): void => {
+    const manifestPath = join(skillsDir, id, 'manifest.json')
+    let manifest: Record<string, unknown>
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
+    } catch {
+      throw new SkillIpcError('SKILL_WRITE_FAILED', 500, 'manifest 解析失败')
+    }
+    if (patch.categories !== undefined) manifest.categories = patch.categories
+    if (patch.health !== undefined) manifest.health = patch.health
+    const temporary = `${manifestPath}.tmp-${randomUUID()}`
+    try {
+      writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`)
+      renameSync(temporary, manifestPath)
+    } catch {
+      try { if (existsSync(temporary)) rmSync(temporary, { force: true }) } catch { /* best-effort */ }
+      throw new SkillIpcError('SKILL_WRITE_FAILED', 500, '写入技能元数据失败；请检查目录权限')
+    }
+  }
+  /** Install-time health snapshot so a freshly installed pack is checked without a manual skill_check. */
+  const persistHealth = (packId: string): void => {
+    const item = collectPackHealth(catalog(), { packId }).items.find(row => row.packId === packId)
+    if (item === undefined) return
+    try {
+      patchManifest(packId, { health: { status: item.status, checkedAt: new Date().toISOString(), issues: item.issues } })
+    } catch { /* advisory only: the pack itself is already committed; leave its manifest without health */ }
+  }
   const packOf = (id: string): SkillPack => {
     const pack = catalog().get(id)
     if (pack === undefined) throw new SkillIpcError('SKILL_NOT_FOUND', 400, `未知技能包：${id}`)
@@ -515,10 +566,10 @@ export function createSkillApi(options: {
       if (target !== input.actorSessionId && actor?.role !== 'supervisor') {
         throw new SkillIpcError('SKILL_FORBIDDEN', 403, '只有 supervisor 可以查看其他成员的技能')
       }
-      // An off-roster session has no roster row holding a selection, so it reads as "nothing enabled".
+      // Off-roster sessions keep their selection in session_skills.
       const selected = new Set(
         target === input.actorSessionId && actor === undefined
-          ? []
+          ? readSessionSkills(db, target)
           : requireMember(db, input.projectId, target).skills,
       )
       return [...catalog().values()].map(pack => entryOf(pack, selected.has(pack.id), input.locale))
@@ -531,7 +582,7 @@ export function createSkillApi(options: {
       }
       return {
         skills: [...(input.targetSessionId === input.actorSessionId && actor === undefined
-          ? []
+          ? readSessionSkills(db, input.targetSessionId)
           : requireMember(db, input.projectId, input.targetSessionId).skills)],
       }
     },
@@ -548,8 +599,23 @@ export function createSkillApi(options: {
       for (const id of selected) {
         packOf(id)
       }
-      // Off-roster sessions have no members row to hold a selection: validate and echo it unchanged.
-      if (actor === undefined) return { skills: selected }
+      // Off-roster sessions persist their selection in session_skills.
+      if (actor === undefined) {
+        const writer = new DatabaseSync(ledgerPath)
+        try {
+          writer.prepare(`CREATE TABLE IF NOT EXISTS session_skills (
+            session_id TEXT PRIMARY KEY, skills_json TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL
+          )`).run()
+          writer.prepare(`INSERT INTO session_skills (session_id, skills_json, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET skills_json = excluded.skills_json, updated_at = excluded.updated_at`)
+            .run(input.targetSessionId, JSON.stringify(selected), new Date().toISOString())
+        } catch {
+          // Pre-migration ledger without the table: keep the echo behavior.
+        } finally {
+          writer.close()
+        }
+        return { skills: selected }
+      }
       const writer = new DatabaseSync(ledgerPath)
       try {
         writer.prepare('UPDATE members SET skills_json = ?, updated_at = ? WHERE project_id = ? AND session_id = ?')
@@ -594,6 +660,8 @@ export function createSkillApi(options: {
         id: pack.id,
         name: pack.name,
         description: pack.description,
+        // Install-time auto classification: derived tags become editable manifest metadata.
+        categories: deriveCategories({ name: pack.name, description: pack.description }),
         roles: pack.roles,
         tokenEstimate: pack.tokenEstimate,
         tools: pack.tools,
@@ -623,6 +691,55 @@ export function createSkillApi(options: {
       if (saved === undefined) {
         throw new SkillIpcError('SKILL_WRITE_FAILED', 500, '技能包写入后无法读取；请检查 manifest')
       }
+      persistHealth(pack.id)
+      return entryOf(saved)
+    },
+    setMetadata(input) {
+      requireSupervisor(db, input.projectId, input.actorSessionId)
+      const id = requiredString(input.packId, 'packId')
+      if (!KEBAB_ID.test(id) || id.length > 64) throw new SkillIpcError('SKILL_INVALID', 400, 'packId 格式非法')
+      if (builtinDir !== undefined && existsSync(join(builtinDir, id))) {
+        throw new SkillIpcError('SKILL_BUILTIN_READONLY', 403, `内置技能包 ${id} 的元数据只读`)
+      }
+      const target = join(skillsDir, id)
+      const manifestPath = join(target, 'manifest.json')
+      if (!existsSync(manifestPath)) {
+        throw new SkillIpcError('SKILL_NOT_FOUND', 404, `未知技能包或缺少 manifest：${id}`)
+      }
+      const categories = input.categories === undefined ? undefined
+        : Array.isArray(input.categories)
+          ? [...new Set(input.categories.filter((tag): tag is string => typeof tag === 'string').map(tag => tag.trim()).filter(tag => tag !== '' && tag.length <= 32))]
+          : undefined
+      if (input.categories !== undefined && categories === undefined) {
+        throw new SkillIpcError('SKILL_INVALID', 400, 'categories 必须是字符串数组')
+      }
+      if (categories !== undefined && categories.length > 8) {
+        throw new SkillIpcError('SKILL_INVALID', 400, 'categories 最多 8 个标签')
+      }
+      let health: { status: string; checkedAt: string; issues?: unknown } | undefined
+      if (input.health !== undefined) {
+        if (typeof input.health !== 'object' || input.health === null || Array.isArray(input.health)) {
+          throw new SkillIpcError('SKILL_INVALID', 400, 'health 必须是对象')
+        }
+        const record = input.health as Record<string, unknown>
+        if (record.status !== 'ok' && record.status !== 'warning' && record.status !== 'error') {
+          throw new SkillIpcError('SKILL_INVALID', 400, 'health.status 必须是 ok/warning/error')
+        }
+        health = {
+          status: record.status,
+          checkedAt: typeof record.checkedAt === 'string' ? record.checkedAt : new Date().toISOString(),
+          ...(Array.isArray(record.issues) ? { issues: record.issues } : {}),
+        }
+      }
+      if (categories === undefined && health === undefined) {
+        throw new SkillIpcError('SKILL_INVALID', 400, '至少提供 categories 或 health 之一')
+      }
+      patchManifest(id, {
+        ...(categories === undefined ? {} : { categories }),
+        ...(health === undefined ? {} : { health }),
+      })
+      const saved = catalog().get(id)
+      if (saved === undefined) throw new SkillIpcError('SKILL_WRITE_FAILED', 500, '元数据写入后无法读取')
       return entryOf(saved)
     },
     remove(input) {
@@ -780,6 +897,7 @@ export function createSkillApi(options: {
         throw new SkillIpcError('SKILL_INSTALL_PACKAGE_FAILED', 502,
           `SkillHub 安装完成但 catalog 未发现 ${expectedId}`)
       }
+      persistHealth(expectedId)
       return { name, visible, durationMs, installed: true, warnings }
     },
     async installAny(input) {

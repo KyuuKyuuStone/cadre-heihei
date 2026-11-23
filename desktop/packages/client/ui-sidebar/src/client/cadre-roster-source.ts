@@ -6,6 +6,10 @@
  * when the ledger moves to a Host Remote (ADR-0023 §2.4) only this file and
  * its bridge type change — the UI keeps its view model.
  */
+import { zhTranslate, type SidebarKey } from './locales.ts'
+
+/** Locale seat for the adapter's failure/activity copy; defaults to zh. */
+type RosterTranslate = (key: SidebarKey, params?: Record<string, unknown>) => string
 
 /** Roles are the ledger's `members.role`; the client never invents one. */
 export type RosterRole = 'supervisor' | 'worker'
@@ -118,14 +122,16 @@ function compare(a: RosterMember, b: RosterMember): number {
  * @param bridge - `window.cadre` when the preload exposed it.
  * @param projectId - current project.
  * @param tasks - ledger tasks used to derive review/working states.
+ * @param t - locale seat for failure copy; defaults to the zh dictionary.
  * @returns adapted members, or the failure reason.
  */
 export async function loadRoster(
   bridge: RosterBridge | undefined,
   projectId: string,
   tasks: readonly RosterTaskHint[],
+  t: RosterTranslate = zhTranslate,
 ): Promise<RosterLoad> {
-  if (bridge === undefined) return { ok: false, reason: '主进程通道未就绪' }
+  if (bridge === undefined) return { ok: false, reason: t('roster.hostNotReady') }
   try {
     if (bridge.listRoster !== undefined) {
       const result = await bridge.listRoster({ projectId })
@@ -140,7 +146,7 @@ export async function loadRoster(
     if (bridge.listEmployees !== undefined) {
       const result = await bridge.listEmployees({ projectId })
       if (result?.ok === false) {
-        return { ok: false, reason: `${result.code ?? 'UNKNOWN'} · ${result.message ?? '读取员工失败'}` }
+        return { ok: false, reason: `${result.code ?? 'UNKNOWN'} · ${result.message ?? t('roster.readEmployeesFailed')}` }
       }
       const rows = (result?.employees ?? []).map(employee => ({
         sessionId: employee.sessionId,
@@ -205,18 +211,19 @@ export function removeCustomRole(id: string): readonly CustomRole[] {
  * ledger's `updated_at` only moves on membership writes, not every task step.
  * @param member - roster member.
  * @param now - clock injection for tests.
+ * @param t - locale seat for the activity label; defaults to the zh dictionary.
  * @returns the label shown under the status.
  */
-export function activityText(member: RosterMember, now: number = Date.now()): string {
-  if (member.status === 'working') return '刚刚'
+export function activityText(member: RosterMember, now: number = Date.now(), t: RosterTranslate = zhTranslate): string {
+  if (member.status === 'working') return t('stall.time.justNow')
   if (member.updatedAt === undefined) return '—'
   const at = Date.parse(member.updatedAt)
   if (Number.isNaN(at)) return '—'
   const seconds = Math.max(0, Math.round((now - at) / 1000))
-  if (seconds < 60) return '刚刚'
+  if (seconds < 60) return t('stall.time.justNow')
   const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 60) return t('stall.time.minutesAgo', { count: String(minutes) })
   const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours} 小时前`
-  return `${Math.round(hours / 24)} 天前`
+  if (hours < 24) return t('stall.time.hoursAgo', { count: String(hours) })
+  return t('stall.time.daysAgo', { count: String(Math.round(hours / 24)) })
 }

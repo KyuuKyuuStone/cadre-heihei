@@ -14,9 +14,6 @@ const entryListSchema = JSON_SCHEMA.extend(new Type('tag:yaml.org,2002:js', {
 const preset = (name: string): string =>
   readFileSync(new URL(`../presets/${name}.patch.yml`, import.meta.url), 'utf8')
 
-const pluginIds = (text: string): string[] =>
-  [...text.matchAll(/^\s+- id: (\S+)$/gmu)].map(match => match[1] as string)
-
 interface PresetRow {
   readonly id?: string
   readonly config?: unknown
@@ -33,51 +30,31 @@ function presetCompactionConfig(): Record<string, unknown> {
 }
 
 describe('shipped agent presets', () => {
-  it('publishes cadre beside the four upstream presets without replacing them', () => {
+  it('publishes the four upstream presets without replacing them', () => {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       dsh?: { bundle?: { patch?: string[] } }
     }
     const patches = pkg.dsh?.bundle?.patch ?? []
     expect(patches).toEqual(expect.arrayContaining([
       './presets/standard.patch.yml', './presets/ptc.patch.yml',
-      './presets/minimal.patch.yml', './presets/cordis.patch.yml', './presets/cadre.patch.yml',
+      './presets/minimal.patch.yml', './presets/cordis.patch.yml',
     ]))
-    for (const [name, id] of [['standard', 'standard'], ['ptc', 'ptc'], ['minimal', 'minimal'], ['cordis', 'cordis'], ['cadre', 'cadre']] as const) {
-      const text = preset(name)
+    for (const id of ['standard', 'ptc', 'minimal', 'cordis'] as const) {
+      const text = preset(id)
       expect(text).toMatch(new RegExp(`id: ${id}\\b`, 'u'))
-      expect(text).toMatch(new RegExp(`source: ${id === 'cadre' ? 'cadre' : 'deepseek'}`, 'u'))
+      expect(text).toMatch(/source: deepseek/u)
     }
   })
 
-  it('keeps the Cadre composition focused on team tools and removes unrelated web access', () => {
-    const standard = pluginIds(preset('standard')).filter(id => !id.startsWith('preset-'))
-    const cadre = pluginIds(preset('cadre')).filter(id => !id.startsWith('preset-'))
-    for (const required of [
-      'tool-bash', 'tool-pwsh', 'tool-fs', 'tool-fs-search',
-      'tool-jobs', 'tool-skill', 'tool-todo', 'present',
-    ]) {
-      expect(cadre).toContain(required)
+  it('no longer ships the redundant cadre-team/cadre-workflow builtin skills', () => {
+    // Their guidance is hardcoded in SUPERVISOR_DUTY / WORKER_POLICY; shipping
+    // them as opt-in packs only duplicated the prompt budget.
+    for (const id of ['cadre-team', 'cadre-workflow']) {
+      expect(() => readFileSync(
+        new URL(`../../../cadre/host-session-skills/builtin-skills/${id}/manifest.json`, import.meta.url),
+        'utf8',
+      )).toThrow()
     }
-    expect(cadre).not.toContain('tool-web')
-    expect(standard).toContain('tool-web')
-    expect(preset('cadre')).toContain('name: Cadre 团队模式')
-    expect(preset('cadre')).toContain('source: cadre')
-    expect(preset('cadre')).toContain('Dispatch template')
-  })
-
-  it('ships the cadre-team builtin skill with the preset guidance', () => {
-    const manifest = JSON.parse(readFileSync(
-      new URL('../../../cadre/host-session-skills/builtin-skills/cadre-team/manifest.json', import.meta.url),
-      'utf8',
-    )) as { id: string; descriptionI18n?: { zh?: string } }
-    const skill = readFileSync(
-      new URL('../../../cadre/host-session-skills/builtin-skills/cadre-team/SKILL.md', import.meta.url),
-      'utf8',
-    )
-    expect(manifest.id).toBe('cadre-team')
-    expect(manifest.descriptionI18n?.zh).toBeTruthy()
-    expect(skill).toContain('Dispatch template')
-    expect(skill).toContain('Release preflight')
   })
 
   it('mounts the skill-admin tools only in the skill-admin preset', () => {
@@ -85,7 +62,9 @@ describe('shipped agent presets', () => {
     expect(cadreApp).toContain('id: cadre-skill-admin')
     expect(cadreApp).toContain("name: '@deepseek-ai/dsh-host-session-skills/admin'")
     expect(cadreApp).toContain('sampleOverCapGlobResults: false')
-    expect(preset('cadre')).not.toContain('host-session-skills/admin')
+    for (const name of ['standard', 'ptc', 'minimal', 'cordis']) {
+      expect(preset(name)).not.toContain('host-session-skills/admin')
+    }
   })
 
   it('satisfies the required tool-fs-search config that broke the admin preset', () => {
@@ -97,10 +76,10 @@ describe('shipped agent presets', () => {
   it('wires the Cadre compaction budget onto the row the standard preset actually mounts', () => {
     const config = presetCompactionConfig()
     expect(config).toEqual({
-      thresholdTokens: 120_000,
+      thresholdTokens: 727_040,
       retainTokens: 10_000,
       stepPressureCheck: true,
-      stepPressureThresholdTokens: 120_000,
+      stepPressureThresholdTokens: 727_040,
       stepMinToolCallsBetweenChecks: 0,
     })
     // The row's config must yield the Cadre budgets through the real policy
@@ -111,9 +90,11 @@ describe('shipped agent presets', () => {
       1_000_000,
       256_000,
     )
-    expect(spec.thresholdTokens).toBe(120_000)
+    // The cap sits above the routed pressure budget, so the 0.9 ratio wins:
+    // floor((1,000,000 − 256,000 − 65,536) × 0.9) = 610,617.
+    expect(spec.thresholdTokens).toBe(610_617)
     expect(spec.retainTokens).toBe(10_000)
-    expect(resolved.stepPressureThresholdTokens).toBe(120_000)
+    expect(resolved.stepPressureThresholdTokens).toBe(727_040)
     expect(resolved.auto).toBe(true)
   })
 

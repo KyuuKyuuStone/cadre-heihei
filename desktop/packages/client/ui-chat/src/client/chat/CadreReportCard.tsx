@@ -18,9 +18,12 @@ import {
   Tag,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 
-const TEXT_PRIMARY = 'var(--dsw-alias-label-primary)'
-const TEXT_SECONDARY = 'var(--dsw-alias-label-secondary)'
-const TEXT_ERROR = 'var(--dsw-alias-state-error-primary)'
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ChatKey } from '../locale.ts'
+
+const INK_PRIMARY = 'var(--dsw-alias-label-primary)'
+const INK_SECONDARY = 'var(--dsw-alias-label-secondary)'
+const INK_ERROR = 'var(--dsw-alias-state-error-primary)'
 const CARD: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -29,7 +32,7 @@ const CARD: CSSProperties = {
   border: '0.5px solid var(--dsw-alias-border-l2)',
   borderRadius: 'var(--dsw-radius-md)',
   background: 'var(--dsw-alias-bg-layer-1)',
-  color: TEXT_PRIMARY,
+  color: INK_PRIMARY,
   minWidth: 0,
 }
 
@@ -43,16 +46,21 @@ const BAR: CSSProperties = {
   border: '0.5px solid var(--dsw-alias-border-l2)',
   borderRadius: 'var(--dsw-radius-md)',
   background: 'var(--dsw-alias-bg-layer-1)',
-  color: TEXT_PRIMARY,
+  color: INK_PRIMARY,
 }
 
-const STATUS_LABELS: Readonly<Record<string, string>> = {
-  delivered: '待主管审',
-  review: '待你确认',
-  verified: '已完成',
-  rework: '返工中',
-  failed: '失败',
-  cancelled: '已取消',
+const STATUS_KEYS: Readonly<Record<string, ChatKey>> = {
+  delivered: 'report.status.delivered',
+  review: 'report.status.review',
+  verified: 'report.status.verified',
+  rework: 'report.status.rework',
+  failed: 'report.status.failed',
+  cancelled: 'report.status.cancelled',
+}
+
+function statusLabel(status: string, t: PropsLocale<'chat'>['t']): string {
+  const key = STATUS_KEYS[status]
+  return key === undefined ? status : t(key)
 }
 
 interface TaskRow {
@@ -117,9 +125,9 @@ export function parseCadreReport(content: string): ParsedReport | undefined {
 }
 
 /** Prefer a conclusion/completion sentence, then fall back to the first line. */
-function firstLine(text: string): string {
+function firstLine(text: string, t: PropsLocale<'chat'>['t']): string {
   const trimmed = text.trim()
-  if (trimmed === '') return '（汇报没有正文）'
+  if (trimmed === '') return t('report.emptyBody')
   const lines = trimmed.split('\n').map(line => line.trim()).filter(line => line !== '')
   const conclusion = lines.find(line => /^(结论|完成|已完成|结果|交付)[:：]?/.test(line)) ?? lines[0] ?? trimmed
   const sentence = (conclusion.split(/[。！？!?]/)[0] ?? '').trim() || conclusion
@@ -156,8 +164,8 @@ function writeExpanded(key: string, value: boolean): void {
   }
 }
 
-function failureText(result: TransitionResult | undefined): string {
-  return `${result?.code ?? 'LEDGER_NOT_UPDATED'} · ${result?.message ?? '台账未确认写入'}`
+function failureText(result: TransitionResult | undefined, t: PropsLocale<'chat'>['t']): string {
+  return `${result?.code ?? 'LEDGER_NOT_UPDATED'} · ${result?.message ?? t('report.ledgerUnconfirmed')}`
 }
 
 /**
@@ -166,11 +174,12 @@ function failureText(result: TransitionResult | undefined): string {
  * @param props - report message text and the Workspace id of the Session
  * that owns the card (the ledger addresses projects by Workspace id).
  */
-export function CadreReportNodeView({ content, projectId, sessionId }: {
+export function CadreReportNodeView({ content, projectId, sessionId, t }: {
   readonly content: string
   readonly projectId: string | undefined
   /** The Session showing the card; it becomes the ledger actor. */
   readonly sessionId: string | undefined
+  readonly t: PropsLocale<'chat'>['t']
 }) {
   const report = parseCadreReport(content)
   const expandKey = report === undefined ? '' : expansionKey(report.taskId, content)
@@ -187,11 +196,11 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
     if (report === undefined) return
     const target = bridge()
     if (target?.listTasks === undefined) {
-      setLoadError('台账通道未接入：window.cadre.listTasks 未注册')
+      setLoadError(t('report.channelMissing'))
       return
     }
     if (projectId === undefined) {
-      setLoadError('当前会话不属于任何项目部，无法读取台账。')
+      setLoadError(t('report.noProjectRead'))
       return
     }
     let cancelled = false
@@ -199,7 +208,7 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
       if (cancelled) return
       const row = response?.rows?.find(task => task.taskId === report.taskId)
       if (row === undefined) {
-        setLoadError('台账中找不到这条任务；卡片仅展示汇报原文。')
+        setLoadError(t('report.taskMissing'))
         return
       }
       setStatus(row.status)
@@ -207,7 +216,7 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
       if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error))
     })
     return () => { cancelled = true }
-  }, [content, projectId])
+  }, [content, projectId, t])
 
   useEffect(() => {
     setExpanded(readExpanded(expandKey))
@@ -226,15 +235,15 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
   const transition = async (to: string, reasonText?: string): Promise<void> => {
     const target = bridge()
     if (target?.transitionTask === undefined) {
-      setNotice('写入通道未接入：window.cadre.transitionTask 未注册')
+      setNotice(t('report.writeChannelMissing'))
       return
     }
     if (projectId === undefined) {
-      setNotice('当前会话不属于任何项目部，无法写入台账。')
+      setNotice(t('report.noProjectWrite'))
       return
     }
     if (sessionId === undefined) {
-      setNotice('无法确定当前会话身份，写入已拒绝。')
+      setNotice(t('report.noActor'))
       return
     }
     setPending(true)
@@ -247,7 +256,7 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
           projectId, sessionId, taskId: report.taskId, status: 'review',
         })
         if (reviewed?.ok === false) {
-          setNotice(`主管审核步骤失败：${failureText(reviewed)}`)
+          setNotice(t('report.reviewStepFailed', { detail: failureText(reviewed, t) }))
           return
         }
       }
@@ -259,11 +268,11 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
         ...(reasonText === undefined ? {} : { reason: reasonText }),
       })
       if (final?.ok === false || (final?.ok !== true && final?.ledgerUpdated !== true)) {
-        setNotice(`写入失败：${failureText(final)}`)
+        setNotice(t('report.writeFailed', { detail: failureText(final, t) }))
         return
       }
       setStatus(to)
-      setResult(to === 'verified' ? '已确认收货，任务完成。' : '已打回，任务退回员工返工。')
+      setResult(to === 'verified' ? t('report.verified') : t('report.reworked'))
       setReasonOpen(false)
       setReason('')
     } catch (error) {
@@ -275,27 +284,27 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
 
   const final = status === 'verified' || status === 'rework' || status === 'failed' || status === 'cancelled'
   const actionable = status === 'delivered' || status === 'review'
-  const preview = firstLine(report.summary)
+  const preview = firstLine(report.summary, t)
 
   if (!expanded) {
     return (
       <div style={BAR} data-cadre-report-collapsed="">
-        <span aria-hidden="true" style={{ display: 'inline-flex', flex: 'none', color: TEXT_SECONDARY }}>
+        <span aria-hidden="true" style={{ display: 'inline-flex', flex: 'none', color: INK_SECONDARY }}>
           <IconDeliverDocRegular size={14} />
         </span>
-        <span style={{ flex: 'none', fontWeight: 500 }}>员工汇报</span>
-        <span style={{ flex: 'none', color: TEXT_SECONDARY, fontSize: 12 }}>{report.taskId}</span>
+        <span style={{ flex: 'none', fontWeight: 500 }}>{t('report.title')}</span>
+        <span style={{ flex: 'none', color: INK_SECONDARY, fontSize: 12 }}>{report.taskId}</span>
         <span
           title={report.summary}
           style={{
             flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap', color: TEXT_PRIMARY, fontSize: 13,
+            whiteSpace: 'nowrap', color: INK_PRIMARY, fontSize: 13,
           }}
         >
           {preview}
         </span>
         <Button variant="ghost" size="sm" onClick={toggleExpanded} aria-expanded={false}>
-          展开 <IconChevronDownOutlineRegular size={12} />
+          {t('report.expand')} <IconChevronDownOutlineRegular size={12} />
         </Button>
       </div>
     )
@@ -304,30 +313,30 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
   return (
     <div style={CARD}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <Tag tone="neutral">员工汇报</Tag>
+        <Tag tone="neutral">{t('report.title')}</Tag>
         <span style={{ fontWeight: 600, minWidth: 0 }}>{report.title}</span>
         <span style={{ flex: 1 }} />
         {status === undefined
-          ? <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>读取状态…</span>
-          : <Pill>{STATUS_LABELS[status] ?? status}</Pill>}
+          ? <span style={{ color: INK_SECONDARY, fontSize: 12 }}>{t('report.loadingStatus')}</span>
+          : <Pill>{statusLabel(status, t)}</Pill>}
         <Button variant="ghost" size="sm" onClick={toggleExpanded} aria-expanded={true}>
-          收起 <IconChevronUpOutlineRegular size={12} />
+          {t('report.collapse')} <IconChevronUpOutlineRegular size={12} />
         </Button>
       </div>
-      <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
-        {report.reporter} · 任务号 {report.taskId}
+      <span style={{ color: INK_SECONDARY, fontSize: 12 }}>
+        {report.reporter} · {t('report.taskId', { id: report.taskId })}
       </span>
-      <p style={{ margin: 0, color: TEXT_PRIMARY, lineHeight: 1.55 }}>
+      <p style={{ margin: 0, color: INK_PRIMARY, lineHeight: 1.55 }}>
         {report.summary}
       </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>交付物</span>
+        <span style={{ color: INK_SECONDARY, fontSize: 12 }}>{t('report.deliverables')}</span>
         {report.deliverables.length === 0
-          ? <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>（未提供）</span>
+          ? <span style={{ color: INK_SECONDARY, fontSize: 12 }}>{t('report.none')}</span>
           : report.deliverables.map(item => <Tag key={item} tone="neutral">{item}</Tag>)}
       </div>
       {loadError !== null && (
-        <p role="status" style={{ margin: 0, color: TEXT_SECONDARY, fontSize: 12 }}>{loadError}</p>
+        <p role="status" style={{ margin: 0, color: INK_SECONDARY, fontSize: 12 }}>{loadError}</p>
       )}
       {actionable && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -337,7 +346,7 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
             disabled={pending}
             onClick={() => { setReasonOpen(true); setNotice(null); setReason('') }}
           >
-            打回重做
+            {t('report.reject')}
           </Button>
           <Button
             variant="primary"
@@ -345,58 +354,58 @@ export function CadreReportNodeView({ content, projectId, sessionId }: {
             disabled={pending}
             onClick={() => { void transition('verified') }}
           >
-            {pending ? '处理中…' : status === 'delivered' ? '主管通过并确认收货' : '确认收货'}
+            {pending ? t('report.processing') : status === 'delivered' ? t('report.approveAndAccept') : t('report.accept')}
           </Button>
-          <span style={{ color: TEXT_SECONDARY, fontSize: 11 }}>
-            {status === 'delivered' ? '通过会先记录主管审核，再确认收货。' : '确认后任务进入已完成。'}
+          <span style={{ color: INK_SECONDARY, fontSize: 11 }}>
+            {status === 'delivered' ? t('report.approveHint') : t('report.acceptHint')}
           </span>
         </div>
       )}
       {final && (
-        <p role="status" style={{ margin: 0, color: TEXT_SECONDARY, fontSize: 12 }}>
-          {result ?? `当前状态：${STATUS_LABELS[status!] ?? status}`}
+        <p role="status" style={{ margin: 0, color: INK_SECONDARY, fontSize: 12 }}>
+          {result ?? t('report.currentState', { status: statusLabel(status!, t) })}
         </p>
       )}
-      {notice !== null && <p role="alert" style={{ margin: 0, color: TEXT_ERROR, fontSize: 12 }}>{notice}</p>}
+      {notice !== null && <p role="alert" style={{ margin: 0, color: INK_ERROR, fontSize: 12 }}>{notice}</p>}
       <Modal
         open={reasonOpen}
         onClose={() => { if (!pending) setReasonOpen(false) }}
-        title="打回重做"
+        title={t('report.reject')}
         description={`${report.title} · ${report.taskId}`}
-        closeLabel="关闭"
+        closeLabel={t('report.close')}
         footer={(
           <>
-            <Button variant="outline" disabled={pending} onClick={() => { setReasonOpen(false) }}>取消</Button>
+            <Button variant="outline" disabled={pending} onClick={() => { setReasonOpen(false) }}>{t('report.cancel')}</Button>
             <Button
               variant="primary"
               disabled={pending || reason.trim() === ''}
               onClick={() => { void transition('rework', reason.trim()) }}
             >
-              {pending ? '处理中…' : '确认打回'}
+              {pending ? t('report.processing') : t('report.confirmReject')}
             </Button>
           </>
         )}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <label htmlFor="cadre-report-reason" style={{ color: TEXT_PRIMARY, fontSize: 13 }}>
-            打回原因（必填）
+          <label htmlFor="cadre-report-reason" style={{ color: INK_PRIMARY, fontSize: 13 }}>
+            {t('report.reasonLabel')}
           </label>
           <textarea
             id="cadre-report-reason"
             value={reason}
             rows={4}
             disabled={pending}
-            placeholder="例如：交付物不全 / 没按要求 / 结论不成立"
+            placeholder={t('report.reasonPlaceholder')}
             onChange={event => { setReason(event.target.value) }}
             style={{
               boxSizing: 'border-box', width: '100%', resize: 'vertical', font: 'inherit',
               padding: '8px 10px', border: '0.5px solid var(--dsw-alias-border-l4)',
               borderRadius: 'var(--dsw-radius-md)', background: 'var(--dsw-alias-bg-layer-1)',
-              color: TEXT_PRIMARY,
+              color: INK_PRIMARY,
             }}
           />
-          <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
-            打回后任务回到员工返工；原因会写入台账事件。
+          <span style={{ color: INK_SECONDARY, fontSize: 12 }}>
+            {t('report.rejectHint')}
           </span>
         </div>
       </Modal>

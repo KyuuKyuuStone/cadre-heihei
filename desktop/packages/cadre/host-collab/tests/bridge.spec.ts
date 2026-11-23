@@ -28,7 +28,7 @@ interface Seeded {
 
 function seed(databasePath: string, options: { readonly due?: boolean } = {}): Seeded {
   const store = new SqliteCollabStore({ databasePath })
-  store.addMember({ projectId: PROJECT as never, sessionId: SUPERVISOR as never, role: 'supervisor', state: 'available', displayName: '主管' })
+  store.addMember({ projectId: PROJECT as never, sessionId: SUPERVISOR as never, role: 'supervisor', state: 'available', displayName: '组长' })
   store.addMember({ projectId: PROJECT as never, sessionId: WORKER as never, role: 'worker', state: 'available', displayName: '小明' })
   store.addMember({ projectId: PROJECT as never, sessionId: WORKER_2 as never, role: 'worker', state: 'available', displayName: '小红' })
   if (options.due === true) store.ledger.core.db.exec('ALTER TABLE tasks ADD COLUMN due_at TEXT')

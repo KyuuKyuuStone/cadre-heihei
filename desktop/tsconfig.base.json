@@ -398,6 +398,7 @@
       "@deepseek-ai/dsh-commands": ["./packages/interaction/commands/src"],
       "@deepseek-ai/dsh-compaction": ["./packages/compaction/compaction/src"],
       "@deepseek-ai/dsh-compaction-basic": ["./packages/compaction/compaction-basic/src"],
+      "@deepseek-ai/dsh-compaction-basic/settings": ["./packages/compaction/compaction-basic/src/settings.ts"],
       "@deepseek-ai/dsh-compaction-image-offload": ["./packages/compaction/compaction-image-offload/src"],
       "@deepseek-ai/dsh-compaction-tool-result-pruner": ["./packages/compaction/compaction-tool-result-pruner/src"],
       "@deepseek-ai/dsh-config-editor": ["./packages/boot/config-editor/src"],

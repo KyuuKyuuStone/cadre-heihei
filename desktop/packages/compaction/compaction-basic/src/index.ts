@@ -16,9 +16,11 @@ import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 // Type-only: makes the optional sibling service available to `ctx.get()`.
 import type {} from '@deepseek-ai/dsh-compaction-tool-result-pruner'
+import type {} from './settings.ts'
 import {
   resolveCompactSpec,
   resolveConfig,
+  resolveEffectiveConfig,
   resolveTargetPolicy,
   TargetPressureConfigError,
 } from './config.ts'
@@ -111,6 +113,12 @@ const modelPolicy: z<ModelCompactPolicyConfig> = z.object({
  * `summarize()` is the sole subclass customization hook; the replay and durable
  * mutation strategy stays fixed so every pricing decision uses the singleton
  * token meter.
+ *
+ * The optional `compactionSettings` service supplies live `auto` and
+ * `thresholdRatio` overrides. Decisions read them through
+ * {@link resolveEffectiveConfig}; the composition row still owns every safety
+ * field (absolute caps, retention, step thresholds, and overflow retries), and
+ * the capacity ceiling in {@link resolveCompactSpec} still caps the ratio.
  */
 export class BasicCompactionEngine extends CompactionEngine {
   static inject = ['llm', 'tokenMeter', 'sessions']
@@ -130,7 +138,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     auto: z.boolean(),
   })
 
-  /** Resolved and validated compaction configuration. */
+  /** Resolved and validated composition configuration. */
   readonly config: ResolvedConfig
 
   private readonly warnedPressureConfigTargets = new Set<string>()
@@ -148,7 +156,29 @@ export class BasicCompactionEngine extends CompactionEngine {
         + `(configured ${String(config.compactionRetries)}).`,
       )
     }
-    if (this.config.auto) this._registerAutomaticCompaction()
+    // Listeners stay mounted so a live `auto` write can re-enable automatic
+    // compaction; each handler gates on the current effective switch.
+    this._registerAutomaticCompaction()
+  }
+
+  /**
+   * Read the composition config overlaid with present live Settings values.
+   * @returns the frozen effective config for one decision.
+   */
+  private effectiveConfig(): ResolvedConfig {
+    const settings = this.ctx.get('compactionSettings')
+    if (settings === undefined) return this.config
+    return resolveEffectiveConfig(this.config, settings.current())
+  }
+
+  /**
+   * Read the live automatic-compaction switch.
+   * @returns the effective switch; composition `auto` applies without a live value.
+   */
+  private effectiveAuto(): boolean {
+    const settings = this.ctx.get('compactionSettings')
+    if (settings === undefined) return this.config.auto
+    return settings.auto ?? this.config.auto
   }
 
   /** Current surface tool-result count; resets naturally when compaction shrinks it. */
@@ -184,6 +214,7 @@ export class BasicCompactionEngine extends CompactionEngine {
       { agent, signal },
       next,
     ): Promise<PreStepDecision> => {
+      if (!this.effectiveAuto()) return next()
       const stepDue = this.config.stepPressureCheck
         && this.surfaceToolResults(agent.session) >= this.config.stepMinToolCallsBetweenChecks
         && this.stepSurfaceBalanced(agent.session)
@@ -226,6 +257,7 @@ export class BasicCompactionEngine extends CompactionEngine {
       { agent, failure, signal },
       next,
     ) => {
+      if (!this.effectiveAuto()) return next()
       if (failure.code !== CONTEXT_WINDOW_EXCEEDED_CODE || signal.aborted) return next()
       this.overflowAgents.set(agent.session, agent)
       const target = routedTarget(agent.session)
@@ -286,8 +318,8 @@ export class BasicCompactionEngine extends CompactionEngine {
   ): Promise<SummaryResult> {
     const target = conversationTarget(agent)
     const config = target === undefined
-      ? this.config
-      : resolveTargetPolicy(this.config, target)
+      ? this.effectiveConfig()
+      : resolveTargetPolicy(this.effectiveConfig(), target)
     return summarizeWithLlm(this.ctx, config, input, agent, signal)
   }
 
@@ -310,7 +342,7 @@ export class BasicCompactionEngine extends CompactionEngine {
   ): Promise<CompactionResult | null> {
     const target = routedTarget(agent.session)
     if (target === undefined) return null
-    const policy = resolveTargetPolicy(this.config, target)
+    const policy = resolveTargetPolicy(this.effectiveConfig(), target)
     const meter = this.ctx.tokenMeter
     let measurement = meter.measure(agent.session)
     switch (trigger) {

@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v1.6.3/compaction-pressure-budget-ratio/guide.md
+/:
+  en: e8100a9d6c9d1938
+  zh: 91dec573e0363c49
+/compaction-threshold-ratio-now-applies-to-the-pressure-budget:
+  en: e67060d9405b9ae5
+  zh: a78438663a7519a8
+/compaction-threshold-ratio-now-applies-to-the-pressure-budget/change:
+  en: 62541fbfad5f94d8
+  zh: 503624e6474aaeee
+/compaction-threshold-ratio-now-applies-to-the-pressure-budget/migration:
+  en: 5cfc56719645fea9
+  zh: 13c7c630569c0ccc

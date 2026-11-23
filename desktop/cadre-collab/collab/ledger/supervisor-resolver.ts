@@ -29,11 +29,11 @@ export interface PrototypeSupervisorEntry {
  * **prototypeOnly，非产品默认**：静态 supervisor 名单。
  *
  * 限制（ADR-0019）：
- * - 仅适用于「单主管 / 无换届 / 无代派」的内存原型与单元测试；
- * - 不读取花名册，不支持主管上任/撤销、会话重建与多主管运维；
+ * - 仅适用于「单组长 / 无换届 / 无代派」的内存原型与单元测试；
+ * - 不读取花名册，不支持组长上任/撤销、会话重建与多组长运维；
  * - 测试可在静态名单里登记多个 ID 以覆盖 ADR 验收场景，但这**不构成花名册权威**，
  *   生产（SQLite）必须使用 `SqliteSupervisorResolver` 查询 members 表；
- * - 一旦出现换届、代派或多主管运维，此桩立即失效。
+ * - 一旦出现换届、代派或多组长运维，此桩立即失效。
  */
 export class PrototypeOnlySupervisorResolver implements SupervisorResolver {
   readonly prototypeOnly = true

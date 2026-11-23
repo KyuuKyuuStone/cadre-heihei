@@ -66,8 +66,12 @@ export function OfficialHeroBrandMark({ size }: HeroBrandMarkOwnerProps) {
 
 /**
  * Render the product name without a mark; the mark occupies its own slot.
+ * The `t` seat is the common namespace's translate narrowed to the shared
+ * brand wordmark key (structural share: this package does not depend on
+ * ui-slots directly).
+ * @param props - the locale seat synthesized by the `locale: 'common'` registration.
  * @returns the Cadre Heihei wordmark.
  */
-export function OfficialBrandName() {
-  return <span className={css.name}>Cadre Heihei</span>
+export function OfficialBrandName({ t }: { t: (key: 'brand.name', params?: Record<string, unknown>) => string }) {
+  return <span className={css.name}>{t('brand.name')}</span>
 }

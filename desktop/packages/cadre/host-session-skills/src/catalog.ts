@@ -2,6 +2,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { deriveCategories } from './auto-categories.ts'
 
 /** Where a pack came from; builtin packs are read-only. */
 export type SkillOrigin = 'builtin' | 'installed'
@@ -18,6 +19,8 @@ export interface SkillPack {
   readonly homepage?: string
   readonly origin: SkillOrigin
   readonly roles: readonly ('supervisor' | 'worker')[]
+  /** Topic tags (e.g. 编程/工具/设计); one pack may carry several. Explicit manifest tags win; absent tags are derived from name/description. */
+  readonly categories: readonly string[]
   readonly tokenEstimate: number
   readonly tools: readonly string[]
   readonly source: string
@@ -35,6 +38,7 @@ interface Manifest {
   readonly author?: unknown
   readonly homepage?: unknown
   readonly roles?: unknown
+  readonly categories?: unknown
   readonly tokenEstimate?: unknown
   readonly tools?: unknown
   readonly source?: unknown
@@ -95,6 +99,9 @@ function parsePack(directory: string, origin: SkillOrigin): SkillPack {
     ...(homepage === undefined ? {} : { homepage }),
     origin,
     roles,
+    categories: Array.isArray(manifest.categories)
+      ? stringArray(manifest.categories).map(tag => tag.trim()).filter(tag => tag !== '')
+      : deriveCategories({ name: manifest.name as string, description: manifest.description as string }),
     tokenEstimate,
     tools: stringArray(manifest.tools),
     source: manifest.source as string,
@@ -243,6 +250,7 @@ function synthesizePack(directory: string, origin: SkillOrigin, scope: string | 
     ...(homepage === undefined ? {} : { homepage }),
     origin,
     roles: roles.length === 0 ? ['worker'] : [...new Set(roles)],
+    categories: deriveCategories({ name, description }),
     tokenEstimate: Math.ceil(content.length / 4),
     tools: (fields.tools ?? '').split(/[,\s]+/u).filter(tool => tool !== ''),
     source,

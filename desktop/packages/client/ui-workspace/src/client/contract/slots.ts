@@ -84,6 +84,19 @@ export interface ProjectRowOwnerProps {
   readonly cwd?: string
 }
 
+/**
+ * Owner share of one project-menu entry occurrence: the Workspace the menu
+ * belongs to plus the browser-local dialog requests. Rename and delete open
+ * dialogs whose state lives in the owner's React tree, so they travel as
+ * owner callbacks instead of slot-level inject.
+ */
+export interface ProjectMenuOwnerProps extends ProjectRowOwnerProps {
+  /** Open the owner's rename dialog for this Workspace. */
+  readonly requestRename: () => void
+  /** Open the owner's delete-confirmation dialog for this Workspace. */
+  readonly requestDelete: () => void
+}
+
 /** Owner share of one Session row action occurrence: the row the action belongs to. */
 export interface SessionRowOwnerProps {
   /** Session the row shows. */
@@ -111,6 +124,17 @@ export type UseMenuOpenState = () => MenuOpenState
  * @returns the hook the entry calls.
  */
 export const menuOpenStateFactory: SlotHookFactory<'sidebar.workspaces.session.menu.item', UseMenuOpenState> =
+  (_standard, state) => () => state
+
+/**
+ * Bind the project menu's render occurrence into the entries'
+ * `useMenuOpenState` hook: the owner supplies its open-state pair as the
+ * occurrence's `hookContext`, and the hook hands that pair back.
+ * @param _standard - framework standard props (unused).
+ * @param state - the menu's open-state pair from the render occurrence.
+ * @returns the hook the entry calls.
+ */
+export const projectMenuOpenStateFactory: SlotHookFactory<'sidebar.workspaces.project.menu.item', UseMenuOpenState> =
   (_standard, state) => () => state
 
 /**
@@ -178,6 +202,30 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * seat, so an empty seat leaves the list unchanged.
      */
     'sidebar.workspaces.project.row.create': { kind: 'list'; scope: 'root'; owner: ProjectRowOwnerProps }
+    /**
+     * The rows of one project (Workspace) row's "..." menu, in ascending
+     * `order`. ui-workspace registers the shipped rows here — `rename` (200)
+     * and `delete` (400) — so a plugin row is placed by its own `order` among
+     * them. Use a package-namespaced `id`; reusing a shipped id at another
+     * `priority` shadows that row. Each entry renders one `role="menuitem"`
+     * `<button>` (the shipped rows use ui-primitives' `MenuItemButton`, which
+     * adds the host styling and `separatorBefore`), decides its own visibility
+     * from its own state, and dismisses the menu through the injected
+     * `useMenuOpenState` hook after acting; the list's keyboard walk and focus
+     * return read the DOM, so any such button joins them. Labels come from the
+     * contributing package's locale namespace. Mounted only for a real
+     * Workspace row in the grouped view; while the seat is empty the menu
+     * shows only the shipped rename and delete rows.
+     */
+    'sidebar.workspaces.project.menu.item': {
+      kind: 'list'
+      scope: 'root'
+      owner: ProjectMenuOwnerProps
+      hookContext: MenuOpenState
+      inject: { hooks: {
+        menuOpenState: SlotHookFactory<'sidebar.workspaces.project.menu.item', UseMenuOpenState>
+      } }
+    }
     /**
      * The rows of one Session's "..." menu, in ascending `order`. ui-workspace
      * registers the shipped rows here — `pin` (100), `rename` (200), `fork`
@@ -326,6 +374,12 @@ export type WorkspaceViewStoreHandle = ReturnType<typeof createWorkspaceViewStor
 /** Props of one shipped row-menu entry: owner share + locale seat + the entry's own injected share. */
 export type SessionMenuItemProps<Injected extends object = object> =
   PropsRuntime<'sidebar.workspaces.session.menu.item'>
+  & PropsLocale<'workspace'>
+  & InjectFace<Injected>
+
+/** Props of one shipped project-menu entry: owner share + locale seat + the entry's own injected share. */
+export type ProjectMenuItemProps<Injected extends object = object> =
+  PropsRuntime<'sidebar.workspaces.project.menu.item'>
   & PropsLocale<'workspace'>
   & InjectFace<Injected>
 
@@ -517,6 +571,7 @@ export type WorkspaceBrowserProps =
     | 'sidebar.workspaces.directoryFlow'
     | 'sidebar.workspaces.project.row.action'
     | 'sidebar.workspaces.project.row.create'
+    | 'sidebar.workspaces.project.menu.item'
     | 'sidebar.workspaces.session.menu.item'
     | 'sidebar.workspaces.session.row.action'
     | 'sidebar.session.row.leading'

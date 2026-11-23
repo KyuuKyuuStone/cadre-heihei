@@ -1,0 +1,14 @@
+- tree "会话":
+  - treeitem "incremental {{cwd}}\\incremental 项目组“incremental”的操作 在“incremental”中新建 查看“incremental”台账 花名册读取失败，重试：花名册通道未接入：window.cadre.listRoster 未注册" [expanded]:
+    - text: incremental {{cwd}}\incremental
+    - button "项目组“incremental”的操作"
+    - button "在“incremental”中新建"
+    - button "查看“incremental”台账": 台账
+    - button "花名册读取失败，重试：花名册通道未接入：window.cadre.listRoster 未注册": 读取失败 · 重试
+  - treeitem "engage C {{age}}" [selected]
+  - treeitem "engage A {{age}}"
+  - treeitem "engage B 会话“engage B”的操作 归档会话 置顶会话":
+    - text: engage B
+    - button "会话“engage B”的操作"
+    - button "归档会话"
+    - button "置顶会话"

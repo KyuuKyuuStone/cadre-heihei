@@ -1,4 +1,8 @@
 /** Skill-admin session/plan transport and optional skill-health reads. */
+import { zhTranslate, type SidebarKey } from './locales.ts'
+
+/** Locale seat for transport failure copy; defaults to the zh dictionary. */
+type SkillAdminTranslate = (key: SidebarKey, params?: Record<string, unknown>) => string
 
 export interface SkillAdminSession {
   readonly sessionId: string
@@ -77,7 +81,7 @@ export class SkillAdminError extends Error {
   }
 }
 
-async function adminCall<T>(path: string, body: Record<string, unknown>): Promise<T> {
+async function adminCall<T>(path: string, body: Record<string, unknown>, t: SkillAdminTranslate = zhTranslate): Promise<T> {
   const response = await fetch(`/cadre/skills/admin/${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -85,7 +89,7 @@ async function adminCall<T>(path: string, body: Record<string, unknown>): Promis
   })
   const payload = await response.json().catch(() => undefined) as Envelope<T> | undefined
   if (!response.ok || payload?.ok !== true || payload.result === undefined) {
-    throw new SkillAdminError(payload?.code ?? `HTTP_${response.status}`, payload?.message ?? `技能管理员请求失败（HTTP ${response.status}）`)
+    throw new SkillAdminError(payload?.code ?? `HTTP_${response.status}`, payload?.message ?? t('skills.admin.requestFailed', { status: String(response.status) }))
   }
   return payload.result
 }
@@ -141,9 +145,9 @@ const parseSkillHealth = (value: unknown): SkillHealth | undefined => {
  * @param operatorSessionId - foreground session making the read-only request.
  * @returns validated per-pack health, or undefined when the response has only totals.
  */
-export async function fetchSkillHealth(projectId: string, operatorSessionId: string): Promise<SkillHealth | undefined> {
-  const result = await adminCall('diag', { projectId, operatorSessionId })
-  return parseSkillHealth(result)
+export async function fetchSkillHealth(projectId: string, operatorSessionId: string, t: SkillAdminTranslate = zhTranslate): Promise<SkillHealth | undefined> {
+  const result = await adminCall<unknown>('diag', { projectId, operatorSessionId }, t)
+  return parseSkillHealth(isRecord(result) ? result.packs : undefined)
 }
 
 export interface SkillSessionBinding {
@@ -163,37 +167,38 @@ export async function bindSkillSession(
   projectId: string,
   skillId: string,
   skillName: string,
+  t: SkillAdminTranslate = zhTranslate,
 ): Promise<SkillSessionBinding> {
-  return await adminCall<SkillSessionBinding>('bind-session', { projectId, skillId, skillName })
+  return await adminCall<SkillSessionBinding>('bind-session', { projectId, skillId, skillName }, t)
 }
 
 /** Create an ordinary admin session and bind it to the supervisor operator. */
-export function createSkillAdminSession(projectId: string): Promise<SkillAdminSession> {
-  return adminCall('session', { projectId })
+export function createSkillAdminSession(projectId: string, t: SkillAdminTranslate = zhTranslate): Promise<SkillAdminSession> {
+  return adminCall('session', { projectId }, t)
 }
 
 /** List ordinary sessions whose preset is the hidden skill administrator. */
-export function listSkillAdminSessions(projectId: string): Promise<readonly SkillAdminSession[]> {
-  return adminCall('sessions', { projectId })
+export function listSkillAdminSessions(projectId: string, t: SkillAdminTranslate = zhTranslate): Promise<readonly SkillAdminSession[]> {
+  return adminCall('sessions', { projectId }, t)
 }
 
 /** Delete one ordinary admin session. */
-export function deleteSkillAdminSession(projectId: string, operatorSessionId: string, sessionId: string): Promise<{ deleted: true }> {
-  return adminCall('delete-session', { projectId, operatorSessionId, sessionId })
+export function deleteSkillAdminSession(projectId: string, operatorSessionId: string, sessionId: string, t: SkillAdminTranslate = zhTranslate): Promise<{ deleted: true }> {
+  return adminCall('delete-session', { projectId, operatorSessionId, sessionId }, t)
 }
 
 /** Send one supervisor message to the admin conversation. */
 export function sendSkillAdminMessage(
-  projectId: string, actorSessionId: string, sessionId: string, text: string,
+  projectId: string, actorSessionId: string, sessionId: string, text: string, t: SkillAdminTranslate = zhTranslate,
 ): Promise<{ accepted: true }> {
-  return adminCall('message', { projectId, actorSessionId, sessionId, text })
+  return adminCall('message', { projectId, actorSessionId, sessionId, text }, t)
 }
 
 /** Read admin messages after a sequence number. */
 export function readSkillAdminMessages(
-  projectId: string, actorSessionId: string, sessionId: string, afterSeq: number,
+  projectId: string, actorSessionId: string, sessionId: string, afterSeq: number, t: SkillAdminTranslate = zhTranslate,
 ): Promise<SkillAdminMessages> {
-  return adminCall('messages', { projectId, actorSessionId, sessionId, afterSeq })
+  return adminCall('messages', { projectId, actorSessionId, sessionId, afterSeq }, t)
 }
 
 /** Apply or cancel one confirmed plan. */
@@ -203,14 +208,14 @@ export function applySkillPlan(input: {
   readonly planId: string
   readonly token: string
   readonly action: 'apply' | 'cancel'
-}): Promise<ApplyResult> {
+}, t: SkillAdminTranslate = zhTranslate): Promise<ApplyResult> {
   return adminCall('apply', {
     projectId: input.projectId,
     operatorSessionId: input.operatorSessionId,
     planId: input.planId,
     token: input.token,
     ...(input.action === 'cancel' ? { action: 'cancel' } : {}),
-  })
+  }, t)
 }
 
 /** Parse the structured JSON the skill_plan tool records as its text result. */

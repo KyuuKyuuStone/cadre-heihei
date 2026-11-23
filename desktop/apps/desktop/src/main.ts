@@ -272,7 +272,7 @@ function asCadreFailure(value: unknown): { ok: false; code: string; message: str
   return {
     ok: false,
     code: typeof detail.code === 'string' ? detail.code : 'INTERNAL_ERROR',
-    message: typeof detail.message === 'string' ? detail.message : '请求被拒绝',
+    message: typeof detail.message === 'string' ? detail.message : currentDesktopLocale().messages.ipcRequestRejected,
   }
 }
 
@@ -1086,22 +1086,22 @@ async function main(): Promise<void> {
     try {
       input = parseCadreDispatchOptions(options)
     } catch (error) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: error instanceof Error ? error.message : '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: error instanceof Error ? error.message : locale.messages.ipcInvalidArgument }
     }
     // Ownership comes from the roster, not from a process-wide project id: the
     // caller must already be a member of the project it names.
     const membership = cadreMembership(input.projectId, input.sessionId)
     if (membership === 'unavailable') {
-      return { ok: false, code: 'LEDGER_UNAVAILABLE', message: '台账不可用，无法校验项目归属' }
+      return { ok: false, code: 'LEDGER_UNAVAILABLE', message: locale.messages.ipcLedgerUnavailableOwnership }
     }
     if (membership === 'foreign') {
       console.log(`cadre:dispatchTask project=${input.projectId} actor=${input.sessionId} ` +
         `path=${cadreLedgerPath} ok=false code=CROSS_PROJECT_DENIED`)
-      return { ok: false, code: 'CROSS_PROJECT_DENIED', message: '跨项目请求已拒绝' }
+      return { ok: false, code: 'CROSS_PROJECT_DENIED', message: locale.messages.ipcCrossProjectDenied }
     }
     const collab = cadreCollab.forProject(input.projectId, input.sessionId)
     if (collab === undefined) {
-      return { ok: false, code: 'COLLAB_UNAVAILABLE', message: '协作写路径不可用' }
+      return { ok: false, code: 'COLLAB_UNAVAILABLE', message: locale.messages.ipcCollabUnavailable }
     }
     try {
       const result = collab.dispatch({
@@ -1128,7 +1128,7 @@ async function main(): Promise<void> {
       return { ...(result as Record<string, unknown>), tasks: snapshot.rows }
     } catch (error) {
       console.log(`cadre:dispatchTask failed reason=${error instanceof Error ? error.message : String(error)}`)
-      return { ok: false, code: 'INTERNAL_ERROR', message: '派活执行失败' }
+      return { ok: false, code: 'INTERNAL_ERROR', message: locale.messages.ipcDispatchFailed }
     }
   })
 
@@ -1138,20 +1138,20 @@ async function main(): Promise<void> {
     try {
       input = parseCadreTransitionOptions(options)
     } catch (error) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: error instanceof Error ? error.message : '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: error instanceof Error ? error.message : locale.messages.ipcInvalidArgument }
     }
     const membership = cadreMembership(input.projectId, input.sessionId)
     if (membership === 'unavailable') {
-      return { ok: false, code: 'LEDGER_UNAVAILABLE', message: '台账不可用，无法校验项目归属' }
+      return { ok: false, code: 'LEDGER_UNAVAILABLE', message: locale.messages.ipcLedgerUnavailableOwnership }
     }
     if (membership === 'foreign') {
       console.log(`cadre:transitionTask project=${input.projectId} actor=${input.sessionId} ` +
         `path=${cadreLedgerPath} ok=false code=CROSS_PROJECT_DENIED`)
-      return { ok: false, code: 'CROSS_PROJECT_DENIED', message: '跨项目请求已拒绝' }
+      return { ok: false, code: 'CROSS_PROJECT_DENIED', message: locale.messages.ipcCrossProjectDenied }
     }
     const collab = cadreCollab.forProject(input.projectId, input.sessionId)
     if (collab === undefined) {
-      return { ok: false, code: 'COLLAB_UNAVAILABLE', message: '协作写路径不可用' }
+      return { ok: false, code: 'COLLAB_UNAVAILABLE', message: locale.messages.ipcCollabUnavailable }
     }
     try {
       const view = cadreTransitionView(collab.transition({
@@ -1188,7 +1188,7 @@ async function main(): Promise<void> {
               sessionId: row.assigneeSessionId,
               text: [
                 '【任务打回】', `任务号：${row.taskId}`, `标题：${row.title}`, '',
-                `打回原因：${reason === undefined || reason === '' ? '（主管未填写）' : reason}`, '',
+                `打回原因：${reason === undefined || reason === '' ? '（组长未填写）' : reason}`, '',
                 '任务状态已置 rework。请按原因修改后重新调用 report_task 回报。',
               ].join('\n'),
             })
@@ -1216,7 +1216,7 @@ async function main(): Promise<void> {
       }
     } catch (error) {
       console.log(`cadre:transitionTask failed reason=${error instanceof Error ? error.message : String(error)}`)
-      return { ok: false, code: 'INTERNAL_ERROR', message: '验收执行失败' }
+      return { ok: false, code: 'INTERNAL_ERROR', message: locale.messages.ipcTransitionFailed }
     }
   })
 
@@ -1250,7 +1250,7 @@ async function main(): Promise<void> {
     // the official "Models" page never enter the legacy provider table, so
     // reading that table made a configured provider look like "none".
     if (hostUrl === undefined || hostCookie === undefined) {
-      return { ok: false, code: 'HOST_UNAVAILABLE', message: 'Host 未就绪，无法读取官方模型目录' }
+      return { ok: false, code: 'HOST_UNAVAILABLE', message: locale.messages.ipcHostUnavailableCatalog }
     }
     let catalog: Awaited<ReturnType<typeof fetchModelCatalog>>
     try {
@@ -1259,7 +1259,8 @@ async function main(): Promise<void> {
       console.log(`cadre:listProviders catalog unavailable=${error instanceof Error ? error.message : String(error)}`)
       return {
         ok: false, code: 'CATALOG_UNAVAILABLE',
-        message: `读取官方模型目录失败：${error instanceof Error ? error.message : String(error)}`,
+        message: formatDesktopMessage(locale.messages.ipcCatalogReadFailed,
+          { detail: error instanceof Error ? error.message : String(error) }),
       }
     }
     const providers = providerOptionsFromCatalog(catalog)
@@ -1271,19 +1272,19 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.cadreSaveProvider, async (event, options: unknown) => {
     assertProductSender(event)
     if (cadreProviders === undefined) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcProviderStoreUnavailable }
     }
     if (typeof options !== 'object' || options === null) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidArgument }
     }
     const input = options as Partial<SaveProviderInput> & { apiKey?: unknown }
     if (typeof input.providerId !== 'string' || typeof input.name !== 'string'
       || typeof input.kind !== 'string' || typeof input.defaultModel !== 'string'
       || !Array.isArray(input.models)) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidArgument }
     }
     if (input.apiKey !== undefined && typeof input.apiKey !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'apiKey 必须是字符串' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcApiKeyNotString }
     }
     const saved = cadreProviders.save({
       providerId: input.providerId,
@@ -1303,13 +1304,13 @@ async function main(): Promise<void> {
     let runtimeError: string | undefined
     if (typeof input.apiKey === 'string' && input.apiKey.trim() !== '') {
       if (hostUrl === undefined || hostCookie === undefined) {
-        return { ok: false, code: 'MISSING_CREDENTIAL', message: '凭据服务未就绪，请稍后重试', field: 'apiKey' }
+        return { ok: false, code: 'MISSING_CREDENTIAL', message: locale.messages.ipcCredentialServiceUnavailable, field: 'apiKey' }
       }
       try {
         await setProviderCredential(hostUrl, hostCookie, saved.provider.apiKeyRef, input.apiKey.trim())
       } catch {
         console.log(`cadre:saveProvider id=${input.providerId} credential-write=failed`)
-        return { ok: false, code: 'INVALID_CREDENTIAL', message: '凭据写入失败', field: 'apiKey' }
+        return { ok: false, code: 'INVALID_CREDENTIAL', message: locale.messages.ipcCredentialWriteFailed, field: 'apiKey' }
       }
     }
     if (hostUrl !== undefined && hostCookie !== undefined) {
@@ -1330,12 +1331,12 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.cadreDeleteProvider, async (event, options: unknown) => {
     assertProductSender(event)
     if (cadreProviders === undefined) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcProviderStoreUnavailable }
     }
     const providerId = typeof options === 'object' && options !== null ? (options as { providerId?: unknown }).providerId : undefined
-    if (typeof providerId !== 'string') return { ok: false, code: 'INVALID_ARGUMENT', message: 'providerId 无效' }
+    if (typeof providerId !== 'string') return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidProviderId }
     const provider = cadreProviders.get(providerId)
-    if (provider === undefined) return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 不存在' }
+    if (provider === undefined) return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcProviderNotFound }
     const deleted = cadreProviders.delete(providerId)
     if (deleted.ok !== true) {
       console.log(`cadre:deleteProvider id=${providerId} ok=false code=${deleted.code}`)
@@ -1353,15 +1354,15 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.cadreTestProvider, async (event, options: unknown) => {
     assertProductSender(event)
     if (cadreProviders === undefined) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 存储不可用' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcProviderStoreUnavailable }
     }
     const providerId = typeof options === 'object' && options !== null ? (options as { providerId?: unknown }).providerId : undefined
-    if (typeof providerId !== 'string') return { ok: false, code: 'INVALID_ARGUMENT', message: 'providerId 无效' }
+    if (typeof providerId !== 'string') return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidProviderId }
     const provider = cadreProviders.get(providerId)
-    if (provider === undefined) return { ok: false, code: 'INVALID_ARGUMENT', message: 'provider 不存在' }
+    if (provider === undefined) return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcProviderNotFound }
     const metadata = await providerMetadata(provider)
     if (!metadata.hasKey) {
-      return { ok: false, code: 'MISSING_CREDENTIAL', message: '未配置 Key', field: 'apiKey' }
+      return { ok: false, code: 'MISSING_CREDENTIAL', message: locale.messages.ipcKeyMissing, field: 'apiKey' }
     }
     // Probe is non-network by design (U-20): format and credential presence only.
     console.log(`cadre:testProvider id=${providerId} ok=true hasKey=true check=credential`)
@@ -1371,7 +1372,7 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.cadreBindSession, async (event, options: unknown) => {
     assertProductSender(event)
     if (typeof options !== 'object' || options === null) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidArgument }
     }
     const { sessionId, providerId, model, reasoningEffort } = options as {
       sessionId?: unknown
@@ -1380,23 +1381,23 @@ async function main(): Promise<void> {
       reasoningEffort?: unknown
     }
     if (typeof sessionId !== 'string' || sessionId.trim() === '') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidSessionId, field: 'sessionId' }
     }
     if (typeof providerId !== 'string' || providerId.trim() === '') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'providerId 无效', field: 'providerId' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidProviderId, field: 'providerId' }
     }
     if (typeof model !== 'string' || model === '') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'model 无效', field: 'model' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidModel, field: 'model' }
     }
     if (reasoningEffort !== undefined && reasoningEffort !== null && typeof reasoningEffort !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'reasoningEffort 无效', field: 'reasoningEffort' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidReasoningEffort, field: 'reasoningEffort' }
     }
     const effort = typeof reasoningEffort === 'string' && reasoningEffort.trim() !== '' ? reasoningEffort.trim() : undefined
     // Official providers are not in the legacy provider table. The official
     // selection is the truth (including effort); the local row is a display
     // shadow at best, so its absence must not block binding.
     if (hostUrl === undefined || hostCookie === undefined) {
-      return { ok: false, code: 'HOST_UNAVAILABLE', message: 'Host 未就绪，无法写入官方模型选择' }
+      return { ok: false, code: 'HOST_UNAVAILABLE', message: locale.messages.ipcHostUnavailableModelSelection }
     }
     try {
       await selectSessionModel(hostUrl, hostCookie, {
@@ -1406,7 +1407,8 @@ async function main(): Promise<void> {
     } catch (error) {
       console.log(`cadre:bindSession session=${sessionId} provider=${providerId} official=false`)
       return { ok: false, code: 'HOST_RPC_FAILED', field: 'reasoningEffort',
-        message: `官方模型选择未写入：${error instanceof Error ? error.message : String(error)}` }
+        message: formatDesktopMessage(locale.messages.ipcModelSelectionWriteFailed,
+          { detail: error instanceof Error ? error.message : String(error) }) }
     }
     const updatedAt = new Date().toISOString()
     if (cadreProviders !== undefined) {
@@ -1431,7 +1433,7 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.cadreReportIn, async (event, options: unknown) => {
     assertProductSender(event)
     if (typeof options !== 'object' || options === null) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidArgument }
     }
     const record = options as Record<string, unknown>
     let sessionId: string
@@ -1449,21 +1451,22 @@ async function main(): Promise<void> {
       role = record.role
       duty = record.duty === undefined ? undefined : cadreText(record.duty, 'duty', 2_000)
     } catch (error) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: error instanceof Error ? error.message : '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: error instanceof Error ? error.message : locale.messages.ipcInvalidArgument }
     }
     let members
     try {
       members = cadreLedger.listMembers(projectId).rows
     } catch (error) {
       console.log(`cadre:reportIn project=${projectId} ledger=unavailable reason=${error instanceof Error ? error.message : String(error)}`)
-      return { ok: false, code: 'LEDGER_UNAVAILABLE', message: '台账不可用，无法确认花名册身份' }
+      return { ok: false, code: 'LEDGER_UNAVAILABLE', message: locale.messages.ipcLedgerUnavailableRoster }
     }
     const self = activeMember(members, sessionId)
     if (self === undefined) {
-      return { ok: false, code: 'NOT_A_MEMBER', message: '该会话不在本项目花名册中' }
+      return { ok: false, code: 'NOT_A_MEMBER', message: locale.messages.ipcNotARosterMember }
     }
     if (self.role !== role) {
-      return { ok: false, code: 'ROLE_MISMATCH', message: `花名册角色为 ${self.role}，与请求的 ${role} 不一致` }
+      return { ok: false, code: 'ROLE_MISMATCH',
+        message: formatDesktopMessage(locale.messages.ipcRosterRoleMismatch, { actual: self.role, requested: role }) }
     }
     const name = self.displayName.trim() === '' ? displayName : self.displayName
     const storedDuty = (() => {
@@ -1478,7 +1481,7 @@ async function main(): Promise<void> {
       ? reportInText({ role, name, roster: members })
       : reportInText({ role, name, ...(effectiveDuty === undefined ? {} : { duty: effectiveDuty }) })
     if (hostUrl === undefined || hostCookie === undefined) {
-      return { ok: false, code: 'HOST_UNAVAILABLE', message: 'Host 未就绪，无法发送报到消息' }
+      return { ok: false, code: 'HOST_UNAVAILABLE', message: locale.messages.ipcHostUnavailableReportIn }
     }
     try {
       await promptSession(hostUrl, hostCookie, { sessionId, text })
@@ -1494,7 +1497,9 @@ async function main(): Promise<void> {
   // ADR-0022 T1 employee roster. Validation rules live in employees-db so the
   // tests pin exactly what this path applies; a bad payload returns a structured
   // error instead of throwing, and logs carry ids only (never persona text).
-  const employeeStoreMissing = { ok: false as const, code: 'INVALID_ARGUMENT' as const, message: '员工存储不可用' }
+  // Read the dictionary per call so a locale change reaches later IPC failures.
+  const employeeStoreMissing = () =>
+    ({ ok: false as const, code: 'INVALID_ARGUMENT' as const, message: locale.messages.ipcEmployeeStoreUnavailable })
   /**
    * Project (Workspace) id required by every employee operation.
    *
@@ -1505,33 +1510,34 @@ async function main(): Promise<void> {
     | { readonly ok: true; readonly projectId: string }
     | { readonly ok: false; readonly code: 'INVALID_ARGUMENT'; readonly message: string; readonly field: string } => {
     if (typeof value !== 'string' || value.trim() === '') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '缺少 projectId', field: 'projectId' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcProjectIdMissing, field: 'projectId' }
     }
     try {
       return { ok: true, projectId: requireProjectId(value) }
     } catch {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'projectId 无效', field: 'projectId' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidProjectId, field: 'projectId' }
     }
   }
-  const employeeText = (value: unknown, field: string):
+  const employeeTextValue = (value: unknown, field: string):
     | { readonly ok: true; readonly value: string | null | undefined }
     | { readonly ok: false; readonly code: 'INVALID_ARGUMENT'; readonly message: string; readonly field: string } => {
     if (value === undefined || value === null) return { ok: true, value }
     if (typeof value !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: `${field} 必须是字符串或 null`, field }
+      return { ok: false, code: 'INVALID_ARGUMENT',
+        message: formatDesktopMessage(locale.messages.ipcFieldNotStringOrNull, { field }), field }
     }
     return { ok: true, value }
   }
 
   ipcMain.handle(DESKTOP_IPC.cadreGetEmployee, (event, options: unknown) => {
     assertProductSender(event)
-    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (cadreEmployees === undefined) return employeeStoreMissing()
     if (typeof options !== 'object' || options === null) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidArgument }
     }
     const { sessionId, projectId } = options as { sessionId?: unknown; projectId?: unknown }
     if (typeof sessionId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidSessionId, field: 'sessionId' }
     }
     const project = employeeProjectRequired(projectId)
     if (project.ok === false) return project
@@ -1541,25 +1547,25 @@ async function main(): Promise<void> {
 
   ipcMain.handle(DESKTOP_IPC.cadreUpsertEmployee, (event, options: unknown) => {
     assertProductSender(event)
-    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (cadreEmployees === undefined) return employeeStoreMissing()
     if (typeof options !== 'object' || options === null) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidArgument }
     }
     const record = options as Record<string, unknown>
     if (typeof record.sessionId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidSessionId, field: 'sessionId' }
     }
     const project = employeeProjectRequired(record.projectId)
     if (project.ok === false) return project
-    const displayName = employeeText(record.displayName, 'displayName')
+    const displayName = employeeTextValue(record.displayName, 'displayName')
     if (displayName.ok === false) return displayName
-    const templateId = employeeText(record.templateId, 'templateId')
+    const templateId = employeeTextValue(record.templateId, 'templateId')
     if (templateId.ok === false) return templateId
-    const personaNote = employeeText(record.personaNote, 'personaNote')
+    const personaNote = employeeTextValue(record.personaNote, 'personaNote')
     if (personaNote.ok === false) return personaNote
-    const preferredProviderId = employeeText(record.preferredProviderId, 'preferredProviderId')
+    const preferredProviderId = employeeTextValue(record.preferredProviderId, 'preferredProviderId')
     if (preferredProviderId.ok === false) return preferredProviderId
-    const preferredModel = employeeText(record.preferredModel, 'preferredModel')
+    const preferredModel = employeeTextValue(record.preferredModel, 'preferredModel')
     if (preferredModel.ok === false) return preferredModel
     const input: UpsertEmployeeInput = {
       sessionId: record.sessionId,
@@ -1583,13 +1589,13 @@ async function main(): Promise<void> {
 
   ipcMain.handle(DESKTOP_IPC.cadreDeleteEmployee, (event, options: unknown) => {
     assertProductSender(event)
-    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (cadreEmployees === undefined) return employeeStoreMissing()
     if (typeof options !== 'object' || options === null) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidArgument }
     }
     const { sessionId, projectId } = options as { sessionId?: unknown; projectId?: unknown }
     if (typeof sessionId !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId 无效', field: 'sessionId' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidSessionId, field: 'sessionId' }
     }
     const project = employeeProjectRequired(projectId)
     if (project.ok === false) return project
@@ -1607,13 +1613,13 @@ async function main(): Promise<void> {
   // validation and the one-active-supervisor rule.
   ipcMain.handle(DESKTOP_IPC.cadreSaveMember, (event, options: unknown) => {
     assertProductSender(event)
-    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (cadreEmployees === undefined) return employeeStoreMissing()
     if (typeof options !== 'object' || options === null) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidArgument }
     }
     const record = options as Record<string, unknown>
     if (typeof record.sessionId !== 'string' || typeof record.role !== 'string') {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: 'sessionId/role 无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidSessionIdOrRole }
     }
     const project = employeeProjectRequired(record.projectId)
     if (project.ok === false) return project
@@ -1632,7 +1638,7 @@ async function main(): Promise<void> {
 
   ipcMain.handle(DESKTOP_IPC.cadreRetireMember, (event, options: unknown) => {
     assertProductSender(event)
-    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (cadreEmployees === undefined) return employeeStoreMissing()
     const employees = cadreEmployees
     const parsed = parseRetireMemberOptions(options)
     if (parsed.ok === false) return parsed
@@ -1649,7 +1655,7 @@ async function main(): Promise<void> {
         returnTasks: (input) => {
           const mod = loadCadreCollabModule()
           if (mod?.returnOpenTasksToSupervisor === undefined) {
-            return { ok: false, code: 'COLLAB_UNAVAILABLE', message: '协作写路径不可用，无法退回未结任务' }
+            return { ok: false, code: 'COLLAB_UNAVAILABLE', message: locale.messages.ipcCollabUnavailableReturnTasks }
           }
           return mod.returnOpenTasksToSupervisor({ databasePath: cadreLedgerPath, ...input })
         },
@@ -1662,15 +1668,15 @@ async function main(): Promise<void> {
     } catch (error) {
       console.log(`cadre:retireMember session=${request.sessionId} project=${request.projectId} ` +
         `error=${error instanceof Error ? error.message : String(error)}`)
-      return { ok: false, code: 'INTERNAL_ERROR', message: '离职处置失败' }
+      return { ok: false, code: 'INTERNAL_ERROR', message: locale.messages.ipcRetireFailed }
     }
   })
 
   ipcMain.handle(DESKTOP_IPC.cadreListEmployees, (event, options: unknown) => {
     assertProductSender(event)
-    if (cadreEmployees === undefined) return employeeStoreMissing
+    if (cadreEmployees === undefined) return employeeStoreMissing()
     if (typeof options !== 'object' || options === null) {
-      return { ok: false, code: 'INVALID_ARGUMENT', message: '参数无效' }
+      return { ok: false, code: 'INVALID_ARGUMENT', message: locale.messages.ipcInvalidArgument }
     }
     const project = employeeProjectRequired((options as { projectId?: unknown }).projectId)
     if (project.ok === false) return project

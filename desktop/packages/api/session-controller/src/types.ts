@@ -223,6 +223,11 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }
     'session/attachment-invalid': { readonly reason: string }
     'session/queue-item-not-found': { readonly itemId: MessageId }
+    'session/turn-conflict': {
+      readonly sessionId: SessionId
+      readonly expectedTurn: number
+      readonly activeTurn?: number
+    }
     'session/steer-unavailable': { readonly itemId: MessageId }
     'session/title-invalid': { readonly sessionId: SessionId }
     'session/fork-unavailable': { readonly sessionId: SessionId }
@@ -383,6 +388,8 @@ export interface SessionUpdateQueueValue {
 /** Active-turn cancellation request. */
 export interface SessionCancelRequest {
   readonly sessionId: SessionId
+  /** Cancel only when this exact turn is still open; omission retains unconditional active-turn cancellation. */
+  readonly turn?: number
 }
 
 /** Receipt after cancellation is admitted to the live Agent. */

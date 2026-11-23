@@ -22,6 +22,7 @@ import { FOLLOW, err, followScript, sessionWorld } from './remote/session.client
 
 const S1 = 'fk-m1' as SessionId
 const S2 = 'fk-m2' as SessionId
+const S3 = 'fk-m3' as SessionId
 /** Gateway Client cone used by the subagent-catalog and connected-generation cases. */
 const API_ROSTER = webApp.closure(['@deepseek-ai/dsh-api-gateway'])
 const it = createClientTest({ roster: API_ROSTER })
@@ -567,13 +568,40 @@ describe('list lifecycle', () => {
     expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S2, S1])
   })
 
-  it('advances list activity from the filtered Host notification', async ({ mock, remote }) => {
-    remote.session.list.mockResolvedValue(ok({ items: [summary(S1)] as never[] }))
+  it('advances only the active row and its recency position without another list pull', async ({ mock, remote }) => {
+    remote.session.list.mockResolvedValue(ok({ items: [
+      summary(S1, { updatedAt: 300 }), summary(S2, { updatedAt: 200 }), summary(S3, { updatedAt: 100 }),
+    ] as never[] }))
+    const manager = makeManager(mock, remote)
+    await manager.refreshList()
+    const before = manager.getListSnapshot()
+    remote.session.list.mockClear()
+
+    manager.handleSessionActivity(S3, 500)
+
+    const after = manager.getListSnapshot()
+    expect(after.items.map(item => item.sessionId)).toEqual([S3, S1, S2])
+    expect(after.items.map(item => item.updatedAt)).toEqual([500, 300, 200])
+    expect(after.items[1]).toBe(before.items[0])
+    expect(after.items[2]).toBe(before.items[1])
+    expect(new Set(after.items.map(item => item.sessionId)).size).toBe(3)
+    expect(remote.session.list).not.toHaveBeenCalled()
+  })
+
+  it('keeps prior relative order when activity reaches an equal updatedAt', async ({ mock, remote }) => {
+    remote.session.list.mockResolvedValue(ok({ items: [
+      summary(S1, { updatedAt: 200 }), summary(S2, { updatedAt: 200 }), summary(S3, { updatedAt: 100 }),
+    ] as never[] }))
     const manager = makeManager(mock, remote)
     await manager.refreshList()
 
-    manager.handleSessionActivity(S1, 500)
-    expect(manager.getListSnapshot().items[0]?.updatedAt).toBe(500)
+    manager.handleSessionActivity(S3, 200)
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1, S2, S3])
+
+    manager.handleSessionActivity(S2, 300)
+    manager.handleSessionActivity(S3, 300)
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S2, S3, S1])
+    expect(new Set(manager.getListSnapshot().items.map(item => item.sessionId)).size).toBe(3)
   })
 
   it('keeps the error in the list snapshot on failure', async ({ mock, remote }) => {
@@ -602,12 +630,18 @@ describe('list lifecycle', () => {
     expect(manager.getListSnapshot().items).toEqual([])
   })
 
-  it('merges create into the list immediately without waiting for a refresh', async ({ mock, remote }) => {
+  it.for([false, true])('inserts create first without waiting for a refresh (existing list: %s)', async (existing, { mock, remote }) => {
+    if (existing) remote.session.list.mockResolvedValue(ok({ items: [summary(S1)] as never[] }))
     remote.session.create.mockResolvedValue(ok({ sessionId: S2 }))
     const manager = makeManager(mock, remote)
+    if (existing) await manager.refreshList()
+    remote.session.list.mockClear()
+
     const result = await manager.create()
+
     expect(result).toMatchObject({ ok: true, value: { sessionId: S2 } })
-    expect(manager.getListSnapshot().items.map(i => i.sessionId)).toEqual([S2])
+    expect(manager.getListSnapshot().items.map(i => i.sessionId)).toEqual(existing ? [S2, S1] : [S2])
+    expect(remote.session.list).not.toHaveBeenCalled()
   })
 
   it('retains title projections before list arrival, keeps last-wins by seq, and clears them on removal', async ({ mock, remote }) => {

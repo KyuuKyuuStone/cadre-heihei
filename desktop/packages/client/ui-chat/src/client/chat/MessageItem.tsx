@@ -307,7 +307,7 @@ export const UserMessageNodeView = memo(function UserMessageNodeView({
   const projectId = useWorkspaces(snapshot => snapshot.items
     .find(item => item.sessionIds.some(id => String(id) === String(sessionId)))?.workspaceId)
   if (parseCadreReport(reportText) !== undefined) {
-    return <CadreReportNodeView content={reportText} projectId={projectId} sessionId={String(sessionId)} />
+    return <CadreReportNodeView content={reportText} projectId={projectId} sessionId={String(sessionId)} t={t} />
   }
   if (parseCadreTask(reportText) !== undefined) {
     return <CadreTaskNodeView content={reportText} t={t} />

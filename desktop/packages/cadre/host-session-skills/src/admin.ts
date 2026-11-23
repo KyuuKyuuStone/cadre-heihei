@@ -391,7 +391,7 @@ export class SkillAdminApi {
     // Binding requests carry no session id, so the operator is the project's roster supervisor.
     const supervisor = this.supervisorOf(input.projectId)
     if (supervisor === undefined) {
-      throw new SkillIpcError('SKILL_FORBIDDEN', 403, `项目 ${input.projectId} 没有在册主管，不能绑定技能会话`)
+      throw new SkillIpcError('SKILL_FORBIDDEN', 403, `项目 ${input.projectId} 没有在册组长，不能绑定技能会话`)
     }
     // Re-prove the resolved operator so a departed or reassigned roster row cannot bind.
     this.api.assertSupervisor({ projectId: input.projectId, actorSessionId: supervisor })
@@ -999,7 +999,32 @@ export class SkillAdminApi {
         })
         return installed
       },
-      check: async (_sessionId, _projectId, packId) => collectPackHealth(packs(), packId === undefined ? {} : { packId }),
+      check: async (sessionId, _projectId, packId) => {
+        const health = collectPackHealth(packs(), packId === undefined ? {} : { packId })
+        // Persist the admin verdict so the library page shows a real result
+        // instead of "not checked"; builtin packs stay read-only.
+        const actor = await actorFor(sessionId)
+        for (const item of health.items) {
+          try {
+            this.api.setMetadata({
+              projectId: actor.projectId, actorSessionId: actor.actorSessionId, packId: item.packId,
+              health: { status: item.status, checkedAt: new Date().toISOString(), issues: item.issues },
+            })
+          } catch {
+            // Builtin or manifest-less packs cannot carry a verdict; the
+            // live diagnostics still report them.
+          }
+        }
+        return health
+      },
+      setCategories: async (sessionId, _projectId, packId, categories) => {
+        const actor = await actorFor(sessionId)
+        const updated = this.api.setMetadata({
+          projectId: actor.projectId, actorSessionId: actor.actorSessionId, packId, categories,
+        })
+        this.audit({ id: randomUUID(), kind: 'set-categories', actorSessionId: sessionId, projectId: actor.projectId, result: 'updated', packId, warnings: [] })
+        return updated
+      },
       audit: async (sessionId, _projectId, limit) => {
         await this.projectFor(sessionId)
         return this.readAudit(limit).flatMap(row => auditRowOf(row))

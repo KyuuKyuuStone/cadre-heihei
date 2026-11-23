@@ -146,7 +146,7 @@ describe('SidebarRoot shell', () => {
     // three-way menu, whose 普通会话 item is the plain-session action.
     fireEvent.click(starters[0]!)
     fireEvent.click(starters[1]!)
-    fireEvent.click(screen.getByRole('menuitem', { name: '普通会话' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: en['create.menu.plain'] }))
     expect(b.startSession).toHaveBeenCalledTimes(2)
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
     expect(b.toggleSidebar).toHaveBeenCalledOnce()
@@ -157,7 +157,7 @@ describe('SidebarRoot shell', () => {
     const starters = screen.getAllByRole('button', { name: 'New session' })
     fireEvent.click(starters[1]!)
     expect(b.refreshCadreSupervisor).toHaveBeenCalled()
-    expect(screen.getByRole('menuitem', { name: '主管' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('menuitem', { name: en['role.supervisor'] }).hasAttribute('disabled')).toBe(true)
   })
 
   it('renders generic brand fallbacks when no package fills the slots', () => {

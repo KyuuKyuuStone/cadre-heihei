@@ -63,7 +63,7 @@ describe('roster mirror', () => {
       PRIMARY KEY (project_id, session_id))`)
     db.prepare(`INSERT INTO members (project_id, session_id, role, state, created_at, updated_at)
       VALUES ('proj-1', 'sup-1', 'supervisor', 'available', ?, ?)`).run(NOW, NOW)
-    expectOk(store.upsert(employee({ sessionId: 'sup-1', displayName: '主管' }), LATER))
+    expectOk(store.upsert(employee({ sessionId: 'sup-1', displayName: '组长' }), LATER))
     expect((db.prepare('SELECT role FROM members WHERE session_id = ?').get('sup-1') as { role: string }).role).toBe('supervisor')
     db.close()
     store.close()

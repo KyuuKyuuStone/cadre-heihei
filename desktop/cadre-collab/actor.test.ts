@@ -102,7 +102,7 @@ test('终态任务归档为摘要，进行中任务不归档', () => {
   }
 })
 
-test('环境变量不能把员工提升为主管：验收仍被拒', () => {
+test('环境变量不能把员工提升为组长：验收仍被拒', () => {
   const previous = process.env.CADRE_ROLE
   process.env.CADRE_ROLE = 'supervisor'
   const setup = fixture()
@@ -139,7 +139,7 @@ test('不在花名册的会话无法伪造 actor', () => {
   }
 })
 
-test('主管验收记录真实 from_status（delivered → review → verified）', () => {
+test('组长验收记录真实 from_status（delivered → review → verified）', () => {
   const setup = fixture()
   try {
     insertTask(setup.db, { taskId: 'task-ok', status: 'delivered', seq: 1 })

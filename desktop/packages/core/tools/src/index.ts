@@ -1760,15 +1760,15 @@ export class ToolRuntime extends Service {
     switch (outcome) {
       case 'allowed-once': return { decision: { kind: 'allow' }, approvalCancelled: false }
       case 'rejected': return {
-        decision: { kind: 'deny', reason: `the user rejected tool "${exec.name}"` },
+        decision: { kind: 'deny', reason: `APPROVAL_REJECTED: the user rejected tool "${exec.name}". Do not retry the same call; use a read-only alternative, ask the user, or dispatch the action to an employee.` },
         approvalCancelled: false,
       }
       case 'cancelled': return {
-        decision: { kind: 'deny', reason: `approval for tool "${exec.name}" was cancelled` },
+        decision: { kind: 'deny', reason: `APPROVAL_CANCELLED: approval for tool "${exec.name}" was cancelled. Do not retry the same call; use a read-only alternative or ask the user.` },
         approvalCancelled: true,
       }
       case 'unavailable': return {
-        decision: { kind: 'deny', reason: `tool "${exec.name}" requires approval, but no approval channel is available` },
+        decision: { kind: 'deny', reason: `APPROVAL_UNAVAILABLE: tool "${exec.name}" requires approval, but approval prompts are disabled in this session, so the call is auto-denied (environment policy, not a permission judgment). Do not retry; use read/grep for diagnosis, dispatch execution to an employee, or ask the user to enable approval prompts.` },
         approvalCancelled: false,
       }
       default: return assertNever(outcome, 'ApprovalOutcome')

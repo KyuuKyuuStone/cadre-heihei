@@ -104,7 +104,7 @@ export function AgentPresetSection({
     {state.error === null ? null : <p className={css.error} role="alert">{state.error}</p>}
     {([true, false] as const).map((builtIn) => {
       const belongsToBuiltIn = (row: (typeof state.rows)[number]): boolean =>
-        isBuiltInPreset(row) || row.source === 'cadre'
+        isBuiltInPreset(row)
       const rows = state.rows.filter(row => belongsToBuiltIn(row) === builtIn
         && (developerTools || !requiresCodingTools(row)))
       const entry = builtIn ? null : creatorButton
@@ -134,9 +134,6 @@ export function AgentPresetSection({
                     <Tag tone={row.isDefault ? 'solid' : 'outline'}>
                       {row.isDefault ? t('inUse') : t(builtIn ? 'builtInGroup' : 'customGroup')}
                     </Tag>
-                    {row.source === 'cadre' && (
-                      <Tag tone="solid">{t(row.isDefault ? 'cadreDefault' : 'cadreRecommended')}</Tag>
-                    )}
                   </span>
                   <code className={css.cardId} title={row.id}>{row.id}</code>
                 </span>

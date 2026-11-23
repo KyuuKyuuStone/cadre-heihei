@@ -160,10 +160,10 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       : policy.denyTools[payload.name]
         ?? policy.denyToolPrefixes.find(prefix => payload.name.startsWith(prefix))
     if (builtin === 'office' || policyDeny === 'office') {
-      return deny('WRITE_OFFICE_DENIED', '主管不能写 Office 文件；请派员工产出后验收', 'deny:office')
+      return deny('WRITE_OFFICE_DENIED', '组长不能写 Office 文件；请派员工产出后验收', 'deny:office')
     }
     if (builtin === 'shell' || policyDeny === 'shell') {
-      return deny('WRITE_SHELL_DENIED', '主管不能执行 shell；请用 read/grep 只读诊断或派员工', 'deny:shell')
+      return deny('WRITE_SHELL_DENIED', '组长不能执行 shell；请用 read/grep 只读诊断或派员工', 'deny:shell')
     }
     const policyWrite = policy?.writeTools[payload.name] !== undefined
     if (builtin !== 'write' && !policyWrite) return next()
@@ -181,7 +181,9 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       ?? config.workspaceRoot
       ?? (config.reportsDir !== undefined && isAbsolute(config.reportsDir) ? dirname(config.reportsDir) : undefined)
     if (root === undefined || root === '') {
-      return deny('WRITE_POLICY_UNAVAILABLE', '项目根目录/工作区未登记', 'root-missing')
+      return deny('WRITE_POLICY_UNAVAILABLE',
+        '项目根目录/工作区未登记。请让用户在侧栏把目标文件夹添加为项目组（或从该项目组的「＋」发起会话），登记后重试；只读诊断可用 read/grep，落盘可派员工',
+        'root-missing')
     }
     const reportsRoot = config.reportsDir === undefined
       ? undefined

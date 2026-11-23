@@ -16,10 +16,12 @@ import { apply, inject } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { WorkspaceBrowserInjected, WorkspacePickerInjected } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import {
   type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
+  projectMenuOpenStateFactory,
   type RenameSessionInjected, type RowToastInjected, type SessionArchiveConfirmInjected, type SessionRenameDialogInjected,
   type SessionIdInjected, type WorkspaceViewStoreHandle,
 } from '../src/client/contract/slots.ts'
 import { WorkspaceBrowser } from '../src/client/rows/WorkspaceBrowser.tsx'
+import { DeleteWorkspaceMenuItem, RenameWorkspaceMenuItem } from '../src/client/rows/ProjectMenuItems.tsx'
 import { ArchiveSessionMenuItem, ArchiveSessionRowButton, SessionArchiveConfirmDialog } from '../src/client/session-actions/ArchiveSession.tsx'
 import { ForkSessionMenuItem } from '../src/client/session-actions/ForkSession.tsx'
 import { PinSessionMenuItem, PinSessionRowButton } from '../src/client/session-actions/PinSession.tsx'
@@ -174,7 +176,8 @@ type HoleName = 'sidebar.workspaces' | 'conversation.hero.workspace' | 'conversa
 
 const MENU_ITEM = 'sidebar.workspaces.session.menu.item'
 const ROW_ACTION = 'sidebar.workspaces.session.row.action'
-type RowListName = typeof MENU_ITEM | typeof ROW_ACTION | 'shell.overlay'
+const PROJECT_MENU = 'sidebar.workspaces.project.menu.item'
+type RowListName = typeof MENU_ITEM | typeof ROW_ACTION | typeof PROJECT_MENU | 'shell.overlay'
 
 /** Declare any subset of the holes with a single root registration ('root' is a single slot); the overlay is a list. */
 function declare(slots: SlotRegistry, ...names: HoleName[]): () => void {
@@ -267,6 +270,7 @@ describe('ui-workspace apply', () => {
     // The row actions follow the browser's own declaration, whenever it lands.
     expect(after.slots.entries(MENU_ITEM)).toHaveLength(5)
     expect(after.slots.entries(ROW_ACTION)).toHaveLength(2)
+    expect(after.slots.entries(PROJECT_MENU)).toHaveLength(2)
     expect(after.slots.entries('shell.overlay')).toHaveLength(3)
   })
 
@@ -280,6 +284,11 @@ describe('ui-workspace apply', () => {
       kind: 'list', scope: 'root', inject: { hooks: { menuOpenState: menuOpenStateFactory, shortcuts: b.ctx.shortcuts.catalog } },
     })
     expect(b.slots.spec(ROW_ACTION)).toEqual({ kind: 'list', scope: 'root' })
+    // The project menu binds the same per-occurrence open-state hook, without
+    // the shortcut catalog its rename/delete rows never display.
+    expect(b.slots.spec(PROJECT_MENU)).toEqual({
+      kind: 'list', scope: 'root', inject: { hooks: { menuOpenState: projectMenuOpenStateFactory } },
+    })
 
     const rows = (key: RowListName) => b.slots.entries(key)
       .map(registration => [registration.options.id, registration.options.order, registration.component, registration.locale])
@@ -293,6 +302,10 @@ describe('ui-workspace apply', () => {
     expect(rows(ROW_ACTION)).toEqual([
       ['archive', 100, ArchiveSessionRowButton, 'workspace'],
       ['pin', 200, PinSessionRowButton, 'workspace'],
+    ])
+    expect(rows(PROJECT_MENU)).toEqual([
+      ['rename', 200, RenameWorkspaceMenuItem, 'workspace'],
+      ['delete', 400, DeleteWorkspaceMenuItem, 'workspace'],
     ])
     expect(rows('shell.overlay')).toEqual([
       ['workspace.session-rename', undefined, SessionRenameDialog, 'workspace'],
@@ -313,7 +326,7 @@ describe('ui-workspace apply', () => {
       expect(registration.locale).toBe('workspace')
       expect(registration.store).toBe(['archived', 'stoppedAndArchived'].includes(String(registration.options.key)) ? browser.store : undefined)
     }
-    for (const registration of [...b.slots.entries(MENU_ITEM), ...b.slots.entries(ROW_ACTION), ...b.slots.entries('shell.overlay')]) {
+    for (const registration of [...b.slots.entries(MENU_ITEM), ...b.slots.entries(ROW_ACTION), ...b.slots.entries(PROJECT_MENU), ...b.slots.entries('shell.overlay')]) {
       if (registration === rowToastEntry) continue
       expect(registration.store).toBeUndefined()
     }
@@ -878,6 +891,7 @@ describe('ui-workspace apply', () => {
     await fiber.await()
     expect(b.slots.entries(MENU_ITEM)).toHaveLength(5)
     expect(b.slots.entries(ROW_ACTION)).toHaveLength(2)
+    expect(b.slots.entries(PROJECT_MENU)).toHaveLength(2)
     expect(b.slots.entries('shell.overlay')).toHaveLength(3)
     await fiber.dispose()
     expect(b.slots.entries('sidebar.workspaces')).toHaveLength(0)
@@ -887,6 +901,8 @@ describe('ui-workspace apply', () => {
     expect(b.slots.spec(MENU_ITEM)).toBeUndefined()
     expect(b.slots.entries(MENU_ITEM)).toHaveLength(0)
     expect(b.slots.entries(ROW_ACTION)).toHaveLength(0)
+    expect(b.slots.spec(PROJECT_MENU)).toBeUndefined()
+    expect(b.slots.entries(PROJECT_MENU)).toHaveLength(0)
     expect(b.slots.entries('shell.overlay')).toHaveLength(0)
     expect(b.slots.entries('workspace.toast')).toHaveLength(0)
     expect(b.slots.snapshot('factory:workspace.toast.content')).toEqual([])

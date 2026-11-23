@@ -229,7 +229,9 @@ function formatGlobPage(items: readonly string[], seen: number, spillRef: SpillR
 
 /** Bound and format one canonical path list for the Native surface relative to its search root. */
 function renderGlobPaths(paths: string[], caps: GlobToolCaps, root: string, spillRef?: SpillRef): string {
-  if (paths.length === 0) return 'No files found'
+  if (paths.length === 0) {
+    return 'No files found. The directory may exist but nothing matched: patterns anchor at the search root, so an absolute-path pattern with ** may not recurse as expected. Try a filename wildcard (e.g. *.py or *report*), or list one directory level first.'
+  }
   // A result that fits is shown whole, untouched: modification-time order is the
   // tool's contract, and over a complete result it is what answers age questions.
   if (paths.length <= caps.maxResults) return paths.join('\n')

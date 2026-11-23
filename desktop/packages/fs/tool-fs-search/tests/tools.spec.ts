@@ -557,7 +557,7 @@ describe('exit semantics and failure classification', () => {
     subprocess.handler = () => runResult('', { exitCode: 1 })
     const glob = await call(ctx, 'glob', { pattern: '*.nope' })
     expect(glob.isError).toBe(false)
-    expect(text(glob)).toBe('No files found')
+    expect(text(glob)).toContain('No files found')
     const grep = await call(ctx, 'grep', { pattern: 'nope' })
     expect(grep.isError).toBe(false)
     expect(text(grep)).toBe('No matches found')

@@ -6,7 +6,7 @@
  * (`dispatched` / `failed`) — never the rendered text — so wording changes do
  * not affect the card. Running → 拆解中; settled → per-item dispatch / failure
  * rows; then it joins the ledger so the same bar can show the flow back
- * (已交付，主管正在审).
+ * (已交付，组长正在审).
  */
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
@@ -16,12 +16,15 @@ import {
   StateDot,
   Tag,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ToolCallViewProps } from '../../contract/slots.ts'
+import { CONVERSATION_NS as NS } from '../../locale.ts'
 
-const TEXT_PRIMARY = 'var(--dsw-alias-label-primary)'
-const TEXT_SECONDARY = 'var(--dsw-alias-label-secondary)'
-const TEXT_ERROR = 'var(--dsw-alias-state-error-primary)'
+type Translate = TranslateNS<'conversation'>
+
+const INK_PRIMARY = 'var(--dsw-alias-label-primary)'
+const INK_SECONDARY = 'var(--dsw-alias-label-secondary)'
+const INK_ERROR = 'var(--dsw-alias-state-error-primary)'
 
 /** One dispatched item from `meta.dispatched`. */
 interface DispatchedItem {
@@ -60,7 +63,7 @@ export interface DispatchRowInjected {
   resolveProjectId?(): string | undefined
 }
 
-type DispatchRowProps = ToolCallViewProps & InjectFace<DispatchRowInjected>
+type DispatchRowProps = ToolCallViewProps & PropsLocale<'conversation'> & InjectFace<DispatchRowInjected>
 
 /** Minimal ledger row joined by task id for the returned state. */
 interface LedgerRow {
@@ -112,8 +115,8 @@ function textOf(content: readonly { type: string; text?: string }[]): string {
 }
 
 /** `MM-DD HH:mm` in local time; invalid or empty timestamps stay visible. */
-function dueText(iso: string): string {
-  if (iso === '') return '未注明'
+function dueText(iso: string, t: Translate): string {
+  if (iso === '') return t('dispatch.dueUnset')
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return iso
   const pad = (value: number): string => String(value).padStart(2, '0')
@@ -160,23 +163,23 @@ function Headline({ icon, title, tag, tagTone = 'neutral' }: {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
       {icon}
-      <span style={{ flex: 1, minWidth: 0, color: TEXT_PRIMARY, fontWeight: 500 }}>{title}</span>
+      <span style={{ flex: 1, minWidth: 0, color: INK_PRIMARY, fontWeight: 500 }}>{title}</span>
       {tag === undefined ? null : <Tag tone={tagTone}>{tag}</Tag>}
     </div>
   )
 }
 
-function RunningBar() {
+function RunningBar({ t }: { readonly t: Translate }) {
   return (
     <BarShell tone="neutral">
       <Headline
         icon={<StateDot state="ongoing" />}
-        title="拆解中…"
-        tag="进行中"
+        title={t('dispatch.running')}
+        tag={t('dispatch.runningTag')}
         tagTone="info"
       />
-      <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
-        主管正在读你的话，判断要拆成几件事、派给谁
+      <span style={{ color: INK_SECONDARY, fontSize: 12 }}>
+        {t('dispatch.runningHint')}
       </span>
     </BarShell>
   )
@@ -188,6 +191,7 @@ function RunningBar() {
  * @returns the status bar for running, success, partial, or failure.
  */
 export function DispatchStatusRow(props: DispatchRowProps) {
+  const { t } = props
   const [ledger, setLedger] = useState<ReadonlyMap<string, LedgerRow>>(new Map())
   const [syncError, setSyncError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState<string | null>(null)
@@ -213,21 +217,21 @@ export function DispatchStatusRow(props: DispatchRowProps) {
       ? undefined
       : (window as unknown as { cadre?: LedgerBridge }).cadre?.listTasks
     if (list === undefined) {
-      setSyncError('状态未同步：台账通道未接入')
+      setSyncError(t('dispatch.sync.channelMissing'))
       return
     }
     let cancelled = false
     const tick = async () => {
       const projectId = props.resolveProjectId?.()
       if (projectId === undefined) {
-        setSyncError('状态未同步：当前会话不属于任何项目部')
+        setSyncError(t('dispatch.sync.noProject'))
         return
       }
       try {
         const response = await list({ projectId })
         if (cancelled) return
         if (response === undefined || !Array.isArray(response.rows)) {
-          setSyncError('状态未同步：台账响应缺少 rows')
+          setSyncError(t('dispatch.sync.rowsMissing'))
           return
         }
         setSyncError(null)
@@ -237,7 +241,7 @@ export function DispatchStatusRow(props: DispatchRowProps) {
         if (cancelled) return
         // Keep the last snapshot, but make the failed join visible instead of
         // letting the card imply that the ledger still agrees with it.
-        setSyncError(`状态未同步：${error instanceof Error ? error.message : String(error)}`)
+        setSyncError(t('dispatch.sync.failed', { message: error instanceof Error ? error.message : String(error) }))
       }
     }
     void tick()
@@ -248,18 +252,18 @@ export function DispatchStatusRow(props: DispatchRowProps) {
       window.clearInterval(timer)
       window.clearTimeout(stop)
     }
-  }, [taskKey])
+  }, [taskKey, t])
 
-  if (props.phase !== 'result') return <RunningBar />
+  if (props.phase !== 'result') return <RunningBar t={t} />
 
   const block = props.block
   if (block.isError) {
-    const reason = block.error?.reason ?? (textOf(block.content).trim() || '主管没能完成拆解')
+    const reason = block.error?.reason ?? (textOf(block.content).trim() || t('dispatch.failedDefault'))
     return (
       <BarShell tone="danger">
-        <Headline title="拆解失败" tag="未派活" tagTone="danger" />
-        <span style={{ color: TEXT_PRIMARY, fontSize: 13 }}>{reason}</span>
-        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>没有产生任何任务 · 请重新说一次</span>
+        <Headline title={t('dispatch.failedTitle')} tag={t('dispatch.notDispatched')} tagTone="danger" />
+        <span style={{ color: INK_PRIMARY, fontSize: 13 }}>{reason}</span>
+        <span style={{ color: INK_SECONDARY, fontSize: 12 }}>{t('dispatch.failedHint')}</span>
       </BarShell>
     )
   }
@@ -270,23 +274,23 @@ export function DispatchStatusRow(props: DispatchRowProps) {
     const raw = textOf(block.content).trim()
     return (
       <BarShell tone="neutral">
-        <Headline title="派活结果" tag="旧格式" />
-        <span style={{ color: TEXT_PRIMARY, fontSize: 12 }}>{raw || '这条记录没有结构化数据'}</span>
-        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>该结果早于结构化回传，仅作原文展示；重新派活后按新格式显示</span>
+        <Headline title={t('dispatch.result')} tag={t('dispatch.legacyTag')} />
+        <span style={{ color: INK_PRIMARY, fontSize: 12 }}>{raw || t('dispatch.noStructured')}</span>
+        <span style={{ color: INK_SECONDARY, fontSize: 12 }}>{t('dispatch.legacyHint')}</span>
       </BarShell>
     )
   }
 
   const groups = new Map<string, number>()
   for (const item of dispatched) groups.set(item.assigneeName, (groups.get(item.assigneeName) ?? 0) + 1)
-  const groupText = [...groups].map(([name, count]) => `${name}（${count} 条）`).join(' · ')
+  const groupText = [...groups].map(([name, count]) => t('dispatch.groupItem', { name, count })).join(' · ')
   const partial = dispatched.length > 0 && failed.length > 0
   const allFailed = dispatched.length === 0
   if (allFailed && failed.length === 0) {
     return (
       <BarShell tone="neutral">
-        <Headline title="派活结果" tag="空" />
-        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>后端返回了空的 dispatched / failed</span>
+        <Headline title={t('dispatch.result')} tag={t('dispatch.emptyTag')} />
+        <span style={{ color: INK_SECONDARY, fontSize: 12 }}>{t('dispatch.emptyHint')}</span>
       </BarShell>
     )
   }
@@ -294,13 +298,13 @@ export function DispatchStatusRow(props: DispatchRowProps) {
   const dueSummary = dueValues.length === 0
     ? ''
     : dueValues.length === 1
-      ? `截止 ${dueText(dueValues[0] ?? '')}`
-      : `最早截止 ${dueText(dueValues[0] ?? '')}`
+      ? t('dispatch.due', { time: dueText(dueValues[0] ?? '', t) })
+      : t('dispatch.dueEarliest', { time: dueText(dueValues[0] ?? '', t) })
   const headline = allFailed
-    ? `派活未成功 · ${failed.length} 条待处理`
+    ? t('dispatch.allFailed', { count: failed.length })
     : partial
-      ? `部分成功 · 成功 ${dispatched.length} 条 · 失败 ${failed.length} 条`
-      : `已派给 ${groupText}`
+      ? t('dispatch.partial', { dispatched: dispatched.length, failed: failed.length })
+      : t('dispatch.assigned', { groups: groupText })
   const tone: 'neutral' | 'danger' | 'warning' = allFailed
     ? 'danger'
     : failed.length > 0
@@ -311,12 +315,12 @@ export function DispatchStatusRow(props: DispatchRowProps) {
     const row = ledger.get(item.taskId)
     if (row === undefined) return []
     const title = row.title === '' ? item.taskId : row.title
-    if (row.status === 'delivered') return [`${item.assigneeName} · ${title} — 已交付，主管正在审`]
-    if (row.status === 'review') return [`${item.assigneeName} · ${title} — 待你确认`]
-    if (row.status === 'verified') return [`${item.assigneeName} · ${title} — 已完成`]
-    if (row.status === 'rework') return [`${item.assigneeName} · ${title} — 被退回重做`]
-    if (row.status === 'failed') return [`${item.assigneeName} · ${title} — 失败`]
-    if (row.status === 'in_progress') return [`${item.assigneeName} · ${title} — 正在执行`]
+    if (row.status === 'delivered') return [`${item.assigneeName} · ${title} — ${t('dispatch.status.delivered')}`]
+    if (row.status === 'review') return [`${item.assigneeName} · ${title} — ${t('dispatch.status.review')}`]
+    if (row.status === 'verified') return [`${item.assigneeName} · ${title} — ${t('dispatch.status.verified')}`]
+    if (row.status === 'rework') return [`${item.assigneeName} · ${title} — ${t('dispatch.status.rework')}`]
+    if (row.status === 'failed') return [`${item.assigneeName} · ${title} — ${t('dispatch.status.failed')}`]
+    if (row.status === 'in_progress') return [`${item.assigneeName} · ${title} — ${t('dispatch.status.inProgress')}`]
     return []
   })
 
@@ -340,12 +344,12 @@ export function DispatchStatusRow(props: DispatchRowProps) {
         const landed = outcome.dispatched ?? []
         setAddedDispatched(previous => [...previous, ...landed])
         setResolved(previous => new Map(previous).set(pendingId, null))
-        setNotice(pendingId, { tone: 'neutral', text: landed.length > 0 ? '重试成功，已派出' : '重试成功' })
+        setNotice(pendingId, { tone: 'neutral', text: landed.length > 0 ? t('dispatch.retryDispatched') : t('dispatch.retryOk') })
         return
       }
       const replacement = outcome.failed?.[0]
       if (replacement !== undefined) setResolved(previous => new Map(previous).set(pendingId, replacement))
-      setNotice(pendingId, { tone: 'danger', text: outcome.message ?? replacement?.reason ?? '重试失败' })
+      setNotice(pendingId, { tone: 'danger', text: outcome.message ?? replacement?.reason ?? t('dispatch.retryFailed') })
     } catch (error) {
       setNotice(pendingId, {
         tone: 'danger',
@@ -361,12 +365,12 @@ export function DispatchStatusRow(props: DispatchRowProps) {
       <Headline
         icon={<IconBranchOutlineRegular size={14} />}
         title={headline}
-        tag={allFailed ? '失败' : partial ? '部分成功' : '已派出'}
+        tag={allFailed ? t('dispatch.tag.failed') : partial ? t('dispatch.tag.partial') : t('dispatch.tag.dispatched')}
         tagTone={allFailed ? 'danger' : partial ? 'warning' : 'success'}
       />
       {dispatched.length > 0 && (
-        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>
-          {`共 ${dispatched.length} 条任务`}
+        <span style={{ color: INK_SECONDARY, fontSize: 12 }}>
+          {t('dispatch.total', { count: dispatched.length })}
           {dueSummary === '' ? '' : ` · ${dueSummary}`}
         </span>
       )}
@@ -384,13 +388,13 @@ export function DispatchStatusRow(props: DispatchRowProps) {
       {statusLines.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderTop: '0.5px solid var(--dsw-alias-border-l1)', paddingTop: 6 }}>
           {statusLines.map(line => (
-            <span key={line} style={{ color: TEXT_PRIMARY, fontSize: 12 }}>{line}</span>
+            <span key={line} style={{ color: INK_PRIMARY, fontSize: 12 }}>{line}</span>
           ))}
         </div>
       )}
 
       {syncError !== null && (
-        <span role="status" style={{ color: TEXT_ERROR, fontSize: 12 }}>{syncError}</span>
+        <span role="status" style={{ color: INK_ERROR, fontSize: 12 }}>{syncError}</span>
       )}
 
       {failed.length > 0 && (
@@ -401,26 +405,26 @@ export function DispatchStatusRow(props: DispatchRowProps) {
             const notice = item.pendingId === undefined ? undefined : retryNotices.get(item.pendingId)
             return (
               <div key={`${item.pendingId ?? ''}:${item.target}:${item.reason}`} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <Tag tone={pending ? 'warning' : 'danger'}>{pending ? '待派' : '失败'}</Tag>
-                <span style={{ flex: 1, minWidth: 0, color: TEXT_PRIMARY, fontSize: 12 }}>
+                <Tag tone={pending ? 'warning' : 'danger'}>{pending ? t('dispatch.pendingTag') : t('dispatch.tag.failed')}</Tag>
+                <span style={{ flex: 1, minWidth: 0, color: INK_PRIMARY, fontSize: 12 }}>
                   {`${item.target} · ${item.reason}`}
                 </span>
                 {pending && canRetry && (
-                  <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>补人后可重试</span>
+                  <span style={{ color: INK_SECONDARY, fontSize: 12 }}>{t('dispatch.pendingHint')}</span>
                 )}
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={!canRetry || retrying !== null}
-                  title={canRetry ? undefined : '该失败不可重试，请重新派活'}
+                  title={canRetry ? undefined : t('dispatch.notRetryable')}
                   onClick={() => { void onRetry(item) }}
                 >
-                  {retrying === item.pendingId ? '重试中…' : '重试'}
+                  {retrying === item.pendingId ? t('dispatch.retrying') : t('dispatch.retry')}
                 </Button>
                 {notice !== undefined && (
                   <span
                     role={notice.tone === 'danger' ? 'alert' : 'status'}
-                    style={{ color: notice.tone === 'danger' ? TEXT_ERROR : TEXT_SECONDARY, fontSize: 12 }}
+                    style={{ color: notice.tone === 'danger' ? INK_ERROR : INK_SECONDARY, fontSize: 12 }}
                   >
                     {notice.text}
                   </span>
@@ -432,7 +436,7 @@ export function DispatchStatusRow(props: DispatchRowProps) {
       )}
 
       {allFailed && (
-        <span style={{ color: TEXT_SECONDARY, fontSize: 12 }}>没有产生任何任务 · 可重试的条目不依赖重新派活</span>
+        <span style={{ color: INK_SECONDARY, fontSize: 12 }}>{t('dispatch.allFailedHint')}</span>
       )}
     </BarShell>
   )
@@ -448,7 +452,7 @@ interface WorkspaceSessionIndex {
 /** Registers the dispatch status row; retry replays one pending id over the app channel. */
 export const dispatchToolview = {
   name: 'dispatch-toolview',
-  inject: ['slots', 'workspaces'],
+  inject: ['slots', 'workspaces', 'locale'],
   apply(ctx: Context): void {
     const workspaces = ctx.get('workspaces') as WorkspaceSessionIndex | undefined
     ctx.slots.inject('tool.call.toolview', function* () {
@@ -466,10 +470,10 @@ export const dispatchToolview = {
             if (!response.ok) {
               return {
                 ok: false,
-                message: payload?.message ?? `重试请求失败（HTTP ${response.status}）`,
+                message: payload?.message ?? ctx.locale.bind(NS)('dispatch.retryHttpFailed', { status: response.status }),
               }
             }
-            return payload ?? { ok: false, message: '重试通道未返回结果' }
+            return payload ?? { ok: false, message: ctx.locale.bind(NS)('dispatch.retryNoResult') }
           } catch (error) {
             return { ok: false, message: error instanceof Error ? error.message : String(error) }
           }
@@ -478,6 +482,7 @@ export const dispatchToolview = {
       const register = (key: string) => ctx.slots.register({
         name: 'tool.call.toolview',
         key,
+        locale: NS,
         inject: (sessionId: string) => render(sessionId),
       }, DispatchStatusRow)
       yield register('dispatch_task')

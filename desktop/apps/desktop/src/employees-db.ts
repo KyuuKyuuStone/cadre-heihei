@@ -268,7 +268,7 @@ export class EmployeeStore {
             AND session_id != ? AND session_id != 'sup-1' LIMIT 1`)
           .get(input.projectId, input.sessionId) as { session_id?: string } | undefined
         if (occupied !== undefined) {
-          return fail('INVALID_ARGUMENT', `本项目已有主管（${String(occupied.session_id)}），请先办理离职`, 'role')
+          return fail('INVALID_ARGUMENT', `本项目已有组长（${String(occupied.session_id)}），请先办理离职`, 'role')
         }
       }
       this.db.prepare(`

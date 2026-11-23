@@ -117,7 +117,7 @@ describe('skill admin model tools', () => {
       get: () => admin,
     })
     expect(registered.map(tool => tool.name))
-      .toEqual(['skill_catalog', 'skill_search', 'skill_preview', 'skill_install', 'skill_create', 'skill_check', 'skill_audit', 'skill_plan'])
+      .toEqual(['skill_catalog', 'skill_search', 'skill_preview', 'skill_install', 'skill_create', 'skill_check', 'skill_set_categories', 'skill_audit', 'skill_plan'])
     const run = { agent: { id: created.sessionId } }
     const find = (name: string): Registered => registered.find(tool => tool.name === name) as Registered
 

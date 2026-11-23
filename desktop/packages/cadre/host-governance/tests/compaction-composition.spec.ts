@@ -20,6 +20,10 @@ interface PromptSection {
   readonly text: (context: { scope?: unknown }) => string
 }
 
+interface CompositionOptions {
+  readonly stallAgeMinutes?: number
+}
+
 let root: string | undefined
 let context: Context | undefined
 
@@ -31,27 +35,38 @@ afterEach(async () => {
   root = undefined
 })
 
-async function loadComposition(): Promise<{
+async function loadComposition(options: CompositionOptions = {}): Promise<{
   readonly agent: { id: string; status: string; session: { snapshotEvents(): readonly never[] }; ctx?: Context }
   readonly compactCalls: () => number
   readonly presetLookups: () => number
   readonly promptSections: PromptSection[]
+  readonly promptTexts: () => readonly string[]
+  readonly goalReads: () => number
 }> {
   root = await mkdtemp(join(tmpdir(), 'host-governance-composition-'))
   const databasePath = join(root, 'cadre.sqlite')
   initCadreStore(databasePath)
   const db = new DatabaseSync(databasePath)
   try {
-    const at = '2026-11-07T00:00:00.000Z'
+    const at = options.stallAgeMinutes === undefined
+      ? '2026-11-07T00:00:00.000Z'
+      : new Date(Date.now() - options.stallAgeMinutes * 60_000).toISOString()
+    const status = options.stallAgeMinutes === undefined ? 'verified' : 'in_progress'
     db.prepare(`INSERT INTO members
       (project_id, session_id, role, display_name, state, created_at, updated_at)
-      VALUES ('p1', 'sup', 'supervisor', '主管', 'available', ?, ?)`).run(at, at)
+      VALUES ('p1', 'sup', 'supervisor', '组长', 'available', ?, ?)`).run(at, at)
     db.prepare(`INSERT INTO tasks (task_id, project_id, seq, title, body, body_bytes,
       body_sha256, status, dispatcher_session_id, assignee_session_id, created_at, updated_at)
-      VALUES ('t1', 'p1', 1, '已完成任务', '完成内容', 1, 'sha', 'verified', 'sup', 'sup', ?, ?)`).run(at, at)
-    db.prepare(`INSERT INTO task_memory
-      (task_id, project_id, name, status, summary, decisions_json, artifacts_json, transcript_ref, updated_at)
-      VALUES ('t1', 'p1', '已完成任务', 'verified', '已完成任务｜完成内容', '[]', '[]', 'task:t1', ?)`).run(at)
+      VALUES ('t1', 'p1', 1, '已完成任务', '完成内容', 1, 'sha', ?, 'sup', 'sup', ?, ?)`).run(status, at, at)
+    if (options.stallAgeMinutes === undefined) {
+      db.prepare(`INSERT INTO task_memory
+        (task_id, project_id, name, status, summary, decisions_json, artifacts_json, transcript_ref, updated_at)
+        VALUES ('t1', 'p1', '已完成任务', 'verified', '已完成任务｜完成内容', '[]', '[]', 'task:t1', ?)`).run(at)
+    } else {
+      db.prepare(`INSERT INTO task_events
+        (event_id, project_id, task_id, to_status, actor_session_id, idempotency_key, at)
+        VALUES ('e1', 'p1', 't1', 'in_progress', 'sup', 'composition', ?)`).run(at)
+    }
   } finally {
     db.close()
   }
@@ -62,8 +77,10 @@ async function loadComposition(): Promise<{
     id: 'sup', status: 'idle', session,
   }
   const promptSections: PromptSection[] = []
+  const promptTexts: string[] = []
   let compactCalls = 0
   let presetLookups = 0
+  let goalReads = 0
   let isolatedCompaction: {
     compactNow(target: typeof agent, signal: AbortSignal): Promise<{ compacted: boolean }>
   } | undefined
@@ -72,12 +89,19 @@ async function loadComposition(): Promise<{
     name: 'test:host-dependencies',
     apply(ctx: Context): void {
       ctx.provide('tools', { register: () => () => {} })
-      ctx.provide('sessionController', { prompt: async () => ({}) })
+      ctx.provide('sessionController', {
+        prompt: async (request: { content: readonly { type: string; text?: string }[] }) => {
+          for (const part of request.content) {
+            if (part.type === 'text' && part.text !== undefined) promptTexts.push(part.text)
+          }
+          return {}
+        },
+      })
       ctx.provide('sessions', { get: () => session, list: () => [session] })
       ctx.provide('sessionQuery', { readSession: async () => ({ events: [] }) })
       ctx.provide('agents', { get: (id: string) => id === agent.id ? agent : undefined })
       ctx.provide('goals', {
-        get: () => undefined, create: () => goal, resume: () => goal,
+        get: () => { goalReads += 1; return undefined }, create: () => goal, resume: () => goal,
         pause: () => goal, complete: () => goal, disarm: () => goal,
       })
       ctx.provide('tokenMeter', { measure: () => ({ totalTokens: 60_000 }) })
@@ -120,6 +144,13 @@ async function loadComposition(): Promise<{
     '  isolate:',
     '    compaction: true',
     "- name: '@deepseek-ai/dsh-host-governance'",
+    '  config:',
+    // Keep the fixture's 60k measurement above the archive floor explicitly;
+    // the shipped default is 200k and this test targets the wiring, not the default.
+    '    taskMemoryCompactionThresholdTokens: 60000',
+    ...(options.stallAgeMinutes === undefined ? [] : [
+      '    consecutiveSamples: 1',
+    ]),
     '',
   ].join('\n'))
   context = new Context()
@@ -146,7 +177,10 @@ async function loadComposition(): Promise<{
     config: { path: pathToFileURL(configPath).href },
   })
   await context.loader.await()
-  return { agent, compactCalls: () => compactCalls, presetLookups: () => presetLookups, promptSections }
+  return {
+    agent, compactCalls: () => compactCalls, presetLookups: () => presetLookups, promptSections,
+    promptTexts: () => promptTexts, goalReads: () => goalReads,
+  }
 }
 
 describe('host-governance real Loader composition', () => {
@@ -173,5 +207,19 @@ describe('host-governance real Loader composition', () => {
     await ctx.fiber.dispose()
     context = undefined
     expect(mounted.promptSections).toEqual([])
+  })
+
+  it('keeps a transient warning out of the supervisor prompt queue', async () => {
+    const mounted = await loadComposition({ stallAgeMinutes: 2 })
+    await vi.waitFor(() => { expect(mounted.goalReads()).toBeGreaterThan(0) })
+    console.log(`METRIC composition_transient_prompt_calls=${mounted.promptTexts().length}`)
+    expect(mounted.promptTexts()).toEqual([])
+  })
+
+  it('delivers a confirmed stall through the composed prompt channel', async () => {
+    const mounted = await loadComposition({ stallAgeMinutes: 15 })
+    await vi.waitFor(() => { expect(mounted.promptTexts()).toHaveLength(1) })
+    console.log(`METRIC composition_confirmed_prompt_calls=${mounted.promptTexts().length}`)
+    expect(mounted.promptTexts()[0]).toContain('已停摆')
   })
 })

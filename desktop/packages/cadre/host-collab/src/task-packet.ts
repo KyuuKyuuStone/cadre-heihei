@@ -4,12 +4,19 @@
  * @module
  */
 
-/** Per-field bounds enforced by {@link normalizeTaskPacket}. */
+/**
+ * Per-field bounds enforced by {@link normalizeTaskPacket}.
+ *
+ * listItems/itemChars were raised from 10/200 (1.6.6-test.20261120.4): real
+ * acceptance specs carry dozens of ~300-char clauses, and the old bounds
+ * truncated them into re-dispatch loops. 40×400 still fits the advisory
+ * 30k task token budget; overflow keeps the loud truncation warning.
+ */
 export const TASK_PACKET_LIMITS = {
   goalChars: 200,
-  listItems: 10,
+  listItems: 40,
   fileRefs: 20,
-  itemChars: 200,
+  itemChars: 400,
   filePathChars: 300,
   fileSummaryChars: 120,
 } as const
@@ -253,8 +260,8 @@ export function buildEmployeeContext(
     `禁止项：${packet.forbidden.length === 0 ? '无' : packet.forbidden.join('；')}`,
     `未决问题：${packet.openQuestions.length === 0 ? '无' : packet.openQuestions.join('；')}`,
     '',
-    '【上下文边界】只使用本任务包与按需读取的文件引用；不要读取、推断或复述主管完整历史。',
-    '【歧义处理】目标/验收/引用不足时先向主管提问，不要猜；主管回复前不要跳过验收项。',
+    '【上下文边界】只使用本任务包与按需读取的文件引用；不要读取、推断或复述组长完整历史。',
+    '【歧义处理】目标/验收/引用不足时先向组长提问，不要猜；组长回复前不要跳过验收项。',
   ]
   if (options.lastTurn !== undefined && options.lastTurn.trim() !== '') {
     lines.push('', '【上一轮摘要】', options.lastTurn.trim().slice(0, 1_000))

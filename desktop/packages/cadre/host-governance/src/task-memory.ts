@@ -135,7 +135,16 @@ export class TaskMemoryReader {
 
 /** Gate one forced compaction per new task-memory archive and idle session. */
 export class TaskMemoryCompactionGate {
+  /**
+   * Unsuccessful attempts tolerated for one archive before the gate stops
+   * retrying it. A summary that cannot shrink below the shadowed span fails
+   * identically on every idle event; without a cap the session re-runs the
+   * same failing summarization forever. A newer archive resets the budget.
+   */
+  static readonly MAX_ATTEMPTS_PER_ARCHIVE = 3
+
   readonly #seen = new Map<string, string>()
+  readonly #attempts = new Map<string, { readonly updatedAt: string; count: number }>()
   readonly #thresholdTokens: number
 
   /**
@@ -149,7 +158,8 @@ export class TaskMemoryCompactionGate {
   /**
    * True when a new completed task has been archived, the session is idle,
    * and current context reaches the configured floor. Cumulative usage is not
-   * an input. Marking happens only after a successful compaction, so failures retry.
+   * an input. Marking happens only after a successful compaction, so failures
+   * retry up to {@link MAX_ATTEMPTS_PER_ARCHIVE} attempts per archive.
    * @param sessionId - actor session.
    * @param latest - newest archived task marker.
    * @param status - current agent status.
@@ -163,11 +173,23 @@ export class TaskMemoryCompactionGate {
     currentContextTokens: number,
   ): boolean {
     if (latest === undefined || status !== 'idle' || currentContextTokens < this.#thresholdTokens) return false
-    return this.#seen.get(sessionId) !== latest.updatedAt
+    if (this.#seen.get(sessionId) === latest.updatedAt) return false
+    const attempt = this.#attempts.get(sessionId)
+    return attempt?.updatedAt !== latest.updatedAt
+      || attempt.count < TaskMemoryCompactionGate.MAX_ATTEMPTS_PER_ARCHIVE
+  }
+
+  /** Record one unsuccessful attempt (failure or resolved no-op) for the archive. */
+  markAttempt(sessionId: string, updatedAt: string): void {
+    const attempt = this.#attempts.get(sessionId)
+    this.#attempts.set(sessionId, attempt?.updatedAt === updatedAt
+      ? { updatedAt, count: attempt.count + 1 }
+      : { updatedAt, count: 1 })
   }
 
   markCompacted(sessionId: string, updatedAt: string): void {
     this.#seen.set(sessionId, updatedAt)
+    this.#attempts.delete(sessionId)
   }
 }
 
@@ -230,5 +252,5 @@ export function capTaskMemory(text: string, maxTokens = 2_000): string {
     used += Array.from(line).length + 1
   }
   const suffix = preserved.length === 0 ? '' : `\n${preserved.slice(0, 5).join('\n')}`
-  return `${kept.join('\n')}\n[... task memory truncated; full summaries available via search ...]${suffix}`
+  return `${kept.join('\n')}\n[... task memory truncated; call search_task_memory with a taskId/name/keyword to read full archived summaries ...]${suffix}`
 }

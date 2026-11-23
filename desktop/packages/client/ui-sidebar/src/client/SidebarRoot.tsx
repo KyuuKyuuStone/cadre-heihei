@@ -268,9 +268,9 @@ export function SidebarRoot({
         open={createMenuOpen}
         onClose={() => { setCreateMenuOpen(false) }}
         items={[
-          { id: 'supervisor', label: '主管', disabled: hasSupervisor },
-          { id: 'worker', label: '员工' },
-          { id: 'plain', label: '普通会话' },
+          { id: 'supervisor', label: t('role.supervisor'), disabled: hasSupervisor },
+          { id: 'worker', label: t('role.worker') },
+          { id: 'plain', label: t('create.menu.plain') },
         ]}
         onSelect={(id) => {
           setCreateMenuOpen(false)

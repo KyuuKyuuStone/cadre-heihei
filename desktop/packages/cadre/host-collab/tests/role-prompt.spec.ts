@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { rosterLines, supervisorDuty, workerDuty } from '../src/index.ts'
 
 const ROSTER = rosterLines([
-  { name: '主管', role: 'supervisor' },
+  { name: '组长', role: 'supervisor' },
   { name: '架构师', role: 'worker', description: '负责边界划分、接口契约与技术取舍' },
 ])
 

@@ -241,6 +241,22 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   }
   const db = new DatabaseSync(ledgerPath, { readOnly: true })
   db.exec('PRAGMA busy_timeout = 5000')
+  // Opt-in catalog for every session: roster members read members.skills_json,
+  // ordinary sessions read session_skills. Absent row means nothing selected.
+  const selectedFor = (sessionId: string): readonly string[] => {
+    try {
+      const member = membership(db, sessionId)
+      if (member !== undefined && member.state !== 'departed') return member.skills
+      const row = db.prepare('SELECT skills_json FROM session_skills WHERE session_id = ? LIMIT 1')
+        .get(sessionId) as { skills_json?: unknown } | undefined
+      if (row === undefined) return []
+      const parsed: unknown = JSON.parse(String(row.skills_json ?? '[]'))
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+    } catch {
+      return []
+    }
+  }
+  ctx.provide?.('skillSelection', { selectedFor })
   const registered = new Map<string, Map<string, { dispose: () => void; content: string }>>()
 
   const clear = (agentId: string): void => {
@@ -263,7 +279,8 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       console.error(`host-session-skills: member read failed agent=${agent.id}: ${String(error)}`)
       return next()
     }
-    if (member === undefined || member.state === 'departed' || member.skills.length === 0) {
+    const skills = member !== undefined && member.state !== 'departed' ? member.skills : selectedFor(agent.id)
+    if (skills.length === 0) {
       clear(agent.id)
       return next()
     }
@@ -274,7 +291,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
       console.error(`host-session-skills: catalog load failed: ${String(error)}`)
       return next()
     }
-    const selected = [...new Set(member.skills)]
+    const selected = [...new Set(skills)]
     const current = registered.get(agent.id) ?? new Map<string, { dispose: () => void; content: string }>()
     for (const [id, entry] of current) {
       const pack = catalog.get(id)
@@ -345,6 +362,8 @@ export function apply(ctx: HostContext, config: Config = {}): void {
         presets: ctx.get?.('agentPresets') as PresetDiagnosticsPort | undefined,
         sessionController: ctx.get?.('sessionController'),
         adminService: ctx.get?.('skillAdmin'),
+        // Without packs the UI health panel has no items and shows "not checked".
+        packs: mergedCatalog(),
       })
       const errorLog = join(config.skillAdminAuditDir ?? join(homedir(), '.dsh', 'cadre-skill-admin'), 'session-error.log')
       const reply = (res: ServerResponse, status: number, body: unknown): void => {
@@ -499,7 +518,9 @@ export function apply(ctx: HostContext, config: Config = {}): void {
             const body = req.method === 'POST'
               ? await readBody(req)
               : Object.fromEntries(new URL(req.url ?? '/', 'http://127.0.0.1').searchParams)
-            api.assertSupervisor({ projectId: required(body, 'projectId'), actorSessionId: required(body, 'operatorSessionId') })
+            // Health is read-only catalog metadata; any project member may view
+            // it (the library page is open to ordinary sessions too).
+            api.assertMember({ projectId: required(body, 'projectId'), actorSessionId: required(body, 'operatorSessionId') })
             reply(res, 200, { ok: true, result: await diagnostics() })
           } catch (error) {
             if (error instanceof SkillIpcError) return reply(res, error.status, { ok: false, code: error.code, message: error.message })
@@ -507,6 +528,13 @@ export function apply(ctx: HostContext, config: Config = {}): void {
           }
         },
       }), 'host-session-skills: diag')
+      route('/cadre/skills/set-metadata', body => api.setMetadata({
+        projectId: required(body, 'projectId'),
+        actorSessionId: required(body, 'actorSessionId'),
+        packId: required(body, 'packId'),
+        categories: body.categories,
+        health: body.health,
+      }))
       route('/cadre/skills/admin/sessions', body => requireAdmin().listSessions({
         projectId: required(body, 'projectId'),
       }))

@@ -18,6 +18,7 @@ import {
   stallStateText,
 } from './cadre-stall.ts'
 import css from './CadreLedgerOverlay.module.css'
+import type { SidebarKey } from './locales.ts'
 
 
 /** One overlay request raised by a project row. */
@@ -105,23 +106,28 @@ export function ledgerPageWindow(current: number, total: number): readonly (numb
   return slots
 }
 
-const FILTERS: readonly { readonly id: Filter; readonly label: string }[] = [
-  { id: 'all', label: '全部' },
-  { id: 'active', label: '进行中' },
-  { id: 'pending', label: '待验收' },
-  { id: 'done', label: '已完成' },
+const FILTERS: readonly { readonly id: Filter; readonly labelKey: SidebarKey }[] = [
+  { id: 'all', labelKey: 'ledger.filter.all' },
+  { id: 'active', labelKey: 'status.inProgress' },
+  { id: 'pending', labelKey: 'status.pendingReview' },
+  { id: 'done', labelKey: 'status.done' },
 ]
 
-const STATUS_LABELS: Readonly<Record<string, string>> = {
-  dispatched: '进行中',
-  accepted: '进行中',
-  in_progress: '进行中',
-  delivered: '待验收',
-  review: '待验收',
-  verified: '已完成',
-  rework: '返工中',
-  failed: '失败',
-  cancelled: '已取消',
+const STATUS_KEYS: Readonly<Record<string, SidebarKey>> = {
+  dispatched: 'status.inProgress',
+  accepted: 'status.inProgress',
+  in_progress: 'status.inProgress',
+  delivered: 'status.pendingReview',
+  review: 'status.pendingReview',
+  verified: 'status.done',
+  rework: 'status.rework',
+  failed: 'status.failed',
+  cancelled: 'status.cancelled',
+}
+
+function statusLabel(status: string, t: PropsLocale<'sidebar'>['t']): string {
+  const key = STATUS_KEYS[status]
+  return key === undefined ? status : t(key)
 }
 
 function filterOf(status: string): Filter {
@@ -142,14 +148,14 @@ function filterOf(status: string): Filter {
 }
 
 /** Acceptance result is read from status plus the recorded report; never invented. */
-function acceptanceText(row: LedgerRow): string {
+function acceptanceText(row: LedgerRow, t: PropsLocale<'sidebar'>['t']): string {
   switch (row.status) {
-    case 'delivered': return '员工已交付 · 待主管审'
-    case 'review': return '主管已审 · 待确认'
-    case 'verified': return '已确认收货'
-    case 'rework': return '主管打回'
-    case 'failed': return '已标记失败'
-    case 'cancelled': return '已取消'
+    case 'delivered': return t('ledger.acceptance.delivered')
+    case 'review': return t('ledger.acceptance.review')
+    case 'verified': return t('ledger.acceptance.verified')
+    case 'rework': return t('ledger.acceptance.rework')
+    case 'failed': return t('ledger.acceptance.failed')
+    case 'cancelled': return t('ledger.acceptance.cancelled')
     default: return '—'
   }
 }
@@ -167,8 +173,28 @@ function dueText(iso: string | undefined): string {
   return timeText(iso)
 }
 
-/** Due timestamps are overdue only when they parse and are strictly earlier than now. */
-export function isCadreTaskOverdue(dueAt: string | undefined, now: number): boolean {
+/** Dispatch time is the created event; `updatedAt` moves on every transition. */
+function dispatchedAtOf(row: LedgerRow): string {
+  return row.events?.find(event => event.fromStatus === null)?.at ?? row.updatedAt
+}
+
+/** Statuses whose work is still outstanding; only these can be overdue. */
+const OPEN_STATUSES: ReadonlySet<string> = new Set([
+  'dispatched', 'accepted', 'in_progress', 'rework', 'delivered', 'review',
+])
+
+/**
+ * Due timestamps are overdue only when they parse, are strictly earlier than
+ * now, and the task is still open. A closed task (verified/failed/cancelled)
+ * keeps its due time as plain history: flagging it red forever would mark
+ * every finished row overdue once its deadline passes.
+ * @param dueAt - recorded deadline, ISO-8601 or absent.
+ * @param now - epoch ms to compare against.
+ * @param status - ledger task status.
+ * @returns whether the open task is past its deadline.
+ */
+export function isCadreTaskOverdue(dueAt: string | undefined, now: number, status: string): boolean {
+  if (!OPEN_STATUSES.has(status)) return false
   if (dueAt === undefined || dueAt === '') return false
   const at = Date.parse(dueAt)
   return !Number.isNaN(at) && at < now
@@ -184,17 +210,17 @@ function useLedgerNow(): number {
   return now
 }
 
-function positionText(row: LedgerRow): string {
+function positionText(row: LedgerRow, t: PropsLocale<'sidebar'>['t']): string {
   const title = row.assigneeTitle?.trim()
   if (title !== undefined && title !== '') return title
-  return row.assigneeRole === 'supervisor' ? '主管' : '员工'
+  return row.assigneeRole === 'supervisor' ? t('role.supervisor') : t('role.worker')
 }
 
-function deliverablesText(row: LedgerRow): string {
+function deliverablesText(row: LedgerRow, t: PropsLocale<'sidebar'>['t']): string {
   const items = row.latestReport?.deliverables ?? []
   if (items.length === 0) return '—'
   if (items.length === 1) return items[0] ?? '—'
-  return `${items.length} 个文件`
+  return t('ledger.fileCount', { count: String(items.length) })
 }
 
 function matches(row: LedgerRow, query: string): boolean {
@@ -249,12 +275,12 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
     setLoad({ kind: 'loading' })
     const bridge = (window as unknown as { cadre?: LedgerBridge }).cadre
     if (bridge?.listTasks === undefined) {
-      setLoad({ kind: 'error', reason: '台账通道未接入：window.cadre.listTasks 未注册' })
+      setLoad({ kind: 'error', reason: t('ledger.channelMissing') })
       return
     }
     void bridge.listTasks({ projectId: request.projectId }).then((result) => {
       if (result === undefined || !Array.isArray(result.rows)) {
-        setLoad({ kind: 'error', reason: '响应缺少 rows' })
+        setLoad({ kind: 'error', reason: t('ledger.rowsMissing') })
         return
       }
       setLoad({
@@ -265,7 +291,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
     }).catch((reason: unknown) => {
       setLoad({ kind: 'error', reason: reason instanceof Error ? reason.message : String(reason) })
     })
-  }, [request.projectId])
+  }, [request.projectId, t])
 
   useEffect(() => { reload() }, [reload])
 
@@ -283,29 +309,34 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
   const currentPage = Math.min(page, totalPages)
   const pageRows = visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   const summary = load.kind === 'ready'
-    ? `${String(counts.all)} 条：进行中 ${String(counts.active)} · 待验收 ${String(counts.pending)} · 已完成 ${String(counts.done)}`
-    : load.kind === 'loading' ? '读取台账…' : load.reason
+    ? t('ledger.summary', {
+      total: String(counts.all),
+      active: String(counts.active),
+      pending: String(counts.pending),
+      done: String(counts.done),
+    })
+    : load.kind === 'loading' ? t('ledger.loading') : load.reason
 
   return (
     <Modal
       open
       onClose={closeLedger}
-      title={`项目部「${request.label}」· 台账`}
+      title={t('ledger.title', { label: request.label })}
       description={request.cwd === undefined ? summary : `${request.cwd} · ${summary}`}
-      closeLabel="关闭"
+      closeLabel={t('dialog.close')}
       className={css.dialog ?? ''}
       contentClassName={css.content ?? ''}
-      footer={<Button variant="outline" onClick={closeLedger}>关闭</Button>}
+      footer={<Button variant="outline" onClick={closeLedger}>{t('dialog.close')}</Button>}
     >
       <div className={css.ledgerBody}>
         <div className={css.toolbar}>
           <Input
             value={query}
-            placeholder="搜索任务 / 员工 / 交付物…"
-            aria-label="搜索台账"
+            placeholder={t('ledger.searchPlaceholder')}
+            aria-label={t('ledger.searchAria')}
             onChange={(event) => { setQuery(event.target.value); setPage(1) }}
           />
-          <Button variant="outline" size="sm" onClick={reload}>刷新</Button>
+          <Button variant="outline" size="sm" onClick={reload}>{t('ledger.refresh')}</Button>
         </div>
 
         {stallProject?.status === 'error' && (
@@ -320,7 +351,7 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
           <p className={css.hint} role="status">{t('stall.card.ledgerStale')}</p>
         )}
 
-        <div className={css.filters} role="radiogroup" aria-label="台账筛选">
+        <div className={css.filters} role="radiogroup" aria-label={t('ledger.filtersAria')}>
           {FILTERS.map(item => (
             <Button
               key={item.id}
@@ -328,41 +359,43 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
               size="sm"
               onClick={() => { setFilter(item.id); setPage(1) }}
             >
-              {item.label} {counts[item.id]}
+              {t(item.labelKey)} {counts[item.id]}
             </Button>
           ))}
         </div>
 
-        {load.kind === 'loading' && <p role="status" className={css.hint}>读取台账…</p>}
+        {load.kind === 'loading' && <p role="status" className={css.hint}>{t('ledger.loading')}</p>}
         {load.kind === 'error' && (
           <div className={css.errorBox} role="alert">
             <span>{load.reason}</span>
-            <span className={css.hint}>台账不可用时不展示示例数据；请检查主进程台账路径或稍后重试。</span>
+            <span className={css.hint}>{t('ledger.errorHint')}</span>
           </div>
         )}
         {load.kind === 'ready' && rows.length === 0 && (
-          <p role="status" className={css.hint}>这个项目部还没有台账记录。</p>
+          <p role="status" className={css.hint}>{t('ledger.empty')}</p>
         )}
         {load.kind === 'ready' && rows.length > 0 && visible.length === 0 && (
-          <p role="status" className={css.hint}>没有匹配的任务；换一个筛选或关键词。</p>
+          <p role="status" className={css.hint}>{t('ledger.noMatch')}</p>
         )}
         {load.kind === 'ready' && load.elapsedMs !== undefined && (
-          <span className={css.hint}>只读查询 {String(load.elapsedMs)} ms</span>
+          <span className={css.hint}>{t('ledger.readonlyQuery', { ms: String(load.elapsedMs) })}</span>
         )}
         {pageRows.length > 0 && (
           <div className={css.tableScroll} data-ledger-scroll>
-            <div className={css.table} role="table" aria-label="项目台账">
+            <div className={css.table} role="table" aria-label={t('ledger.tableAria')}>
               <div className={css.headerRow} role="row">
-                <span role="columnheader">任务</span>
-                <span role="columnheader">归属</span>
-                <span role="columnheader">状态</span>
-                <span role="columnheader">截止</span>
-                <span role="columnheader">交付物</span>
-                <span role="columnheader">验收结果</span>
+                <span role="columnheader">{t('ledger.col.task')}</span>
+                <span role="columnheader">{t('ledger.col.assignee')}</span>
+                <span role="columnheader">{t('ledger.col.status')}</span>
+                <span role="columnheader">{t('ledger.col.due')}</span>
+                <span role="columnheader">{t('ledger.col.deliverables')}</span>
+                <span role="columnheader">{t('ledger.col.acceptance')}</span>
               </div>
               {pageRows.map((row) => {
                 const open = expanded === row.taskId
-                const overdue = isCadreTaskOverdue(row.dueAt, now)
+                const overdue = isCadreTaskOverdue(row.dueAt, now, row.status)
+                const assigneeName = row.assigneeName ?? row.assigneeSessionId
+                const position = positionText(row, t)
                 const stallTask = stallTasks.get(row.taskId)
                 const lastError = stallTask?.lastError ?? null
                 const execution = stallTask === undefined ? null : executionOf(stallTask)
@@ -371,7 +404,9 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
                   ? progress
                   : stallTask !== undefined
                     ? stallStateText(stallTask.stallState, stallTask.lastActivityAt, t)
-                    : stallProject?.status === 'ready' ? t('stall.activityUnknown') : null
+                    : stallProject?.status === 'ready' && OPEN_STATUSES.has(row.status)
+                      ? t('stall.activityUnknown')
+                      : null
                 const stallClass = progress !== ''
                   ? css.stallNormal
                   : stallTask?.stallState === 'stalled'
@@ -394,7 +429,9 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
                     >
                       <span role="cell" className={css.taskCell}>
                         <span className={css.taskTitle}>{row.title}</span>
-                        <span className={css.taskMeta}>派发 {timeText(row.updatedAt)} · {row.taskId}</span>
+                        <span className={css.taskMeta} title={row.taskId}>
+                          {t('ledger.dispatchedAt', { time: timeText(dispatchedAtOf(row)) })} · {row.taskId.slice(0, 8)}
+                        </span>
                         {stallText !== null && <span className={`${css.taskStall} ${stallClass}`}>{stallText}</span>}
                         {lastError !== null && (
                           <span className={css.taskError} title={lastErrorTooltip(lastError, t)}
@@ -404,17 +441,17 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
                           </span>
                         )}
                       </span>
-                      <span role="cell">{row.assigneeName ?? row.assigneeSessionId}（{positionText(row)}）</span>
-                      <span role="cell"><Pill>{STATUS_LABELS[row.status] ?? row.status}</Pill></span>
+                      <span role="cell">{position === assigneeName ? assigneeName : t('ledger.assigneeCell', { name: assigneeName, position })}</span>
+                      <span role="cell"><Pill>{statusLabel(row.status, t)}</Pill></span>
                       <span role="cell" className={overdue ? css.dueOverdue : undefined}>
-                        {overdue && <span className={css.overdueLabel}>已超期</span>}
+                        {overdue && <span className={css.overdueLabel}>{t('ledger.overdue')}</span>}
                         {dueText(row.dueAt)}
                       </span>
-                      <span role="cell">{deliverablesText(row)}</span>
-                      <span role="cell">{acceptanceText(row)}</span>
+                      <span role="cell">{deliverablesText(row, t)}</span>
+                      <span role="cell">{acceptanceText(row, t)}</span>
                       <span className={css.chevron} aria-hidden="true">{open ? '⌄' : '›'}</span>
                     </button>
-                    {open && <Timeline row={row} />}
+                    {open && <Timeline row={row} t={t} />}
                   </div>
                 )
               })}
@@ -459,25 +496,25 @@ function LedgerBody({ request, closeLedger, useStall, retryStall, t }: {
   )
 }
 
-function Timeline({ row }: { readonly row: LedgerRow }) {
+function Timeline({ row, t }: { readonly row: LedgerRow; readonly t: PropsLocale<'sidebar'>['t'] }) {
   const events = row.events ?? []
   return (
-    <div className={css.timeline} role="region" aria-label="任务时间线">
+    <div className={css.timeline} role="region" aria-label={t('ledger.timelineAria')}>
       <div className={css.timelineHead}>
-        <Tag tone="neutral">时间线</Tag>
-        <span className={css.hint}>只读；状态变化与汇报都来自台账。</span>
+        <Tag tone="neutral">{t('ledger.timeline')}</Tag>
+        <span className={css.hint}>{t('ledger.timelineHint')}</span>
       </div>
       {events.length === 0
-        ? <p className={css.hint}>这条任务还没有状态事件记录（旧账本）。</p>
+        ? <p className={css.hint}>{t('ledger.timelineEmpty')}</p>
         : (
           <ol className={css.eventList}>
             {events.map((event, index) => (
               <li key={`${event.at}:${String(index)}`} className={css.event}>
                 <span className={css.eventTime}>{timeText(event.at)}</span>
                 <span className={css.eventText}>
-                  {event.fromStatus === null ? '创建' : STATUS_LABELS[event.fromStatus] ?? event.fromStatus}
+                  {event.fromStatus === null ? t('ledger.created') : statusLabel(event.fromStatus, t)}
                   {' → '}
-                  {STATUS_LABELS[event.toStatus] ?? event.toStatus}
+                  {statusLabel(event.toStatus, t)}
                   {event.actorName === undefined ? '' : ` · ${event.actorName}`}
                   {event.reason === undefined ? '' : ` · ${event.reason}`}
                 </span>
@@ -488,14 +525,14 @@ function Timeline({ row }: { readonly row: LedgerRow }) {
       {row.latestReport !== undefined && (
         <div className={css.reportBox}>
           <div className={css.timelineHead}>
-            <Tag tone="neutral">最新汇报</Tag>
+            <Tag tone="neutral">{t('ledger.latestReport')}</Tag>
             <span className={css.hint}>{row.latestReport.reporterName} · {timeText(row.latestReport.receivedAt)}</span>
           </div>
-          <p className={css.reportText}>{row.latestReport.summary.trim() === '' ? '（汇报没有正文）' : row.latestReport.summary}</p>
+          <p className={css.reportText}>{row.latestReport.summary.trim() === '' ? t('ledger.reportEmptyBody') : row.latestReport.summary}</p>
           <div className={css.deliverables}>
-            <span className={css.hint}>交付物</span>
+            <span className={css.hint}>{t('ledger.col.deliverables')}</span>
             {row.latestReport.deliverables.length === 0
-              ? <span className={css.hint}>（未提供）</span>
+              ? <span className={css.hint}>{t('ledger.reportNone')}</span>
               : row.latestReport.deliverables.map(item => <Tag key={item} tone="neutral">{item}</Tag>)}
           </div>
         </div>

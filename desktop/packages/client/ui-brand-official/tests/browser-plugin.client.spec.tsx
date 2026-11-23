@@ -84,7 +84,7 @@ describe('official browser-brand plugin', () => {
   })
 
   it('renders the Cadre name and one seal at both requested sizes', () => {
-    const name = render(<OfficialBrandName />)
+    const name = render(<OfficialBrandName t={() => 'Cadre Heihei'} />)
     expect(name.container.textContent).toBe('Cadre Heihei')
     name.unmount()
 

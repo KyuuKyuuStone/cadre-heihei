@@ -5,7 +5,7 @@
 export const TOOL_DEFINITIONS = [
   {
     name: 'dispatch_task',
-    description: '主管派活：创建 dispatched 任务，可取代旧任务。身份取 server 注入值。',
+    description: '组长派活：创建 dispatched 任务，可取代旧任务。身份取 server 注入值。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -40,7 +40,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'list_tasks',
-    description: '任务摘要列表：主管看本项目全部，worker 仅本人任务。',
+    description: '任务摘要列表：组长看本项目全部，worker 仅本人任务。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -90,7 +90,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'review_task',
-    description: '主管验收入口：enter_review / verify / rework / fail；review 必经。',
+    description: '组长验收入口：enter_review / verify / rework / fail；review 必经。',
     inputSchema: {
       type: 'object',
       properties: {

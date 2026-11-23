@@ -10,7 +10,7 @@ import type { SkillConversationPort, SkillSearchProvider } from './conversation.
 
 /** The executor entry points the tool surface calls; the concrete class satisfies this. */
 export type SkillToolExecutor = Pick<SkillConversationExecutor,
-'catalog' | 'searchQuery' | 'preview' | 'install' | 'create' | 'check' | 'audit' | 'plan'>
+'catalog' | 'searchQuery' | 'preview' | 'install' | 'create' | 'check' | 'setCategories' | 'audit' | 'plan'>
 
 /** One text block returned to the model. */
 export interface ToolContent {
@@ -222,6 +222,24 @@ export function skillConversationTools(executor: SkillToolExecutor): readonly To
         },
       },
       run: (args, run) => executor.check(callerOf(run), optionalString(args.packId), optionalString(args.projectId)),
+    }),
+    tool({
+      name: 'skill_set_categories',
+      description: 'Assign topic tags to one skill pack (e.g. 编程/工具/设计/文档/办公). One pack may carry several tags; the library and session skill pages group and filter by them. Supervisor/admin only; builtin packs are read-only.',
+      parameters: {
+        type: 'object', additionalProperties: false, required: ['packId', 'categories'],
+        properties: {
+          packId: { type: 'string', description: 'Pack id from skill_catalog.' },
+          categories: { type: 'array', items: { type: 'string' }, description: 'Topic tags, max 8; replaces the previous set.' },
+          projectId: PROJECT_ID,
+        },
+      },
+      run: (args, run) => executor.setCategories(
+        callerOf(run),
+        String(args.packId ?? ''),
+        Array.isArray(args.categories) ? args.categories.filter((tag): tag is string => typeof tag === 'string') : [],
+        optionalString(args.projectId),
+      ),
     }),
     tool({
       name: 'skill_audit',

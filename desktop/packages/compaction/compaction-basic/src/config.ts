@@ -15,9 +15,15 @@ import type {
   ResolvedRetention,
   ResolvedTargetPolicy,
 } from './types.ts'
+import type { CompactionSettingsOverrides } from './settings.ts'
 
-/** Default request-pressure fraction for every routed model. */
-const DEFAULT_THRESHOLD_RATIO = 0.8
+/**
+ * Default fraction of the usable pressure budget for every routed model.
+ * Applying the ratio after the output reservation and headroom keeps a higher
+ * ratio later even when the window fraction alone would exceed the capacity
+ * ceiling; the ceiling itself remains the hard upper bound.
+ */
+const DEFAULT_THRESHOLD_RATIO = 0.9
 
 /** Default verbatim-tail fraction for every routed model. */
 const DEFAULT_RETAIN_RATIO = 0.16
@@ -129,6 +135,46 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
 }
 
 /**
+ * Overlay live Settings overrides onto the validated composition config.
+ *
+ * Only the default `auto` switch and default `thresholdRatio` are overridable;
+ * exact model policies, absolute caps, retention, headroom, step thresholds, and
+ * overflow retries stay composition-owned. A ratio at or below the effective
+ * retained fraction fails the same validation as load-time configuration;
+ * capacity still caps the scaled threshold in {@link resolveCompactSpec}.
+ *
+ * @param config - validated composition config owned by the plugin entry.
+ * @param overrides - live Settings values; absent fields keep the composition value.
+ * @returns the frozen effective config, or the same instance when no field overrides it.
+ */
+export function resolveEffectiveConfig(
+  config: ResolvedConfig,
+  overrides: CompactionSettingsOverrides,
+): ResolvedConfig {
+  const auto = overrides.auto
+  const thresholdRatio = overrides.thresholdRatio
+  if (auto === undefined && thresholdRatio === undefined) return config
+  if (auto !== undefined && typeof auto !== 'boolean') {
+    throw new Error('compaction-settings: auto must be a boolean')
+  }
+  if (thresholdRatio !== undefined) {
+    assertRatio('compaction-settings: thresholdRatio', thresholdRatio)
+    validateRatioRetention(
+      thresholdRatio,
+      config.retainTokens === undefined
+        ? { retainRatio: config.retainRatio }
+        : { retainTokens: config.retainTokens },
+      'compaction-settings: thresholdRatio',
+    )
+  }
+  return deepFreeze({
+    ...config,
+    ...auto === undefined ? {} : { auto },
+    ...thresholdRatio === undefined ? {} : { thresholdRatio },
+  })
+}
+
+/**
  * Merge the exact provider/model override over the validated default policy.
  * @param config - validated service defaults and override table.
  * @param target - exact durable provider/model route to match.
@@ -163,9 +209,12 @@ export function resolveTargetPolicy(
 /**
  * Scale one routed policy into concrete token budgets for its model capacity.
  *
- * Pressure is capped by both the window fraction and the capacity remaining
- * after the routed output reservation plus compaction headroom. Retention scales
- * the message budget before headroom is deducted.
+ * Pressure is a fraction of the capacity remaining after the routed output
+ * reservation plus compaction headroom, then capped by the absolute
+ * `thresholdTokens` ceiling. Applying the ratio to the pressure budget instead
+ * of the raw window keeps live ratio changes effective when the reservation and
+ * headroom consume a material part of the window. Retention scales the message
+ * budget before headroom is deducted.
  *
  * @param policy - merged policy for the exact routed target.
  * @param contextWindow - positive adapter-owned capacity for that target.
@@ -211,8 +260,7 @@ export function resolveCompactSpec(
     )
   }
   const thresholdTokens = Math.floor(Math.min(
-    contextWindow * policy.thresholdRatio,
-    pressureBudgetTokens,
+    pressureBudgetTokens * policy.thresholdRatio,
     policy.thresholdTokensCap ?? Number.POSITIVE_INFINITY,
   ))
   // With an absolute cap, retention scales to the cap rather than the full

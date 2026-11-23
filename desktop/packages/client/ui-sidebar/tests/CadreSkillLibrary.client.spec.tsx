@@ -35,7 +35,7 @@ function pageProps(role: 'supervisor' | 'worker' = 'supervisor', translate = t):
   const roster: CadreRosterState = {
     status: 'ready',
     members: [
-      { sessionId: 'sup', role: 'supervisor', displayName: '主管', state: 'available' },
+      { sessionId: 'sup', role: 'supervisor', displayName: '组长', state: 'available' },
       { sessionId: 'w1', role: 'worker', displayName: '员工', state: 'available' },
     ],
     error: null,
@@ -70,7 +70,7 @@ function catalogFetch(
     const url = requestUrl(input)
     if (url.endsWith('/catalog')) return json({ ok: true, result: entries })
     if (url.endsWith('/admin/diag')) {
-      return json({ ok: true, result: health ?? { status: 'ok', items: entries.map(entry => ({ packId: entry.id, status: 'ok', issues: [] })) } })
+      return json({ ok: true, result: { packs: health ?? { status: 'ok', items: entries.map(entry => ({ packId: entry.id, status: 'ok', issues: [] })) } } })
     }
     if (url.endsWith('/admin/bind-session')) return await onBind?.(init) ?? json({ ok: false, code: 'UNEXPECTED_BIND', message: 'unexpected' }, 500)
     if (url.endsWith('/remove')) return json({ ok: true, result: { removed: true } })
@@ -268,19 +268,21 @@ describe('Cadre skill library', () => {
     expect(fetchMock.mock.calls.filter(([input]) => requestUrl(input).endsWith('/admin/bind-session'))).toHaveLength(1)
   })
 
-  it('groups skills, localizes descriptions, and renders conversation actions and metadata', async () => {
+  it('shows category selector cards over a flat grid, localizes descriptions, and renders conversation actions and metadata', async () => {
     vi.stubGlobal('fetch', catalogFetch())
     render(<CadreSkillLibraryPage {...pageProps('worker')} />)
-    expect(await screen.findByText('内置技能')).toBeTruthy()
-    expect(screen.getByText('已安装')).toBeTruthy()
+    expect(await screen.findByText('未分类')).toBeTruthy()
     expect(screen.getByRole('heading', { name: '技能库', level: 1 })).toBeTruthy()
     expect(screen.getByText('共 2 个技能 · 内置 1 · 已安装 1')).toBeTruthy()
-    const builtin = screen.getByRole('region', { name: '内置技能' })
-    const installed = screen.getByRole('region', { name: '已安装' })
-    expect(within(builtin).getByRole('heading', { name: 'AI Design', level: 3 })).toBeTruthy()
-    expect(within(installed).getByRole('heading', { name: '员工技能', level: 3 })).toBeTruthy()
-    expect(within(builtin).getByText('1')).toBeTruthy()
-    expect(within(installed).getByText('1')).toBeTruthy()
+    const selector = screen.getByRole('radiogroup', { name: zh['skills.filter.category'] })
+    expect(within(selector).getByRole('radio', { name: '全部 2' }).getAttribute('aria-checked')).toBe('true')
+    const uncategorized = within(selector).getByRole('radio', { name: '未分类 2' })
+    expect(screen.getByRole('heading', { name: 'AI Design', level: 3 })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '员工技能', level: 3 })).toBeTruthy()
+    fireEvent.click(uncategorized)
+    expect(uncategorized.getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('heading', { name: 'AI Design', level: 3 })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '员工技能', level: 3 })).toBeTruthy()
     expect(screen.getByText('落地页设计：信息结构、转化文案、视觉规范、状态与上线检查。')).toBeTruthy()
     expect(screen.queryByText('English landing page description')).toBeNull()
     expect(screen.getAllByRole('button', { name: '对话使用' })).toHaveLength(2)
@@ -289,6 +291,29 @@ describe('Cadre skill library', () => {
     expect(screen.getByText('作者：Elaya')).toBeTruthy()
     expect(screen.getAllByText('许可：MIT')).toHaveLength(2)
     expect(document.querySelector('input, textarea, select, form, code, pre')).toBeNull()
+  })
+
+  it('filters the flat grid through category selector cards, including multi-tag packs', async () => {
+    const entries = [
+      { id: 'ai-design', name: 'AI Design', description: 'English landing page description', roles: ['worker'], tokenEstimate: 100, tools: ['read'], origin: 'builtin', source: 'builtin', author: 'Elaya', license: 'MIT', selected: false, categories: ['设计', '办公'] },
+      { id: 'worker-only', name: '员工技能', description: '只给员工', roles: ['worker'], tokenEstimate: 10, tools: [], origin: 'installed', source: 'local', license: 'MIT', selected: false, categories: ['办公'] },
+      { id: 'plain', name: '无标签技能', description: '没有标签', roles: ['worker'], tokenEstimate: 5, tools: [], origin: 'installed', source: 'local', license: 'MIT', selected: false },
+    ]
+    vi.stubGlobal('fetch', catalogFetch(entries))
+    render(<CadreSkillLibraryPage {...pageProps('worker')} />)
+    const selector = await screen.findByRole('radiogroup', { name: zh['skills.filter.category'] })
+    fireEvent.click(within(selector).getByRole('radio', { name: '办公 2' }))
+    expect(screen.getByRole('heading', { name: 'AI Design', level: 3 })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '员工技能', level: 3 })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: '无标签技能', level: 3 })).toBeNull()
+    fireEvent.click(within(selector).getByRole('radio', { name: '设计 1' }))
+    expect(screen.getByRole('heading', { name: 'AI Design', level: 3 })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: '员工技能', level: 3 })).toBeNull()
+    fireEvent.click(within(selector).getByRole('radio', { name: '未分类 1' }))
+    expect(screen.getByRole('heading', { name: '无标签技能', level: 3 })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'AI Design', level: 3 })).toBeNull()
+    fireEvent.click(within(selector).getByRole('radio', { name: '全部 3' }))
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(3)
   })
 
   it.each([
@@ -398,7 +423,7 @@ describe('Cadre skill library', () => {
     expect(screen.queryByText('denied')).toBeNull()
     expect(screen.getByRole('button', { name: '对话安装新技能' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '重新加载' }))
-    expect(await screen.findByText('内置技能')).toBeTruthy()
+    expect(await screen.findByText('未分类')).toBeTruthy()
     expect(catalogCalls).toBe(2)
     expect(screen.queryByRole('alert')).toBeNull()
   })
@@ -520,7 +545,7 @@ describe('Cadre skill library', () => {
       projectOfSession: () => undefined,
       defaultProjectId: () => 'p1',
     }} />)
-    expect(await screen.findByText('内置技能')).toBeTruthy()
+    expect(await screen.findByText('未分类')).toBeTruthy()
     expect(screen.getByRole('button', { name: '对话安装新技能' })).toBeTruthy()
     expect(requestBody(fetchMock, '/catalog')).toMatchObject({ projectId: 'p1', actorSessionId: 'plain', targetSessionId: 'plain' })
   })
@@ -546,7 +571,7 @@ describe('Cadre skill library', () => {
       ...props,
       useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) => selector({ byId: {} })) as never,
       useRoster: ((selector: (value: CadreRosterState) => unknown) => selector({
-        status: 'ready', members: [{ sessionId: 'gone', role: 'supervisor', displayName: '前主管', state: 'departed' }], error: null,
+        status: 'ready', members: [{ sessionId: 'gone', role: 'supervisor', displayName: '前组长', state: 'departed' }], error: null,
       })) as never,
       projectOfSession: (sessionId: string) => (sessionId === 'gone' ? 'p1' : undefined),
       defaultProjectId: () => 'p1',
@@ -568,7 +593,7 @@ describe('Cadre skill library', () => {
       useSessions: ((selector: (value: { byId: Record<string, unknown> }) => unknown) => selector({ byId: {} })) as never,
       defaultProjectId: () => 'p1',
     }} />)
-    expect(await screen.findByText('内置技能')).toBeTruthy()
+    expect(await screen.findByText('未分类')).toBeTruthy()
     expect(requestBody(fetchMock, '/catalog')).toMatchObject({ projectId: 'p1', actorSessionId: 'sup', targetSessionId: 'sup' })
   })
 

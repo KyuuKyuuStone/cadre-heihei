@@ -105,10 +105,13 @@
 }
 
 /* Project actions stay visible: a hover-revealed strip would vanish under the
-   pointer while it travels from the ＋ trigger into the portaled menu. */
+   pointer while it travels from the ＋ trigger into the portaled menu. The
+   strip may stack roster feedback beneath its buttons. */
 .projectRow .rowActions {
   display: inline-flex;
-  height: 20px;
+  gap: 4px;
+  height: auto;
+  min-height: 20px;
 }
 
 /* Session cell: pad 8, a 16px status slot, then a 4px title gap. Two text
@@ -192,7 +195,7 @@
 
 .projectText {
   flex: 1;
-  min-width: 0;
+  min-width: 88px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -203,6 +206,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* A project path matters most at its tail; clip the leading directories. */
+  direction: rtl;
+  text-align: left;
   color: var(--dsw-alias-label-secondary);
   font-size: 10px;
   line-height: 1.2;

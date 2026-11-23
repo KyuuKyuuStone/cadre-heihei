@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import {
-  CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
+  CadreProjectLedgerMenuItem, CadreProjectRowActions, CadreRetireDialog, CadreRetireMenuItem,
   CadreSessionBadge, CadreSessionSubtitle,
   type CadreRosterState,
 } from '../src/client/CadreSidebar.tsx'
@@ -49,42 +49,39 @@ function rosterState(
 
 function mount(overrides: {
   supervisors?: readonly string[]
-  cwd?: string | undefined
   roster?: CadreRosterState
 } = {}) {
   const startSession = vi.fn()
   const requestCadreCreate = vi.fn()
-  const openLedger = vi.fn()
   const retryRoster = vi.fn()
   const state = projectState(overrides.supervisors)
   const roster = overrides.roster ?? rosterState('ready', 1)
   const props: Props = {
     workspaceId: 'ws-1',
-    label: '项目部 A',
-    ...(overrides.cwd === undefined && 'cwd' in overrides ? {} : { cwd: overrides.cwd ?? '/tmp/a' }),
+    label: '项目组 A',
     useProjectState: ((selector: (value: CadreProjectState) => unknown) => selector(state)) as never,
     useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(roster)) as never,
     retryRoster,
     startSession,
     requestCadreCreate,
-    openLedger,
+    t,
   }
   render(<CadreProjectRowActions {...props} />)
-  return { startSession, requestCadreCreate, openLedger, retryRoster }
+  return { startSession, requestCadreCreate, retryRoster }
 }
 
 describe('CadreProjectRowActions', () => {
-  it('renders the ＋ and 台账 affordances on a project row', () => {
+  it('renders the ＋ affordance and no standalone ledger button', () => {
     mount()
-    expect(screen.getByRole('button', { name: '在“项目部 A”中新建' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '查看“项目部 A”台账' })).toBeTruthy()
-    expect(screen.getByText('台账')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '在“项目组 A”中新建' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '查看“项目组 A”台账' })).toBeNull()
+    expect(screen.queryByText('台账')).toBeNull()
   })
 
   it('offers supervisor / employee / plain session and routes each choice', () => {
     const b = mount()
-    fireEvent.click(screen.getByRole('button', { name: '在“项目部 A”中新建' }))
-    expect(screen.getByRole('menuitem', { name: '主管' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '在“项目组 A”中新建' }))
+    expect(screen.getByRole('menuitem', { name: '组长' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: '员工' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: '普通会话' })).toBeTruthy()
 
@@ -92,11 +89,11 @@ describe('CadreProjectRowActions', () => {
     expect(b.requestCadreCreate).toHaveBeenCalledExactlyOnceWith('worker', 'ws-1')
     expect(b.startSession).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: '在“项目部 A”中新建' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '主管' }))
+    fireEvent.click(screen.getByRole('button', { name: '在“项目组 A”中新建' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '组长' }))
     expect(b.requestCadreCreate).toHaveBeenLastCalledWith('supervisor', 'ws-1')
 
-    fireEvent.click(screen.getByRole('button', { name: '在“项目部 A”中新建' }))
+    fireEvent.click(screen.getByRole('button', { name: '在“项目组 A”中新建' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '普通会话' }))
     expect(b.startSession).toHaveBeenCalledExactlyOnceWith('ws-1')
     expect(b.requestCadreCreate).toHaveBeenCalledTimes(2)
@@ -104,8 +101,8 @@ describe('CadreProjectRowActions', () => {
 
   it('greys the supervisor item when this project already has one', () => {
     const b = mount({ supervisors: ['ws-1'] })
-    fireEvent.click(screen.getByRole('button', { name: '在“项目部 A”中新建' }))
-    const supervisor = screen.getByRole('menuitem', { name: '主管（已有）' })
+    fireEvent.click(screen.getByRole('button', { name: '在“项目组 A”中新建' }))
+    const supervisor = screen.getByRole('menuitem', { name: '组长（已有）' })
     expect(supervisor.hasAttribute('disabled')).toBe(true)
     fireEvent.click(supervisor)
     expect(b.requestCadreCreate).not.toHaveBeenCalled()
@@ -113,27 +110,8 @@ describe('CadreProjectRowActions', () => {
 
   it('keeps another project supervisor from disabling this row', () => {
     mount({ supervisors: ['ws-2'] })
-    fireEvent.click(screen.getByRole('button', { name: '在“项目部 A”中新建' }))
-    expect(screen.getByRole('menuitem', { name: '主管' }).hasAttribute('disabled')).toBe(false)
-  })
-
-  it('opens the ledger with the row Workspace id as projectId', () => {
-    const b = mount()
-    fireEvent.click(screen.getByRole('button', { name: '查看“项目部 A”台账' }))
-    expect(b.openLedger).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'ws-1',
-      label: '项目部 A',
-      cwd: '/tmp/a',
-    })
-  })
-
-  it('omits cwd when the Workspace has none', () => {
-    const b = mount({ cwd: undefined })
-    fireEvent.click(screen.getByRole('button', { name: '查看“项目部 A”台账' }))
-    expect(b.openLedger).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'ws-1',
-      label: '项目部 A',
-    })
+    fireEvent.click(screen.getByRole('button', { name: '在“项目组 A”中新建' }))
+    expect(screen.getByRole('menuitem', { name: '组长' }).hasAttribute('disabled')).toBe(false)
   })
 
   it('shows a project-level loading state separately from an empty team', () => {
@@ -158,24 +136,62 @@ describe('CadreProjectRowActions', () => {
     const outer = vi.fn()
     const startSession = vi.fn()
     const requestCadreCreate = vi.fn()
-    const openLedger = vi.fn()
     const retryRoster = vi.fn()
     const state = projectState()
     const roster = rosterState('ready', 1)
     render(
       <div onClick={outer}>
         <CadreProjectRowActions
-          workspaceId="ws-1" label="项目部 A" cwd="/tmp/a"
+          workspaceId="ws-1" label="项目组 A"
           useProjectState={((selector: (value: CadreProjectState) => unknown) => selector(state)) as never}
           useRoster={((selector: (value: CadreRosterState) => unknown) => selector(roster)) as never}
           retryRoster={retryRoster}
-          startSession={startSession} requestCadreCreate={requestCadreCreate} openLedger={openLedger}
+          startSession={startSession} requestCadreCreate={requestCadreCreate}
+          t={t}
         />
       </div>,
     )
-    fireEvent.click(screen.getByRole('button', { name: '查看“项目部 A”台账' }))
-    expect(openLedger).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: '在“项目组 A”中新建' }))
+    expect(screen.getByRole('menuitem', { name: '普通会话' })).toBeTruthy()
     expect(outer).not.toHaveBeenCalled()
+  })
+})
+
+describe('CadreProjectLedgerMenuItem', () => {
+  function mountLedgerRow(overrides: { cwd?: string | undefined } = {}) {
+    const openLedger = vi.fn()
+    const setMenuOpen = vi.fn()
+    render(
+      <CadreProjectLedgerMenuItem
+        workspaceId="ws-1" label="项目组 A"
+        {...(overrides.cwd === undefined && 'cwd' in overrides ? {} : { cwd: overrides.cwd ?? '/tmp/a' })}
+        useMenuOpenState={() => [true, setMenuOpen]}
+        openLedger={openLedger}
+        t={t}
+      />,
+    )
+    return { openLedger, setMenuOpen }
+  }
+
+  it('opens the ledger with the row Workspace id as projectId and dismisses the menu', () => {
+    const b = mountLedgerRow()
+    fireEvent.click(screen.getByRole('menuitem', { name: '台账' }))
+    expect(b.openLedger).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'ws-1',
+      label: '项目组 A',
+      cwd: '/tmp/a',
+    })
+    expect(b.setMenuOpen).toHaveBeenCalledExactlyOnceWith(false)
+  })
+
+  it('omits cwd when the Workspace has none', () => {
+    const b = mountLedgerRow({ cwd: undefined })
+    fireEvent.click(screen.getByRole('menuitem', { name: '台账' }))
+    expect(b.openLedger).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'ws-1',
+      label: '项目组 A',
+    })
+    expect(b.setMenuOpen).toHaveBeenCalledExactlyOnceWith(false)
   })
 })
 
@@ -183,15 +199,16 @@ describe('supervisor create dialog', () => {
   it('prefills the role name and uses it as the placeholder', () => {
     render(<CadreCreateDialog {...({
       useCreateRequest: (selector: (value: unknown) => unknown) => selector({
-        kind: 'supervisor', token: 1, workspaceId: 'ws-1', projectLabel: '项目部 A',
+        kind: 'supervisor', token: 1, workspaceId: 'ws-1', projectLabel: '项目组 A',
       }),
       closeCreate: vi.fn(),
       createRosterEntry: vi.fn(),
       refreshSupervisor: vi.fn(),
+      t,
     } as unknown as ComponentProps<typeof CadreCreateDialog>)} />)
     const input = screen.getByLabelText('名字') as HTMLInputElement
-    expect(input.value).toBe('主管')
-    expect(input.placeholder).toBe('主管')
+    expect(input.value).toBe('组长')
+    expect(input.placeholder).toBe('组长')
   })
 })
 
@@ -207,8 +224,9 @@ describe('session identity', () => {
     render(<CadreSessionBadge {...({
       sessionId: 's1',
       useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      t,
     } as unknown as ComponentProps<typeof CadreSessionBadge>)} />)
-    expect(screen.getByText('主管').className.split(' ')).toContain('cadre-role-supervisor')
+    expect(screen.getByText('组长').className.split(' ')).toContain('cadre-role-supervisor')
   })
 
   it('marks the employee badge with the worker role token and the position', () => {
@@ -216,10 +234,24 @@ describe('session identity', () => {
     render(<CadreSessionBadge {...({
       sessionId: 's1',
       useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      t,
     } as unknown as ComponentProps<typeof CadreSessionBadge>)} />)
-    const badge = screen.getByText('员工 · 前端')
+    const badge = screen.getByText('前端')
     expect(badge.className.split(' ')).toContain('cadre-role-worker')
     expect(badge.getAttribute('title')).toBe('岗位：前端')
+  })
+
+  it('renders an icon-only worker badge named after the member when no position is set', () => {
+    const state = roster({ sessionId: 's1', role: 'worker', displayName: '前端' })
+    render(<CadreSessionBadge {...({
+      sessionId: 's1',
+      useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      t,
+    } as unknown as ComponentProps<typeof CadreSessionBadge>)} />)
+    const badge = screen.getByLabelText('前端')
+    expect(badge.className.split(' ')).toContain('cadre-role-worker')
+    expect(badge.textContent).toBe('')
+    expect(badge.getAttribute('title')).toBe('前端')
   })
 
   it('keeps a departed employee distinct from an ordinary session', () => {
@@ -227,6 +259,7 @@ describe('session identity', () => {
     render(<CadreSessionBadge {...({
       sessionId: 's1',
       useRoster: ((selector: (value: CadreRosterState) => unknown) => selector(state)) as never,
+      t,
     } as unknown as ComponentProps<typeof CadreSessionBadge>)} />)
     expect(screen.getByText('已离职')).toBeTruthy()
     cleanup()
@@ -406,7 +439,7 @@ describe('member retirement', () => {
   const useRoster = ((selector: (value: CadreRosterState) => unknown) => selector(roster)) as never
   const supervisorRoster: CadreRosterState = {
     status: 'ready',
-    members: [{ sessionId: 's1', role: 'supervisor', displayName: '主管', state: 'available' }],
+    members: [{ sessionId: 's1', role: 'supervisor', displayName: '组长', state: 'available' }],
     error: null,
   }
   const useSupervisorRoster = ((selector: (value: CadreRosterState) => unknown) =>
@@ -422,6 +455,7 @@ describe('member retirement', () => {
         useRoster={useRoster}
         useRequest={((selector: (value: null) => unknown) => selector(null)) as never}
         requestRetire={requestRetire} settleRetire={vi.fn()} retire={vi.fn()}
+        t={t}
       />,
     )
     const retire = screen.getByRole('menuitem', { name: '离职' })
@@ -443,6 +477,7 @@ describe('member retirement', () => {
           { sessionId: 's1', displayTitle: '前端', token: 1 },
         )) as never}
         requestRetire={vi.fn()} settleRetire={settleRetire} retire={retire}
+        t={t}
       />,
     )
     fireEvent.click(screen.getByRole('button', { name: '确认离职' }))
@@ -466,6 +501,7 @@ describe('member retirement', () => {
           { sessionId: 's1', displayTitle: '前端', token: 3 },
         )) as never}
         requestRetire={vi.fn()} settleRetire={settleRetire} retire={retire}
+        t={t}
       />,
     )
     return settleRetire
@@ -483,7 +519,7 @@ describe('member retirement', () => {
     const confirm = screen.getByRole('button', { name: '确认离职' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     expect(screen.getByRole('radio', { name: '取消任务' })).toBeTruthy()
-    expect(screen.getByRole('radio', { name: '转回主管' })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: '转回组长' })).toBeTruthy()
     const transfer = screen.getByRole('radio', { name: '转给其他员工（0.10.0 支持）' }) as HTMLButtonElement
     expect(transfer.disabled).toBe(true)
     expect(screen.getByText(/0\.10\.0 支持/)).toBeTruthy()
@@ -507,7 +543,7 @@ describe('member retirement', () => {
       .mockResolvedValueOnce({ ok: true })
     const settleRetire = renderRetire(retire)
     fireEvent.click(screen.getByRole('button', { name: '确认离职' }))
-    fireEvent.click(await screen.findByRole('radio', { name: '转回主管' }))
+    fireEvent.click(await screen.findByRole('radio', { name: '转回组长' }))
     fireEvent.click(screen.getByRole('button', { name: '确认离职' }))
     await waitFor(() => { expect(retire).toHaveBeenNthCalledWith(2, 's1', { taskDisposition: 'return' }) })
     await waitFor(() => { expect(settleRetire).toHaveBeenCalledOnce() })
@@ -521,8 +557,8 @@ describe('member retirement', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认离职' }))
     expect(await screen.findByText('未结任务')).toBeTruthy()
     expect(screen.getByRole('radio', { name: '取消任务' })).toBeTruthy()
-    expect(screen.queryByRole('radio', { name: '转回主管' })).toBeNull()
-    expect(screen.getByText(/主管离职后无其他接手人/)).toBeTruthy()
+    expect(screen.queryByRole('radio', { name: '转回组长' })).toBeNull()
+    expect(screen.getByText(/组长离职后无其他接手人/)).toBeTruthy()
     expect(screen.getByRole('radio', { name: '转给其他员工（0.10.0 支持）' }).hasAttribute('disabled')).toBe(true)
     const confirm = screen.getByRole('button', { name: '确认离职' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
@@ -543,6 +579,7 @@ describe('member retirement', () => {
           { sessionId: 's1', displayTitle: '前端', token: 2 },
         )) as never}
         requestRetire={vi.fn()} settleRetire={settleRetire} retire={retire}
+        t={t}
       />,
     )
     fireEvent.click(screen.getByRole('button', { name: '确认离职' }))

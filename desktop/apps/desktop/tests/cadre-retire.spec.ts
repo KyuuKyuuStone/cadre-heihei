@@ -273,7 +273,7 @@ describe('returnOpenTasksToSupervisor (real ledger)', () => {
       const insertMember = db.prepare(`INSERT INTO members
         (project_id, session_id, role, display_name, state, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'available', ?, ?)`)
-      insertMember.run(PROJECT, SUPERVISOR, 'supervisor', '主管', AT, AT)
+      insertMember.run(PROJECT, SUPERVISOR, 'supervisor', '组长', AT, AT)
       insertMember.run(PROJECT, WORKER, 'worker', '员工', AT, AT)
       const insertTask = db.prepare(`INSERT INTO tasks (task_id, project_id, seq, title, body,
         body_bytes, body_sha256, status, dispatcher_session_id, assignee_session_id, created_at, updated_at)

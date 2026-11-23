@@ -75,7 +75,7 @@ function seedRoster(databasePath: string): void {
     (project_id, session_id, role, display_name, description, state, created_at, updated_at)
     VALUES (?, ?, ?, ?, NULL, 'active', ?, ?)`)
   try {
-    insert.run(PROJECT, SUPERVISOR, 'supervisor', '主管', AT, AT)
+    insert.run(PROJECT, SUPERVISOR, 'supervisor', '组长', AT, AT)
     insert.run(PROJECT, WORKER, 'worker', '小明', AT, AT)
     insert.run(PROJECT, WORKER_2, 'worker', '小红', AT, AT)
   } finally {
@@ -303,7 +303,7 @@ describe('pageTaskRows', () => {
     expect(missed.hint).not.toContain('去掉 scope/assignee')
 
     const empty = pageTaskRows([], names, { role: 'worker', caller: WORKER })
-    expect(empty.hint).toContain('等主管派活')
+    expect(empty.hint).toContain('等组长派活')
     expect(empty.hint).not.toContain('dispatch_task 派活')
   })
 

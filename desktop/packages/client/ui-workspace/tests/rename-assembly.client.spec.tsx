@@ -158,6 +158,37 @@ describe('session rename through the assembled browser', () => {
     await runtime.dispose()
   })
 
+  it('renders the shipped project-menu rows in order and raises the browser-local rename dialog', async () => {
+    const runtime = await createRuntime()
+    await runtime.sessions.add({
+      id: SID,
+      summary: { title: 'Persisted title', displayTitle: 'Session title', cwd: '/w/alpha' },
+      session: { rename: vi.fn() },
+    })
+    await runtime.sessions.retainFor(runtime.ctx, SID, { source: 'mainView' }).ready
+    await seedWorkspace(runtime)
+    await declareFrame(runtime)
+    await runtime.mount({ inject: [...inject], apply })
+    const view = runtime.renderRoot()
+
+    // The project menu renders through the real registry, so the shipped
+    // entries receive the open-state hook bound from the render occurrence.
+    const trigger = await view.findByLabelText('项目组“alpha”的操作')
+    fireEvent.click(trigger)
+    expect(view.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['重命名', '删除项目组'])
+    fireEvent.click(view.getByRole('menuitem', { name: '重命名' }))
+    // The entry dismissed the menu through the bound hook; the rename dialog
+    // lives in the browser, seeded from the row's current title.
+    expect(view.queryByRole('menu')).toBeNull()
+    const input = await view.findByLabelText('项目组名称') as HTMLInputElement
+    expect(input.value).toBe('alpha')
+    // Escape dismisses the dialog without renaming (the common-locale cancel
+    // copy is not mounted in this runtime).
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(view.queryByLabelText('项目组名称')).toBeNull()
+    await runtime.dispose()
+  })
+
   it('renames via the row menu: binding.session.rename fires, the dialog closes, the row re-labels from the list', async () => {
     const runtime = await createRuntime()
     const rename = vi.fn<ISession['rename']>(async title => ({

@@ -8,12 +8,13 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { HoverCardGroup, MenuItemButton, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import type { MenuOpenState, SessionRowOwnerProps } from '../src/client/contract/slots.ts'
+import type { MenuOpenState, ProjectMenuOwnerProps, SessionRowOwnerProps } from '../src/client/contract/slots.ts'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { RowDragProps } from '../src/client/rows/Rows.tsx'
 import {
   ProjectRowItem, SearchResultItem, SessionNodeItem as SessionNodeItemComponent,
 } from '../src/client/rows/Rows.tsx'
+import { DeleteWorkspaceMenuItem, RenameWorkspaceMenuItem } from '../src/client/rows/ProjectMenuItems.tsx'
 import type { GroupNode, SearchResultNode, SessionNode } from '../src/client/tree.ts'
 import { en, zh } from '../src/client/locales.ts'
 
@@ -41,6 +42,27 @@ function SessionNodeItem({ renderSlot = renderNoRowEntries, onRenameRequest = ()
   SessionNodeItemProps, 'renderSlot' | 'onRenameRequest'
 > & Partial<Pick<SessionNodeItemProps, 'renderSlot' | 'onRenameRequest'>>) {
   return <SessionNodeItemComponent {...props} renderSlot={renderSlot} onRenameRequest={onRenameRequest} />
+}
+
+/**
+ * Render the shipped project-menu entries the way the registry does: the
+ * owner share plus the open-state hook bound from the render occurrence.
+ * The rows read no standard seats, so the fixture omits them.
+ * @param name - the slot being rendered.
+ * @param owner - the project-menu owner share.
+ * @param opts - the occurrence's hook context (the menu open-state pair).
+ * @returns the shipped rows, or null for other seats.
+ */
+function renderShippedProjectMenu(name: string, owner: object, opts?: { hookContext?: unknown }) {
+  if (name !== 'sidebar.workspaces.project.menu.item') return null
+  const state = opts?.hookContext as MenuOpenState
+  const shared = { ...(owner as ProjectMenuOwnerProps), useMenuOpenState: () => state, t }
+  return (
+    <>
+      <RenameWorkspaceMenuItem {...(shared as ComponentProps<typeof RenameWorkspaceMenuItem>)} />
+      <DeleteWorkspaceMenuItem {...(shared as ComponentProps<typeof DeleteWorkspaceMenuItem>)} />
+    </>
+  )
 }
 
 /** Half detection reads the row rect; jsdom rects are all-zero by default. */
@@ -542,21 +564,41 @@ describe('workspace browser rows', () => {
     render(<ProjectRowItem
       group={group} onToggle={onToggle} onCreate={vi.fn()}
       actions={{ rename: onRename, delete: onDelete }} t={t}
+      renderSlot={renderShippedProjectMenu}
     />)
-    fireEvent.click(screen.getByRole('button', { name: '项目部“Project”的操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '项目组“Project”的操作' }))
     // Opening the menu neither toggles the group nor renames yet.
     expect(onToggle).not.toHaveBeenCalled()
-    expect(screen.getByRole('menuitem', { name: '删除项目部' }).className).toMatch(/danger/)
+    expect(screen.getByRole('menuitem', { name: '删除项目组' }).className).toMatch(/danger/)
     fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
     expect(onRename).toHaveBeenCalledOnce()
     expect(screen.queryByRole('menu')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '项目部“Project”的操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '删除项目部' }))
+    fireEvent.click(screen.getByRole('button', { name: '项目组“Project”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除项目组' }))
     expect(screen.queryByRole('menu')).toBeNull()
     expect(onRename).toHaveBeenCalledOnce()
     expect(onDelete).toHaveBeenCalledOnce()
     // Escape closes without selecting (Menu onClose path).
-    fireEvent.click(screen.getByRole('button', { name: '项目部“Project”的操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '项目组“Project”的操作' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('keeps the workspace row menu empty while the menu slot has no entries', () => {
+    const onToggle = vi.fn()
+    const group: GroupNode = {
+      key: 'project', workspaceId: wid('project'), cwd: undefined, createdAt: 0, label: 'Project',
+      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+    }
+    render(<ProjectRowItem
+      group={group} onToggle={onToggle} onCreate={vi.fn()}
+      actions={{ rename: vi.fn(), delete: vi.fn() }} t={t}
+      renderSlot={() => null}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: '项目组“Project”的操作' }))
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect(screen.queryByRole('menuitem')).toBeNull()
+    expect(onToggle).not.toHaveBeenCalled()
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
   })
@@ -705,7 +747,7 @@ describe('workspace browser rows', () => {
       sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
     }
     render(<ProjectRowItem group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
-    expect(screen.queryByRole('button', { name: /项目部/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /项目组/ })).toBeNull()
   })
 
   it('blank New Session rows carry no menu, no time label, and no hover-card time', () => {

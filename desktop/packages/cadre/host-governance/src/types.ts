@@ -10,6 +10,8 @@
 export interface StallConfig {
   readonly suspectAfterMs: number
   readonly stalledAfterMs: number
+  /** Ceiling for one active model/tool step; long single-step work stays normal below it. */
+  readonly stepStalledAfterMs: number
   readonly recoverAfterMs: number
   readonly scanIntervalMs: number
   readonly consecutiveSamples: number
@@ -20,8 +22,11 @@ export interface StallConfig {
 
 /** Defaults match `前端-停摆治理交互规格.md`. */
 export const DEFAULT_STALL_CONFIG: StallConfig = {
-  suspectAfterMs: 180_000,
-  stalledAfterMs: 600_000,
+  // Shortened so a worker that finishes a turn without report_task is nudged
+  // within ~3 minutes instead of idling for 10+ minutes.
+  suspectAfterMs: 90_000,
+  stalledAfterMs: 180_000,
+  stepStalledAfterMs: 600_000,
   recoverAfterMs: 30_000,
   scanIntervalMs: 15_000,
   consecutiveSamples: 2,

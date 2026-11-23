@@ -4,7 +4,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { PartialArguments } from '@deepseek-ai/dsh-util-values'
+import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 import { DispatchStatusRow, type RetryOutcome } from '../src/client/tool/toolviews/dispatch-row.tsx'
+
+const t = makeTranslate(zh, commonZh)
 
 type Props = Parameters<typeof DispatchStatusRow>[0]
 
@@ -41,6 +46,7 @@ function props(overrides: Record<string, unknown>): Props {
     phase: 'result',
     block: result({ dispatched: [], failed: [] }),
     sessionId: 's1',
+    t,
     retry: vi.fn(async (): Promise<RetryOutcome> => ({ ok: true })),
     resolveProjectId: () => 'ws-1',
     ...overrides,
@@ -143,7 +149,7 @@ describe('DispatchStatusRow', () => {
     }))
     ;(window as unknown as { cadre: unknown }).cadre = { listTasks }
     render(<DispatchStatusRow {...props({ block: result({ dispatched: DISPATCHED, failed: [] }) })} />)
-    expect(await screen.findByText('陈允 · 复核清单 — 已交付，主管正在审')).toBeTruthy()
+    expect(await screen.findByText('陈允 · 复核清单 — 已交付，组长正在审')).toBeTruthy()
     expect(screen.getByText('陈允 · 补检定报告 — 正在执行')).toBeTruthy()
     expect(screen.getByText('陈允 · 复核清单')).toBeTruthy()
     expect(listTasks).toHaveBeenCalledWith({ projectId: 'ws-1' })

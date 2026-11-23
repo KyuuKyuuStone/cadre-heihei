@@ -1,0 +1,8 @@
+# Keep the shipped Cadre compaction composition while omitting unrelated desktop-only rows.
+- { id: cadre-collab, disabled: true }
+- { id: cadre-governance, disabled: true }
+- { id: cadre-write-guard, disabled: true }
+- { id: cadre-supervisor-skill, disabled: true }
+- { id: cadre-session-skills, disabled: true }
+- { id: cadre-skill-conversation, disabled: true }
+- { id: preset-cadre-skill-admin, disabled: true }

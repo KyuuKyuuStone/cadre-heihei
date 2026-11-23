@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SessionStore from '@deepseek-ai/dsh-session'
+import LlmRuntime, { createUserMessage, createMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 
 let root: string | undefined
 let context: Context | undefined
@@ -53,6 +55,59 @@ async function loadYaml(lines: readonly string[]): Promise<Context> {
   })
   await context.loader.await()
   return context
+}
+
+class CompositionAdapter extends LlmAdapter {
+  constructor(private readonly contextWindow: number) {
+    super()
+  }
+
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve({
+      provider,
+      id: model,
+      name: model,
+      context: { contextWindow: this.contextWindow },
+    })
+  }
+
+  async * stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
+    yield { type: 'block-start', index: 0, blockType: 'text' }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text: 'LOADER CHECKPOINT' } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  }
+}
+
+function loaderConversation(text = 'x'.repeat(200)): Session {
+  const session = Session.create(SessionId('loader-execution'))
+  for (let turn = 1; turn <= 4; turn += 1) {
+    session.append('turn/start', { turn })
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: `${text} user ${turn}` }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    session.append('step/start', { turn, step: 1 })
+    if (turn === 1) {
+      session.append('request/header', {
+        header: { config: { provider: 'mock', model: 'mock' } },
+        reason: 'initial',
+      })
+    }
+    session.append('assistant/message', {
+      stream: [],
+      turn,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: [{ type: 'text', text: `${text} assistant ${turn}` }],
+        source: { kind: 'model', provider: 'mock', model: 'mock' },
+      }),
+    }, { surfaceOp: 'append' })
+    session.append('step/end', { turn, step: 1 })
+    session.append('turn/end', { turn, reason: { kind: 'completed' } })
+  }
+  session.append('turn/start', { turn: 5 })
+  return session
 }
 
 describe('real Loader composition', () => {
@@ -145,5 +200,50 @@ describe('real Loader composition', () => {
         summarizationModel: '',
       }],
     })).rejects.toThrow(/modelPolicies\[0\].*must be set together/)
+  })
+
+  it('reads the shipped lower-frequency threshold default through the real Loader', async () => {
+    const loaded = await loadYaml([
+      "- name: '@deepseek-ai/dsh-llm'",
+      "- name: '@deepseek-ai/dsh-session'",
+      "- name: '@deepseek-ai/dsh-session-projection'",
+      "- name: '@deepseek-ai/dsh-token-meter'",
+      "- name: '@deepseek-ai/dsh-compaction-basic'",
+    ])
+
+    const engine = loaded.compaction as BasicCompactionEngine
+    expect(engine).toBeInstanceOf(BasicCompactionEngine)
+    expect(engine.config).toMatchObject({
+      thresholdRatio: 0.9,
+      auto: true,
+      stepPressureCheck: false,
+    })
+  })
+
+  it('executes an explicit thresholdRatio from shipped YAML composition', async () => {
+    const loaded = await loadYaml([
+      "- name: '@deepseek-ai/dsh-llm'",
+      "- name: '@deepseek-ai/dsh-session'",
+      "- name: '@deepseek-ai/dsh-session-projection'",
+      "- name: '@deepseek-ai/dsh-token-meter'",
+      "- name: '@deepseek-ai/dsh-compaction-basic'",
+      '  config:',
+      '    thresholdRatio: 0.5',
+      '    headroomTokens: 0',
+      '    maxTokens: 32',
+      '    auto: false',
+    ])
+    const engine = loaded.compaction as BasicCompactionEngine
+    expect(engine.config).toMatchObject({ thresholdRatio: 0.5, auto: false })
+
+    loaded.llm.registerAdapter(['mock'], new CompositionAdapter(400))
+    const session = loaderConversation()
+    const result = await engine.compactIfNeeded(
+      { session, options: {} } as Agent,
+      'pressure',
+      new AbortController().signal,
+    )
+    expect(result).not.toBeNull()
+    expect(session.snapshotEvents().some(event => event.type === 'compaction/summary')).toBe(true)
   })
 })

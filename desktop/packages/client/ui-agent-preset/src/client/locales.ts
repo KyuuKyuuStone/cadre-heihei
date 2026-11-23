@@ -33,8 +33,6 @@ export type AgentPresetSettingsKey =
   | 'createPluginChecking'
   | 'createPluginUnavailable'
   | 'createPluginMissing'
-  | 'cadreRecommended'
-  | 'cadreDefault'
   | 'attribution'
   | 'attributionLink'
   | 'attributionDisclaimer'
@@ -81,8 +79,6 @@ export const en: Record<AgentPresetSettingsKey, string> = {
   createPluginChecking: 'Checking whether Creator mode is available',
   createPluginUnavailable: 'Temporarily unavailable. Reopen this menu to retry',
   createPluginMissing: 'Creator mode is not included in this configuration',
-  cadreRecommended: 'Cadre recommended',
-  cadreDefault: 'Cadre default',
   attribution: 'Based on DeepSeek Harness (MIT).',
   attributionLink: 'DeepSeek Harness on GitHub',
   attributionDisclaimer: 'Cadre is an independent distribution and does not imply endorsement by DeepSeek.',
@@ -127,8 +123,6 @@ export const zh: Record<AgentPresetSettingsKey, string> = {
   createPluginChecking: '正在确认创造模式是否可用',
   createPluginUnavailable: '暂时不可用，请重新打开菜单重试',
   createPluginMissing: '当前配置未提供创造模式',
-  cadreRecommended: 'Cadre 推荐',
-  cadreDefault: 'Cadre 默认',
   attribution: '基于 DeepSeek Harness（MIT）。',
   attributionLink: 'GitHub 上的 DeepSeek Harness',
   attributionDisclaimer: 'Cadre 是独立发行版，不代表 DeepSeek 官方，也不暗示 DeepSeek 背书。',

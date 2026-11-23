@@ -93,6 +93,11 @@ function optionLabels(question: RoutedQuestion): string[] {
   return (question.options ?? []).map(option => option.label)
 }
 
+/** The ask tool appends "(Recommended)" to one label; answers may omit it. */
+function normalizeOption(label: string): string {
+  return label.replace(/\s*\(Recommended\)\s*$/iu, '').trim()
+}
+
 function renderQuestions(questions: readonly RoutedQuestion[]): string {
   return questions.map((question, index) => {
     const head = `${String(index + 1)}. ${question.header === undefined ? '' : `[${question.header}] `}${question.question}`
@@ -160,11 +165,11 @@ export class QuestionRouter {
     const task = this.#ports.openTask(member.projectId, agentId)
     const target = task?.dispatcherSessionId ?? this.#ports.supervisor(member.projectId)
     if (target === undefined || target === '') {
-      throw new Error('CADRE_NO_SUPERVISOR: 本项目没有可接收请示的主管，问题已拦截但无法路由；请联系用户登记主管')
+      throw new Error('CADRE_NO_SUPERVISOR: 本项目没有可接收请示的组长，问题已拦截但无法路由；请联系用户登记组长')
     }
     const own = [...this.#pending.values()].filter(pending => pending.workerSessionId === agentId && pending.state === 'pending')
     if (own.length >= this.#maxPending) {
-      throw new Error(`CADRE_QUESTION_LIMIT: 待答问题已达 ${String(this.#maxPending)} 条，请先让主管处理队列`)
+      throw new Error(`CADRE_QUESTION_LIMIT: 待答问题已达 ${String(this.#maxPending)} 条，请先让组长处理队列`)
     }
 
     const questionId = request.wait?.callId ?? `ask-${this.#ports.newId()}`
@@ -205,7 +210,7 @@ export class QuestionRouter {
       this.#ports.log(`question routed id=${questionId} worker=${agentId} target=${target} project=${member.projectId}`)
     } catch (error) {
       this.#finish(questionId, 'cancelled')
-      reject(new Error(`CADRE_SUPERVISOR_UNREACHABLE: 主管会话不可达（${error instanceof Error ? error.message : String(error)}）`))
+      reject(new Error(`CADRE_SUPERVISOR_UNREACHABLE: 组长会话不可达（${error instanceof Error ? error.message : String(error)}）`))
       return promise
     }
     return promise
@@ -220,15 +225,15 @@ export class QuestionRouter {
   async resolve(request: ResolveRequest, actorSessionId: string): Promise<ResolveResult> {
     const actor = this.#ports.member(actorSessionId)
     if (actor === undefined || actor.role !== 'supervisor' || actor.state === 'departed') {
-      return { ok: false, code: 'FORBIDDEN_ACTOR', message: '只有主管可以处理员工请示' }
+      return { ok: false, code: 'FORBIDDEN_ACTOR', message: '只有组长可以处理员工请示' }
     }
     const pending = this.#pending.get(request.questionId)
     if (pending === undefined) return { ok: false, code: 'QUESTION_NOT_FOUND', message: `请示不存在或已结束：${request.questionId}` }
     if (pending.projectId !== actor.projectId) {
-      return { ok: false, code: 'CROSS_PROJECT_DENIED', message: '不能处理其他项目部的请示' }
+      return { ok: false, code: 'CROSS_PROJECT_DENIED', message: '不能处理其他项目组的请示' }
     }
     if (pending.targetSessionId !== actorSessionId && this.#ports.supervisor(pending.projectId) !== actorSessionId) {
-      return { ok: false, code: 'FORBIDDEN_ACTOR', message: '该请示路由给了另一位主管' }
+      return { ok: false, code: 'FORBIDDEN_ACTOR', message: '该请示路由给了另一位组长' }
     }
     if (pending.state === 'answered' || pending.state === 'rejected' || pending.state === 'cancelled') {
       return { ok: true, state: pending.state, replayed: true }
@@ -240,7 +245,7 @@ export class QuestionRouter {
         pending.state = 'escalated'
         try {
           await this.#ports.prompt(pending.targetSessionId,
-            `【请示升级 #${pending.questionId}】${pending.workerName} 的问题已由主管升级给用户。请用 ask_user_question 向用户确认后，再用 resolve_employee_question 回答员工。`)
+            `【请示升级 #${pending.questionId}】${pending.workerName} 的问题已由组长升级给用户。请用 ask_user_question 向用户确认后，再用 resolve_employee_question 回答员工。`)
           this.#ports.log(`question escalated id=${pending.questionId} by=${actorSessionId} reason=${request.reason ?? ''}`)
         } catch (error) {
           this.#ports.log(`question escalate prompt failed id=${pending.questionId} reason=${error instanceof Error ? error.message : String(error)}`)
@@ -260,30 +265,47 @@ export class QuestionRouter {
     }
 
     const answers = request.answers ?? []
-    const invalid = this.#validateAnswers(pending.questions, answers)
-    if (invalid !== undefined) return { ok: false, code: 'BAD_ANSWER', message: invalid }
+    const validated = this.#validateAnswers(pending.questions, answers)
+    if (typeof validated === 'string') return { ok: false, code: 'BAD_ANSWER', message: validated }
     this.#finish(request.questionId, 'answered')
-    pending.resolve({ answers })
+    pending.resolve({ answers: validated })
     this.#ports.log(`question answered id=${pending.questionId} by=${actorSessionId}`)
     return { ok: true, state: 'answered', replayed: false }
   }
 
-  #validateAnswers(questions: readonly RoutedQuestion[], answers: readonly { id: string; selected: readonly string[] }[]): string | undefined {
+  /** Returns an error message, or the answers with options canonicalized to original labels. */
+  #validateAnswers(
+    questions: readonly RoutedQuestion[],
+    answers: readonly { readonly id: string; readonly selected: readonly string[]; readonly custom?: string }[],
+  ): string | readonly { readonly id: string; readonly selected: readonly string[]; readonly custom?: string }[] {
+    const idList = questions.map(question => question.id).join(', ')
     if (answers.length !== questions.length) {
-      return `必须逐题回答：${String(questions.length)} 题，收到 ${String(answers.length)} 条答案`
+      return `必须逐题回答：${String(questions.length)} 题，收到 ${String(answers.length)} 条答案。问题 id：${idList}`
     }
     const byId = new Map(answers.map(answer => [answer.id, answer]))
-    if (byId.size !== answers.length) return '答案里出现重复的 question id'
+    if (byId.size !== answers.length) return `答案里出现重复的 question id。问题 id：${idList}`
+    const canonical: { readonly id: string; readonly selected: readonly string[]; readonly custom?: string }[] = []
     for (const question of questions) {
       const answer = byId.get(question.id)
-      if (answer === undefined) return `缺少问题 ${question.id} 的答案`
+      if (answer === undefined) return `缺少问题 ${question.id} 的答案。问题 id：${idList}`
       if (question.multiSelect !== true && answer.selected.length > 1) return `问题 ${question.id} 只能选一个选项`
-      const allowed = new Set(optionLabels(question))
-      for (const selected of answer.selected) {
-        if (allowed.size > 0 && !allowed.has(selected)) return `问题 ${question.id} 的选项「${selected}」不存在`
+      const labels = optionLabels(question)
+      if (labels.length === 0) {
+        canonical.push(answer)
+        continue
       }
+      const allowed = new Map(labels.map(label => [normalizeOption(label), label]))
+      const selected: string[] = []
+      for (const choice of answer.selected) {
+        const matched = allowed.get(normalizeOption(choice))
+        if (matched === undefined) {
+          return `问题 ${question.id} 的选项「${choice}」不存在。合法选项：${labels.map(label => `「${label}」`).join(' / ')}（可省略 (Recommended) 后缀）`
+        }
+        selected.push(matched)
+      }
+      canonical.push({ ...answer, selected })
     }
-    return undefined
+    return canonical
   }
 
   async #timeout(questionId: string): Promise<void> {

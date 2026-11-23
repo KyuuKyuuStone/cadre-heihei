@@ -12,6 +12,7 @@ const DESCRIPTIONS: Record<string, string> = {
   skill_install: 'Install one skill by package name, HTTPS URL, or free text after the required confirmation.',
   skill_create: 'Create a local skill from explicit metadata and SKILL.md content.',
   skill_check: 'Check skill package health and return actionable issues without modifying files.',
+  skill_set_categories: 'Assign topic tags to one skill pack (e.g. 编程/工具/设计/文档/办公). One pack may carry several tags; the library and session skill pages group and filter by them. Supervisor/admin only; builtin packs are read-only.',
   skill_audit: 'Read skill operation audits visible to the current actor.',
   skill_plan: 'Create a non-executed install, update, or remove plan for user confirmation.',
 }
@@ -44,6 +45,10 @@ function fakePort(overrides: Partial<SkillConversationPort> = {}): FakePort {
     check: async (_sessionId, _projectId, packId) => ({
       status: 'ok', items: [{ packId: packId ?? 'all', status: 'ok', issues: [] }], summary: { total: 1, ok: 1, warning: 0, error: 0 },
     }),
+    setCategories: async (_sessionId, _projectId, packId, categories) => {
+      calls.push(`setCategories:${packId}:${categories.join(',')}`)
+      return { id: packId, name: packId, description: 'd', origin: 'installed', license: 'MIT', roles: ['worker'], tokenEstimate: 1, tools: [], source: 'installed', selected: false }
+    },
     audit: async () => [],
     plan: async () => ({ planId: 'plan-1', kind: 'install', packId: '', summary: 's', expiresAt: 'e', actions: [], riskFlags: [], confirmToken: 't' }),
     record: () => undefined,
@@ -59,7 +64,7 @@ function find(tools: readonly ToolRegistration[], name: string): ToolRegistratio
 }
 
 describe('conversational skill tools', () => {
-  it('exposes the eight tools with the pinned descriptions and argument rules', () => {
+  it('exposes the nine tools with the pinned descriptions and argument rules', () => {
     const tools = skillConversationTools(new SkillConversationExecutor({ port: fakePort() }))
     expect(tools.map(tool => tool.name)).toEqual(Object.keys(DESCRIPTIONS))
     for (const tool of tools) expect(tool.description).toBe(DESCRIPTIONS[tool.name])
@@ -138,9 +143,9 @@ describe('conversational skill tools', () => {
       },
     }
     const dispose = registerSkillConversationTools(ctx, new SkillConversationExecutor({ port: fakePort() }))
-    expect(registered).toHaveLength(7)
+    expect(registered).toHaveLength(8)
     expect(registered).not.toContain('skill_catalog')
     dispose()
-    expect(disposers).toHaveLength(7)
+    expect(disposers).toHaveLength(8)
   })
 })

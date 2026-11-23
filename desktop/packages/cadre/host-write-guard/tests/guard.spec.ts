@@ -48,7 +48,7 @@ function mount(policy: object = {
     const member = raw.prepare(`INSERT INTO members
       (project_id, session_id, role, display_name, state, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'active', ?, ?)`)
-    member.run(PROJECT, SUP, 'supervisor', '主管', AT, AT)
+    member.run(PROJECT, SUP, 'supervisor', '组长', AT, AT)
     member.run(PROJECT, WORKER, 'worker', '员工', AT, AT)
   } finally {
     raw.close()

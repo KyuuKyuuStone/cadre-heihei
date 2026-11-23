@@ -570,7 +570,7 @@ describe('ConversationRoot resident composer', () => {
     expect(b.store.store.getSnapshot().draft).toEqual({ text: 'draft in hero', references: [] })
     // Picker: open through the chip; a pick switches to the other
     // workspace's blank session (draft carry is apply-layer wiring).
-    fireEvent.click(b.view.getByRole('button', { name: '选择项目部' }))
+    fireEvent.click(b.view.getByRole('button', { name: '选择项目组' }))
     const owner = b.pickerOwner() as { open: boolean; onPick(id: WorkspaceId): void }
     expect(owner.open).toBe(true)
     act(() => { owner.onPick(wid('second')) })
@@ -581,7 +581,7 @@ describe('ConversationRoot resident composer', () => {
   it('hides the workspace chip for a cadre-skill-admin session', () => {
     const internal = { ...workspace('internal'), title: '技能管理员工作区（内部）', sessionIds: [SID] }
     const b = mount(sessionSnapshotOf(), [internal], undefined, { agentPreset: 'cadre-skill-admin' })
-    expect(b.view.queryByRole('button', { name: '选择项目部' })).toBeNull()
+    expect(b.view.queryByRole('button', { name: '选择项目组' })).toBeNull()
     expect(b.view.getByRole('textbox')).toBeTruthy()
   })
 
@@ -708,7 +708,7 @@ describe('ConversationRoot resident composer', () => {
       ],
       selectWorkspace,
     )
-    fireEvent.click(b.view.getByRole('button', { name: '选择项目部' }))
+    fireEvent.click(b.view.getByRole('button', { name: '选择项目组' }))
     const owner = b.pickerOwner() as { onPick(id: WorkspaceId): void }
     await act(async () => { owner.onPick(wid('second')); await Promise.resolve() })
     expect(selectWorkspace).toHaveBeenCalledWith(wid('second'))
@@ -718,7 +718,7 @@ describe('ConversationRoot resident composer', () => {
 
   it('blank session keeps the interactive picker chip (workspace switchable until the first message)', () => {
     const b = mount(sessionSnapshotOf({ blank: true }))
-    const chip = b.view.getByRole('button', { name: '选择项目部' })
+    const chip = b.view.getByRole('button', { name: '选择项目组' })
     expect((chip as HTMLButtonElement).disabled).toBe(false)
     expect(b.slotCalls).toContain('conversation.hero.workspace')
     // The agent-preset chip sits in the same row, for the same reason: both
