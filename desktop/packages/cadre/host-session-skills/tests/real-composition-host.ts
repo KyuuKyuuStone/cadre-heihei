@@ -8,7 +8,7 @@
  * ledger, the skill directories, and the HTTP server are real.
  * @module
  */
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -28,7 +28,7 @@ export interface CompositionPaths {
 
 /** @returns a fresh temp composition layout with empty skill directories. */
 export async function makeCompositionPaths(prefix: string): Promise<CompositionPaths> {
-  const root = await mkdtemp(join(tmpdir(), prefix))
+  const root = await realpath(await mkdtemp(join(tmpdir(), prefix)))
   const ledgerPath = join(root, 'cadre.sqlite')
   const skillsDir = join(root, 'installed')
   const builtinDir = join(root, 'builtin')
