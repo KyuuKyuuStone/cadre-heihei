@@ -112,10 +112,18 @@ function parsePack(directory: string, origin: SkillOrigin): SkillPack {
 }
 
 /**
+ * Operation leftovers (`<dir>.backup-<uuid>` / `<dir>.old-<uuid>`) are copies of a
+ * pack, not packs; releases before the hidden `.backups` root left them in the
+ * scan root, where they resurrected removed packs under the same id.
+ */
+const OPERATION_RESIDUE = /\.(?:backup|old)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
+
+/**
  * Scan one pack per immediate child directory, `manifest.json` + `SKILL.md`.
  * Also scans `@scope/<pack>` containers whose pack carries only a frontmatter
  * `SKILL.md` (SkillHub layout). Missing directories produce an empty catalog;
- * duplicate ids keep the first pack in scan order and log a warning.
+ * duplicate ids keep the first pack in scan order and log a warning. Legacy
+ * operation-residue directories (see `OPERATION_RESIDUE`) are skipped.
  * @param directory - catalog root.
  * @param origin - builtin or installed; copied onto every pack.
  * @returns pack id → pack.
@@ -146,6 +154,7 @@ export function loadSkillCatalog(directory: string, origin: SkillOrigin = 'insta
     throw error
   }
   for (const name of entries) {
+    if (OPERATION_RESIDUE.test(name)) continue
     const path = join(directory, name)
     if (!statSync(path).isDirectory()) continue
     if (existsSync(join(path, 'manifest.json')) || existsSync(join(path, 'SKILL.md'))) {

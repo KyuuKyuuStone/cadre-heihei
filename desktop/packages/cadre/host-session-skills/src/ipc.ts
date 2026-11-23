@@ -648,12 +648,15 @@ export function createSkillApi(options: {
     add(input) {
       actorOf(input.projectId, input.actorSessionId)
       const pack = validatePack(input)
-      const target = join(skillsDir, pack.id)
-      if (builtinDir !== undefined && existsSync(join(builtinDir, pack.id))) {
+      const existing = catalog().get(pack.id)
+      if (existing?.origin === 'builtin') {
         throw new SkillIpcError('SKILL_BUILTIN_READONLY', 403, `内置技能包 ${pack.id} 不可覆盖`)
       }
       const overwrite = input.overwrite === true
-      if (existsSync(target) && !overwrite) {
+      // Overwrite replaces the directory the catalog actually reads, so an update
+      // of a `@scope/<pack>` pack cannot leave a shadow copy under `skillsDir/<id>`.
+      const target = existing !== undefined && overwrite ? dirname(existing.path) : join(skillsDir, pack.id)
+      if ((existing !== undefined || existsSync(target)) && !overwrite) {
         throw new SkillIpcError('SKILL_EXISTS', 409, `技能包 ${pack.id} 已存在；如需覆盖请传 overwrite:true`)
       }
       const manifest = {
@@ -671,8 +674,10 @@ export function createSkillApi(options: {
         ...(pack.author === undefined ? {} : { author: pack.author }),
         ...(pack.homepage === undefined ? {} : { homepage: pack.homepage }),
       }
-      const temporary = join(skillsDir, `.${pack.id}.tmp-${randomUUID()}`)
-      const backup = `${target}.old-${randomUUID()}`
+      // staging and rollback copies stay under the hidden `.backups` root so a
+      // concurrent catalog scan never reads them as packs.
+      const temporary = join(skillsDir, '.backups', `.${pack.id}.tmp-${randomUUID()}`)
+      const backup = join(skillsDir, '.backups', `${pack.id}.old-${randomUUID()}`)
       try {
         mkdirSync(temporary, { recursive: true })
         writeFileSync(join(temporary, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
@@ -747,10 +752,13 @@ export function createSkillApi(options: {
       const id = requiredString(input.packId, 'packId')
       if (!KEBAB_ID.test(id) || id.length > 64) throw new SkillIpcError('SKILL_INVALID', 400, 'packId 格式非法')
       if (input.confirm !== true) throw new SkillIpcError('SKILL_INVALID', 400, '删除技能包需要 confirm:true')
-      if (builtinDir !== undefined && existsSync(join(builtinDir, id))) {
+      const pack = packOf(id)
+      if (pack.origin === 'builtin') {
         throw new SkillIpcError('SKILL_BUILTIN_READONLY', 403, `内置技能包 ${id} 不可删除`)
       }
-      const target = join(skillsDir, id)
+      // The directory is wherever the catalog found the pack: SkillHub packs live
+      // under `@scope/<pack>` while their id is the synthesized `scope-slug`.
+      const target = dirname(pack.path)
       if (!existsSync(target) || !statSync(target).isDirectory()) {
         throw new SkillIpcError('SKILL_NOT_FOUND', 404, `未知技能包：${id}`)
       }

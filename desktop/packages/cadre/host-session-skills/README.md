@@ -26,6 +26,9 @@ is `ceil(chars / 4)`. Scope packs get a scope-qualified id
 different scopes do not collide. Invalid frontmatter is skipped with a log;
 manifest packs remain fail-loud. Builtin ids win over installed duplicates and
 duplicate installed ids keep the first pack. No generated manifest is written.
+Legacy operation-residue directories (`<dir>.backup-<uuid>` / `<dir>.old-<uuid>`
+left in the scan root by older releases) are skipped so a retained backup copy
+cannot resurrect a removed pack; current backups live under `.backups/`.
 
 Catalog entries carry `origin` (`builtin`/`installed`); builtin packs cannot be
 overwritten or removed. A request `locale` starting with `zh` selects
@@ -102,8 +105,12 @@ POST JSON, project-scoped. `catalog`/`get`/`set` admit any session of an existin
 - `/cadre/skills/preview` — `{projectId, actorSessionId, packId}` → `SKILL.md`
   body and `tokenEstimate`; read-only;
 - `/cadre/skills/add` — manifest fields + `content`; kebab-case id, valid roles,
-  atomic directory write, `overwrite:true` only replaces;
-- `/cadre/skills/remove` — `{packId, confirm:true}` deletes the pack directory;
+  atomic directory write, `overwrite:true` only replaces and replaces the
+  directory the catalog reads (a SkillHub `@scope/<pack>` pack is updated in
+  place, never shadowed by a new `skillsDir/<id>` copy);
+- `/cadre/skills/remove` — `{packId, confirm:true}` deletes the directory the
+  catalog reads for the pack (`@scope/<pack>` for SkillHub layouts, not
+  necessarily `skillsDir/<id>`);
 - `/cadre/skills/install-url` — `{url, confirm?}` fetches `manifest.json` and
   `SKILL.md` from a public GitHub raw/tree URL over HTTPS (size/timeout bounded;
   no SkillHub/ClawHub API);
@@ -136,6 +143,8 @@ It never writes roster rows or team tools. Its backend routes are:
   text increments;
 - `/cadre/skills/admin/apply` — `{planId, token}`; revalidates the operator as a
   supervisor and applies install/update/remove with backup, rollback and audit;
+  backups and staging copies stay under the hidden `.backups` root so retained
+  copies are never catalogued as packs again;
 - `/cadre/skills/admin/audit` — append-only JSONL records without page bodies or
   secrets;
 - `/cadre/skills/admin/diag` — GET query or POST body with `projectId` and

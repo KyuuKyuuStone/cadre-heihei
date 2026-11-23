@@ -6,7 +6,7 @@
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { loadSkillCatalog, searchLocalPacks, type SkillPack } from './catalog.ts'
 import { createSkillApi, installWarnings, SkillIpcError, type InstallWarning, type PackageCommandResult, type SkillApi, type ValidPack } from './ipc.ts'
@@ -481,6 +481,7 @@ export class SkillAdminApi {
     }
     const pack = inspected.pack
     const planId = randomUUID()
+    const targetDir = this.localPackDir(pack.id)
     const plan: SkillPlan = {
       planId,
       kind,
@@ -489,7 +490,7 @@ export class SkillAdminApi {
       ...(pack.author === undefined ? {} : { author: pack.author }),
       license: pack.license,
       contentHash: inspected.contentHash,
-      targetDir: join(this.skillsDir, pack.id),
+      targetDir,
       actions: kind === 'update'
         ? ['download', 'verify-hash', 'backup', 'atomic-replace']
         : ['download', 'verify-hash', 'backup', 'atomic-rename'],
@@ -499,7 +500,7 @@ export class SkillAdminApi {
         ...(pack.author === undefined ? ['unknown-author'] : []),
         ...(pack.license === 'unknown' ? ['unknown-license'] : []),
       ],
-      summary: `${kind === 'update' ? '更新' : '安装'} ${pack.id}（${pack.name}）到 ${join(this.skillsDir, pack.id)}`,
+      summary: `${kind === 'update' ? '更新' : '安装'} ${pack.id}（${pack.name}）到 ${targetDir}`,
       expiresAt: new Date(this.now() + 10 * 60_000).toISOString(),
     }
     this.pending.set(planId, { plan, projectId, operatorSessionId, token: randomUUID(), pack })
@@ -581,7 +582,7 @@ export class SkillAdminApi {
     }
     const planId = randomUUID()
     const plan: SkillPlan = {
-      planId, kind, packId, targetDir: join(this.skillsDir, packId),
+      planId, kind, packId, targetDir: this.localPackDir(packId),
       ...(pack.author === undefined ? {} : { author: pack.author }),
       license: pack.license,
       actions: kind === 'remove' ? ['backup', 'atomic-remove'] : ['backup', 'atomic-replace'],
@@ -596,9 +597,14 @@ export class SkillAdminApi {
   }
 
   private removeWithBackup(projectId: string, operatorSessionId: string, plan: SkillPlan): void {
-    const target = join(this.skillsDir, plan.packId)
-    if (!existsSync(target)) throw new SkillIpcError('SKILL_NOT_FOUND', 404, `未知技能包：${plan.packId}`)
-    const backup = `${target}.backup-${plan.planId}`
+    const target = plan.targetDir
+    if (target === undefined || !existsSync(target)) {
+      throw new SkillIpcError('SKILL_NOT_FOUND', 404, `未知技能包：${plan.packId}`)
+    }
+    // Backups stay under the hidden `.backups` root: a copy left in the scan root
+    // would be catalogued as the pack again and resurrect the removed skill.
+    const backup = join(this.skillsDir, '.backups', `${plan.packId}.backup-${plan.planId}`)
+    mkdirSync(dirname(backup), { recursive: true })
     cpSync(target, backup, { recursive: true })
     try {
       this.api.remove({ projectId, actorSessionId: operatorSessionId, packId: plan.packId, confirm: true })
@@ -607,6 +613,18 @@ export class SkillAdminApi {
       renameSync(backup, target)
       throw error
     }
+  }
+
+  /**
+   * Directory the installed catalog actually reads for one pack; SkillHub packs
+   * live under `@scope/<pack>` rather than `skillsDir/<id>`. Unknown ids fall back
+   * to the id-named directory a fresh install would create.
+   * @param packId - pack id to locate.
+   * @returns absolute pack directory.
+   */
+  private localPackDir(packId: string): string {
+    const pack = loadSkillCatalog(this.skillsDir).get(packId)
+    return pack === undefined ? join(this.skillsDir, packId) : dirname(pack.path)
   }
 
   private requireOperator(projectId: string, operatorSessionId: string): void {

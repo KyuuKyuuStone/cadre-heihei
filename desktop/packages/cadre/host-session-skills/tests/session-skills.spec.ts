@@ -232,6 +232,51 @@ describe('session skill packs', () => {
     db.close()
   })
 
+  it('removes and overwrites SkillHub-scoped packs through their real directory', () => {
+    const root = workspace()
+    const packs = join(root, 'installed')
+    const scoped = join(packs, '@indiv', 'guipi-find-skills')
+    mkdirSync(scoped, { recursive: true })
+    writeFileSync(join(scoped, 'SKILL.md'), '---\nname: guipi-find-skills\ndescription: find skills\nroles: worker\n---\n# v1\n')
+    const db = ledger(root); insert(db, 's1', 'supervisor', []); db.close()
+    const reader = new DatabaseSync(join(root, 'ledger.sqlite'))
+    const api = createSkillApi({ db: reader, ledgerPath: join(root, 'ledger.sqlite'), skillsDir: packs })
+    expect(loadSkillCatalog(packs).has('indiv-guipi-find-skills')).toBe(true)
+    const base = {
+      projectId: 'p1', actorSessionId: 's1', name: 'Find', description: 'find skills',
+      roles: ['worker'], tokenEstimate: 1, tools: [], source: 'manual', license: 'MIT',
+    }
+    // Without overwrite the scoped pack counts as existing; no shadow directory appears.
+    expect(() => api.add({ ...base, id: 'indiv-guipi-find-skills', content: '# x' })).toThrow(/已存在/)
+    expect(existsSync(join(packs, 'indiv-guipi-find-skills'))).toBe(false)
+    expect(api.add({ ...base, id: 'indiv-guipi-find-skills', content: '# v2', overwrite: true }))
+      .toMatchObject({ id: 'indiv-guipi-find-skills' })
+    expect(readFileSync(join(scoped, 'SKILL.md'), 'utf8')).toBe('# v2')
+    expect(existsSync(join(packs, 'indiv-guipi-find-skills'))).toBe(false)
+    expect(api.remove({ projectId: 'p1', actorSessionId: 's1', packId: 'indiv-guipi-find-skills', confirm: true }))
+      .toEqual({ removed: true })
+    expect(existsSync(scoped)).toBe(false)
+    expect(loadSkillCatalog(packs).has('indiv-guipi-find-skills')).toBe(false)
+    reader.close()
+  })
+
+  it('skips legacy operation-residue directories so removed packs stay removed', () => {
+    const root = workspace()
+    const packs = join(root, 'installed')
+    pack(packs, 'gone-pack', ['worker'])
+    const uuid = '123e4567-e89b-42d3-a456-426614174000'
+    const residue = join(packs, `gone-pack.backup-${uuid}`)
+    mkdirSync(residue, { recursive: true })
+    writeFileSync(join(residue, 'manifest.json'), readFileSync(join(packs, 'gone-pack', 'manifest.json'), 'utf8'))
+    writeFileSync(join(residue, 'SKILL.md'), '# old copy')
+    const oldResidue = join(packs, `other.old-${uuid}`)
+    mkdirSync(oldResidue, { recursive: true })
+    writeFileSync(join(oldResidue, 'SKILL.md'), '---\nname: other\ndescription: old copy\n---\n# old\n')
+    expect([...loadSkillCatalog(packs).keys()]).toEqual(['gone-pack'])
+    rmSync(join(packs, 'gone-pack'), { recursive: true, force: true })
+    expect([...loadSkillCatalog(packs).keys()]).toEqual([])
+  })
+
   it('degrades to empty selections when the real ledger is still schema 2', () => {
     const root = workspace()
     const packs = join(root, 'packs')
@@ -445,16 +490,33 @@ describe('session skill packs', () => {
     expect(readFileSync(join(packs, 'admin-pack', 'SKILL.md'), 'utf8')).toBe('# admin body')
 
     const removePlan = await admin.plan({ projectId: 'p1', operatorSessionId: 's1', kind: 'remove', packId: 'admin-pack' })
+    expect(removePlan.targetDir).toBe(join(packs, 'admin-pack'))
     const removeToken = admin.tokenFor(removePlan.planId) ?? ''
     expect(await admin.apply({
       projectId: 'p1', operatorSessionId: 's1', planId: removePlan.planId, token: removeToken,
     })).toMatchObject({ status: 'applied', packId: 'admin-pack' })
     expect(existsSync(join(packs, 'admin-pack'))).toBe(false)
-    expect(existsSync(join(packs, `admin-pack.backup-${removePlan.planId}`))).toBe(true)
+    // The retained backup lives under the hidden root, so the catalog cannot
+    // resurrect the removed pack from it.
+    expect(existsSync(join(packs, '.backups', `admin-pack.backup-${removePlan.planId}`))).toBe(true)
+    expect(loadSkillCatalog(packs).has('admin-pack')).toBe(false)
 
     const audit = admin.auditFor({ projectId: 'p1', operatorSessionId: 's1' })
     expect(audit.at(-1)).toMatchObject({ result: 'applied', packId: 'admin-pack' })
     expect(JSON.stringify(audit)).not.toContain('# admin body')
+
+    // SkillHub-scoped packs delete through their real `@scope/<pack>` directory.
+    const scoped = join(packs, '@indiv', 'guipi-find-skills')
+    mkdirSync(scoped, { recursive: true })
+    writeFileSync(join(scoped, 'SKILL.md'), '---\nname: guipi-find-skills\ndescription: find skills\nroles: worker\n---\n# find\n')
+    const scopedPlan = await admin.plan({ projectId: 'p1', operatorSessionId: 's1', kind: 'remove', packId: 'indiv-guipi-find-skills' })
+    expect(scopedPlan.targetDir).toBe(scoped)
+    const scopedToken = admin.tokenFor(scopedPlan.planId) ?? ''
+    expect(await admin.apply({
+      projectId: 'p1', operatorSessionId: 's1', planId: scopedPlan.planId, token: scopedToken,
+    })).toMatchObject({ status: 'applied', packId: 'indiv-guipi-find-skills' })
+    expect(existsSync(scoped)).toBe(false)
+    expect(loadSkillCatalog(packs).has('indiv-guipi-find-skills')).toBe(false)
 
     const workerSession = await admin.createSession({ projectId: 'p1', cwd: root })
     expect(workerSession.sessionId).toBe('admin-2')

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-settings-compaction",
   "description": "Context compaction settings on the dsh web client's Plugins page: automatic compaction and the live pressure-budget ratio",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "publishConfig": {
     "access": "public"
   },
