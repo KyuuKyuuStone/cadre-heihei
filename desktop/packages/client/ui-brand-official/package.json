@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-brand-official",
   "description": "Official DeepSeek Harness brand occupants for the Web client's sidebar slots",
-  "version": "1.6.6",
+  "version": "1.6.7",
   "publishConfig": {
     "access": "public"
   },

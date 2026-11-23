@@ -46,15 +46,31 @@ describe('shipped agent presets', () => {
     }
   })
 
-  it('no longer ships the redundant cadre-team/cadre-workflow builtin skills', () => {
-    // Their guidance is hardcoded in SUPERVISOR_DUTY / WORKER_POLICY; shipping
-    // them as opt-in packs only duplicated the prompt budget.
-    for (const id of ['cadre-team', 'cadre-workflow']) {
-      expect(() => readFileSync(
+  it('ships the cadre-team/cadre-workflow builtin skills aligned with verification moderation', () => {
+    // Restored as opt-in packs after user feedback that the session skill page
+    // listed nothing on fresh installs; content now matches the moderation rules
+    // instead of the old exhaustive double-confirmation checklist.
+    for (const id of ['cadre-team', 'cadre-workflow'] as const) {
+      const manifest = JSON.parse(readFileSync(
         new URL(`../../../cadre/host-session-skills/builtin-skills/${id}/manifest.json`, import.meta.url),
         'utf8',
-      )).toThrow()
+      )) as { roles?: string[] }
+      expect(manifest.roles).toEqual(['supervisor', 'worker'])
+      const skill = readFileSync(
+        new URL(`../../../cadre/host-session-skills/builtin-skills/${id}/SKILL.md`, import.meta.url),
+        'utf8',
+      )
+      expect(skill).toMatch(/spot-check/iu)
+      expect(skill).toMatch(/team lead/iu)
+      expect(skill).not.toMatch(/supervisor/iu)
+      expect(skill).not.toMatch(/Confirm each delivery twice/iu)
     }
+    const team = readFileSync(
+      new URL('../../../cadre/host-session-skills/builtin-skills/cadre-team/SKILL.md', import.meta.url),
+      'utf8',
+    )
+    expect(team).toMatch(/three entrances/iu)
+    expect(team).toMatch(/ask back once/iu)
   })
 
   it('mounts the skill-admin tools only in the skill-admin preset', () => {

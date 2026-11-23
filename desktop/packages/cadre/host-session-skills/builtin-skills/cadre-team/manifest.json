@@ -1,0 +1,19 @@
+{
+  "id": "cadre-team",
+  "name": "Cadre Team Mode",
+  "description": "Cadre dispatch, verification moderation, evidence, baseline, permissions, and release checklist.",
+  "descriptionI18n": {
+    "zh": "Cadre 派单、检查分级、证据、基线、权限与发布检查清单。",
+    "en": "Cadre dispatch, verification moderation, evidence, baseline, permissions, and release checklist."
+  },
+  "roles": [
+    "supervisor",
+    "worker"
+  ],
+  "tokenEstimate": 500,
+  "tools": [],
+  "source": "builtin:cadre-team",
+  "license": "MIT",
+  "author": "Cadre",
+  "homepage": "https://github.com/KyuuKyuuStone/cadre-heihei"
+}

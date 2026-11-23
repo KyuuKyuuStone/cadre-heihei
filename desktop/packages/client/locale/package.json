@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-locale",
   "description": "Locale plugin: Host-backed preference, extensible language catalog, browser fallback, and typed built-in dictionaries",
-  "version": "1.6.6",
+  "version": "1.6.7",
   "publishConfig": {
     "access": "public"
   },
