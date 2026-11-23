@@ -26,7 +26,7 @@ import {
 } from '../cadre-build-stamp.mjs'
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const REBUILD = 'node desktop/scripts/build-cadre-collab.mjs'
+const REBUILD = 'node scripts/build-cadre-collab.mjs'
 const MAX_LISTED = 10
 
 const failures: string[] = []

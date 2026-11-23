@@ -47,6 +47,10 @@ jobs:
         working-directory: desktop
         run: pnpm run typecheck
 
+      - name: Build cadre-collab bundles (build-cadre-collab)
+        working-directory: desktop
+        run: pnpm run build:cadre
+
       - name: Gates (5/5)
         working-directory: desktop
         run: pnpm run gates
