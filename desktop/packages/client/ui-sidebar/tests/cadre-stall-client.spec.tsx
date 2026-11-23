@@ -9,7 +9,6 @@ import {
   type CadreStallActionRequest,
   type CadreStallTaskView,
 } from '../src/client/cadre-stall.ts'
-import type { StallTaskView as HostStallTaskView } from '@deepseek-ai/dsh-host-governance'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -81,8 +80,8 @@ function realView(overrides: Partial<CadreStallTaskView> = {}): CadreStallTaskVi
 }
 
 it('accepts no_events and real generation views without a false contract error', () => {
-  const noEvents: HostStallTaskView = realView()
-  const generation: HostStallTaskView = realView(FIXTURE.generation)
+  const noEvents = realView()
+  const generation = realView(FIXTURE.generation)
   expect(() => { assertCadreStallTaskView(noEvents) }).not.toThrow()
   expect(() => { assertCadreStallTaskView(generation) }).not.toThrow()
   expect(executionOf(noEvents)).toBeNull()
