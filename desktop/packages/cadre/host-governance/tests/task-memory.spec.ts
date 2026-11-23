@@ -266,6 +266,7 @@ describe('task memory', () => {
     expect(mounted.compactCalls()).toBe(1)
   })
 
+  // Eight cold mounts each build a temp SQLite ledger, which exceeds the 5000 ms default on CI runners.
   it('rejects a compaction floor that is not a positive safe integer at the plugin boundary', () => {
     for (const threshold of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 1.5, 2 ** 60]) {
       expect(() => mountCompaction({ taskMemoryCompactionThresholdTokens: threshold }))
@@ -274,7 +275,7 @@ describe('task memory', () => {
     // The plugin row arrives from YAML, so a numeric-looking string is still rejected.
     expect(() => mountCompaction({ taskMemoryCompactionThresholdTokens: '60000' } as never))
       .toThrow(/taskMemoryCompactionThresholdTokens must be a positive integer/u)
-  })
+  }, 30_000)
 
   it('honors an explicitly configured 60000 floor and a minimal positive integer', async () => {
     const explicit = mountCompaction({ taskMemoryCompactionThresholdTokens: 60_000 })
