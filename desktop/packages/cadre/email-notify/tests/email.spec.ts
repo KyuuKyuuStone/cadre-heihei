@@ -277,7 +277,11 @@ describe('dedupe, rate limit and failures', () => {
     expect(String(failure)).not.toContain('qq-secret')
   })
 
-  it.runIf(process.platform === 'win32')('roundtrips through real Windows DPAPI', async () => {
+  // Real DPAPI costs two PowerShell spawns (encrypt + decrypt), and a cold CI runner pays
+  // powershell.exe startup plus the System.Security JIT on each one, which turned Vitest's
+  // 5 s default into a deterministic timeout. The ceiling matches the provider's own
+  // 2 x 15 s budget, so a genuinely hung spawn still reports its own error before the test.
+  it.runIf(process.platform === 'win32')('roundtrips through real Windows DPAPI', { timeout: 30_000 }, async () => {
     const store = new EmailSecretStore({
       dir: workspace(),
       platform: 'win32',
