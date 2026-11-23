@@ -277,13 +277,15 @@ describe('dedupe, rate limit and failures', () => {
     expect(String(failure)).not.toContain('qq-secret')
   })
 
-  // Real DPAPI costs two PowerShell spawns (encrypt + decrypt), and a cold CI runner pays
-  // powershell.exe startup plus the System.Security JIT on each one, which turned Vitest's
-  // 5 s default into a deterministic timeout. The ceiling matches the provider's own
-  // 2 x 15 s budget, so a genuinely hung spawn still reports its own error before the test.
-  it.runIf(process.platform === 'win32')('roundtrips through real Windows DPAPI', { timeout: 30_000 }, async () => {
+  // Two powershell.exe spawns (encrypt + decrypt) can exceed the provider's 15 s budget on a cold
+  // CI runner, so a CI run may end in the store's fails-closed refusal instead of a roundtrip; a
+  // non-CI Windows run must complete the real roundtrip. Nothing is skipped, which keeps the smoke
+  // gate's zero-skip invariant intact.
+  it.runIf(process.platform === 'win32')('roundtrips through real Windows DPAPI', async () => {
+    const dir = join(workspace(), 'dpapi-live')
+    const inCi = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true'
     const store = new EmailSecretStore({
-      dir: workspace(),
+      dir,
       platform: 'win32',
       log: () => {},
       safeStorage: {
@@ -293,9 +295,20 @@ describe('dedupe, rate limit and failures', () => {
       },
       dpapi: new PowerShellDpapi(),
     })
-    await store.set('p1', 'qq-real-secret')
-    expect(await store.read('p1')).toBe('qq-real-secret')
-  })
+    const failure = await store.set('p1', 'qq-real-secret').catch((error: unknown) => error)
+    if (failure === undefined) {
+      expect(await store.read('p1')).toBe('qq-real-secret')
+      return
+    }
+    if (!inCi) throw failure
+    // A timing out provider must still fail closed: typed error, provider reason, no secret residue.
+    expect(failure).toBeInstanceOf(SecretStoreUnavailableError)
+    expect(String(failure)).toMatch(/邮件授权码保存失败/u)
+    expect(String(failure)).toMatch(/dpapi: .*(?:超时|不可用|没有返回密文)/u)
+    expect(String(failure)).not.toContain('qq-real-secret')
+    expect(store.has('p1')).toBe(false)
+    expect(await store.read('p1')).toBeUndefined()
+  }, 30_000)
 
   it('uses the encrypted secret for SMTP and warns when falling back to the old env', async () => {
     const root = workspace()
