@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-error",
   "description": "Dependency-free HarnessError base class with a stable machine-routable code for the DeepSeek Harness",
-  "version": "1.6.9",
+  "version": "1.7.0",
   "publishConfig": {
     "access": "public"
   },

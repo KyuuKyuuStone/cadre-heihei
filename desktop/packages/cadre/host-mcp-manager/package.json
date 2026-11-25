@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-mcp-manager",
   "description": "Per-session Cadre MCP server selection mounted into each agent scope",
-  "version": "1.6.9",
+  "version": "1.7.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

@@ -4,8 +4,8 @@
     {
       "path": "packages/extensions/tool-cordis/src/api-catalog.ts",
       "reason": "生成文件（scripts/gen-cordis-catalog.ts 的 AST 遍历输出）：行数随登记进公共 API 的 service/event 增长，手工拆分会被下一次生成覆盖并使 verify-cordis-api 失败。基线保持生成文件入库时的 8974 行不变，此处只给当前生成结果的显式上限。",
-      "decisionRef": "commit 190c34faf —— feat(experimental): 增加可重放的 token 用量账本，该提交登记的新 service/event 使生成目录 +25 行（8974 → 8999）；待生成器支持按域拆文件后撤销本豁免。2026-11-25 甲方授权原话「授权续期到 1.7.0」，本条目续期至 1.7.0。",
-      "expiresInVersion": "1.7.0",
+      "decisionRef": "commit 190c34faf —— feat(experimental): 增加可重放的 token 用量账本，该提交登记的新 service/event 使生成目录 +25 行（8974 → 8999）；待生成器支持按域拆文件后撤销本豁免。2026-11-25 甲方授权原话「授权续期到 1.7.0」，本条目续期至 1.7.0。2026-11-26 发布 1.7.0 时治理到期：生成文件仍为 8999 行（cap 不变），按组长任务包授权「续期 decisionRef 或移除」择续期，本条续期至 1.8.0。",
+      "expiresInVersion": "1.8.0",
       "cap": 8999
     }
   ]
