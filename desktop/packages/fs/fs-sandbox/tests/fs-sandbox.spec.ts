@@ -125,16 +125,15 @@ describe('workspace-write containment', () => {
     expect(await readFile(path, 'utf8')).toBe('updated')
   })
 
-  it('rejects invalid grants before workspace writes', async () => {
+  it('ignores non-directory grants without blocking workspace or granted-directory writes', async () => {
     const file = join(outside, 'file.txt')
     await writeFile(file, 'file')
-    const path = join(workspace, 'blocked.txt')
-    for (const invalid of [join(base, 'missing'), file, join(file, 'child')]) {
-      const policy = { mode: 'workspace-write' as const, workspaceRoot: workspace,
-        additionalWritableRoots: [outside, invalid] }
-      await expect(fs.writeText(await target(path), 'blocked', undefined, undefined, policy))
-        .rejects.toMatchObject({ code: 'SANDBOX_INVALID_ROOT' })
-      expect(existsSync(path)).toBe(false)
+    const policy = { mode: 'workspace-write' as const, workspaceRoot: workspace,
+      additionalWritableRoots: [outside, join(base, 'missing'), file, join(file, 'child')] }
+    for (const directory of [workspace, outside]) {
+      const path = join(directory, 'allowed.txt')
+      await fs.writeText(await target(path), 'allowed', undefined, undefined, policy)
+      expect(await readFile(path, 'utf8')).toBe('allowed')
     }
   })
 

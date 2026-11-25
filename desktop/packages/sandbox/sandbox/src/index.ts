@@ -52,8 +52,8 @@ export interface SandboxExecutionPolicy {
   workspaceRoot: string
   /**
    * Extra physical absolute directories `workspace-write` may also write under.
-   * Absence means none. The enforcing host rejects missing, non-directory, and
-   * symlinked entries on each call. Remote paths are checked on the remote host.
+   * Absence means none. The enforcing host skips missing and non-directory entries
+   * and rejects symlinked directories on each call. Remote paths are checked on the remote host.
    * These grant nothing under `read-only` or `danger-full-access`.
    */
   additionalWritableRoots?: readonly string[]
@@ -159,6 +159,13 @@ export class SandboxUnavailableError extends HarnessError {
   }
 }
 
+/** The selected backend is available but cannot enforce the requested policy. */
+export class SandboxUnsupportedPolicyError extends HarnessError {
+  constructor(detail: string) {
+    super(detail, 'SANDBOX_UNSUPPORTED_POLICY')
+    this.name = 'SandboxUnsupportedPolicyError'
+  }
+}
 declare module '@deepseek-ai/cordis' {
   interface Context {
     sandbox: SandboxProvider

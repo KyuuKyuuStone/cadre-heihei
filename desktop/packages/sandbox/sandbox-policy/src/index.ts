@@ -105,7 +105,7 @@ export interface Config {
    * (default: none). The supervisor names them explicitly; there is no
    * automatic repository or gitfile discovery. Entries are execution-world
    * paths: this service validates absoluteness and detaches the list, while
-   * the enforcing host rejects missing, non-directory, or symlinked paths. They grant nothing under
+   * the enforcing host skips missing or non-directory paths and rejects symlinked directories. They grant nothing under
    * `read-only`.
    */
   additionalWritableRoots?: string[]
@@ -222,7 +222,7 @@ export class SandboxPolicyService extends Service {
    * Grants are runtime-only and must be registered again after resume or fork.
    * On Windows, only harness file tools honor extra grants; process permissions stay unchanged.
    * @param session - exact live Session receiving the grant; other Sessions and agentless calls are unaffected.
-   * @param directory - absolute execution-world path; execution rejects missing, non-directory, or symlinked paths.
+   * @param directory - absolute execution-world path; execution skips it unless it is a directory and rejects symlinked directories.
    * @returns the exact Cordis effect disposer for this registration.
    * @throws when the directory is relative or contains a NUL byte.
    */
