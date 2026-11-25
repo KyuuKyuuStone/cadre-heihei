@@ -5,7 +5,7 @@
  * is mocked; native access checks live in sandbox-windows-acl's runner suite.
  */
 
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'

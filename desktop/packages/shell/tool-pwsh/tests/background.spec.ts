@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { HarnessError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session/types'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -10,7 +10,6 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { provideWorkingDirectoryFixture, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import * as ToolTasks from '@deepseek-ai/dsh-tool-jobs'
-import { SandboxPreparationError } from '@deepseek-ai/dsh-sandbox'
 import { ShellExecutor } from '@deepseek-ai/dsh-shell'
 import type { ShellExecRequest, ShellExecSpec, ShellExecution, ShellProcess } from '@deepseek-ai/dsh-shell'
 import { renderPwshPromoted } from '../src/render.ts'
@@ -381,6 +380,7 @@ describe('foreground commands as jobs (pwsh)', () => {
   })
 
   it('a Windows ACL preparation failure keeps its name and code through the job path', async () => {
+    class SandboxPreparationError extends HarnessError {}
     const { ctx, pwsh } = await setup()
     const cause = new Error('SetNamedSecurityInfoW failed (Win32 5): C:\\ws')
     pwsh.backgroundHandler = () => {

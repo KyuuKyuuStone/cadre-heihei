@@ -430,7 +430,7 @@ describe('the default seatbelt probe (sandbox-exec contract)', () => {
 })
 
 describe('the windows-acl probe (runner invocation contract)', () => {
-  it.each([RO, WW])('ignores extra directory grants in $mode runner arguments', async (policy) => {
+  it.each([RO, WW])('ignores extra directory grants in $mode runner arguments', async (_policy) => {
     const { ctx, sandbox } = await setup({}, {
       chain: ['windows-acl'],
       probeWindowsAcl: () => true,
