@@ -10,6 +10,7 @@ import { apply, inject } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { SidebarRootInjected } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { HeaderLeadingControls } from '../src/client/HeaderLeadingControls.tsx'
+import { CadreMcpTab } from '../src/client/CadreMcpTab.tsx'
 import { CadreProjectLedgerMenuItem } from '../src/client/CadreSidebar.tsx'
 import { apply as hostApply } from '../src/index.ts'
 
@@ -171,15 +172,28 @@ describe('ui-sidebar apply', () => {
     }
   })
 
-  it('registers the skill Conversation view for every Session without a header chip or status strip', async () => {
+  it('registers the skill and MCP Conversation views for every Session without a header chip or status strip', async () => {
     const b = await bench()
     const register = vi.spyOn(b.slots, 'register')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
-    expect(entryIds(b.slots, 'conversation.view')).toEqual(['skills'])
+    expect(entryIds(b.slots, 'conversation.view')).toEqual(['skills', 'mcp'])
     const skillRegistration = register.mock.calls.find(([options]) => options.name === 'conversation.view')
     expect(skillRegistration?.[0]).not.toHaveProperty('available')
     const skillView = b.slots.entries('conversation.view')[0]!
     expect(skillView.inject?.()['defaultProjectId']).toEqual(expect.any(Function))
+    const mcpView = b.slots.entries('conversation.view')[1]!
+    expect(mcpView.component).toBe(CadreMcpTab)
+    expect([mcpView.options.order, mcpView.locale]).toEqual([6, 'sidebar'])
+    const mcpLabel = mcpView.options.label
+    expect(typeof mcpLabel === 'function' ? mcpLabel() : mcpLabel).toBe('MCP')
+    const mcpInjected = mcpView.inject?.() as {
+      hooks?: { roster?: unknown }
+      projectOfSession?: unknown
+      defaultProjectId?: unknown
+    }
+    expect(mcpInjected.hooks?.roster).toBeDefined()
+    expect(typeof mcpInjected.projectOfSession).toBe('function')
+    expect(typeof mcpInjected.defaultProjectId).toBe('function')
     // The removed header chip and status strip were surfaces of their own; no
     // Cadre entry may name one.
     expect(surfaceIds(b.slots).filter(id => /chip|status/i.test(id))).toEqual([])

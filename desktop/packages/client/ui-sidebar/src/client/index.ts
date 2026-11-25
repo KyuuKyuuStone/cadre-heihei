@@ -26,6 +26,7 @@ import {
   type CadreSkillsInjected,
   type CadreSkillsRequest,
 } from './CadreSkills.tsx'
+import { CadreMcpTab, type CadreMcpTabInjected } from './CadreMcpTab.tsx'
 import { CadreSkillTab, type CadreSkillTabInjected } from './CadreSkillTab.tsx'
 import {
   CadreSkillLibraryIcon,
@@ -904,6 +905,18 @@ export function apply(ctx: ClientContext): void {
       hooks: { roster }, projectOfSession, defaultProjectId: () => resolveDefaultProject() ?? undefined,
     }),
   } as never, CadreSkillTab as never))
+  // Per-conversation MCP server selection is its own Conversation view tab; the
+  // manager dialog and the global library page are P2 surfaces.
+  ctx.slots.inject('conversation.view' as never, () => ctx.slots.register({
+    name: 'conversation.view',
+    id: 'mcp',
+    order: 6,
+    locale: NS,
+    label: () => ctx.locale.bind(NS)('mcp.tab'),
+    inject: (): CadreMcpTabInjected => ({
+      hooks: { roster }, projectOfSession, defaultProjectId: () => resolveDefaultProject() ?? undefined,
+    }),
+  } as never, CadreMcpTab as never))
   ctx.slots.inject('sidebar.workspaces.session.menu.item' as never, () => ctx.slots.register({
     name: 'sidebar.workspaces.session.menu.item',
     id: 'cadre-retire-member',
