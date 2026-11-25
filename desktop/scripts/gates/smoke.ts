@@ -39,6 +39,15 @@ const VITEST_TARGETS = [
 /** 判别力自证（two-state-evidence）通过该变量临时追加注入样本。 */
 const EXTRA_TARGETS = (process.env.GATE_SMOKE_EXTRA ?? '').split(',').map(s => s.trim()).filter(Boolean)
 
+/**
+ * 单个用例的默认上限。冒烟子集里大量用例会挂载真实组合、开临时 SQLite 或启真实 webserver，
+ * CI runner 负载一高就撞 Vitest 的 5000 ms 默认值：run 45541336944 撞 9 例（4 个 spec），
+ * run 45543356639 撞另外 6 例（4 个 spec），而同一子集在 40 秒前的 step12 全绿。
+ * 两次运行各自爆在不同用例 ⇒ 逐用例补 timeout 不收敛，故在门禁调用点统一收敛。
+ * 只抬上限，不改断言、不 skip、不改两态期望：真失败仍红。
+ */
+const VITEST_TEST_TIMEOUT_MS = 30_000
+
 mkdirSync(EVIDENCE_DIR, { recursive: true })
 
 type Runner = {
@@ -67,6 +76,7 @@ const RUNNERS: Runner[] = [
       'run',
       '--reporter=junit',
       `--outputFile=${VITEST_JUNIT}`,
+      `--testTimeout=${VITEST_TEST_TIMEOUT_MS}`,
       ...VITEST_TARGETS,
       ...EXTRA_TARGETS,
     ],
