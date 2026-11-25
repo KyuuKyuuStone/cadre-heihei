@@ -3,7 +3,7 @@ import type { ProductEvent } from '@deepseek-ai/dsh-client-product-analytics/typ
 
 import { randomUUID } from 'node:crypto'
 import { desktopAccountBackend, type DesktopAccountBackend } from './account-backend.ts'
-import { DesktopHostAuthenticationError, HOST_AUTH_ATTEMPTS, authenticateWebHost } from './web-document.ts'
+import { DesktopHostAuthenticationError, authenticateWebHost } from './web-document.ts'
 
 /** Metadata needed before the native entry or workspace becomes visible. */
 export interface WelcomeState {
@@ -36,38 +36,18 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Authenticate the native HTTP client through the Web application's launch URL.
- * An unauthenticated response is retried once; a remaining failure is typed so
- * startup can degrade instead of aborting.
- * @param authenticatedUrl - URL supplied by the running Desktop Host.
- * @param send - Electron session fetch, retaining the Web authentication cookie.
- * @param cookies - Cookie reader for the same loopback session.
+ * Connect the native HTTP client to the Desktop Host; every request sends `cookie` explicitly and uses no cookie jar.
+ * @param hostUrl - URL of the running Desktop Host; only its origin is used.
+ * @param cookie - Cookie header returned by `authenticateWebHost` for this Host.
+ * @param send - HTTP client for Host requests.
  * @returns metadata reads and write-only credential operations over standard RPC.
  */
-export async function connectDesktopWelcome(
-  authenticatedUrl: string,
-  send: (input: string, init?: RequestInit) => Promise<Response>,
-  cookies: () => Promise<string> = () => Promise.resolve(''),
-): Promise<DesktopWelcomeBackend> {
-  const origin = new URL(authenticatedUrl).origin
-  let status: number | undefined
-  let cause: unknown
-  for (let attempt = 0; attempt < HOST_AUTH_ATTEMPTS; attempt++) {
-    try {
-      const authenticated = await send(authenticatedUrl, { credentials: 'include' })
-      await authenticated.body?.cancel()
-      if (authenticated.ok) break
-      status = authenticated.status
-      cause = undefined
-    } catch (error) {
-      status = undefined
-      cause = error
-    }
-    if (attempt === HOST_AUTH_ATTEMPTS - 1) {
-      throw new DesktopHostAuthenticationError('desktop welcome: Web authentication failed', status,
-        cause === undefined ? undefined : { cause })
-    }
-  }
+export function connectDesktopWelcome(
+  hostUrl: string,
+  cookie: string,
+  send: (input: string, init?: RequestInit) => Promise<Response> = fetch,
+): DesktopWelcomeBackend {
+  const origin = new URL(hostUrl).origin
   const invoke = async (
     request: { namespace: string; method: string; args: Record<string, unknown> },
     signal?: AbortSignal,
@@ -75,8 +55,8 @@ export async function connectDesktopWelcome(
     const rpcId = randomUUID()
     const method = `${request.namespace}/${request.method}`
     const response = await send(new URL(`/api/${method}`, origin).href, {
-      method: 'POST', credentials: 'include', redirect: 'error', ...(signal === undefined ? {} : { signal }),
-      headers: { 'content-type': 'application/json' },
+      method: 'POST', redirect: 'error', ...(signal === undefined ? {} : { signal }),
+      headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify({ type: 'client-request', rpcId, method, payload: { args: request.args } }),
     })
     if (!response.ok) {
@@ -95,7 +75,7 @@ export async function connectDesktopWelcome(
     }
     return envelope.result.value
   }
-  const account = desktopAccountBackend(origin, invoke, cookies)
+  const account = desktopAccountBackend(origin, invoke, cookie)
   const settingsAndReference = async () => {
     const settings = await invoke({ namespace: 'settings', method: 'describe', args: {} })
     if (!record(settings) || !Array.isArray(settings.namespaces)) throw new Error('desktop welcome: missing settings namespaces')
@@ -215,18 +195,15 @@ export async function startDesktopWelcome(
     console.warn(`desktop host authentication failed; continuing to welcome (${describeAuthFailure(error)})`)
   }
   let backend: DesktopWelcomeBackend | undefined
-  try {
-    backend = await connectDesktopWelcome(url, send, cookies)
-  } catch (error) {
-    if (!(error instanceof DesktopHostAuthenticationError)) throw error
-    console.warn(`desktop welcome authentication failed; continuing to welcome (${describeAuthFailure(error)})`)
-  }
-  if (hostCookie === undefined) {
+  // Only an authenticated launch yields a cookie to connect with: the Host
+  // cookie is never read back from the loopback session jar, so a later launch
+  // on another port cannot reuse or accumulate it.
+  if (hostCookie !== undefined) {
     try {
-      const stored = await cookies()
-      if (stored !== '') hostCookie = stored
+      backend = connectDesktopWelcome(url, hostCookie, send)
     } catch (error) {
-      console.warn(`desktop host cookie unavailable after degraded authentication: ${error instanceof Error ? error.message : String(error)}`)
+      if (!(error instanceof DesktopHostAuthenticationError)) throw error
+      console.warn(`desktop welcome authentication failed; continuing to welcome (${describeAuthFailure(error)})`)
     }
   }
   return { backend, hostCookie }

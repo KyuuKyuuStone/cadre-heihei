@@ -55,6 +55,7 @@ import type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
   SubagentCapabilities,
+  SubagentCapacity,
   SubagentActivation,
   SubagentActivationSpec,
   SubagentInterruptAuthority,
@@ -85,6 +86,7 @@ export type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
   SubagentCapabilities,
+  SubagentCapacity,
   SubagentActivation,
   SubagentActivationSpec,
   SubagentInterruptAuthority,
@@ -211,7 +213,7 @@ export class SubagentRuntime extends TypertRemoteService {
     this.emitLifecycle = createLifecycleEmitter(this.ctx, parent => scopeTarget(this, parent))
     ctx.inject(['agents'], (childCtx: Context) => {
       const manager = new SubagentManager(childCtx, {
-        startExternal: (name, request) => {
+startExternal: (name, request) => {
           const provider = this.expectProvider(name) as SubagentProvider & Required<Pick<SubagentProvider, 'start'>>
           return provider.start(request)
         },
@@ -232,6 +234,11 @@ export class SubagentRuntime extends TypertRemoteService {
     // Archive admission: this runtime is the owner that knows which live
     // children descend from a Session and how a parent stops them.
     ctx.inject(['agents'], (agentsCtx: Context) => { installSubagentArchiveAdmission(agentsCtx) })
+  }
+
+  /** Current concurrency limit shared by all descendants in each subagent tree. */
+  get maxActiveSubagents(): number {
+    return this.config.maxActiveSubagents.get()
   }
 
   /**
@@ -282,6 +289,15 @@ export class SubagentRuntime extends TypertRemoteService {
       ? manager.startExternal(spec)
       : manager.startLocal(spec)
   }
+  /**
+   * Observe the shared concurrency capacity of the caller's subagent tree.
+   * @param caller - exact live root or resident tree member.
+   * @returns occupied slots and the current limit; this observation reserves no capacity.
+   */
+  capacityOf(caller: Agent): SubagentCapacity {
+    return this.requireManager().capacityOf(caller)
+  }
+
 
   /**
    * Join progressing descendants without cancelling them. Idle descendants whose

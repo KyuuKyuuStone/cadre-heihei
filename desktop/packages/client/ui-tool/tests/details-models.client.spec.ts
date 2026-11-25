@@ -67,6 +67,13 @@ describe('control detail adapters', () => {
   it('uses producer wording for agent, job, terminal, and LSP lists', () => {
     const agents = details('list_agents', 'a1 [running] — Build\na2 [ready] parent=a1 depth=1 — Review', { scope: 'descendants' })
     expect(agents?.summary).toBe('2 agents')
+    // A top-level capacity record keeps the member rows unchanged.
+    const capacityText = 'Subagent capacity: running=2, limit=8\na1 [running] — Build\na2 [ready] parent=a1 depth=1 — Review'
+    expect(details('list_agents', capacityText, { scope: 'descendants' })?.items).toEqual(agents?.items)
+    expect(details('list_agents', JSON.stringify({
+      running: 2, limit: 8,
+      agents: [{ kind: 'child', id: 'a1', label: 'Build', status: 'running' }],
+    }), { scope: 'children' })?.summary).toBe('1 agents')
     expect(details('list_agents', '(no subagents)')?.empty).toBe('No results')
     expect(details('job_list', 'j1 [bash] running — Build')?.items[0]?.fields).toContainEqual({ label: 'Type', value: 'bash' })
     expect(details('job_list', '(no background jobs)')?.empty).toBe('No results')

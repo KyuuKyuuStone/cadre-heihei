@@ -30,7 +30,7 @@ import { writeCrashReport } from '../src/crash-report.ts'
 type InvokeEvent = { sender?: unknown; senderFrame: { url: string } }
 type InvokeHandler = (event: InvokeEvent, ...args: unknown[]) => unknown
 
-vi.mock('../src/web-document.ts', () => ({ authenticateWebHost: async () => 'test-cookie', serveWebDocument: vi.fn(), forwardWebRequest: vi.fn() }))
+vi.mock('../src/web-document.ts', () => ({ authenticateWebHost: async () => 'test-cookie', serveWebDocument: vi.fn(), forwardWebRequest: vi.fn(), removeLegacyHostCookies: vi.fn(async () => {}) }))
 // Startup tests exercise the shell, not the public release feed; the service
 // still exposes the same surface so the new IPC handlers stay wired.
 vi.mock('../src/github-update.ts', () => ({
@@ -307,7 +307,6 @@ vi.mock('electron', () => ({
   dialog: harness.dialog,
   shell: { openExternal: harness.openExternal },
   nativeTheme: harness.nativeTheme,
-  net: { fetch: vi.fn() },
   ipcMain: {
     on: harness.ipcOn,
     handle: (channel: string, handler: InvokeHandler) => {
@@ -320,6 +319,7 @@ vi.mock('electron', () => ({
   session: {
     fromPartition: () => ({ setProxy: vi.fn(async () => {}) }),
     defaultSession: {
+      cookies: {} as unknown,
       setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(), webRequest: { onBeforeSendHeaders: harness.socketHeaders },
     },
   },
@@ -386,14 +386,14 @@ vi.mock('../src/platform-view.ts', async importOriginal => ({
   },
 }))
 vi.mock('../src/welcome-backend.ts', () => ({
-  startDesktopWelcome: async () => ({ hostCookie: 'test-cookie', backend: {
+  startDesktopWelcome: vi.fn(async () => ({ hostCookie: 'test-cookie', backend: {
     analyticsEnabled: async () => harness.analyticsEnabled,
     report: harness.analytics,
     readLocalePreference: async () => null,
     read: async (): Promise<unknown> => (await harness.hosts.at(-1)!.fetch()).json() as Promise<unknown>,
     save: async () => ({ ok: true }),
     account: { watch: harness.watchAccount, state: async () => ({ status: 'signed-out', attempt: null }) },
-  } }),
+  } })),
 }))
 
 function configureTestAuthPopup(allow: boolean): void {
@@ -1082,6 +1082,16 @@ describe('desktop main startup', () => {
     harness.hosts[0]!.url = `${protocol}//127.0.0.1:3080/?token=test`
     harness.hosts[0]!.ready.resolve()
     await Promise.resolve(invoke(DESKTOP_IPC.boot))
+    // The Cadre shell keeps startDesktopWelcome as the seam; it receives the
+    // loopback transport and cookie reader, and startup never touches a jar.
+    const welcomeModule = await import('../src/welcome-backend.ts')
+    const webDocumentModule = await import('../src/web-document.ts')
+    expect(vi.mocked(welcomeModule.startDesktopWelcome)).toHaveBeenCalled()
+    expect(vi.mocked(welcomeModule.startDesktopWelcome).mock.calls[0]![0])
+      .toBe(`${protocol}//127.0.0.1:3080/?token=test`)
+    expect(vi.mocked(webDocumentModule.removeLegacyHostCookies)).toHaveBeenCalled()
+    expect(vi.mocked(webDocumentModule.removeLegacyHostCookies).mock.calls[0]![1])
+      .toBe(`${protocol}//127.0.0.1:3080/?token=test`)
     const handler = harness.socketHeaders.mock.calls[0]![1] as (
       details: { url: string; webContentsId: number; requestHeaders: Record<string, string> },
       callback: (result: unknown) => void,

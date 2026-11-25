@@ -70,7 +70,7 @@ import { claimDesktopSingleInstance } from './single-instance.ts'
 import { desktopUpdateChannel } from './update-channel.ts'
 import { DesktopUpdateCoordinator } from './update-coordinator.ts'
 import { DesktopCommandManager } from './command-management.ts'
-import { serveWebDocument, forwardWebRequest } from './web-document.ts'
+import { serveWebDocument, forwardWebRequest, removeLegacyHostCookies } from './web-document.ts'
 import { DesktopFatalRecovery } from './fatal-recovery.ts'
 import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashReportSource } from './crash-report.ts'
 import { openWelcomeWindow } from './welcome-window.ts'
@@ -756,6 +756,10 @@ async function main(): Promise<void> {
       start: async () => {
         const ready = await host.start()
         hostUrl = ready.url
+        // Earlier builds kept Host auth cookies in the default Electron session.
+        // Drop any leftovers so a new launch cannot reuse them for this Host.
+        void removeLegacyHostCookies(session.defaultSession.cookies, ready.url)
+          .catch((error: unknown) => { console.error('desktop: legacy Host cookie cleanup failed', error) })
         // Loopback must not inherit the system proxy: a proxy can answer the
         // unreachable 127.0.0.1 launch with 401/407/502. This dedicated session
         // is direct and separate from the default session used by updaters.

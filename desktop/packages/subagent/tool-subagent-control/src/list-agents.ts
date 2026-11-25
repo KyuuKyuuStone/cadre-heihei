@@ -86,7 +86,8 @@ export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'list_agents',
     description:
-      'List subagents you started, with their ids, labels, and status. '
+'List subagents you started, with their ids, labels, and status. '
+      + 'Shared capacity reports running/limit; do not spawn more agents when capacity is limited. '
       + 'running means it is working; inactive means it is not currently working. '
       + 'You will be notified when a subagent finishes; there is no need to keep checking its status. '
       + 'Use send_message to continue the conversation.',
@@ -100,52 +101,61 @@ export function apply(ctx: Context): void {
     },
     output: {
       schema: {
-        type: 'array',
-        items: {
-          oneOf: [
-            {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                kind: { type: 'string', required: true, enum: ['child'] },
-                id: { type: 'string', required: true },
-                label: { type: 'string', required: true },
-                status: { type: 'string', required: true, enum: ['running', 'inactive'] },
-                parent: { type: 'string' },
-                depth: { type: 'number' },
-              },
+type: 'object',
+        additionalProperties: false,
+        properties: {
+          running: { type: 'integer', required: true },
+          limit: { type: 'integer', required: true },
+          agents: {
+            type: 'array', required: true,
+            items: {
+              oneOf: [
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    kind: { type: 'string', required: true, enum: ['child'] },
+                    id: { type: 'string', required: true },
+                    label: { type: 'string', required: true },
+                    status: { type: 'string', required: true, enum: ['running', 'inactive'] },
+                    parent: { type: 'string' },
+                    depth: { type: 'number' },
+                  },
+                },
+                {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    kind: { type: 'string', required: true, enum: ['diagnostic'] },
+                    id: { type: 'string', required: true },
+                    reason: { type: 'string', required: true, enum: ['corrupt', 'unsupported', 'unavailable'] },
+                    parent: { type: 'string' },
+                    depth: { type: 'number' },
+                  },
+                },
+              ],
             },
-            {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                kind: { type: 'string', required: true, enum: ['diagnostic'] },
-                id: { type: 'string', required: true },
-                reason: { type: 'string', required: true, enum: ['corrupt', 'unsupported', 'unavailable'] },
-                parent: { type: 'string' },
-                depth: { type: 'number' },
-              },
-            },
-          ],
+          },
         },
       },
-      render: (args, entries) => {
+      render: (args, value) => {
         const request = resolveListAgentsRequest(args)
+        const rows = value.agents.length === 0
+          ? '(no subagents)'
+          : value.agents.map((entry) => {
+            // A descendants row always carries its position; children rows
+            // never render it. String() spans the schema-optional shape
+            // without a dead fallback branch.
+            const at = request.scope === 'descendants'
+              ? ` parent=${String(entry.parent)} depth=${String(entry.depth)}`
+              : ''
+            return entry.kind === 'child'
+              ? `${entry.id} [${entry.status}]${at} — ${entry.label}`
+              : `${entry.id} [diagnostic: ${entry.reason}]${at}`
+          }).join('\n')
         return [{
           type: 'text',
-          text: entries.length === 0
-            ? '(no subagents)'
-            : entries.map((entry) => {
-              // A descendants row always carries its position; children rows
-              // never render it. String() spans the schema-optional shape
-              // without a dead fallback branch.
-              const at = request.scope === 'descendants'
-                ? ` parent=${String(entry.parent)} depth=${String(entry.depth)}`
-                : ''
-              return entry.kind === 'child'
-                ? `${entry.id} [${entry.status}]${at} — ${entry.label}`
-                : `${entry.id} [diagnostic: ${entry.reason}]${at}`
-            }).join('\n'),
+          text: rows,
         }]
       },
     },
@@ -159,15 +169,21 @@ export function apply(ctx: Context): void {
       switch (request.scope) {
         case 'children': {
           const entries = await ctx.subagents.listChildren(parent.id, exec.signal)
-          return entries
-            .map(entry => project(ctx.agents, entry))
-            .filter(entry => entry !== undefined)
+          return {
+            ...ctx.subagents.capacityOf(parent),
+            agents: entries
+              .map(entry => project(ctx.agents, entry))
+              .filter(entry => entry !== undefined),
+          }
         }
         case 'descendants': {
           const entries = await ctx.subagents.listDescendants(parent.id, exec.signal)
-          return entries
-            .map(entry => project(ctx.agents, entry, entry))
-            .filter(entry => entry !== undefined)
+          return {
+            ...ctx.subagents.capacityOf(parent),
+            agents: entries
+              .map(entry => project(ctx.agents, entry, entry))
+              .filter(entry => entry !== undefined),
+          }
         }
         /* v8 ignore next 2 -- the resolver normalizes the schema-validated closed scope before dispatch. */
         default:

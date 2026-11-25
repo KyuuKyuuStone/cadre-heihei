@@ -33,7 +33,7 @@ import { SubagentError } from './error.ts'
 import { isAdjacentAgentSendMessageTool } from './internal.ts'
 import type { ActivationObserver } from './lifecycle.ts'
 import type {
-  ContinuableCreateRequest, ContinuableCreateSpec, SubagentInterruptAuthority,
+ContinuableCreateRequest, ContinuableCreateSpec, SubagentInterruptAuthority, SubagentCapacity,
   SubagentActivationSpec, SubagentActivation, SubagentStartRequest, SubagentRun,
   SubagentSendMessageOptions, SubagentResult, ResolvedSubagentStartRequest,
 } from './types.ts'
@@ -837,7 +837,21 @@ export class SubagentManager {
     return undefined
   }
 
-  /** Resolve a root's pool once; descendants inherit their resident parent's pool directly. */
+/**
+   * Observe the shared capacity of a live tree member.
+   * @param caller - exact live root or resident child selecting the tree.
+   * @returns occupied slots and the current configured limit, without reserving capacity.
+   */
+  capacityOf(caller: Agent): SubagentCapacity {
+    const lineage = this.liveLineage(caller)
+    const root = lineage[lineage.length - 1] ?? caller
+    return {
+      running: this.rootPools.get(root)?.size ?? 0,
+      limit: this.maxActiveSubagents(),
+    }
+  }
+
+  /** Share one capacity pool across every instance in a subagent tree. */
   private rootPool(parent: Agent): ActivationPool {
     let pool = this.rootPools.get(parent)
     if (pool === undefined) {

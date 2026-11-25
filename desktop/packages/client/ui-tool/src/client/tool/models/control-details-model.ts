@@ -20,10 +20,15 @@ function receipt(title: string, badge: NonNullable<DetailItem['badge']>, t: Deta
 }
 
 function agentList(text: string, json: unknown, t: DetailTranslate): ToolDetailsModel | null {
-  if (Array.isArray(json)) return detailList(inspectionItems(json, t), t('detail.agents.count', { count: json.length }), t)
-  if (text === '(no subagents)') return detailList([], t('detail.agents.count', { count: 0 }), t)
+// Capacity is model-facing; the member card keeps its existing presentation.
+  const agents = json !== null && typeof json === 'object' && 'agents' in json
+    ? (json as { agents: unknown }).agents
+    : json
+  if (Array.isArray(agents)) return detailList(inspectionItems(agents, t), t('detail.agents.count', { count: agents.length }), t)
+  const memberText = text.replace(/^Subagent capacity: running=\d+, limit=\d+\n/u, '')
+  if (memberText === '(no subagents)') return detailList([], t('detail.agents.count', { count: 0 }), t)
   const items: DetailItem[] = []
-  for (const line of text.split('\n')) {
+  for (const line of memberText.split('\n')) {
     const match = /^(\S+) \[([^\]]+)\](?: parent=(\S+) depth=(\d+))?(?: — (.*))?$/u.exec(line)
     if (match === null) return null
     const [, id, state, parent, depth, title] = match

@@ -2434,6 +2434,11 @@
     },
     {
       "doc": "docs/subsystems/subagent.md",
+      "symbol": "SubagentCapacity",
+      "source": "packages/subagent/subagent/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
       "symbol": "SubagentActivationSpec",
       "source": "packages/subagent/subagent/src/types.ts"
     },

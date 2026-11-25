@@ -1,4 +1,5 @@
 import { mountWorkingDirectoryFixture } from '../../subagent/tests/working-directory-fixture.ts'
+import { liveConfig } from '../../../settings/settings/tests/live-config.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -398,6 +399,19 @@ describe('dsh-tool-subagent', () => {
     ])
     await forkTool.dispose()
     expect(await delegationGuidance(ctx)).toEqual([])
+  })
+
+  it('reports the configured concurrency limit and follows live edits', async () => {
+    const ctx = await projectedContext()
+    await mountWorkingDirectoryFixture(ctx)
+    const config = await liveConfig(ctx, SubagentRuntime, { maxActiveSubagents: 3 })
+    await mock.mountScriptedProvider(ctx, { name: 'mock' })
+    await ctx.plugin(tool, { provider: 'mock' })
+    // Capacity stays observable through the service; the delegation guidance text
+    // keeps the Cadre wording and carries no limit sentence.
+    expect(ctx.subagents.maxActiveSubagents).toBe(3)
+    await config.update({ maxActiveSubagents: 5 })
+    expect(ctx.subagents.maxActiveSubagents).toBe(5)
   })
 
   it('shares guidance only among the viewing agent\'s visible delegation definitions', async () => {

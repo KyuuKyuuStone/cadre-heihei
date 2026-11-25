@@ -256,7 +256,7 @@ describe('dsh-tool-subagent-control/list-agents', () => {
     expect(schema?.description).toContain('inactive means it is not currently working')
     // The enum is the closed vocabulary the model renders, so pin it rather than
     // scanning prose that legitimately reads "not to poll for completion".
-    const variants = ctx.tools.get('list_agents')?.output.schema.items?.oneOf ?? []
+    const variants = ctx.tools.get('list_agents')?.output.schema.properties?.agents?.items?.oneOf ?? []
     const child = variants.find(variant => variant.properties?.kind?.enum?.includes('child'))
     expect(child?.properties?.status?.enum).toEqual(['running', 'inactive'])
   })
