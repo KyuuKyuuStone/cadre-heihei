@@ -95,6 +95,20 @@ describe('search tools over the real subprocess service + the packaged rg', () =
       expect(text(await call('glob', { pattern: '*.nomatch' }, agent()))).toContain('No files found')
     })
 
+    it('narrows traversal through a literal directory prefix and still lists its matches', async () => {
+      // `src` exists below the workdir, so the command gains a traversal root.
+      const result = await call('glob', { pattern: 'src/*.ts' }, agent())
+      expect(result.isError).toBe(false)
+      expect(text(result).split('\n').sort()).toEqual([join('src', 'alpha.ts'), join('src', 'beta.ts')])
+    })
+
+    it('keeps full traversal when a literal prefix names no directory', async () => {
+      // Prefix inspection is optional: a missing directory must not narrow or fail.
+      expect(text(await call('glob', { pattern: 'ghost/*.ts' }, agent()))).toContain('No files found')
+      // A prefix that names a FILE is likewise not a directory to narrow to.
+      expect(text(await call('glob', { pattern: 'notes.md/*.ts' }, agent()))).toContain('No files found')
+    })
+
     it('excludes VCS internals even when the search root IS the VCS directory', async () => {
       // The prune glob alone never matches root-prefixed paths when rg is
       // rooted at .git; the paired contents glob keeps the exclusion airtight.

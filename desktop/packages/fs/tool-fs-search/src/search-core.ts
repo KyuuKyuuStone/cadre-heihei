@@ -213,7 +213,8 @@ export function resolveRgPath(): Promise<string> {
  * @param ctx - the plugin context; execution uses its `subprocess` service.
  * @param exec - the tool-execution context; supplies the owning Agent and the abort signal.
  * @param toolName - `glob` or `grep`, used in error messages.
- * @param argv - the ripgrep arguments (every model value an unquoted argv element; no shell layer exists).
+ * @param argv - the ripgrep arguments, or a builder that receives the resolved workdir
+ * (every model value an unquoted argv element; no shell layer exists).
  * @param rawOutputMaxBytes - cap on the complete raw stdout the tool will parse.
  * @param graceMs - the seam's terminate-escalation grace period.
  * @param stderrMaxBytes - cap on the retained stderr diagnostic tail.
@@ -223,7 +224,7 @@ export async function runRipgrep(
   ctx: Context,
   exec: ToolExecution,
   toolName: string,
-  argv: readonly string[],
+  argv: readonly string[] | ((workdir: string) => readonly string[] | Promise<readonly string[]>),
   rawOutputMaxBytes: number,
   graceMs: number,
   stderrMaxBytes: number,
@@ -234,10 +235,13 @@ export async function runRipgrep(
   const workdir = exec.agent === undefined
     ? process.cwd()
     : await ctx.workingDirectory.ensure(exec.agent, exec.signal)
+  // A builder runs after the workdir is known, so a caller can narrow traversal
+  // to directories that actually exist below it.
+  const resolvedArgv = typeof argv === 'function' ? await argv(workdir) : argv
   let handle: SubprocessHandle
   try {
     handle = ctx.subprocess.spawn({
-      argv: [await resolveRgPath(), '--no-config', ...argv],
+      argv: [await resolveRgPath(), '--no-config', ...resolvedArgv],
       cwd: workdir,
       stdio: {
         stdin: 'ignore',

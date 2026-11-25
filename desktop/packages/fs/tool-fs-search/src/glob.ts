@@ -10,7 +10,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { sep } from 'node:path'
+import { readdir } from 'node:fs/promises'
+import { join, sep } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, SearchResultView, ToolResult } from '@deepseek-ai/dsh-tools'
 import type { SpillRef } from '@deepseek-ai/dsh-spill'
@@ -104,6 +105,34 @@ export function buildGlobCommand(input: GlobInput): string[] {
   ]
   if (input.path !== undefined) parts.push('--', input.path)
   return parts
+}
+
+/**
+ * Exact directory entries keep prefix narrowing case-sensitive, skip links, and
+ * preserve the logical search root. Inspection requires the co-located local
+ * workspace used by ripgrep; pending filesystem reads are not abortable.
+ */
+async function scopedGlobCommand(input: GlobInput, workdir: string): Promise<string[]> {
+  const command = buildGlobCommand(input)
+  const slash = input.pattern.lastIndexOf('/')
+  if (input.path !== undefined || slash < 1) return command
+  const segments = input.pattern.slice(0, slash).split('/')
+  if (segments.some(part => !/^[\w .-]+$/.test(part) || part === '.' || part === '..' || GLOB_VCS_EXCLUDES.includes(part))) return command
+  let prefix = ''
+  for (const part of segments) {
+    let directory: boolean
+    try {
+      directory = (await readdir(join(workdir, prefix), { withFileTypes: true }))
+        .some(entry => entry.name === part && entry.isDirectory())
+    } catch (_error) {
+      // Prefix inspection is optional; ripgrep retains ownership of search errors.
+      return command
+    }
+    if (!directory) return command
+    prefix = join(prefix, part)
+  }
+  // ripgrep treats a bare '-' as stdin even after '--'.
+  return prefix === '-' ? command : [...command, '--', prefix]
 }
 
 /**
@@ -337,7 +366,7 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
     },
     async execute(args, exec) {
       const input = parseGlobArgs(args)
-      const run = await runRipgrep(ctx, exec, 'glob', buildGlobCommand(input), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
+      const run = await runRipgrep(ctx, exec, 'glob', workdir => scopedGlobCommand(input, workdir), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
       const root = input.path === undefined ? '.' : toWorkdirRelative(input.path, run.workdir)
       if (run.noMatches) return { root, paths: [] }
 
