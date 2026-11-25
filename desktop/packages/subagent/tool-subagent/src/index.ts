@@ -56,8 +56,11 @@ export interface Config extends PresetSelectionConfig {
    */
   toolName?: string
   /**
-   * Sample the Host `subagent-model-selection` setting for each new top-level
-   * Session and inherit that decision in its child Sessions.
+   * Expose optional child `provider`, `model`, and `reasoning_effort` fields
+   * plus `list_subagent_models`, and sample the Host `subagent-model-selection`
+   * setting for each new top-level Session; child Sessions inherit that
+   * decision. Requires a provider with `agentOptions` support.
+   * At most one instance per tool scope may enable it.
    */
   modelSelectionSettings?: boolean
   /**
@@ -179,7 +182,6 @@ export async function apply(ctx: Context, config: Config, session?: Session): Pr
         `tool-subagent: provider "${subagentProvider.name}" does not support child model selection`,
       )
     }
-
   }
 
   // Validate provider-owned config outside the optional LLM binding so an

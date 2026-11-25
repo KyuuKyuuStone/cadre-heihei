@@ -424,11 +424,55 @@ describe('dsh-tool-subagent model selection', () => {
     expect(resolve).not.toHaveBeenCalled()
   })
 
-  it('warns that changing a fork route can lose inherited-prefix reuse', async () => {
-    const ctx = await setup({ provider: 'mock', withModelSelection: true }, { inheritsParentContext: true })
-    const schema = ctx.tools.schemas(modelSelectionSetupAgent(ctx)).find(entry => entry.name === 'subagent')!
+  it('enforces Session authorization when a fork tool explicitly enables model selection', async () => {
+    const requests: SubagentStartRequest[] = []
+    const ctx = await setup({ provider: 'mock', withModelSelection: true }, {
+      inheritsParentContext: true,
+      onStart: (request) => { requests.push(request) },
+    })
+    ctx.llm.registerAdapter(['alpha'], new MockAdapter([], REASONING))
+    const agent = modelSelectionSetupAgent(ctx)
+    const schema = ctx.tools.schemas(agent).find(entry => entry.name === 'subagent')!
     expect(schema.description).toContain('inherits this conversation')
-    expect(schema.description).toContain('can prevent provider-side reuse of the inherited conversation prefix')
+    expect(schema.description).toContain('list_subagent_models')
+
+    const allowed = await callSubagent(ctx, {
+      description: 'fork work', prompt: 'do it', provider: 'alpha', model: 'fast-model', reasoning_effort: 'low',
+    })
+    expect(allowed.isError, text(allowed)).toBe(false)
+    expect(requests[0]?.agentOptions).toEqual({
+      provider: 'alpha', model: 'fast-model', reasoningEffort: ReasoningEffortId('low'),
+    })
+
+    const denied = await callSubagent(ctx, {
+      description: 'unauthorized route', prompt: 'do it', provider: 'alpha', model: 'denied-model',
+    })
+    expect(denied.isError).toBe(true)
+    expect(text(denied)).toContain('is not allowed for this Session')
+
+    const invalidEffort = await callSubagent(ctx, {
+      description: 'unsupported effort', prompt: 'do it', provider: 'alpha', model: 'fast-model', reasoning_effort: 'invalid',
+    })
+    expect(invalidEffort.isError).toBe(true)
+    expect(text(invalidEffort)).toContain('invalid')
+    expect(requests).toHaveLength(1)
+  })
+
+  it('keeps fork model selection unavailable without instance opt-in even with Session authorization', async () => {
+    const started = vi.fn()
+    const ctx = await setup({ provider: 'mock' }, {
+      inheritsParentContext: true,
+      onStart: started,
+    })
+    const agent = modelSelectionSetupAgent(ctx)
+    agent.session.append('subagent/model-selection-policy', {
+      allowedModels: [{ provider: 'alpha', model: 'fast-model' }],
+    })
+    const schema = ctx.tools.schemas(agent).find(entry => entry.name === 'subagent')!
+    const props = (schema.parameters as { properties?: Record<string, unknown> }).properties ?? {}
+    expect(Object.keys(props).sort()).toEqual(['cwd', 'description', 'prompt'])
+    expect(schema.description).toContain('inherits this conversation')
+    expect(schema.description).not.toContain('list_subagent_models')
   })
 
   it('propagates an exact-route resolver failure before child creation', async () => {
