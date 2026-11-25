@@ -15,6 +15,11 @@
       name: '@deepseek-ai/dsh-host-supervisor-skill'
     - id: cadre-session-skills
       name: '@deepseek-ai/dsh-host-session-skills'
+    # Per-session MCP catalog and selection. Mounts the selected servers as
+    # mcp-client child fibers inside each agent scope, so one session's servers
+    # never appear in another session's tool list.
+    - id: cadre-mcp-manager
+      name: '@deepseek-ai/dsh-host-mcp-manager'
     # The eight conversational skill tools. Mounted once for the whole host so every
     # preset and session (Cadre, standard, PTC, minimal, creative) can find, install,
     # create, and check skills from the conversation; the hidden admin preset keeps

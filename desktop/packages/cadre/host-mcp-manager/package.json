@@ -1,0 +1,28 @@
+{
+  "name": "@deepseek-ai/dsh-host-mcp-manager",
+  "description": "Per-session Cadre MCP server selection mounted into each agent scope",
+  "version": "1.6.9",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": ["lib/**", "!lib/**/*.map"],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/dsh-mcp-client": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:*",
+    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:*",
+    "@deepseek-ai/dsh-scope": "workspace:*",
+    "@deepseek-ai/dsh-session": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:*"
+  }
+}

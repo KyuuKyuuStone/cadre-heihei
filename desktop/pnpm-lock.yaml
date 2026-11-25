@@ -2517,6 +2517,9 @@ importers:
       '@deepseek-ai/dsh-host-governance':
         specifier: workspace:*
         version: link:../../cadre/host-governance
+      '@deepseek-ai/dsh-host-mcp-manager':
+        specifier: workspace:*
+        version: link:../../cadre/host-mcp-manager
       '@deepseek-ai/dsh-host-session-skills':
         specifier: workspace:*
         version: link:../../cadre/host-session-skills
@@ -3198,6 +3201,28 @@ importers:
       '@deepseek-ai/dsh-cadre-email-notify':
         specifier: workspace:*
         version: link:../email-notify
+
+  packages/cadre/host-mcp-manager:
+    dependencies:
+      '@deepseek-ai/dsh-mcp-client':
+        specifier: workspace:*
+        version: link:../../mcp/mcp-client
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent-loop-testkit':
+        specifier: workspace:*
+        version: link:../../test-support/agent-loop-testkit
+      '@deepseek-ai/dsh-scope':
+        specifier: workspace:*
+        version: link:../../core/scope
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:*
+        version: link:../../core/session
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: link:../../core/tools
 
   packages/cadre/host-session-skills: {}
 
