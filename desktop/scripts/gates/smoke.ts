@@ -34,6 +34,7 @@ const VITEST_TARGETS = [
   'packages/cadre/host-supervisor-skill/tests',
   'packages/cadre/email-notify/tests',
   'packages/cadre/host-session-skills/tests',
+  'packages/cadre/host-mcp-manager/tests',
 ]
 
 /** 判别力自证（two-state-evidence）通过该变量临时追加注入样本。 */
