@@ -31,11 +31,11 @@ export interface KvFacet {
   /**
    * Open one unit, creating it when the medium holds no trace of it yet
    * (materialization may defer to the first write, but {@link KvUnit.loadAll}
-   * must immediately serve the empty shape). A version already stamped on the
-   * medium outside `descriptor.version` and `compatibleVersions` rejects with
-   * `version-mismatch` with unit-wide checks; an unaccepted per-record document
-   * reads as absent. A medium that cannot be parsed as this unit rejects
-   * with `malformed-medium`. Opening the same unit name twice without closing
+   * must immediately serve the empty shape). Backends with a unit-wide stamp
+   * reject an existing version outside `descriptor.version` and
+   * `compatibleVersions` with `version-mismatch`; document-based per-record
+   * layouts read an unaccepted document as absent. A medium that cannot be
+   * parsed as this unit rejects with `malformed-medium`. Opening the same unit name twice without closing
    * is a caller bug and rejects.
    * @param descriptor - Static identity and shape of the unit to open.
    * @returns the opened unit.
@@ -47,28 +47,29 @@ export interface KvFacet {
 export interface KvUnitDescriptor {
   /** Unit name; must match {@link UNIT_NAME_RE}. Also the file-name / SQL-identifier segment. */
   readonly name: string
-  /** Current unit format version; a non-negative integer stamped on durable writes. */
+  /** Current unit format version; a non-negative integer stamped on initial materialization and subsequent mutations. */
   readonly version: number
   /** Table names; each must match {@link UNIT_NAME_RE}. */
   readonly tables: readonly string[]
   /** Whether this unit carries the global singleton slot. */
   readonly hasGlobal: boolean
   /**
-   * Medium layout. `single` (the default) keeps the whole unit in one
+   * Document layout. `single` (the default) keeps the whole unit in one
    * document; `per-record` keeps each record in its own document, so a unit
    * whose records are large or sparse never rewrites the rest on one write,
-   * and an unaccepted version stamp discards only that record instead of
-   * rejecting the whole unit. Backends that only serve one layout accept the
-   * other's units as foreign documents.
+   * and an unaccepted document reads as absent instead of
+   * rejecting the whole unit. Row stores retain unit-wide versioning for
+   * either layout request.
    */
   readonly layout?: 'single' | 'per-record'
   /**
    * Older unit versions whose stored records are also readable under the
    * declaring owner's current schemas (the owner vouches for that —
    * typically by declaring the fields old records lack as optional). Both
-   * layouts accept listed versions without restamping ordinary reads. The
-   * next mutation atomically stamps {@link version} with its data; untouched records keep
-   * their saved values, so the current schemas must accept mixed generations.
+   * layouts accept listed versions without restamping ordinary reads. Whole-unit
+   * mutations atomically stamp {@link version} with their data; per-record
+   * replacements stamp their document. Untouched records keep their saved
+   * values, so the current schemas must accept mixed generations.
    * The legacy per-record bootstrap also accepts listed versions.
    */
   readonly compatibleVersions?: readonly number[]
@@ -78,10 +79,11 @@ export interface KvUnitDescriptor {
  * One opened unit. Values are opaque JSON to this layer: no schema, no
  * events, no domain meaning. The unit does NOT serialize concurrent writes —
  * write ordering is the caller's responsibility (the domain layer runs one
- * write chain per unit); the unit only guarantees that each single call is
- * atomic on the medium and durable once resolved (a crash after resolution
- * followed by a re-open observes the write). Any call after {@link close}
- * rejects with `closed`.
+write chain per unit). Whole-document and row-store calls are atomic on the
+ * medium; a per-record batch interrupted before resolution can be partially
+ * applied. Resolved writes are durable; per-record deletions sync directory
+ * changes on POSIX before resolving. Any call after {@link close} rejects with
+ * `closed`.
  */
 export interface KvUnit {
   /**
@@ -112,17 +114,20 @@ export interface KvUnit {
   deleteRecord(table: string, key: string): Promise<void>
 
   /**
-   * Delete several records durably as one batch. Idempotent: missing keys are
-   * no-ops. Resolves once every listed record is absent from the readable
-   * state and the backend accepted the batch; a rejection leaves the batch
-   * unapplied, so no listed record was removed. A backend that cannot
-   * establish or restore the batch's state rejects with `unknown-state`
-   * instead: the readable state is then unknown, every later operation on
-   * that unit rejects with the same error, and only {@link close} still
-   * releases it. On the `single` layout a failure after the atomic replacement
-   * (a directory-fsync error) can leave the new file on the medium while the
-   * caller sees a rejection; the unit keeps its memory consistent and the next
-   * publish rewrites the file. A backend whose medium can apply a whole batch
+* Delete several records durably as one batch. Idempotent: missing keys and
+   * empty batches are no-ops and do not advance the version stamp. Resolves
+   * once every listed record is absent from the readable state and the backend
+   * accepted the batch. A rejection normally leaves the batch unapplied, so no
+   * listed record was removed. A backend that cannot establish or restore the
+   * batch's state rejects with `unknown-state` instead: the readable or
+   * durable state is then unknown, every later operation on that unit rejects
+   * with the same error until {@link close} releases it, and calls after close
+   * reject `closed`. On the `single` layout a directory-fsync failure can
+   * arrive after the atomic replacement: the new file may already hold the
+   * batch while the caller sees a rejection. Close the backend and its
+   * domains, then reopen to inspect saved state before retrying. Per-record
+   * batches are not crash-atomic before resolution.
+   * A backend whose medium can apply a whole batch
    * in one operation (the `single` document, a row store) must do that instead
    * of repeating {@link deleteRecord} per key.
    * @param table - Declared table name.

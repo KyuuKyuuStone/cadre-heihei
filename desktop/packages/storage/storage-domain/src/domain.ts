@@ -351,12 +351,7 @@ class KvTableImpl<K extends string, V> implements KvTable<K, V> {
       if (!this.records.has(key)) return false
       await this.host.unit.deleteRecord(this.tableName, key)
       this.records.delete(key)
-      this.host.emitChanged({
-        domain: this.host.domainName,
-        table: this.tableName,
-        key,
-        operation: 'deleted',
-      })
+      this.emitDeleted(key)
       return true
     })
   }
@@ -371,14 +366,7 @@ deleteMany(keys: readonly K[]): Promise<number> {
       // Memory reaches the committed batch state before the first listener runs,
       // so every `domain/changed` observes the same removed set as the medium.
       for (const key of present) this.records.delete(key)
-      for (const key of present) {
-        this.host.emitChanged({
-          domain: this.host.domainName,
-          table: this.tableName,
-          key,
-          operation: 'deleted',
-        })
-      }
+      for (const key of present) this.emitDeleted(key)
       return present.length
     })
   }
@@ -406,6 +394,15 @@ deleteMany(keys: readonly K[]): Promise<number> {
       key,
       operation: 'put',
       value,
+    })
+  }
+
+  private emitDeleted(key: K): void {
+    this.host.emitChanged({
+      domain: this.host.domainName,
+      table: this.tableName,
+      key,
+      operation: 'deleted',
     })
   }
 }

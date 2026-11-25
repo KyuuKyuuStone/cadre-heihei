@@ -37,9 +37,9 @@ export class MemoryMediaPool {
   /** Unit name → stamped version; tests may pre-stamp to force `version-mismatch`. */
   readonly versions = new Map<string, number>()
   /**
-   * When positive, that many subsequent write primitives (putRecord /
-   * deleteRecord / setGlobal) reject without touching the medium, decrementing
-   * per rejection. Negative path: callers assert their state is
+   * When positive, that many subsequent mutations reject without touching
+   * the medium, decrementing per rejection. A missing-key delete is a no-op
+   * and leaves this counter unchanged. Callers assert their state is
    * untouched after a durability failure.
    */
   failNextWrites = 0
@@ -91,12 +91,8 @@ class MemoryKvUnit implements KvUnit {
     this.pool.versions.set(this.descriptor.name, this.descriptor.version)
   }
 
-  async deleteRecord(table: string, key: string): Promise<void> {
-    this.assertOpen()
-    if (!this.medium.tables.get(table)?.has(key)) return
-    this.pool.consumeInjectedFailure()
-    this.medium.tables.get(table)?.delete(key)
-    this.pool.versions.set(this.descriptor.name, this.descriptor.version)
+  deleteRecord(table: string, key: string): Promise<void> {
+    return this.deleteRecords(table, [key])
   }
 
   async deleteRecords(table: string, keys: readonly string[]): Promise<void> {

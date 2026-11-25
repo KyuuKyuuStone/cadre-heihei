@@ -2,12 +2,13 @@
  * One opened SQLite KV unit: prepared per-table statements over the
  * `u_<unit>_<table>` record tables plus this unit's row in the shared
  * `unit_globals` table. The first mutation of an accepted older version commits
- * its data and current version stamp in one transaction. Other writes remain
- * single statements; write ordering belongs to the caller per the KV contract.
+ * its data and current version stamp in one transaction. Batch deletes also
+ * use one transaction; other writes remain single statements. Write ordering
+ * belongs to the caller per the KV contract.
  * @module @deepseek-ai/dsh-storage-sqlite/unit
  */
 
-import type { DatabaseSync, StatementResultingChanges, StatementSync } from 'node:sqlite'
+import type { DatabaseSync, StatementSync } from 'node:sqlite'
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnit, KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import { recordTableName } from './schema.ts'
@@ -30,20 +31,22 @@ export class SqliteKvUnit implements KvUnit {
   private readonly globalSelect: StatementSync | undefined
   private needsVersionStamp: boolean
   private closed = false
-  /** Set when a batch transaction could not be opened or rolled back. */
-  private unusable: StorageError | undefined
 
   /**
    * @param db - Open database handle owned by the backend (never closed here).
    * @param descriptor - Validated descriptor whose record tables already exist.
    * @param storedVersion - Accepted unit version currently saved on the medium.
    * @param onClose - Backend callback releasing this unit's open-name slot.
+   * @param ensureBackendUsable - Rejects use of a connection whose rollback failed.
+   * @param onRollbackFailure - Retains the failure on the backend before this call rejects.
    */
   constructor(
     private readonly db: DatabaseSync,
     private readonly descriptor: KvUnitDescriptor,
     storedVersion: number,
     private readonly onClose: () => void,
+    private readonly ensureBackendUsable: () => void,
+    private readonly onRollbackFailure: (error: StorageError) => void,
   ) {
     this.needsVersionStamp = storedVersion !== descriptor.version
     for (const table of descriptor.tables) {
@@ -106,48 +109,26 @@ export class SqliteKvUnit implements KvUnit {
     return this.settle(() => {
       const statement = this.statementsFor(table).upsert
       const text = JSON.stringify(value)
-      this.write(() => statement.run(key, text))
+      this.write(() => statement.run(key, text).changes)
     })
   }
 
   deleteRecord(table: string, key: string): Promise<void> {
     return this.settle(() => {
       const statement = this.statementsFor(table).remove
-      this.write(() => statement.run(key))
+      this.write(() => statement.run(key).changes)
     })
   }
 
   deleteRecords(table: string, keys: readonly string[]): Promise<void> {
     return this.settle(() => {
       const remove = this.statementsFor(table).remove
-      try {
-        this.db.exec('BEGIN IMMEDIATE')
-      } catch (error: unknown) {
-        // An unopened transaction can only mean the connection is not in the
-        // state this unit expects; later statements would run in an unknown one.
-        this.unusable = new StorageError(
-          'unknown-state',
-          `kv unit '${this.descriptor.name}' could not open a batch transaction; its readable state is unknown`,
-          { cause: error },
-        )
-        throw this.unusable
-      }
-      try {
-        for (const key of new Set(keys)) remove.run(key)
-        this.db.exec('COMMIT')
-      } catch (error: unknown) {
-        try {
-          this.db.exec('ROLLBACK')
-        } catch (rollbackError: unknown) {
-          this.unusable = new StorageError(
-            'unknown-state',
-            `kv unit '${this.descriptor.name}' batch delete failed and could not roll back; its readable state is unknown`,
-            { cause: new AggregateError([error, rollbackError], 'batch delete failed and rollback failed') },
-          )
-          throw this.unusable
-        }
-        throw error
-      }
+      if (keys.length === 0) return
+      this.write(() => {
+        let changes = 0
+        for (const key of new Set(keys)) changes += Number(remove.run(key).changes)
+        return changes
+      }, true)
     })
   }
 
@@ -158,26 +139,38 @@ export class SqliteKvUnit implements KvUnit {
       }
       const statement = this.globalUpsert
       const text = JSON.stringify(value)
-      this.write(() => statement.run(this.descriptor.name, text))
+      this.write(() => statement.run(this.descriptor.name, text).changes)
     })
   }
 
-  /** Commit the current unit stamp with the first mutation; a missing-key delete leaves it unchanged. */
-  private write(operation: () => StatementResultingChanges): void {
-    if (!this.needsVersionStamp) {
+  /** Commit batches and version updates atomically; missing-key deletes leave the stamp unchanged. */
+  private write(operation: () => number | bigint, transactional = false): void {
+    if (!this.needsVersionStamp && !transactional) {
       operation()
       return
     }
     this.db.exec('BEGIN IMMEDIATE')
     try {
-      const changed = operation().changes > 0
-      if (changed) {
+      const changed = operation() > 0
+      if (this.needsVersionStamp && changed) {
         this.db.prepare('UPDATE units SET version = ? WHERE name = ?').run(this.descriptor.version, this.descriptor.name)
       }
       this.db.exec('COMMIT')
-      this.needsVersionStamp = !changed
+      if (changed) this.needsVersionStamp = false
     } catch (error) {
-      if (this.db.isTransaction) this.db.exec('ROLLBACK')
+      if (this.db.isTransaction) {
+        try {
+          this.db.exec('ROLLBACK')
+        } catch (rollbackError) {
+          const failure = new StorageError(
+            'unknown-state',
+            `kv unit '${this.descriptor.name}' write and rollback failed; the backend is unusable and must be closed and reopened`,
+            { cause: new AggregateError([error, rollbackError], 'write and rollback failed', { cause: error }) },
+          )
+          this.onRollbackFailure(failure)
+          throw failure
+        }
+      }
       throw error
     }
   }
@@ -209,7 +202,7 @@ export class SqliteKvUnit implements KvUnit {
     if (this.closed) {
       throw new StorageError('closed', `kv unit '${this.descriptor.name}' is closed`)
     }
-    if (this.unusable !== undefined) throw this.unusable
+    this.ensureBackendUsable()
   }
 
   private statementsFor(table: string): TableStatements {
