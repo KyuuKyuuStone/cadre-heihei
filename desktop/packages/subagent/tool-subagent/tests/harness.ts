@@ -80,7 +80,10 @@ export async function setup(toolConfig: SetupConfig, mockConfig: Partial<mock.Co
   const provider = await mock.mountScriptedProvider(ctx, { name: 'mock', ...mockConfig })
   setupProviders.set(ctx, provider)
   await ctx.plugin(tool, config)
-  const handle = await ctx.agents.create({ sessionId: SessionId(`tool-setup-${++setupAgentCounter}`) })
+  const handle = await ctx.agents.create({
+    sessionId: SessionId(`tool-setup-${++setupAgentCounter}`),
+    ...parentAgentOptions === undefined ? {} : { agentOptions: parentAgentOptions },
+  })
   setupAgents.set(ctx, handle.agent)
   return ctx
 }

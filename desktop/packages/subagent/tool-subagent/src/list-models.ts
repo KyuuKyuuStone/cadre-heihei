@@ -4,6 +4,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type LlmRuntime from '@deepseek-ai/dsh-llm'
 import type { LlmProviderInfo } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
+import { parentAgentOptionsForDelegation } from '@deepseek-ai/dsh-subagent'
+import { subagentModelSelectionPolicy, subagentModelSelectionProjectionDefinition } from './model-selection-state.ts'
 import type { ModelSelectionPolicy } from './model-selection.ts'
 
 interface ListSubagentModelsRequest {
@@ -35,10 +38,20 @@ function modelLine(provider: string, model: { id: string; name: string; descript
 /** Read the requested provider, advertised models, or exact-model efforts. */
 async function listSubagentModels(
   ctx: Context,
-  policy: ModelSelectionPolicy,
+  policy: ModelSelectionPolicy | undefined,
   request: ListSubagentModelsRequest,
-  signal: AbortSignal,
+  exec: ToolRunContext,
 ): Promise<string> {
+  const selectionEnabled = policy !== undefined
+  if (policy === undefined) {
+    if (exec.agent === undefined) throw new Error('list_subagent_models requires a calling agent')
+    const { provider, model } = parentAgentOptionsForDelegation(exec.agent)
+    if (provider === undefined || model === undefined) {
+      throw new Error('cannot discover child LLM routes without a parent provider and model')
+    }
+    policy = { routes: [{ provider, model }] }
+  }
+  const { signal } = exec
   const llm = ctx.get('llm')
   if (llm === undefined) {
     throw new Error('cannot discover child LLM routes because the `llm` service is unavailable')
@@ -55,13 +68,16 @@ async function listSubagentModels(
   }
   if (request.provider.length === 0) throw new Error('`provider` must be non-empty')
   const allowedRoutes = policy.routes.filter(route => route.provider === request.provider)
-  if (allowedRoutes.length === 0) {
+  const [firstRoute] = allowedRoutes
+  if (firstRoute === undefined) {
     throw new Error(`LLM provider "${request.provider}" is not allowed for this Session`)
   }
   const provider = registeredProvider(llm, policy, request.provider)
   if (request.model === undefined) {
-    const models = (await llm.listModels(provider.id))
-      .filter(model => allowedRoutes.some(route => route.model === model.id))
+    const models = selectionEnabled
+      ? (await llm.listModels(provider.id)).filter(model => allowedRoutes.some(route => route.model === model.id))
+      : [await llm.resolveModelInfo(provider.id, firstRoute.model, signal)]
+    signal.throwIfAborted()
     return models.length === 0
       ? `(no advertised models for ${provider.id})`
       : models.map(model => modelLine(provider.id, model)).join('\n')
@@ -79,11 +95,12 @@ async function listSubagentModels(
 }
 
 /**
- * Register `list_subagent_models` for one owning delegation-tool instance.
+ * Register `list_subagent_models` in the owning composition.
+ * Provider listings intersect the catalog with authorization, or resolve only the parent model when selection is disabled.
  * @param ctx - Context whose tool registry owns the fixed discovery definition.
- * @param policy - Route policy captured for this Session.
+ * @param policyFor - Read the calling Session’s authorized routes; undefined restricts discovery to its parent model.
  */
-export function registerListSubagentModels(ctx: Context, policy: ModelSelectionPolicy): void {
+export function registerListSubagentModels(ctx: Context, policyFor: (exec: ToolRunContext) => ModelSelectionPolicy | undefined): void {
   ctx.tools.register(defineTool({
     name: 'list_subagent_models',
     description:
@@ -107,7 +124,25 @@ export function registerListSubagentModels(ctx: Context, policy: ModelSelectionP
       render: (_args, result) => [{ type: 'text', text: result }],
     },
     execute(args, exec) {
-      return listSubagentModels(ctx, policy, args, exec.signal)
+      return listSubagentModels(ctx, policyFor(exec), args, exec)
     },
   }))
+}
+
+/** Shared discovery plugin for all delegation tools in one composition. */
+export const name = 'tool-subagent-list-models'
+/** Services used to register discovery and read durable route policy. */
+export const inject = ['tools', 'sessionProjections']
+
+/**
+ * Register one discovery tool whose results follow the calling Session’s policy.
+ * @param ctx - Owning composition context.
+ */
+export function apply(ctx: Context): void {
+  ctx.sessionProjections.register(subagentModelSelectionProjectionDefinition)
+  registerListSubagentModels(ctx, (exec) => {
+    if (exec.agent === undefined) throw new Error('list_subagent_models requires a calling agent')
+    const routes = subagentModelSelectionPolicy(ctx.sessionProjections, exec.agent.session)
+    return routes === undefined ? undefined : { routes }
+  })
 }

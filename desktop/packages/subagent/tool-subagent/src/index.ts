@@ -192,7 +192,7 @@ export async function apply(ctx: Context, config: Config, session?: Session): Pr
 
   const install = (runtimeCtx: Context, modelSelectionPolicy: ModelSelectionPolicy | undefined): void => {
     const modelSelectionEnabled = modelSelectionPolicy !== undefined
-    if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)
+    if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, () => modelSelectionPolicy)
     // Load order and HMR replacement can change provider availability while
     // this fiber remains active.
     let mounted: { subagentProvider: SubagentProvider; definition: ToolDefinition; disposeTool: () => void } | undefined
