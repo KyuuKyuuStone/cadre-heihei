@@ -91,6 +91,65 @@ describe('read-only', () => {
 describe('workspace-write containment', () => {
   beforeEach(() => boot('workspace-write'))
 
+  it('applies session grants to writes and edits until their plugin unloads', async ({ onTestFinished }) => {
+    onTestFinished(() => ctx.fiber.dispose())
+    const first = Session.create(SessionId('memory-first'))
+    const second = Session.create(SessionId('memory-second'))
+    const path = join(outside, 'memory.txt')
+    const write = async (session: Session, content: string) => fs.writeText(
+      await target(path), content, undefined, undefined, ctx.sandboxPolicy.resolve({ session }),
+    )
+    const edit = async (session: Session) => fs.editText(
+      await target(path), { oldString: 'memory', newString: 'edited', replaceAll: false },
+      undefined, undefined, ctx.sandboxPolicy.resolve({ session }),
+    )
+    await expect(write(first, 'denied')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    const plugin = await ctx.plugin({
+      inject: ['sandboxPolicy'],
+      apply(scope: Context) { scope.sandboxPolicy.registerWritableRoot(first, outside) },
+    })
+    await write(first, 'memory')
+    expect(await readFile(path, 'utf8')).toBe('memory')
+    await expect(write(second, 'other session')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    await expect(edit(second)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    await edit(first)
+    expect(await readFile(path, 'utf8')).toBe('edited')
+    setSandboxMode(first, 'read-only')
+    await expect(write(first, 'read-only')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    await expect(edit(first)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    setSandboxMode(first, 'workspace-write')
+    await write(first, 'updated')
+    await plugin.dispose()
+    await expect(write(first, 'revoked')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    await expect(edit(first)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(await readFile(path, 'utf8')).toBe('updated')
+  })
+
+  it('rejects invalid grants before workspace writes', async () => {
+    const file = join(outside, 'file.txt')
+    await writeFile(file, 'file')
+    const path = join(workspace, 'blocked.txt')
+    for (const invalid of [join(base, 'missing'), file, join(file, 'child')]) {
+      const policy = { mode: 'workspace-write' as const, workspaceRoot: workspace,
+        additionalWritableRoots: [outside, invalid] }
+      await expect(fs.writeText(await target(path), 'blocked', undefined, undefined, policy))
+        .rejects.toMatchObject({ code: 'SANDBOX_INVALID_ROOT' })
+      expect(existsSync(path)).toBe(false)
+    }
+  })
+
+  it('rejects an extra directory replaced by a symlink to an ungranted sibling', async () => {
+    const extra = join(workspace, 'extra')
+    await mkdir(extra)
+    const policy = { mode: 'workspace-write' as const, workspaceRoot: workspace, additionalWritableRoots: [extra] }
+    await fs.writeText(await target(join(extra, 'before.txt')), 'allowed', undefined, undefined, policy)
+    await rm(extra, { recursive: true })
+    await symlink(outside, extra, 'dir')
+    await expect(fs.writeText(await target(join(outside, 'escape.txt')), 'denied', undefined, undefined, policy))
+      .rejects.toMatchObject({ code: 'SANDBOX_INVALID_ROOT' })
+    expect(existsSync(join(outside, 'escape.txt'))).toBe(false)
+  })
+
   it('a write under the workspace lands', async () => {
     const path = join(workspace, 'nested', 'ok.txt')
     const outcome = await fs.writeText(await target(path), 'inside')

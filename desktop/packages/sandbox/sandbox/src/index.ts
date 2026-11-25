@@ -31,8 +31,8 @@ export { canonicalPath, workspaceWritableRoots, writableRoots } from './roots.ts
 
 /**
  * File-effect policy for confined processes. `read-only` permits only required
- * sinks such as `/dev/null`; `workspace-write` also permits the workspace and a
- * backend-defined temp area; `danger-full-access` bypasses confinement. Network
+ * sinks such as `/dev/null`; `workspace-write` also permits the workspace,
+ * explicit extra roots where supported, and backend-defined temp areas; `danger-full-access` bypasses confinement. Network
  * and process visibility are outside this vocabulary.
  */
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
@@ -51,17 +51,18 @@ export interface SandboxExecutionPolicy {
   /** Absolute root directory `workspace-write` may write under. */
   workspaceRoot: string
   /**
-   * Extra absolute directories `workspace-write` may also write under. Absence
-   * means none. The enforcing host canonicalizes each entry; a remote policy
-   * keeps the execution-world spelling until its own helper resolves it. These
-   * grant nothing under `read-only` or `danger-full-access`.
+   * Extra physical absolute directories `workspace-write` may also write under.
+   * Absence means none. The enforcing host rejects missing, non-directory, and
+   * symlinked entries on each call. Remote paths are checked on the remote host.
+   * Windows process confinement ignores these; harness filesystem operations honor them.
+   * These grant nothing under `read-only` or `danger-full-access`.
    */
   additionalWritableRoots?: readonly string[]
   /**
    * Opaque identity of the calling session (the branded `dsh-session`
    * SessionId). Backends key per-session state off it (e.g. windows-acl gives
    * each live session/workspace pair a random private temp directory and SID,
-   * while standing grants are keyed by individual writable directories); absent
+   * while the workspace SID and standing grant remain per-workspace); absent
    * for agentless calls, which fall back to per-call backend state.
    */
   sessionId?: SessionId
