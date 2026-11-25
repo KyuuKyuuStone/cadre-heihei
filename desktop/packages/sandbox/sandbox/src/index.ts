@@ -27,7 +27,7 @@ export type {
   EscalationRequest,
   SandboxEscalationErrorCode,
 } from './escalation.ts'
-export { canonicalPath, writableRoots } from './roots.ts'
+export { canonicalPath, workspaceWritableRoots, writableRoots } from './roots.ts'
 
 /**
  * File-effect policy for confined processes. `read-only` permits only required
@@ -50,6 +50,13 @@ export interface SandboxExecutionPolicy {
   mode: SandboxMode
   /** Absolute root directory `workspace-write` may write under. */
   workspaceRoot: string
+  /**
+   * Extra absolute directories `workspace-write` may also write under. Absence
+   * means none. The enforcing host canonicalizes each entry; a remote policy
+   * keeps the execution-world spelling until its own helper resolves it. These
+   * grant nothing under `read-only` or `danger-full-access`.
+   */
+  additionalWritableRoots?: readonly string[]
   /**
    * Opaque identity of the calling session (the branded `dsh-session`
    * SessionId). Backends key per-session state off it (e.g. windows-acl gives

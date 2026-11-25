@@ -41,15 +41,32 @@ export function canonicalPath(path: string): string {
 }
 
 /**
+ * The workspace-owned writable roots — the policy's workspace root plus its
+ * explicit extra directories, as a canonical, deduplicated allow-list. Both
+ * the workspace and every extra root must be granted together by every
+ * backend; this is the one derivation of that set, kept separate from the
+ * platform temp policy each backend documents for itself (Seatbelt and the fs
+ * fence use {@link writableRoots}; bwrap and Landlock add their own temp
+ * grants).
+ * @param policy - the file-effect policy to derive the allow-list from.
+ * @returns the canonical workspace-owned roots; empty under `read-only`.
+ */
+export function workspaceWritableRoots(policy: SandboxExecutionPolicy): string[] {
+  if (policy.mode !== 'workspace-write') return []
+  return [...new Set([policy.workspaceRoot, ...policy.additionalWritableRoots ?? []].map(canonicalPath))]
+}
+
+/**
  * The roots one confined execution may WRITE under — the mode's meaning as a
  * canonical, deduplicated allow-list. `read-only` allows nothing;
- * `workspace-write` allows the policy's workspace root, the host `/tmp`, and
- * the per-user platform temp dir (`os.tmpdir()` — the real temp area for
- * mkstemp-family tools; omitting it would deny what the mode promises).
+ * `workspace-write` allows the policy's workspace root, its explicit extra
+ * directories, the host `/tmp`, and the per-user platform temp dir
+ * (`os.tmpdir()` — the real temp area for mkstemp-family tools; omitting it
+ * would deny what the mode promises).
  * @param policy - the file-effect policy to derive the allow-list from.
  * @returns the canonical writable roots; empty exactly under `read-only`.
  */
 export function writableRoots(policy: SandboxExecutionPolicy): string[] {
   if (policy.mode !== 'workspace-write') return []
-  return [...new Set([policy.workspaceRoot, '/tmp', tmpdir()].map(canonicalPath))]
+  return [...new Set([...workspaceWritableRoots(policy), '/tmp', tmpdir()].map(canonicalPath))]
 }
