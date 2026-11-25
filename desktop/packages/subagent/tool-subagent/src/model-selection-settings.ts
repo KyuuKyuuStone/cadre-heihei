@@ -2,12 +2,14 @@
 import type { Volatile } from '@deepseek-ai/cordis'
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import { SessionSeq } from '@deepseek-ai/dsh-session'
 import z from '@deepseek-ai/schemastery'
 import {
   AllowedModelRouteSchema,
   assertAllowedModelRoutes,
   type AllowedModelRoute,
 } from './model-selection.ts'
+import { subagentModelSelectionPolicy, subagentModelSelectionProjectionDefinition } from './model-selection-state.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -34,6 +36,7 @@ export interface Config {
 
 /** Singleton settings owner read when delegation tools are composed for a Session. */
 export class SubagentModelSelectionConfig extends Service {
+  static inject = ['sessionProjections', 'sessions']
   static Config = z.object({
     enabled: z.boolean().default(false).volatile(),
     allowedModels: z.array(AllowedModelRouteSchema).default([]).volatile(),
@@ -41,6 +44,30 @@ export class SubagentModelSelectionConfig extends Service {
 
   constructor(ctx: Context, private config: Config) {
     super(ctx, 'subagentModelSelection')
+  }
+
+  protected async [Service.init](): Promise<void> {
+    const ctx = this.ctx
+    const policyReady = ctx.sessionProjections.register(subagentModelSelectionProjectionDefinition)
+    ctx.on('agent/created', async ({ agent }) => {
+      await policyReady
+      ctx.fiber.assertActive()
+      const target = agent.session
+      if (subagentModelSelectionPolicy(ctx.sessionProjections, target) !== undefined) return
+      let allowedModels: AllowedModelRoute[] | undefined
+      const parentId = target.header.origin === 'subagent' ? target.header.parentSession : undefined
+      if (parentId !== undefined) {
+        const parent = ctx.sessions.get(parentId)
+        if (parent !== undefined) allowedModels = subagentModelSelectionPolicy(ctx.sessionProjections, parent)
+      } else if (target.firstLiveSeq === 0
+        // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
+        && target.eventAt(SessionSeq(0))?.type !== 'session/end-seed') {
+        const current = this.current()
+        allowedModels = current.enabled ? current.allowedModels : undefined
+      }
+      if (allowedModels !== undefined) target.append('subagent/model-selection-policy', { allowedModels })
+    })
+    await policyReady
   }
 
   /**
