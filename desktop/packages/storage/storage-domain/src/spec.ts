@@ -48,10 +48,10 @@ export interface DomainSpec {
   /**
    * Older domain versions whose stored records the current record schemas
    * also accept (the declaring owner vouches for that, typically by
-   * declaring the fields older records lack as optional). `per-record` backends
-   * read documents stamped with a listed version instead of discarding them,
-   * and accept a legacy whole-unit file so stamped for the one-time
-   * bootstrap; writes always stamp {@link version}.
+   * declaring the fields older records lack as optional). Ordinary reads admit
+   * listed versions without restamping saved data; writes stamp {@link version}
+   * while leaving untouched records as saved. Current schemas must therefore
+   * accept mixed generations even under the current unit stamp.
    */
   readonly compatibleVersions?: readonly number[]
   /**

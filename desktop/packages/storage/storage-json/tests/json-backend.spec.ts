@@ -439,13 +439,18 @@ describe('per-record layout', () => {
     const compat = { ...descriptor, compatibleVersions: [1] }
     await mkdir(join(root, 'recs', 't'), { recursive: true })
     await writeFile(recordPath(root, 'oldrec'), JSON.stringify({ version: 1, record: { v: 'old' } }), 'utf8')
+    const untouched = JSON.stringify({ version: 1, record: { v: 'keep' } })
+    await writeFile(recordPath(root, 'untouched'), untouched, 'utf8')
     await writeFile(recordPath(root, 'ancient'), JSON.stringify({ version: 0, record: { v: 'no' } }), 'utf8')
     const unit = await backend.kv.open(compat)
     // Version 1 is declared compat and served; version 0 is not and discards.
-    expect(await unit.loadAll()).toEqual({ tables: { t: { oldrec: { v: 'old' } } }, global: null })
+    expect(await unit.loadAll()).toEqual({ tables: { t: { oldrec: { v: 'old' }, untouched: { v: 'keep' } } }, global: null })
+    expect(JSON.parse(await readFile(recordPath(root, 'oldrec'), 'utf8')))
+      .toEqual({ version: 1, record: { v: 'old' } })
     await unit.putRecord('t', 'oldrec', { v: 'new' })
     expect(JSON.parse(await readFile(recordPath(root, 'oldrec'), 'utf8')))
       .toEqual({ version: 2, record: { v: 'new' } })
+    expect(await readFile(recordPath(root, 'untouched'), 'utf8')).toBe(untouched)
     await backend.close()
   })
 

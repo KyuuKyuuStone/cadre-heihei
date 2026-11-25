@@ -32,8 +32,9 @@ export interface KvFacet {
    * Open one unit, creating it when the medium holds no trace of it yet
    * (materialization may defer to the first write, but {@link KvUnit.loadAll}
    * must immediately serve the empty shape). A version already stamped on the
-   * medium that differs from `descriptor.version` rejects with
-   * `version-mismatch`; a medium that cannot be parsed as this unit rejects
+   * medium outside `descriptor.version` and `compatibleVersions` rejects with
+   * `version-mismatch` with unit-wide checks; an unaccepted per-record document
+   * reads as absent. A medium that cannot be parsed as this unit rejects
    * with `malformed-medium`. Opening the same unit name twice without closing
    * is a caller bug and rejects.
    * @param descriptor - Static identity and shape of the unit to open.
@@ -46,7 +47,7 @@ export interface KvFacet {
 export interface KvUnitDescriptor {
   /** Unit name; must match {@link UNIT_NAME_RE}. Also the file-name / SQL-identifier segment. */
   readonly name: string
-  /** Unit format version; a non-negative integer stamped on the medium at first materialization. */
+  /** Current unit format version; a non-negative integer stamped on durable writes. */
   readonly version: number
   /** Table names; each must match {@link UNIT_NAME_RE}. */
   readonly tables: readonly string[]
@@ -63,12 +64,12 @@ export interface KvUnitDescriptor {
   readonly layout?: 'single' | 'per-record'
   /**
    * Older unit versions whose stored records are also readable under the
-   * declaring owner's current record schemas (the owner vouches for that —
-   * typically by declaring the fields old records lack as optional). Reads of
-   * a `per-record` unit accept documents stamped with any listed version, and
-   * the legacy whole-unit bootstrap accepts a legacy file stamped with one;
-   * writes always stamp {@link version}. `single`-layout reads stay
-   * exact-version.
+   * declaring owner's current schemas (the owner vouches for that —
+   * typically by declaring the fields old records lack as optional). Both
+   * layouts accept listed versions without restamping ordinary reads. The
+   * next mutation atomically stamps {@link version} with its data; untouched records keep
+   * their saved values, so the current schemas must accept mixed generations.
+   * The legacy per-record bootstrap also accepts listed versions.
    */
   readonly compatibleVersions?: readonly number[]
 }
@@ -102,7 +103,8 @@ export interface KvUnit {
   putRecord(table: string, key: string, value: unknown): Promise<void>
 
   /**
-   * Delete one record durably. Idempotent: a missing key is a no-op.
+   * Delete one record durably. Idempotent: a missing key is a no-op and does
+   * not advance the version stamp.
    * @param table - Declared table name.
    * @param key - Record key.
    * @returns resolution after durability.

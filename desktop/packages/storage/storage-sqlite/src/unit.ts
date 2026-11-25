@@ -1,13 +1,13 @@
 /**
  * One opened SQLite KV unit: prepared per-table statements over the
  * `u_<unit>_<table>` record tables plus this unit's row in the shared
- * `unit_globals` table. Each primitive is a single statement, so atomicity
- * comes from SQLite itself — no explicit transactions, and no write queue
- * (write ordering is the caller's responsibility per the KV contract).
+* `unit_globals` table. The first mutation of an accepted older version commits
+ * its data and current version stamp in one transaction. Other writes remain
+ * single statements; write ordering belongs to the caller per the KV contract.
  * @module @deepseek-ai/dsh-storage-sqlite/unit
  */
 
-import type { DatabaseSync, StatementSync } from 'node:sqlite'
+import type { DatabaseSync, StatementResultingChanges, StatementSync } from 'node:sqlite'
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnit, KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import { recordTableName } from './schema.ts'
@@ -28,18 +28,22 @@ export class SqliteKvUnit implements KvUnit {
   private readonly tables = new Map<string, TableStatements>()
   private readonly globalUpsert: StatementSync | undefined
   private readonly globalSelect: StatementSync | undefined
+  private needsVersionStamp: boolean
   private closed = false
 
   /**
    * @param db - Open database handle owned by the backend (never closed here).
    * @param descriptor - Validated descriptor whose record tables already exist.
+   * @param storedVersion - Accepted unit version currently saved on the medium.
    * @param onClose - Backend callback releasing this unit's open-name slot.
    */
   constructor(
-    db: DatabaseSync,
+    private readonly db: DatabaseSync,
     private readonly descriptor: KvUnitDescriptor,
+    storedVersion: number,
     private readonly onClose: () => void,
   ) {
+    this.needsVersionStamp = storedVersion !== descriptor.version
     for (const table of descriptor.tables) {
       // Both name segments are validated against UNIT_NAME_RE by the backend,
       // so the physical identifier is safe to interpolate into statement text.
@@ -98,13 +102,16 @@ export class SqliteKvUnit implements KvUnit {
 
   putRecord(table: string, key: string, value: unknown): Promise<void> {
     return this.settle(() => {
-      this.statementsFor(table).upsert.run(key, JSON.stringify(value))
+      const statement = this.statementsFor(table).upsert
+      const text = JSON.stringify(value)
+      this.write(() => statement.run(key, text))
     })
   }
 
   deleteRecord(table: string, key: string): Promise<void> {
     return this.settle(() => {
-      this.statementsFor(table).remove.run(key)
+      const statement = this.statementsFor(table).remove
+      this.write(() => statement.run(key))
     })
   }
 
@@ -113,8 +120,30 @@ export class SqliteKvUnit implements KvUnit {
       if (this.globalUpsert === undefined) {
         throw new Error(`kv unit '${this.descriptor.name}' declared no global slot`)
       }
-      this.globalUpsert.run(this.descriptor.name, JSON.stringify(value))
+      const statement = this.globalUpsert
+      const text = JSON.stringify(value)
+      this.write(() => statement.run(this.descriptor.name, text))
     })
+  }
+
+  /** Commit the current unit stamp with the first mutation; a missing-key delete leaves it unchanged. */
+  private write(operation: () => StatementResultingChanges): void {
+    if (!this.needsVersionStamp) {
+      operation()
+      return
+    }
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      const changed = operation().changes > 0
+      if (changed) {
+        this.db.prepare('UPDATE units SET version = ? WHERE name = ?').run(this.descriptor.version, this.descriptor.name)
+      }
+      this.db.exec('COMMIT')
+      this.needsVersionStamp = !changed
+    } catch (error) {
+      if (this.db.isTransaction) this.db.exec('ROLLBACK')
+      throw error
+    }
   }
 
   close(): Promise<void> {

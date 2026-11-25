@@ -46,6 +46,8 @@ export async function openSingleUnit(
         tables: new Map(descriptor.tables.map(table => [table, new Map<string, unknown>()])),
       }
       : parse(text, descriptor)
+  // Opening leaves the file untouched; the next atomic publish uses the current stamp.
+  state.version = descriptor.version
   return new SingleJsonUnit(descriptor, path, state, onClose)
 }
 

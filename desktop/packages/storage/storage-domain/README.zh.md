@@ -145,7 +145,7 @@ domain.table('workspaces').update(id, (r) => ({ ...r, path: newPath }))
 
 - **变更只在单进程内可见**——`domain/changed` 是进程内事件；在跨进程修订模式落地前，第二个主机进程或重新连接的 GUI 无法观察变更（[Agent Note](../../../.agents/notes/proposed/architecture/2026-07-24-domain-kv-storage-and-workspace.zh.md)）。
 - **没有跨表事务、二级索引或多段键**——每次写入只触碰一条记录；这些扩展列在 Agent Note 的范围外清单中。
-- **没有数据迁移**——领域的已存版本与 spec 不同时，打开操作会被拒绝（`version-mismatch`）；修改 schema 需要手工迁移已存数据。
+- **没有不兼容值迁移执行器**——当前 schema 可通过 `compatibleVersions` 接受旧版本，写入使用当前版本，读取保持原状。其他版本在打开时拒绝（`version-mismatch`）；升级与移除旧读取器参阅[领域版本](../../../docs/subsystems/storage.zh.md#domain-versioning)。
 
 <a id="dev-note"></a>
 ### 开发备注

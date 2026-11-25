@@ -12,11 +12,17 @@ import { Config, SqliteStorageBackend, STORAGE_SQLITE_SCHEMA_VERSION } from '../
 
 /** Mirror the loader: resolve schemastery defaults before construction. */
 function backendAt(path: string): SqliteStorageBackend {
-  return new SqliteStorageBackend(new Config({ path }))
+  const backend = new SqliteStorageBackend(new Config({ path }))
+  backends.push(backend)
+  return backend
 }
 
+const backends: SqliteStorageBackend[] = []
 const dirs: string[] = []
-afterEach(async () => { for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true }) })
+afterEach(async () => {
+  for (const backend of backends.splice(0)) await backend.close()
+  for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true })
+})
 
 async function freshDbPath(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-storage-sqlite-'))
@@ -84,6 +90,34 @@ describe('sqlite backend specifics', () => {
       code: 'version-mismatch',
     })
     await backend.close()
+  })
+
+  it.each(['ABORT', 'ROLLBACK'])('preserves data and stamp on %s during the first version update, then retries', async (action) => {
+    const path = await freshDbPath()
+    const first = backendAt(path)
+    await (await first.kv.open(DESCRIPTOR)).putRecord('records', 'saved', { n: 1 })
+    await first.close()
+
+    const observer = new DatabaseSync(path)
+    const backend = backendAt(path)
+    try {
+      const physicalVersion = observer.prepare('PRAGMA user_version').get()
+      observer.exec(`CREATE TRIGGER reject_unit_version BEFORE UPDATE ON units BEGIN SELECT RAISE(${action}, 'version write failed'); END`)
+      const unit = await backend.kv.open({ ...DESCRIPTOR, version: 2, compatibleVersions: [1] })
+      const savedVersion = () => observer.prepare('SELECT version FROM units WHERE name = ?').get(DESCRIPTOR.name)
+      expect(savedVersion()).toEqual({ version: 1 })
+      await expect(unit.putRecord('records', 'new', { n: 2 })).rejects.toThrow('version write failed')
+      expect(savedVersion()).toEqual({ version: 1 })
+      expect((await unit.loadAll()).tables['records']).toEqual({ saved: { n: 1 } })
+      observer.exec('DROP TRIGGER reject_unit_version')
+      await unit.putRecord('records', 'new', { n: 2 })
+      expect(savedVersion()).toEqual({ version: 2 })
+      expect(observer.prepare('PRAGMA user_version').get()).toEqual(physicalVersion)
+      expect((await unit.loadAll()).tables['records']).toEqual({ saved: { n: 1 }, new: { n: 2 } })
+    } finally {
+      await backend.close()
+      observer.close()
+    }
   })
 
   it('rejects invalid unit and table names before touching the medium', async () => {
