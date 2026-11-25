@@ -7,10 +7,17 @@
   "include": ["src"],
   "references": [
     {
+      "path": "../../util/error"
+    },
+  
+    {
       "path": "../../../vendor/cordis"
     },
     {
       "path": "../../util/lazy-require"
+    },
+    {
+      "path": "../../llm/llm"
     }
   ]
 }

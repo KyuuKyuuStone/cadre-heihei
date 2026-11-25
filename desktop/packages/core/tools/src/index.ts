@@ -10,7 +10,7 @@ import z from '@deepseek-ai/schemastery'
 import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
 import type { ToolCallId, ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { HarnessError } from '@deepseek-ai/dsh-error'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -103,6 +103,15 @@ export {
 export type { PtcDispatchEventData, PtcDispatchStartEventData } from './types.ts'
 
 export { CodeRunFailedError, RUN_CODE_NAME } from './ptc.ts'
+export { ToolContextUnavailableError } from './contracts.ts'
+export {
+  APPROVAL_CANCELLED,
+  APPROVAL_ERROR_NAME,
+  APPROVAL_REJECTED,
+  APPROVAL_UNAVAILABLE,
+  TOOL_CONTEXT_UNAVAILABLE,
+  type ApprovalErrorCode,
+} from './error-codes.ts'
 export { jsonSchemaToTs, renderToolsSdk } from './ts-types.ts'
 export { jsonSchemaToPy, renderToolsSdkPy } from './py-types.ts'
 export { defineContentToolFixture, type ContentToolFixtureOptions } from './testing.ts'
@@ -1592,7 +1601,12 @@ export class ToolRuntime extends Service {
         ? toolAbortedResult(result)
         : result
     } catch (error: unknown) {
-      return toolErrorResult(error)
+      // A body that rethrows this call's own cancellation reason did not fail on
+      // its own terms: record the canonical aborted result instead of the raw
+      // reason, so replay and the transcript keep the cancellation class.
+      return signal.aborted && error === signal.reason
+        ? toolAbortedResult()
+        : toolErrorResult(error)
     } finally {
       fused.dispose()
       exec.signal = wrapperSignal

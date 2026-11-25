@@ -9,6 +9,10 @@
   ],
   "references": [
     {
+      "path": "../../util/error"
+    },
+  
+    {
       "path": "../../../vendor/cosmokit"
     },
     {
@@ -16,6 +20,9 @@
     },
     {
       "path": "../../core/agent"
+    },
+    {
+      "path": "../../llm/llm"
     },
     {
       "path": "../../util/brand"
