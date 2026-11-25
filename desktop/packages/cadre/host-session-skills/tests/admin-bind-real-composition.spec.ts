@@ -346,6 +346,8 @@ test('a real session-list failure answers HTTP 503, keeps the binding, and recov
   expect((recovered.result as { sessionId: string }).sessionId).toBe(sessionId)
 })
 
+// Boots the real composition and its webserver; a cold CI runner exceeds the 5000 ms default
+// (run 45541336944).
 test('the real webserver answers a non-POST bind-session call with 405', async () => {
   seedLedger(paths.ledgerPath, SEED)
   context = await bootComposition({
@@ -356,5 +358,5 @@ test('the real webserver answers a non-POST bind-session call with 405', async (
   const origin = await bindOrigin(context)
   const response = await fetch(`${origin}${BIND}`, { method: 'GET' })
   expect(response.status).toBe(405)
-})
+}, 30_000)
 

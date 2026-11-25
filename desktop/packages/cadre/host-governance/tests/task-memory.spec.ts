@@ -357,6 +357,8 @@ describe('task memory', () => {
     }
   })
 
+  // The attempt loop settles a real compaction controller per attempt over a temp ledger;
+  // a cold CI runner exceeds the 5000 ms default (run 45541336944).
   it('stops retrying a permanently failing archive after the per-archive attempt cap', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
@@ -372,13 +374,14 @@ describe('task memory', () => {
     } finally {
       warning.mockRestore()
     }
-  })
+  }, 30_000)
 
+  // Mounts the plugin boundary, which builds a temp SQLite ledger on a cold runner.
   it('registers task memory through an optional systemPrompt service', () => {
     const mounted = mountCompaction({}, { systemPrompt: true })
     expect(mounted.promptSections.map(section => section.name)).toEqual(['cadre/task-memory'])
     expect(mounted.promptSections[0]?.text({ scope: { session: { id: 'sup' } } })).toContain('已完成任务')
-  })
+  }, 30_000)
 
   it('exposes the latest archive marker used by the compaction trigger', () => {
     const reader = new TaskMemoryReader(seed())
@@ -390,6 +393,7 @@ describe('task memory', () => {
     }
   })
 
+  // Rebuilds the store over a seeded temp ledger and opens SQLite twice on a cold runner.
   it('adds task_memory to an existing ledger without dropping rows', () => {
     const path = seed()
     const raw = new DatabaseSync(path)
@@ -407,5 +411,5 @@ describe('task memory', () => {
     } finally {
       check.close()
     }
-  })
+  }, 30_000)
 })

@@ -641,6 +641,8 @@ describe('host-governance current-task cancellation REAL composition', () => {
     console.log('COMPENSATION same_task_replacement=turn2 retry=success lateTargetInput=removed unrelatedQueue=preserved ledger_cancel_events=1')
   })
 
+  // Loads the real composition twice (the preflight and the retried turn); a cold CI runner
+  // exceeds the 5000 ms default (run 45541336944).
   it('completes a retry after the original turn ends without redirecting to its replacement', async () => {
     const mounted = await loadComposition({ failControllerCancel: true })
     const view = await taskView(mounted)
@@ -664,5 +666,5 @@ describe('host-governance current-task cancellation REAL composition', () => {
     expect(taskRow(mounted, 't2')).toEqual({ status: 'in_progress', version: 1 })
     expect(cancellationEventCount(mounted, 't1')).toBe(1)
     console.log('COMPENSATION original_turn=ended replacement_turn=2 replacement_cancel=0 ledger_cancel_events=1')
-  })
+  }, 30_000)
 })

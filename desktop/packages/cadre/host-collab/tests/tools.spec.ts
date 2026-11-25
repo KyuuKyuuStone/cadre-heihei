@@ -531,6 +531,8 @@ describe('terminal task notification (P0-1)', () => {
     { status: 'failed', reason: '构建失败', header: '【任务关闭】', snapshot: 'transition-notice-failed.txt' },
   ] as const
 
+  // Every iteration mounts a fresh tool composition over a temp SQLite ledger; a cold CI
+  // runner exceeds the 5000 ms default, so the ceiling is per iteration.
   for (const item of cases) {
     it(`queues ${item.header} to the assignee once for ${item.status}`, async () => {
       const databasePath = freshDatabase()
@@ -555,7 +557,7 @@ describe('terminal task notification (P0-1)', () => {
       expect(replay.replayed).toBe(true)
       expect(replay.assigneeNotified).toBeUndefined()
       expect(prompts).toHaveLength(1)
-    })
+    }, 30_000)
 
     it(`keeps the ${item.status} transition when the notice fails`, async () => {
       const databasePath = freshDatabase()
@@ -571,7 +573,7 @@ describe('terminal task notification (P0-1)', () => {
       expect(result).toMatchObject({ status: item.status, assigneeNotified: false })
       expect(result.notifyError).toContain('session offline')
       expect(countEvents(databasePath, 't1', item.status)).toBe(1)
-    })
+    }, 30_000)
   }
 })
 
@@ -582,6 +584,7 @@ describe('terminal task report refusal (P0-1)', () => {
     { status: 'failed', reason: '构建失败', snapshot: 'report-terminal-failed.txt' },
   ] as const
 
+  // Same per-iteration cost as the notification loop above: a fresh ledger plus composition.
   for (const item of cases) {
     it(`returns readable copy for a ${item.status} task`, async () => {
       const databasePath = freshDatabase()
@@ -600,7 +603,7 @@ describe('terminal task report refusal (P0-1)', () => {
       expect(message).not.toContain('INVALID_TRANSITION')
       expect(message).toContain('无需再回报')
       await expect(`${message}\n`).toMatchFileSnapshot(`./expected/${item.snapshot}`)
-    })
+    }, 30_000)
   }
 })
 
