@@ -140,6 +140,29 @@ function format(name: string, phase: string, gate: string, result: ReturnType<ty
   ].join('\n')
 }
 
+/** 输出不超过该行数时原样回显，超过则只列尾部。 */
+const SURFACE_FULL_LINES = 400
+const SURFACE_TAIL_LINES = 200
+
+/**
+ * 两态判定不符时回显该次门禁输出。
+ * evidence 文件落在 gitignore 的 scripts/gates/evidence/ 且 CI 不上传，只写文件会让 job log
+ * 只剩一行判定，失败用例名与报错原文不可考；这里把输出原样交给 CI 日志（判定与退出码不变）。
+ */
+function surfaceUnexpected(name: string, phase: string, gate: string, result: ReturnType<typeof run>) {
+  const lines = `${result.stdout}\n${result.stderr}`.trimEnd().split(/\r?\n/)
+  console.error(
+    `[evidence] ${name} phase=${phase} UNEXPECTED: command=node ${gate} exitCode=${result.exitCode} capturedLines=${lines.length}`,
+  )
+  if (lines.length <= SURFACE_FULL_LINES) {
+    for (const line of lines) console.error(line)
+  } else {
+    console.error(`[evidence] ${name} phase=${phase} UNEXPECTED: 输出超 ${SURFACE_FULL_LINES} 行，只列末尾 ${SURFACE_TAIL_LINES} 行（共 ${lines.length} 行）`)
+    for (const line of lines.slice(-SURFACE_TAIL_LINES)) console.error(line)
+  }
+  console.error(`[evidence] ${name} phase=${phase} UNEXPECTED: --- end of captured gate output ---`)
+}
+
 const summary: Array<{
   name: string
   description: string
@@ -209,6 +232,7 @@ for (const c of CASES) {
       const allowPath = join(EVIDENCE_DIR, `${c.name}-allow.txt`)
       writeFileSync(allowPath, format(c.name, 'allow', c.gate, allow), 'utf8')
       console.log(`[evidence] ${c.name}: allow exit=${allow.exitCode} ${greenExpected ? 'OK' : 'UNEXPECTED'} (${c.description})`)
+      if (!greenExpected) surfaceUnexpected(c.name, 'allow', c.gate, allow)
       summary.push({
         name: c.name,
         description: c.description,
@@ -249,6 +273,8 @@ for (const c of CASES) {
   writeFileSync(greenPath, format(c.name, 'green', c.gate, green), 'utf8')
 
   console.log(`[evidence] ${c.name}: red exit=${red.exitCode} ${redExpected ? 'OK' : 'UNEXPECTED'}; green exit=${green.exitCode} ${greenExpected ? 'OK' : 'UNEXPECTED'} (${c.description})`)
+  if (!redExpected) surfaceUnexpected(c.name, 'red', c.gate, red)
+  if (!greenExpected) surfaceUnexpected(c.name, 'green', c.gate, green)
   summary.push({
     name: c.name,
     description: c.description,
