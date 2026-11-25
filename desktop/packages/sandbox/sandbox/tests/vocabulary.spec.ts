@@ -7,8 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
-import { SANDBOX_PREPARATION_ERROR_CODES, SANDBOX_UNAVAILABLE, SandboxPreparationError, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
+import { SANDBOX_UNAVAILABLE, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 
 describe('SandboxUnavailableError', () => {
   it('carries the structured { name, code } identity consumers key on', () => {

@@ -159,38 +159,6 @@ export class SandboxUnavailableError extends HarnessError {
   }
 }
 
-/**
- * Every {@link SandboxPreparationError} code:
- * - `SANDBOX_PREPARATION_FAILED` — the provider could not set up host state the confined process needs, such as a
- *   Windows ACL grant or a private temp directory; `cause` holds the platform failure.
- * - `SANDBOX_INVALID_TEMP_ROOT` — the host temp root lies inside the workspace, so a private temp directory would
- *   inherit the workspace grant; move the temp root or the workspace.
- */
-export const SANDBOX_PREPARATION_ERROR_CODES = ['SANDBOX_PREPARATION_FAILED', 'SANDBOX_INVALID_TEMP_ROOT'] as const
-
-/** One code from {@link SANDBOX_PREPARATION_ERROR_CODES}. */
-export type SandboxPreparationErrorCode = typeof SANDBOX_PREPARATION_ERROR_CODES[number]
-
-/**
- * Thrown by {@link SandboxProvider.confine} when host preparation for an
- * enforceable mode fails. The provider rolls back what it prepared before
- * throwing, and the command never runs.
- */
-export class SandboxPreparationError extends HarnessError {
-  override readonly code: SandboxPreparationErrorCode
-
-  /**
-   * @param message - names the preparation step and the safe next step.
-   * @param code - the failure class consumers route on.
-   * @param options - the platform failure, or an `AggregateError` with the cleanup failures, as `cause`.
-   */
-  constructor(message: string, code: SandboxPreparationErrorCode, options?: ErrorOptions) {
-    super(message, code, options)
-    this.name = 'SandboxPreparationError'
-    this.code = code
-  }
-}
-
 declare module '@deepseek-ai/cordis' {
   interface Context {
     sandbox: SandboxProvider

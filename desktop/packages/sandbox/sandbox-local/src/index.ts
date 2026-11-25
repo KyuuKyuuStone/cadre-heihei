@@ -28,30 +28,12 @@ import {
 } from '@deepseek-ai/node-addon-system/landlock-run'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { SandboxPreparationError, SandboxProvider, SandboxUnavailableError, canonicalPath, workspaceWritableRoots } from '@deepseek-ai/dsh-sandbox'
+import { SandboxProvider, SandboxUnavailableError, canonicalPath, workspaceWritableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnforcement, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { AclWriteGrant, assertPrivateTempDisjoint, assertTempRootOutsideWorkspace, registerAclDiagnosisSkill, tempWriteSid, directoryWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from './profiles.ts'
-
-/**
- * Classify one failed Windows ACL preparation step; the platform failure, or an
- * `AggregateError` of it and its cleanup failures, becomes the `cause`.
- * @param step - the preparation step, as the message names it.
- * @param error - the step's own failure, typically a `Win32Error` or Node errno error.
- * @param cleanupFailures - rollback failures that followed it.
- * @returns the coded preparation failure.
- */
-function aclPreparationFailure(step: string, error: unknown, cleanupFailures: readonly unknown[] = []): SandboxPreparationError {
-  const failed = cleanupFailures.length === 0 ? `${step} failed` : `${step} failed and its cleanup also failed`
-  return new SandboxPreparationError(
-    `sandbox-local: windows-acl ${failed}: ${String(error)}. The command did not run; `
-    + 'check that the current user can change permissions on the workspace and temp directories, or run with danger-full-access.',
-    'SANDBOX_PREPARATION_FAILED',
-    { cause: cleanupFailures.length === 0 ? error : new AggregateError([error, ...cleanupFailures], `sandbox-local windows-acl ${failed}`) },
-  )
-}
 
 /** Plugin config. All optional — `static Config` supplies the defaults. */
 export interface Config {
@@ -256,7 +238,7 @@ const RUNNER_FAILURE_RULES = {
 /**
  * Local process-sandbox provider. Registers as `ctx.sandbox`. Caches the
  * chain verdict and, on the windows-acl rung, the write grants
- * ({@link AclWriteGrant}: standing grants per writable-directory set
+ * ({@link AclWriteGrant}: standing grants per writable directory
  * and the revocable private-temp grant per live session/workspace pair, the
  * latter revoked on provider dispose); the one-time probes spawn nothing
  * else.
@@ -427,12 +409,7 @@ export class LocalSandboxProvider extends SandboxProvider {
       this.directoryGrants.set(root, directoryGrant)
     }
     if (existing !== undefined) return existing
-    let tempDir: string
-    try {
-      tempDir = mkdtempSync(join(tmpdir(), 'dsh-'))
-    } catch (error) {
-      throw aclPreparationFailure('private temp directory creation', error)
-    }
+    const tempDir = mkdtempSync(join(tmpdir(), 'dsh-'))
     const tempSid = tempWriteSid(tempDir)
     let grant: AclWriteGrant | undefined
     try {
@@ -452,7 +429,10 @@ export class LocalSandboxProvider extends SandboxProvider {
       } catch (cleanupError) {
         cleanupFailures.push(cleanupError)
       }
-      throw aclPreparationFailure('temp grant materialization', error, cleanupFailures)
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError([error, ...cleanupFailures], 'sandbox-local windows-acl temp grant materialization failed and its cleanup also failed')
+      }
+      throw error
     }
     const capability = { dir: tempDir, writeSid: tempSid, grant }
     this.tempCapabilities.set(key, capability)
