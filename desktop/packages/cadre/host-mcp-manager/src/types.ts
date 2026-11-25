@@ -26,7 +26,7 @@ export interface McpServerManifest {
   readonly id: string
   readonly name: string
   readonly description?: string
-  readonly descriptionI18n?: Readonly<Record<string, string>>
+  readonly descriptionI18n?: { readonly zh?: string; readonly en?: string }
   readonly transport: McpTransport
   readonly command?: string
   readonly args?: readonly string[]
@@ -91,8 +91,14 @@ export interface McpCatalogResult {
   readonly health: readonly McpHealthRow[]
 }
 
+/** One selected server as `get` projects it: the stored entry plus its catalog description. */
+export interface McpSelectionViewEntry extends McpSelectionEntry {
+  /** Description localized for the caller's locale; absent when the catalog dropped the id. */
+  readonly localizedDescription?: string
+}
+
 /** The selection a session persists, as the sidebar reads it back. */
-export interface McpSelectionView { readonly servers: readonly McpSelectionEntry[] }
+export interface McpSelectionView { readonly servers: readonly McpSelectionViewEntry[] }
 
 /** Structured failure codes the routes return beside the message and remediation. */
 export type McpErrorCode =
@@ -121,6 +127,7 @@ export interface McpGetInput {
   readonly projectId: string
   readonly actorSessionId: string
   readonly targetSessionId: string
+  readonly locale?: string
 }
 
 /** `set` input; `servers` stays `unknown` because it crosses the wire. */

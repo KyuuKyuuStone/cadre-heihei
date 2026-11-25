@@ -37,6 +37,26 @@ export function isSecretName(name: string): boolean {
   return SECRET_NAME_PATTERN.test(name)
 }
 
+function parseDescriptionI18n(value: unknown): { readonly zh?: string; readonly en?: string } | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const normalized: { zh?: string; en?: string } = {}
+  if (typeof record.zh === 'string' && record.zh.trim() !== '') normalized.zh = record.zh
+  if (typeof record.en === 'string' && record.en.trim() !== '') normalized.en = record.en
+  return normalized.zh === undefined && normalized.en === undefined ? undefined : normalized
+}
+
+/**
+ * Pick the description one locale should read, mirroring the skill catalog's chain.
+ * @param manifest - catalog entry carrying `description` and optional `descriptionI18n`.
+ * @param locale - caller locale; anything not starting with `zh` selects English.
+ * @returns the localized string, else the base description, else an empty string.
+ */
+export function localizedDescription(manifest: McpServerManifest, locale: string | undefined): string {
+  const language = locale?.toLowerCase().startsWith('zh') === true ? 'zh' : 'en'
+  return manifest.descriptionI18n?.[language] ?? manifest.description ?? ''
+}
+
 function invalid(message: string, remediation: string): never {
   throw new McpError('MCP_INVALID', 400, message, remediation)
 }
@@ -112,6 +132,7 @@ export function parseManifest(raw: unknown, fallbackId: string): McpServerManife
   const headers = assertConfigValues('headers', source.headers)
   const toolCallTimeoutMs = assertPositive(source.toolCallTimeoutMs, 'toolCallTimeoutMs')
   const reconnect = parseReconnect(source.reconnect)
+  const descriptionI18n = parseDescriptionI18n(source.descriptionI18n)
 
   if (transport === 'stdio') {
     if (typeof source.command !== 'string' || source.command === '') {
@@ -134,9 +155,7 @@ export function parseManifest(raw: unknown, fallbackId: string): McpServerManife
     ...(toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs }),
     ...(reconnect === undefined ? {} : { reconnect }),
     tags,
-    ...(typeof source.descriptionI18n === 'object' && source.descriptionI18n !== null
-      ? { descriptionI18n: source.descriptionI18n as Record<string, string> }
-      : {}),
+    ...(descriptionI18n === undefined ? {} : { descriptionI18n }),
     ...(typeof source.author === 'string' ? { author: source.author } : {}),
     ...(typeof source.homepage === 'string' ? { homepage: source.homepage } : {}),
     ...(typeof source.license === 'string' ? { license: source.license } : {}),

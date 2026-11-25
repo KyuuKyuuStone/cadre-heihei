@@ -118,6 +118,7 @@ function registerRoutes(scope: unknown, deps: McpIpcDeps): void {
     projectId: required(body, 'projectId'),
     actorSessionId: required(body, 'actorSessionId'),
     targetSessionId: required(body, 'targetSessionId'),
+    ...(typeof body.locale === 'string' ? { locale: body.locale } : {}),
   }))
   route('/cadre/mcp/set', body => api.set({
     projectId: required(body, 'projectId'),

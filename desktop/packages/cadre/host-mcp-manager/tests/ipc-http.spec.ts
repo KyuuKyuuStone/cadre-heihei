@@ -11,6 +11,7 @@ import {
   bootComposition, callRoute, compositionModules, compositionRows, makeCompositionPaths,
   removeCompositionPaths, seedLedger, serviceOf, waitForService, writeStdioServer,
 } from './real-composition.ts'
+import type { StdioServerFixture } from './real-composition.ts'
 
 const CATALOG = '/cadre/mcp/catalog'
 const GET = '/cadre/mcp/get'
@@ -29,12 +30,15 @@ interface Composition {
   readonly origin: string
 }
 
-async function bootRoutes(admission: { reject: boolean }): Promise<Composition & { cleanup(): Promise<void> }> {
+async function bootRoutes(
+  admission: { reject: boolean },
+  fixtures: readonly StdioServerFixture[] = [{
+    id: 'probe', name: 'Probe', command: process.execPath, args: ['-e', 'process.exit(0)'],
+  }],
+): Promise<Composition & { cleanup(): Promise<void> }> {
   const paths = await makeCompositionPaths('mcp-routes-')
   seedLedger(paths.ledgerPath, ROSTER)
-  await writeStdioServer(paths.serversDir, {
-    id: 'probe', name: 'Probe', command: process.execPath, args: ['-e', 'process.exit(0)'],
-  })
+  for (const fixture of fixtures) await writeStdioServer(paths.serversDir, fixture)
   const context = await bootComposition({
     root: paths.root,
     rows: compositionRows({ ...paths, admission }),
@@ -104,7 +108,16 @@ describe('cadre MCP routes over real HTTP', () => {
         projectId: 'p1', actorSessionId: 'w-worker', targetSessionId: 'w-worker',
       })
       expect(read.status).toBe(200)
-      expect(read.result).toEqual({ servers: [{ id: 'probe', enabled: true, overrides: { toolCallTimeoutMs: 45_000 } }] })
+      expect(read.result).toEqual({
+        servers: [{
+          id: 'probe',
+          enabled: true,
+          overrides: { toolCallTimeoutMs: 45_000 },
+          // `get` projects the catalog description for the caller's locale; this
+          // fixture carries none, so the projection is empty.
+          localizedDescription: '',
+        }],
+      })
 
       // Sibling isolation: another member's selection is still empty.
       const sibling = await callRoute(booted.origin, GET, {
@@ -172,6 +185,60 @@ describe('cadre MCP routes over real HTTP', () => {
       admission.reject = false
       const recovered = await callRoute(booted.origin, CATALOG, { projectId: 'p1', actorSessionId: 's-sup' })
       expect(recovered.status).toBe(200)
+    } finally {
+      await booted.cleanup()
+    }
+  }, 90_000)
+
+  it('projects the description localized for the caller locale, falling back to the base field', async () => {
+    const admission = { reject: false }
+    const booted = await bootRoutes(admission, [
+      {
+        id: 'localized', name: 'Localized', command: process.execPath, args: ['-e', 'process.exit(0)'],
+        descriptionI18n: { zh: '中文说明', en: 'English text' },
+      },
+      {
+        id: 'plain', name: 'Plain', command: process.execPath, args: ['-e', 'process.exit(0)'],
+        description: 'base description',
+      },
+    ])
+    interface CatalogRow { readonly id: string; readonly description: string }
+    const catalog = async (locale?: string): Promise<readonly CatalogRow[]> => {
+      const reply = await callRoute(booted.origin, CATALOG, {
+        projectId: 'p1', actorSessionId: 's-sup', ...(locale === undefined ? {} : { locale }),
+      })
+      expect(reply.status).toBe(200)
+      return (reply.result as { readonly servers: readonly CatalogRow[] }).servers
+    }
+    const descriptionOf = (rows: readonly CatalogRow[], id: string): string | undefined =>
+      rows.find(row => row.id === id)?.description
+    try {
+      // A `zh*` locale reads the Chinese entry even when it carries a region tag.
+      const zh = await catalog('zh-CN')
+      expect(descriptionOf(zh, 'localized')).toBe('中文说明')
+      // A manifest without translations keeps its base description.
+      expect(descriptionOf(zh, 'plain')).toBe('base description')
+
+      const en = await catalog('en-US')
+      expect(descriptionOf(en, 'localized')).toBe('English text')
+      expect(descriptionOf(en, 'plain')).toBe('base description')
+
+      // No locale selects English, matching the skill catalog's chain.
+      expect(descriptionOf(await catalog(), 'localized')).toBe('English text')
+
+      // `get` projects the same chain onto the stored selection.
+      await callRoute(booted.origin, SET, {
+        projectId: 'p1', actorSessionId: 'w-worker', targetSessionId: 'w-worker',
+        servers: [{ id: 'localized', enabled: true }],
+      })
+      const read = await callRoute(booted.origin, GET, {
+        projectId: 'p1', actorSessionId: 'w-worker', targetSessionId: 'w-worker', locale: 'zh-CN',
+      })
+      expect(read.result).toMatchObject({ servers: [{ id: 'localized', localizedDescription: '中文说明' }] })
+      const readEn = await callRoute(booted.origin, GET, {
+        projectId: 'p1', actorSessionId: 'w-worker', targetSessionId: 'w-worker', locale: 'en',
+      })
+      expect(readEn.result).toMatchObject({ servers: [{ id: 'localized', localizedDescription: 'English text' }] })
     } finally {
       await booted.cleanup()
     }

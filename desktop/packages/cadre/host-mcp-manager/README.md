@@ -54,11 +54,22 @@ rejects plaintext secrets and resolves references only in memory at mount time.
 A directory whose manifest fails validation becomes a health row and leaves its
 neighbours usable. Dot-directories such as `.backups` are never scanned.
 
+A manifest may carry `descriptionI18n {zh, en}` beside `description`. A route call
+that names a `locale` reads `descriptionI18n.zh` when the locale starts with `zh`,
+otherwise `descriptionI18n.en`, falling back to `description`; blank translations
+are dropped while parsing, so an empty entry never shadows the base field. Without
+a locale the English entry wins, matching the skill catalog. `catalog` projects the
+result onto `description`, and `get` projects it onto each entry's
+`localizedDescription`, so a manifest that carries only `descriptionI18n` still
+surfaces readable text.
+
 ## Routes
 
 `POST /cadre/mcp/catalog`, `/cadre/mcp/get`, `/cadre/mcp/set` behind
 `connection.admit`, a 16 KiB body limit, and `{ok:false, code, message,
-remediation}` failures. Reads tolerate a session the ledger cannot prove (an
+remediation}` failures. `catalog` and `get` accept an optional `locale` and
+localize descriptions as described above. Reads tolerate a session the ledger
+cannot prove (an
 empty team owns the project id first); cross-member reads and writes are
 supervisor-only, departed members are refused, and a session may only override
 `toolCallTimeoutMs` and `env` references — never the command, arguments, URL, or

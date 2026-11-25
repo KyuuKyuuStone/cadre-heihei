@@ -86,6 +86,8 @@ export interface StdioServerFixture {
   readonly command: string
   readonly args: readonly string[]
   readonly toolCallTimeoutMs?: number
+  readonly description?: string
+  readonly descriptionI18n?: { readonly zh?: string; readonly en?: string }
 }
 
 /**
@@ -103,6 +105,8 @@ export async function writeStdioServer(serversDir: string, fixture: StdioServerF
     command: fixture.command,
     args: [...fixture.args],
     ...(fixture.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: fixture.toolCallTimeoutMs }),
+    ...(fixture.description === undefined ? {} : { description: fixture.description }),
+    ...(fixture.descriptionI18n === undefined ? {} : { descriptionI18n: fixture.descriptionI18n }),
   }, null, 2)}\n`, 'utf8')
 }
 

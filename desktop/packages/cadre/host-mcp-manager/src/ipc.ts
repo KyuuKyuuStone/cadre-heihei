@@ -4,6 +4,7 @@
  * @module
  */
 import type { DatabaseSync } from 'node:sqlite'
+import { localizedDescription } from './catalog.ts'
 import { McpError } from './errors.ts'
 import { readSelection, validateSelection, writeSelection } from './selection.ts'
 import type {
@@ -42,11 +43,15 @@ function assertCanTouchTarget(actor: MemberRow | undefined, actorSessionId: stri
   throw new McpError('MCP_FORBIDDEN', 403, '只有主管可以操作其他成员的 MCP 服务器', '请由主管操作')
 }
 
-function entryOf(manifest: McpServerManifest, chosen: McpSelectionEntry | undefined): McpCatalogEntry {
+function entryOf(
+  manifest: McpServerManifest,
+  chosen: McpSelectionEntry | undefined,
+  locale: string | undefined,
+): McpCatalogEntry {
   return {
     id: manifest.id,
     name: manifest.name,
-    description: manifest.description ?? '',
+    description: localizedDescription(manifest, locale),
     transport: manifest.transport,
     tags: manifest.tags ?? [],
     envKeys: Object.keys(manifest.env ?? {}),
@@ -74,7 +79,7 @@ export function createMcpApi(deps: McpIpcDeps): McpApi {
       const scan = await known()
       const chosen = new Map(readSelection(deps.db, target).servers.map(entry => [entry.id, entry]))
       return {
-        servers: [...scan.servers.values()].map(manifest => entryOf(manifest, chosen.get(manifest.id))),
+        servers: [...scan.servers.values()].map(manifest => entryOf(manifest, chosen.get(manifest.id), input.locale)),
         health: scan.health,
       }
     },
@@ -85,8 +90,15 @@ export function createMcpApi(deps: McpIpcDeps): McpApi {
       assertCanTouchTarget(actor, input.actorSessionId, input.targetSessionId)
       const scan = await known()
       const stored = readSelection(deps.db, input.targetSessionId)
-      // Drop ids the catalog no longer carries so the sidebar cannot show a ghost.
-      return { servers: stored.servers.filter(entry => scan.servers.has(entry.id)) }
+      // Project each stored id onto its catalog entry, so the caller reads the
+      // description localized for its locale; ids the catalog dropped disappear.
+      const servers = stored.servers.flatMap((entry) => {
+        const manifest = scan.servers.get(entry.id)
+        return manifest === undefined
+          ? []
+          : [{ ...entry, localizedDescription: localizedDescription(manifest, input.locale) }]
+      })
+      return { servers }
     },
 
     async set(input: McpSetInput): Promise<McpSelectionView> {
