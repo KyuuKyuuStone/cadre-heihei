@@ -20,6 +20,7 @@ import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-a
 import { loadStoredSession } from '../../subagent/tests/persistence-helpers.ts'
 import * as mock from './scripted-provider.ts'
 import * as tool from '../src/index.ts'
+import SubagentModelSelectionConfig from '../src/model-selection-settings.ts'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import {
   callSubagent,
@@ -268,7 +269,6 @@ describe('dsh-tool-subagent', () => {
     expect(seen?.agentOptions).toEqual({
       provider: 'alpha',
       model: 'child-model',
-      reasoningEffort: 'high',
       maxTokens: 321,
     })
   })
@@ -688,7 +688,7 @@ describe('dsh-tool-subagent local activation', () => {
   })
 
   /** Boot the real continuable stack without any model-facing follow-up adapter. */
-  async function continuableSetup() {
+  async function continuableSetup(modelSelection = false) {
     const ctx = new Context()
     const root = mkdtempSync(path.join(tmpdir(), 'dsh-tool-subagent-continuable-'))
     fixtures.push({ ctx, root })
@@ -698,13 +698,40 @@ describe('dsh-tool-subagent local activation', () => {
     await mountWorkingDirectoryFixture(ctx)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
-    await ctx.plugin(tool, { provider: 'spawn' })
+    if (modelSelection) await ctx.plugin(SubagentModelSelectionConfig, { enabled: false })
+    await ctx.plugin(tool, { provider: 'spawn', modelSelectionSettings: modelSelection })
     ctx.llm.registerAdapter(['mock'], new MockAdapter([
       textResponse('continuable answer'),
-    ]))
+    ], modelSelection ? {
+      efforts: [
+        { id: ReasoningEffortId('low'), name: 'Low' },
+        { id: ReasoningEffortId('high'), name: 'High' },
+      ],
+      defaultEffort: ReasoningEffortId('low'),
+    } : undefined))
     const parent = await ctx.agentLoop.create(SessionId('parent'), { provider: 'mock', model: 'mock' })
     return { ctx, parent }
   }
+
+  // Cadre shell keeps the standing model-selection install inside a preset scope, so a
+  // root-mounted continuable stack cannot expose route fields. The same semantic
+  // (explicit route without effort uses the model default) is covered by
+  // model-selection.spec.ts 'uses model-default effort for an explicit parent route ...'.
+  it.skip.each([undefined, 'high'] as const)('starts the explicitly selected parent model with effort %s', async (effort) => {
+    const { ctx, parent } = await continuableSetup(true)
+    parent.options.reasoningEffort = ReasoningEffortId('high')
+    let child: Agent | undefined
+    ctx.on('subagent/start', (info) => { child = ctx.agents.get(info.id) })
+    const result = await callSubagent(ctx, {
+      description: 'selected model', prompt: 'work', provider: 'mock', model: 'mock',
+      ...effort === undefined ? {} : { reasoning_effort: effort },
+    }, { agent: parent })
+    expect(result.isError, text(result)).toBe(false)
+    expect(child).toBeDefined()
+    await child!.whenIdle()
+    expect(child!.session.requestHeader()?.config.reasoningEffort).toBe(effort ?? 'low')
+    expect(parent.options.reasoningEffort).toBe('high')
+  })
 
   it('classifies local activations concurrency-safe', async () => {
     const { ctx } = await continuableSetup()

@@ -104,11 +104,10 @@ export function registerListSubagentModels(ctx: Context, policyFor: (exec: ToolR
   ctx.tools.register(defineTool({
     name: 'list_subagent_models',
     description:
-      'Discover LLM routes for subagents without changing the current Agent. Call with no arguments to list '
-      + 'registered providers, with `provider` to list its advertised models, or with `provider` and `model` '
-      + 'to inspect that exact model and its reasoning efforts. Catalog membership is advisory: an adapter may '
-      + 'accept an unlisted model id. Use the returned ids with a delegation tool\'s `provider`, `model`, and '
-      + '`reasoning_effort` fields.',
+      'Inspect the subagent routes this Session authorizes. No arguments: authorized providers. '
+      + '`provider`: that provider\'s authorized models. `provider` + `model`: that model and its reasoning efforts. '
+      + 'Query when choosing an explicit child route or reasoning effort. Omit `provider`, `model`, and `reasoning_effort` when delegating to use the default child route. '
+      + 'Omit optional fields rather than sending empty strings.',
     parameters: {
       provider: {
         type: 'string',

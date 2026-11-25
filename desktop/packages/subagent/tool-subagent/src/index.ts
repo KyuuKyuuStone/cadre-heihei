@@ -193,7 +193,7 @@ export async function apply(ctx: Context, config: Config, session?: Session): Pr
   if (initialProvider !== undefined) assertSubagentProviderConfiguration(initialProvider)
 
   const install = (runtimeCtx: Context, modelSelectionPolicy: ModelSelectionPolicy | undefined): void => {
-    const modelSelectionEnabled = modelSelectionPolicy !== undefined
+    const modelSelectionEnabled = config.modelSelectionSettings === true
     if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, () => modelSelectionPolicy)
     // Load order and HMR replacement can change provider availability while
     // this fiber remains active.
@@ -203,8 +203,8 @@ export async function apply(ctx: Context, config: Config, session?: Session): Pr
       const wording = providerWording(subagentProvider.inheritsParentContext)
       const providerRouteDefaults = subagentProvider.agentRouteDefaults
       const selectionDescription = providerRouteDefaults !== undefined
-        ? ' Child LLM selection is optional. Omit `provider`, `model`, and `reasoning_effort` to use configured child defaults and this provider\'s route defaults. Supply `provider` and `model` together after using `list_subagent_models` to inspect advertised routes and efforts. Changing the effective route without naming an effort uses the selected model\'s default effort.'
-        : ' Child LLM selection is optional. Omit `provider`, `model`, and `reasoning_effort` to use configured child defaults and inherit compatible missing values from the parent Agent. Supply `provider` and `model` together after using `list_subagent_models` to inspect advertised routes and efforts. Changing the effective route without naming an effort uses the selected model\'s default effort.'
+        ? ' Child LLM selection is optional. Omit `provider`, `model`, and `reasoning_effort` to use configured child defaults and this provider\'s route defaults. Supply `provider` and `model` together after using `list_subagent_models` to inspect advertised routes and efforts. An explicit route without `reasoning_effort` uses that model\'s default effort, even when the route is unchanged.'
+        : ' Child LLM selection is optional. Omit `provider`, `model`, and `reasoning_effort` to use configured child defaults and inherit compatible missing values from the parent Agent. Supply `provider` and `model` together after using `list_subagent_models` to inspect advertised routes and efforts. An explicit route without `reasoning_effort` uses that model\'s default effort, even when the route is unchanged.'
       const choiceDescription = !modelSelectionEnabled
         ? ''
         : selectionDescription
@@ -291,7 +291,6 @@ export async function apply(ctx: Context, config: Config, session?: Session): Pr
             ? { ...providerRouteDefaults, ...config.agentOptions }
             : config.agentOptions
           const requestedChildAgentOptions = requestedAgentOptions(
-            parentOptions,
             configuredChildAgentOptions,
             modelRequest,
             modelSelectionEnabled,
@@ -312,7 +311,7 @@ export async function apply(ctx: Context, config: Config, session?: Session): Pr
               parentOptions,
               requestedChildAgentOptions,
               exec.signal,
-              providerRouteDefaults === undefined,
+              providerRouteDefaults === undefined && !hasDelegationModelRequest(modelRequest),
             )
             if (runtimeCtx.subagents.getProvider(config.provider) !== subagentProvider) {
               throw new Error(`subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`)
