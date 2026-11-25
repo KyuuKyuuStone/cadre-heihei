@@ -49,6 +49,13 @@ const EXTRA_TARGETS = (process.env.GATE_SMOKE_EXTRA ?? '').split(',').map(s => s
  */
 const VITEST_TEST_TIMEOUT_MS = 30_000
 
+/**
+ * Hook（beforeAll/afterAll）的默认上限。同一冒烟子集里的 hooks 要挂真实组合、开临时 SQLite、
+ * 起真实 webserver，冷启动在 CI 满载时同样会撞 Vitest 的 10000 ms 默认值。
+ * 与 --testTimeout 在同一调用点收敛：只抬上限，不改断言、不 skip、不改两态期望。
+ */
+const VITEST_HOOK_TIMEOUT_MS = 30_000
+
 mkdirSync(EVIDENCE_DIR, { recursive: true })
 
 type Runner = {
@@ -78,6 +85,7 @@ const RUNNERS: Runner[] = [
       '--reporter=junit',
       `--outputFile=${VITEST_JUNIT}`,
       `--testTimeout=${VITEST_TEST_TIMEOUT_MS}`,
+      `--hookTimeout=${VITEST_HOOK_TIMEOUT_MS}`,
       ...VITEST_TARGETS,
       ...EXTRA_TARGETS,
     ],
