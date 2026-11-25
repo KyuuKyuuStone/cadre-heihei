@@ -99,6 +99,17 @@ class MemoryKvUnit implements KvUnit {
     this.pool.versions.set(this.descriptor.name, this.descriptor.version)
   }
 
+  async deleteRecords(table: string, keys: readonly string[]): Promise<void> {
+    this.assertOpen()
+    const records = this.medium.tables.get(table)
+    if (records === undefined) return
+    const present = [...new Set(keys)].filter(key => records.has(key))
+    if (present.length === 0) return
+    this.pool.consumeInjectedFailure()
+    for (const key of present) records.delete(key)
+    this.pool.versions.set(this.descriptor.name, this.descriptor.version)
+  }
+
   async setGlobal(value: unknown): Promise<void> {
     this.assertOpen()
     this.pool.consumeInjectedFailure()

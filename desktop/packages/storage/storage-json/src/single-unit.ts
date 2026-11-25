@@ -100,6 +100,24 @@ class SingleJsonUnit implements KvUnit {
     })
   }
 
+  async deleteRecords(table: string, keys: readonly string[]): Promise<void> {
+    this.assertOpen()
+    const records = this.records(table)
+    const removed = new Map<string, unknown>()
+    for (const key of new Set(keys)) {
+      if (!records.has(key)) continue
+      removed.set(key, records.get(key))
+      records.delete(key)
+    }
+    if (removed.size === 0) return
+    // One atomic publish applies the whole batch; a failed publish restores
+    // every removed entry so memory and the medium stay together.
+    await this.publish().catch((error: unknown) => {
+      for (const [key, value] of removed) records.set(key, value)
+      throw error
+    })
+  }
+
   async setGlobal(value: unknown): Promise<void> {
     this.assertOpen()
     if (!this.descriptor.hasGlobal) {

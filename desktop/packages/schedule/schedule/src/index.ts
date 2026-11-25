@@ -17,7 +17,8 @@ import {
   scheduleTitle,
 } from './domain.ts'
 import type {
-  DeliveryRetentionBounds, ScheduleCatalogEntry, ScheduleCreateRequest, ScheduleDeleteRequest, ScheduleDeleteResult,
+  DeliveryRetentionBounds, ScheduleCatalogEntry, ScheduleCreateRequest, ScheduleDeleteInactiveResult,
+  ScheduleDeleteRequest, ScheduleDeleteResult,
   ScheduleDeliveryHistoryRequest, ScheduleDeliveryHistoryResult, ScheduleListRequest, ScheduleRecord,
   ScheduleUpdateRequest, ScheduleUpdateResult, SubagentSessionError,
 } from './types.ts'
@@ -339,6 +340,29 @@ export class ScheduleService extends TypertRemoteService {
   }
 
   /**
+   * Delete every ended Host task, leaving active tasks armed.
+   *
+   * Ended tasks never schedule another delivery, so the removal changes no pending
+   * target and no timer is recomputed. Rows are enumerated and removed in one FIFO
+   * slot, so a delivery ordered behind this call ends its task after the
+   * enumeration rather than during it. The batch is one durable write: a failure
+   * removes nothing and rejects, so the caller never receives a partial removal.
+   * A backend that reports `unknown-state` may have removed rows, so the service
+   * announces the change before rejecting and clients re-read the catalog.
+   * @returns Count of removed rows; zero when the Host held no ended task.
+   */
+  @Remote('deleteInactive')
+  async deleteInactive(): Promise<ScheduleDeleteInactiveResult> {
+    return this.serialize<ScheduleDeleteInactiveResult>(async () => {
+      const tasks = (await this.getDomain()).table('tasks')
+      const ended = [...tasks.entries()]
+        .filter(([, task]) => task.status === 'inactive')
+        .map(([, task]) => task.record.id)
+      return { deleted: await this.removeRows(ended, 'schedule ended-task removal failed', false) }
+    })
+  }
+
+  /**
    * Update the name, instruction, and timing of an active task within the original Session
    * binding without activating the Session or changing saved deliveries.
    *
@@ -434,30 +458,37 @@ export class ScheduleService extends TypertRemoteService {
         .filter(([, task]) => task.sessionId === sessionId && task.status === 'active')
         .map(([, task]) => task.record.id)
       if (active.length === 0) return
-      // One row per write: the domain table has no batch delete, and each row is
-      // durable on its own, so a failure partway through leaves the rows already
-      // removed committed. Observers hear about that change before the failure
-      // reaches the caller, which still receives it.
-      let removed = false
-      let failure: Error | undefined
-      for (const id of active) {
-        try {
-          await tasks.delete(id)
-          removed = true
-        } catch (error: unknown) {
-          // Every row is attempted: the archive has already landed, so a row this
-          // stop skipped would stay armed in a Session whose runtime then refuses
-          // its model steps. A rejection reason that carries no Error still has to
-          // report a failure, so it is wrapped before the first one is kept.
-          failure ??= error instanceof Error ? error : new Error(`schedule stop failed: ${String(error)}`)
-        }
-      }
-      if (removed) {
-        this.emitChanged()
-        this.runtime?.requestDrive()
-      }
-      if (failure !== undefined) throw failure
+      await this.removeRows(active, 'schedule stop failed', true)
     })
+  }
+
+  /**
+   * Remove rows as one durable batch inside the current queue slot.
+   *
+   * The batch is one domain write: either every present row is removed and
+   * announced, or the removal rejects with every row still stored. A rejection
+   * reason that carries no Error is wrapped with the operation label.
+   * @param ids - rows to remove.
+   * @param label - failure message prefix naming the operation that owned them.
+   * @param rearm - whether the rows were armed, so the pending timer must be recomputed.
+   * @returns the number of rows this call removed.
+   */
+  private async removeRows(ids: readonly ScheduleRecord['id'][], label: string, rearm: boolean): Promise<number> {
+    if (ids.length === 0) return 0
+    let removed: number
+    try {
+      removed = await (await this.getDomain()).table('tasks').deleteMany(ids)
+    } catch (error: unknown) {
+      // A rejection never establishes which rows landed, and the backend can
+      // report `unknown-state` after removing some of them. Announce the change
+      // so observers re-read instead of trusting their stale catalog.
+      this.emitChanged()
+      throw error instanceof Error ? error : new Error(`${label}: ${String(error)}`)
+    }
+    // Rows enumerated in this slot are present, so a non-empty batch always removed rows.
+    this.emitChanged()
+    if (rearm) this.runtime?.requestDrive()
+    return removed
   }
 
   private serialize<T>(work: () => Promise<T>): Promise<T> {
