@@ -18,7 +18,6 @@ import * as tool from '../src/index.ts'
 import SubagentModelSelectionConfig from '../src/model-selection-settings.ts'
 import {
   subagentModelSelectionPolicy,
-  subagentModelSelectionProjectionDefinition,
 } from '../src/model-selection-state.ts'
 import { callSubagent, text } from './harness.ts'
 

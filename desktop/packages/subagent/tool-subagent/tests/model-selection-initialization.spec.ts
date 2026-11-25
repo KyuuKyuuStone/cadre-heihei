@@ -19,12 +19,12 @@ async function setup() {
   await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
   await ctx.plugin(AgentLoop, { agents: [] })
   const register = ctx.sessionProjections.register.bind(ctx.sessionProjections)
-  const spy = vi.spyOn(ctx.sessionProjections, 'register').mockImplementationOnce(async (definition) => {
-    const handle = await register(definition)
+  const spy = vi.spyOn(ctx.sessionProjections, 'register').mockImplementationOnce((async (definition: Parameters<typeof register>[0]) => {
+    const handle = register(definition)
     entered.resolve(undefined)
     await release.promise
     return handle
-  })
+  }) as unknown as (definition: Parameters<typeof register>[0]) => () => void)
   onTestFinished(() => { spy.mockRestore() })
   const announcing = Promise.withResolvers<undefined>()
   ctx.on('agent/created', () => { announcing.resolve(undefined) }, { prepend: true })

@@ -32,7 +32,7 @@ describe('child Agent options', () => {
   it('clears parent effort through an explicit undefined override', () => {
     const parent = parentAgent()
     const child = resolveChildAgentOptions(parent, {
-      provider: 'parent-provider', model: 'parent-model', reasoningEffort: undefined,
+      provider: 'parent-provider', model: 'parent-model', reasoningEffort: undefined as unknown as ReasoningEffortId,
     }, 1)
     expect(child.reasoningEffort).toBeUndefined()
     expect(parent.options.reasoningEffort).toBe('high')
