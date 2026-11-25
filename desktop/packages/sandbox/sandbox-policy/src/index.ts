@@ -106,7 +106,7 @@ export interface Config {
    * automatic repository or gitfile discovery. Entries are execution-world
    * paths: this service validates absoluteness and detaches the list, while
    * the enforcing host rejects missing, non-directory, or symlinked paths. They grant nothing under
-   * `read-only`. Windows process confinement ignores them; harness file tools honor them.
+   * `read-only`.
    */
   additionalWritableRoots?: string[]
 }

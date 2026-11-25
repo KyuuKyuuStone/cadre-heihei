@@ -27,7 +27,7 @@ export type {
   EscalationRequest,
   SandboxEscalationErrorCode,
 } from './escalation.ts'
-export { canonicalPath, workspaceWritableRoots, writableRoots } from './roots.ts'
+export { SandboxInvalidRootError, canonicalPath, workspaceWritableRoots, writableRoots } from './roots.ts'
 
 /**
  * File-effect policy for confined processes. `read-only` permits only required
@@ -54,7 +54,6 @@ export interface SandboxExecutionPolicy {
    * Extra physical absolute directories `workspace-write` may also write under.
    * Absence means none. The enforcing host rejects missing, non-directory, and
    * symlinked entries on each call. Remote paths are checked on the remote host.
-   * Windows process confinement ignores these; harness filesystem operations honor them.
    * These grant nothing under `read-only` or `danger-full-access`.
    */
   additionalWritableRoots?: readonly string[]

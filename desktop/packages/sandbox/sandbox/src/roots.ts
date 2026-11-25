@@ -13,9 +13,36 @@
  * @module dsh-sandbox/roots
  */
 
-import { realpathSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { relative } from 'node:path'
+import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { SandboxExecutionPolicy } from './index.ts'
+
+/** An explicit directory grant cannot be enforced without changing the caller's selected path. */
+export class SandboxInvalidRootError extends HarnessError {
+  constructor(path: string, detail: string) {
+    super(`Invalid additional writable directory ${JSON.stringify(path)}: ${detail}`, 'SANDBOX_INVALID_ROOT')
+    this.name = 'SandboxInvalidRootError'
+  }
+}
+
+/** Resolve existing directories, rejecting aliases that differ under the host's path comparison. */
+function additionalRoot(path: string): string {
+  let physical: string
+  let directory: boolean
+  try {
+    physical = realpathSync.native(path)
+    directory = statSync(physical).isDirectory()
+  } catch (error) {
+    throw new SandboxInvalidRootError(path, `cannot read the directory: ${String(error)}`)
+  }
+  if (!directory) throw new SandboxInvalidRootError(path, 'expected an existing directory')
+  if (relative(path, physical) !== '') {
+    throw new SandboxInvalidRootError(path, `use the physical directory path ${JSON.stringify(physical)}; symlinked grants are not supported`)
+  }
+  return physical
+}
 
 /**
  * Resolve a granted root to the path the enforcement layer actually compares:
@@ -43,17 +70,19 @@ export function canonicalPath(path: string): string {
 /**
  * The workspace-owned writable roots — the policy's workspace root plus its
  * explicit extra directories, as a canonical, deduplicated allow-list. Both
- * the workspace and every extra root are included by the filesystem fence and
- * POSIX process backends; Windows process confinement ignores extra roots.
- * This derivation is separate from each backend's platform temp policy (Seatbelt and the fs
+ * the workspace and every extra root must be granted together by every
+ * backend; this is the one derivation of that set, kept separate from the
+ * platform temp policy each backend documents for itself (Seatbelt and the fs
  * fence use {@link writableRoots}; bwrap and Landlock add their own temp
  * grants).
  * @param policy - the file-effect policy to derive the allow-list from.
  * @returns the canonical workspace-owned roots; empty under `read-only`.
+ * @throws {SandboxInvalidRootError} An extra root cannot be inspected, is not a directory, or uses a symlink.
  */
 export function workspaceWritableRoots(policy: SandboxExecutionPolicy): string[] {
   if (policy.mode !== 'workspace-write') return []
-  return [...new Set([policy.workspaceRoot, ...policy.additionalWritableRoots ?? []].map(canonicalPath))]
+  const additional = (policy.additionalWritableRoots ?? []).map(additionalRoot)
+  return [...new Set([canonicalPath(policy.workspaceRoot), ...additional])]
 }
 
 /**
