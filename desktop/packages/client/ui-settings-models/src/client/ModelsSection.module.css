@@ -548,6 +548,26 @@
   gap: 4px;
 }
 
+/* The reservation readout spans the disclosure under the two capacity fields;
+   it is tertiary ink because it states a consequence, not an editable fact. */
+.modelReservation {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* Warning text and its one explicit remedy share a line that wraps on narrow
+   cards; the notice keeps the section's warn ink, the action its link form. */
+.reservationNotice {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
 .modelInputTypes {
   grid-column: 1 / -1;
   min-width: 0;

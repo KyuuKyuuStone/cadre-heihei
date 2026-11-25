@@ -362,6 +362,13 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
     const defaultContextWindow = schema.getPath(fallback, ['defaultContextWindow'])
     const defaultMaxTokens = schema.getPath(fallback, ['maxTokens'])
     const defaultInput = schema.getPath(fallback, ['defaultInput'])
+    // The route's per-request output default: the stored override when the
+    // profile names one, else the schema default the adapter would supply.
+    // The pi-ai model list clamps an adopted disclosure to it and mirrors it
+    // as the blank field's placeholder; the DeepSeek catalog editor above
+    // keeps its own `maxTokens` fallback read.
+    const routeOutputDefault = schema.getPath(fallback, ['defaultMaxTokens'])
+      ?? schema.nodeAtPath(root, [...settingsPath, 'defaultMaxTokens'])?.meta.default
     const baseURL = stringAt(fallback, 'baseURL') ?? props.defaultBaseURL
     const endpointEnv = props.baseURLEnv ?? []
     const endpointHint = family === 'deepseek' ? t('deepSeekEndpointHint')
@@ -530,6 +537,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
                   catalogProvider={props.declared === true ? undefined : props.provider}
                   reasoningLevels={reasoningLevels}
                   defaultInput={Array.isArray(defaultInput) ? defaultInput : undefined}
+                  defaultMaxTokens={typeof routeOutputDefault === 'number' ? routeOutputDefault : undefined}
                   probe={probe}
                   probeBlocked={keyFailure}
                   operations={operations}

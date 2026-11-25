@@ -46,8 +46,11 @@
             - text: 272K
           - text: 最大输出 token 数
           - textbox "最大输出 token 数 1":
-            - /placeholder: 32K
+            - /placeholder: "32768"
             - text: 128K
+          - paragraph: 输出预留 128K · 占上下文窗口 47.1%
+          - paragraph: 输出预留 128K 超出提供商默认 32768，上下文压缩会更早触发、缓存复用下降
+          - button "采用 32768"
           - group "输入类型 1":
             - text: 输入类型
             - checkbox "文本" [checked]

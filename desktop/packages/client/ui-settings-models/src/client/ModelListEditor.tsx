@@ -23,6 +23,7 @@ import type { ModelsOperations } from './operations.ts'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
 import type { en } from './locales.ts'
 import { ModelRow } from './ModelRow.tsx'
+import { reservationView } from './reservation.ts'
 import styles from './ModelsSection.module.css'
 
 /**
@@ -75,6 +76,15 @@ export interface ModelListEditorProps {
   reasoningLevels?: readonly string[] | undefined
   /** Route input types for models absent from the installed catalog. */
   defaultInput?: readonly string[] | undefined
+  /**
+   * The route's per-request output default (the adapter's `defaultMaxTokens`),
+   * when the owning card can read it. An adopted model's disclosed output
+   * capability is clamped to it: the disclosure is what the model CAN emit,
+   * while the stored field is what every request reserves against the context
+   * window, so prefilling the full capability would squeeze the conversation
+   * budget of every request on the route. Absent keeps the disclosure unchanged.
+   */
+  defaultMaxTokens?: number | undefined
   /** Whether the user layer currently owns the whole array; absent on a create. */
   overridden?: boolean
   /** Replace the drafted rows. */
@@ -116,8 +126,10 @@ type CapacityField = 'contextWindow' | 'maxTokens'
  * `defaultContextWindow` and `defaultMaxTokens`), spelled the way a person
  * would say them. They are a hint, not a mirror: this page counts `K` as 1000,
  * so typing `256K` stores 256000 while leaving the field blank keeps the
- * adapter's 262144. A deployment that overrides those defaults is not
- * reflected here — nothing on this page can read them.
+ * adapter's 262144. The output half IS mirrored when the owning card supplies
+ * the route's actual `defaultMaxTokens` — that value also caps adopted
+ * disclosures, so the blank field must not promise a different number. The
+ * context-window half stays a hint: nothing on this page reads that default.
  */
 const CAPACITY_HINT: Readonly<Record<CapacityField, string>> = {
   contextWindow: '256K',
@@ -135,13 +147,23 @@ function capacitySpelling(value: number | undefined): string {
   return value === undefined ? '' : formatCapacity(value)
 }
 
-/** Adopt a candidate, preserving disclosed capacities and input types. */
-function adopt(candidate: LlmDiscoveredModel): ModelDraft {
+/**
+ * Adopt a candidate, preserving disclosed capacities and input types. The
+ * disclosed output capability is clamped to the route's per-request default
+ * when one is known: the stored `maxTokens` is a reservation every request
+ * carries, not a capability fact, so a model that can emit 393000 tokens must
+ * not reserve them all by default. A capability below the default rides along
+ * unchanged — it keeps requests from exceeding what the model actually accepts.
+ */
+function adopt(candidate: LlmDiscoveredModel, outputDefault: number | undefined): ModelDraft {
+  const maxTokens = candidate.maxTokens === undefined ? undefined
+    : outputDefault === undefined ? candidate.maxTokens
+      : Math.min(candidate.maxTokens, outputDefault)
   return {
     id: candidate.id,
     ...candidate.name === undefined ? {} : { name: candidate.name },
     ...candidate.contextWindow === undefined ? {} : { contextWindow: candidate.contextWindow },
-    ...candidate.maxTokens === undefined ? {} : { maxTokens: candidate.maxTokens },
+    ...maxTokens === undefined ? {} : { maxTokens },
     ...candidate.inputModalities === undefined ? {} : { input: [...candidate.inputModalities] },
   }
 }
@@ -284,7 +306,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
       // Keyed by id, so a half-typed row whose id is still empty is not a
       // match and the candidate joins as its own row — correct, since a row
       // without an id is not yet a model and the create/apply gates refuse it.
-      byId.set(candidate.id, byId.get(candidate.id) ?? adopt(candidate))
+      byId.set(candidate.id, byId.get(candidate.id) ?? adopt(candidate, props.defaultMaxTokens))
     }
     onChange([...byId.values()])
     closePicker()
@@ -360,45 +382,68 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
       </div>
       {models.length === 0 ? <p className={styles['modelEmpty']}>{t('modelsEmpty')}</p> : null}
       <div className={styles['modelList']}>
-        {models.map((model, index) => (
-          <ModelRow
-            key={index}
-            model={model}
-            position={index + 1}
-            inputField="input"
-            inputFallback={inputDefaults.get(textOf(model, 'id')) ?? props.defaultInput}
-            inputLoading={catalogProvider !== undefined && catalog === undefined}
-            reasoningLevels={props.reasoningLevels}
-            expanded={expanded.has(index)}
-            disabled={disabled}
-            t={t}
-            contextWindow={{
-              value: capacityText(model, index, 'contextWindow'),
-              placeholder: CAPACITY_HINT.contextWindow,
-              onChange: (text) => { editCapacity(index, 'contextWindow', text) },
-            }}
-            maxTokens={{
-              value: capacityText(model, index, 'maxTokens'),
-              placeholder: CAPACITY_HINT.maxTokens,
-              onChange: (text) => { editCapacity(index, 'maxTokens', text) },
-            }}
-            onFieldChange={(field, value) => { patch(index, { [field]: value }) }}
-            onChange={(next) => { onChange(models.map((row, at) => at === index ? next : row)) }}
-            onToggle={() => { toggleExpanded(index) }}
-            onRemove={() => {
-              onChange(models.filter((_model, at) => at !== index))
-              setExpanded((current) => {
-                const next = new Set<number>()
-                for (const at of current) {
-                  if (at < index) next.add(at)
-                  else if (at > index) next.add(at - 1)
-                }
-                return next
-              })
-              setEditing(current => reindexOnRemove(current, index))
-            }}
-          />
-        ))}
+        {models.map((model, index) => {
+          // A pi-ai row that omits maxTokens declares no cap and reserves
+          // nothing, so only a stored value produces a readout here.
+          const reservation = reservationView({
+            stored: model['maxTokens'],
+            contextWindow: model['contextWindow'],
+            outputDefault: props.defaultMaxTokens,
+          })
+          const suggested = reservation?.suggested
+          return (
+            <ModelRow
+              key={index}
+              model={model}
+              position={index + 1}
+              inputField="input"
+              inputFallback={inputDefaults.get(textOf(model, 'id')) ?? props.defaultInput}
+              inputLoading={catalogProvider !== undefined && catalog === undefined}
+              reasoningLevels={props.reasoningLevels}
+              expanded={expanded.has(index)}
+              disabled={disabled}
+              t={t}
+              contextWindow={{
+                value: capacityText(model, index, 'contextWindow'),
+                placeholder: CAPACITY_HINT.contextWindow,
+                onChange: (text) => { editCapacity(index, 'contextWindow', text) },
+              }}
+              maxTokens={{
+                value: capacityText(model, index, 'maxTokens'),
+                placeholder: props.defaultMaxTokens === undefined
+                  ? CAPACITY_HINT.maxTokens
+                  : formatCapacity(props.defaultMaxTokens),
+                onChange: (text) => { editCapacity(index, 'maxTokens', text) },
+              }}
+              reservation={reservation}
+              onReservationAdopt={suggested === undefined ? undefined : () => {
+                // The remedy writes the field, so the keystroke buffer must go
+                // with it — otherwise the field would keep showing stale text.
+                setEditing((current) => {
+                  const next = new Map(current)
+                  next.delete(bufferKey(index, 'maxTokens'))
+                  return next
+                })
+                patch(index, { maxTokens: suggested })
+              }}
+              onFieldChange={(field, value) => { patch(index, { [field]: value }) }}
+              onChange={(next) => { onChange(models.map((row, at) => at === index ? next : row)) }}
+              onToggle={() => { toggleExpanded(index) }}
+              onRemove={() => {
+                onChange(models.filter((_model, at) => at !== index))
+                setExpanded((current) => {
+                  const next = new Set<number>()
+                  for (const at of current) {
+                    if (at < index) next.add(at)
+                    else if (at > index) next.add(at - 1)
+                  }
+                  return next
+                })
+                setEditing(current => reindexOnRemove(current, index))
+              }}
+            />
+          )
+        })}
       </div>
       <button
         type="button"

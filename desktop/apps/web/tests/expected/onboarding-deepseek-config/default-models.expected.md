@@ -40,6 +40,7 @@
           - text: 最大输出 token 数
           - textbox "最大输出 token 数 1":
             - /placeholder: 256K
+          - paragraph: 输出预留 256K（提供商默认）· 占上下文窗口 25.6%
           - group "输入类型 1":
             - text: 输入类型
             - checkbox "文本" [checked]

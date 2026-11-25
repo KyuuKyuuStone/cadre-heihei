@@ -52,7 +52,7 @@
             - /placeholder: 256K
           - text: 最大输出 token 数
           - textbox "最大输出 token 数 1":
-            - /placeholder: 32K
+            - /placeholder: "32768"
           - group "输入类型 1":
             - text: 输入类型
             - checkbox "文本"

@@ -5,9 +5,11 @@ import {
   IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, IconTrashOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
+import { formatCapacity } from './capacity.ts'
 import type { ModelsKey } from './locales.ts'
 import { ModelInputTypes } from './ModelInputTypes.tsx'
 import { ModelReasoningEfforts } from './ModelReasoningEfforts.tsx'
+import type { ReservationView } from './reservation.ts'
 import styles from './ModelsSection.module.css'
 
 /** A capacity's editable text and adapter-specific inherited hint. */
@@ -32,11 +34,30 @@ interface ModelRowProps {
   t: (key: ModelsKey) => string
   contextWindow: CapacityInput
   maxTokens: CapacityInput
+  /**
+   * The row's output-reservation consequence view, computed by the owning
+   * editor from values it legitimately owns; absent renders no readout.
+   */
+  reservation?: ReservationView | undefined
+  /**
+   * Apply the view's suggested default to the row's `maxTokens`. The remedy is
+   * an explicit click, never an automatic rewrite of a stored value; absent
+   * hides the action (a warning without a readable default still informs).
+   */
+  onReservationAdopt?: (() => void) | undefined
   onFieldChange: (field: 'id' | 'name', value: string | undefined) => void
   onIdBlur?: (value: string) => void
   onChange: (model: DeepSeekModelDraft) => void
   onToggle: () => void
   onRemove: () => void
+}
+
+/** The meta template for one view: inherited marker and window share are independent. */
+function reservationMetaKey(view: ReservationView): ModelsKey {
+  if (view.inherited) {
+    return view.percent === '' ? 'reservationMetaInherited' : 'reservationMetaInheritedShare'
+  }
+  return view.percent === '' ? 'reservationMeta' : 'reservationMetaShare'
 }
 
 /**
@@ -45,7 +66,7 @@ interface ModelRowProps {
  * @returns one expandable model entry.
  */
 export function ModelRow(props: ModelRowProps): ReactNode {
-  const { model, position, t, disabled } = props
+  const { model, position, t, disabled, reservation } = props
   return (
     <div className={styles['modelEntry']}>
       <div className={styles['modelRow']}>
@@ -105,6 +126,40 @@ export function ModelRow(props: ModelRowProps): ReactNode {
                 />
               </label>
             ))}
+            {reservation !== undefined
+              ? (
+                <p className={styles['modelReservation']}>
+                  {t(reservationMetaKey(reservation))
+                    .replace('{value}', formatCapacity(reservation.reserved))
+                    .replace('{percent}', reservation.percent)}
+                </p>
+              )
+              : null}
+            {reservation?.warning !== undefined
+              ? (
+                <div className={styles['reservationNotice']}>
+                  <p className={styles['notice']}>
+                    {reservation.suggested !== undefined
+                      ? t('reservationWarningDefault')
+                        .replace('{value}', formatCapacity(reservation.reserved))
+                        .replace('{default}', formatCapacity(reservation.suggested))
+                      : t('reservationWarningShare').replace('{percent}', reservation.percent)}
+                  </p>
+                  {reservation.suggested !== undefined && props.onReservationAdopt !== undefined
+                    ? (
+                      <button
+                        type="button"
+                        className={styles['linkButton']}
+                        disabled={disabled}
+                        onClick={props.onReservationAdopt}
+                      >
+                        {t('reservationAdopt').replace('{value}', formatCapacity(reservation.suggested))}
+                      </button>
+                    )
+                    : null}
+                </div>
+              )
+              : null}
             <ModelInputTypes
               model={model} field={props.inputField} position={position}
               fallback={props.inputFallback} disabled={disabled || props.inputLoading === true} t={t} onChange={props.onChange}

@@ -18,6 +18,8 @@ import type { ProviderEditorProps } from '../src/client/ProviderEditor.tsx'
 import {
   DeepSeekModelsEditor, formatCapacity, modelDrafts, parseCapacity, validateDeepSeekModels,
 } from '../src/client/DeepSeekModelsEditor.tsx'
+import { ModelRow } from '../src/client/ModelRow.tsx'
+import type { ReservationView } from '../src/client/reservation.ts'
 import { apiKeyFailure } from '../src/client/apiKey.ts'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { deriveKeyRef, ModelsSettingsStore } from '../src/client/store.ts'
@@ -1283,6 +1285,65 @@ describe('ModelsSection', () => {
     ])
   })
 
+  it('reads the inherited connection reservation without warning at the deployment default', async () => {
+    await mountDeepSeekCard()
+    fireEvent.click(screen.getByText(en.customized))
+    expandRow(1)
+    // The curated rows omit maxTokens, so each reserves the connection default
+    // (256K of the 1M window) — a deployment intent, never a warning.
+    expect(screen.getByText(en.reservationMetaInheritedShare
+      .replace('{value}', '256K').replace('{percent}', '25.6'))).toBeTruthy()
+    expect(screen.queryByText(en.reservationWarningDefault
+      .replace('{value}', '256K').replace('{default}', '256K'))).toBeNull()
+    expect(screen.queryByRole('button', { name: en.reservationAdopt.replace('{value}', '256K') })).toBeNull()
+  })
+
+  it('warns above the connection default and adopts it with an explicit click', async () => {
+    const { mutate } = await mountDeepSeekCard({
+      mutate: vi.fn(() => Promise.resolve(remoteOk(wireNamespaces()[0]))),
+    })
+    fireEvent.click(screen.getByText(en.customized))
+    expandRow(1)
+    fireEvent.change(screen.getByLabelText(`${en.maxTokens} 1`), { target: { value: '393000' } })
+    expect(screen.getByText(en.reservationWarningDefault
+      .replace('{value}', '393K').replace('{default}', '256K'))).toBeTruthy()
+
+    // The remedy writes the field, so the live keystroke text ('393000') must
+    // go with it — otherwise the input keeps showing the value just remedied.
+    fireEvent.click(screen.getByRole('button', { name: en.reservationAdopt.replace('{value}', '256K') }))
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).value).toBe('256K')
+    expect(screen.getByText(en.reservationMetaShare
+      .replace('{value}', '256K').replace('{percent}', '25.6'))).toBeTruthy()
+    expect(screen.queryByRole('button', { name: en.reservationAdopt.replace('{value}', '256K') })).toBeNull()
+
+    fireEvent.click(screen.getByText(en.apply))
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(1) })
+    expect(mutate.mock.calls[0]).toEqual([
+      'llm-deepseek',
+      [{
+        op: 'set',
+        path: ['models'],
+        value: [{ ...DEFAULT_DEEPSEEK_MODELS[0], maxTokens: 256_000 }, DEFAULT_DEEPSEEK_MODELS[1]],
+      }],
+      0,
+    ])
+  })
+
+  it('reads an inherited reservation without a share when no window is readable', () => {
+    render(<DeepSeekModelsEditor
+      models={[{ id: 'byo-model' }]}
+      overridden={true}
+      defaultContextWindow={undefined}
+      defaultMaxTokens={256_000}
+      t={t}
+      disabled={false}
+      onChange={vi.fn()}
+      onReset={vi.fn()}
+    />)
+    expandRow(1)
+    expect(screen.getByText(en.reservationMetaInherited.replace('{value}', '256K'))).toBeTruthy()
+  })
+
   it('settles a pasted id and refuses whitespace that would never match', async () => {
     await mountDeepSeekCard()
     fireEvent.click(screen.getByText(en.customized))
@@ -2422,4 +2483,51 @@ it('renders the localized account row as signed in without an edit action', asyn
   const item = screen.getByText(en.deepSeekAccount).closest('li')!
   expect(within(item).getByText(en.accountSignedIn)).toBeTruthy()
   expect(within(item).queryByText(en.edit)).toBeNull()
+})
+
+describe('ModelRow reservation readout', () => {
+  /** Render one open row with a fixed reservation view and optional remedy. */
+  function renderRow(reservation: ReservationView, onReservationAdopt?: () => void): void {
+    render(<ModelRow
+      model={{ id: 'byo-model' }}
+      position={1}
+      inputField="input"
+      expanded={true}
+      disabled={false}
+      t={t}
+      contextWindow={{ value: '', placeholder: '', onChange: vi.fn() }}
+      maxTokens={{ value: '', placeholder: '', onChange: vi.fn() }}
+      reservation={reservation}
+      onReservationAdopt={onReservationAdopt}
+      onFieldChange={vi.fn()}
+      onChange={vi.fn()}
+      onToggle={vi.fn()}
+      onRemove={vi.fn()}
+    />)
+  }
+
+  it('spells a stored reservation without a share when the window is unknown', () => {
+    renderRow({ reserved: 393_000, inherited: false, percent: '', warning: undefined, suggested: undefined })
+    expect(screen.getByText(en.reservationMeta.replace('{value}', '393K'))).toBeTruthy()
+  })
+
+  it('informs above the default even when no remedy action is supplied', () => {
+    renderRow({ reserved: 393_000, inherited: false, percent: '78.6', warning: 'above-default', suggested: 32_768 })
+    expect(screen.getByText(en.reservationWarningDefault
+      .replace('{value}', '393K').replace('{default}', '32768'))).toBeTruthy()
+    expect(screen.queryByRole('button', { name: en.reservationAdopt.replace('{value}', '32768') })).toBeNull()
+  })
+
+  it('warns on the window share alone, with no value to adopt', () => {
+    renderRow({ reserved: 393_000, inherited: false, percent: '78.6', warning: 'window-share', suggested: undefined })
+    expect(screen.getByText(en.reservationWarningShare.replace('{percent}', '78.6'))).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Use / })).toBeNull()
+  })
+
+  it('offers the default as an explicit click, never an automatic rewrite', () => {
+    const adopt = vi.fn()
+    renderRow({ reserved: 393_000, inherited: false, percent: '78.6', warning: 'above-default', suggested: 32_768 }, adopt)
+    fireEvent.click(screen.getByRole('button', { name: en.reservationAdopt.replace('{value}', '32768') }))
+    expect(adopt).toHaveBeenCalledTimes(1)
+  })
 })

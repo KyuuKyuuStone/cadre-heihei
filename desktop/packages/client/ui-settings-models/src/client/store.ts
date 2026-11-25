@@ -168,6 +168,25 @@ export function reasoningLevelChoices(
   return (keys?.list ?? []).map(entry => entry.value).filter((value): value is string => typeof value === 'string')
 }
 
+/**
+ * The per-request output default a route inherits, read out of the owning
+ * namespace's own schema for the same reason as {@link protocolChoices}: the
+ * cap the page clamps an adopted model's disclosed output capability to must
+ * be the one the adapter will actually send, not a number the page invents.
+ * @param namespace - the namespace view whose schema declares the profile shape.
+ * @param schema - settings schema operations.
+ * @returns the schema's route-level `defaultMaxTokens`, or `undefined` when the schema has none.
+ */
+export function routeDefaultMaxTokens(
+  namespace: SettingsNamespaceView | undefined,
+  schema: SettingsSchemaOperations,
+): number | undefined {
+  if (namespace === undefined) return undefined
+  const node = schema.nodeAtPath(schema.rehydrate(namespace.schema), ['providers', PROBE_ROUTE, 'defaultMaxTokens'])
+  const value = node?.meta.default
+  return typeof value === 'number' ? value : undefined
+}
+
 /** The credential reference a resolved profile names (its `apiKeyEnv` field). */
 function apiKeyEnvOf(
   namespace: SettingsNamespaceView | undefined,

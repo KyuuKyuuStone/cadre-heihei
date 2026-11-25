@@ -12,7 +12,7 @@ import type { ModelsSectionInjected, ModelsSectionProps } from '../src/client/Mo
 import { CustomProviderCard } from '../src/client/CustomProviderCard.tsx'
 import { formatCapacity, parseCapacity } from '../src/client/DeepSeekModelsEditor.tsx'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
-import { ModelsSettingsStore, deriveKeyRef, protocolChoices, reasoningLevelChoices } from '../src/client/store.ts'
+import { ModelsSettingsStore, deriveKeyRef, protocolChoices, reasoningLevelChoices, routeDefaultMaxTokens } from '../src/client/store.ts'
 import { createModelsOperations } from '../src/client/operations.ts'
 import type { ModelsOperations } from '../src/client/operations.ts'
 import { en } from '../src/client/locales.ts'
@@ -33,6 +33,7 @@ const PiAiConfig = Schema.object({
     displayName: Schema.string(),
     api: Schema.union(PROTOCOLS),
     baseURL: Schema.string(),
+    defaultMaxTokens: Schema.number().default(32_768),
     models: Schema.array(Schema.object({
       id: Schema.string().required(),
       name: Schema.string(),
@@ -83,10 +84,11 @@ function piAiNamespace(
   providers: Record<string, JsonValue>,
   userProviders: Record<string, JsonValue> = providers,
   baseProviders: Record<string, JsonValue> = {},
+  config: Schema = PiAiConfig,
 ): SettingsNamespaceView {
   return {
     ns: 'llm-pi-ai',
-    schema: JSON.parse(JSON.stringify(PiAiConfig.toJSON())) as JsonValue,
+    schema: JSON.parse(JSON.stringify(config.toJSON())) as JsonValue,
     // `value` is the effective section; `user` is only the layer this page
     // writes. They differ whenever a composition `base` supplies something.
     value: { providers },
@@ -106,6 +108,8 @@ function scriptedFace(options: {
   baseProviders?: Record<string, JsonValue>
   /** Routes the adapter reports as hand-declared; the rest come back as shipped. */
   declaredRoutes?: readonly string[]
+  /** Profile schema variant, for cases about what the schema does NOT declare. */
+  piAiSchema?: Schema
   discover?: ReturnType<typeof vi.fn>
   mutate?: ReturnType<typeof vi.fn>
   set?: ReturnType<typeof vi.fn>
@@ -113,7 +117,7 @@ function scriptedFace(options: {
   const providers = options.providers ?? {
     openai: { apiKeyEnv: 'OPENAI_API_KEY', baseURL: 'https://proxy.example/v1' },
   }
-  const namespace = piAiNamespace(providers, options.userProviders ?? providers, options.baseProviders ?? {})
+  const namespace = piAiNamespace(providers, options.userProviders ?? providers, options.baseProviders ?? {}, options.piAiSchema ?? PiAiConfig)
   const discover = options.discover ?? vi.fn(() => Promise.resolve(ok([])))
   const mutate = options.mutate ?? vi.fn(() => Promise.resolve(remoteOk(namespace)))
   const set = options.set ?? vi.fn(() => Promise.resolve(remoteOk(undefined)))
@@ -811,6 +815,201 @@ describe('endpoint interrogation', () => {
     fireEvent.change(search, { target: { value: 'missing' } })
     expect(screen.getByText(en.fetchNoMatches)).toBeTruthy()
     expect((within_(dialog, en.fetchSelectAll) as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('routeDefaultMaxTokens', () => {
+  it('reads the route-level output default out of the namespace schema and nothing else', () => {
+    const { namespace } = scriptedFace()
+    expect(routeDefaultMaxTokens(namespace, settingsSchema)).toBe(32_768)
+    expect(routeDefaultMaxTokens(undefined, settingsSchema)).toBeUndefined()
+    const plain = { ...namespace, schema: JSON.parse(JSON.stringify(Schema.object({}).toJSON())) as JsonValue }
+    expect(routeDefaultMaxTokens(plain, settingsSchema)).toBeUndefined()
+    // A schema that declares the field without a default has no number to offer.
+    const noDefault = Schema.object({ providers: Schema.dict(Schema.object({ defaultMaxTokens: Schema.number() })) })
+    const unset = { ...namespace, schema: JSON.parse(JSON.stringify(noDefault.toJSON())) as JsonValue }
+    expect(routeDefaultMaxTokens(unset, settingsSchema)).toBeUndefined()
+  })
+})
+
+describe('adopted output cap', () => {
+  it('clamps a disclosed output capability to the route default and keeps a smaller one', async () => {
+    const discover = vi.fn(() => Promise.resolve(ok([
+      { id: 'huge', contextWindow: 500_000, maxTokens: 393_000 },
+      { id: 'small', maxTokens: 4096 },
+    ])))
+    const { mutate } = await mountSection({ discover })
+    openEditor('openai')
+
+    fireEvent.click(screen.getByText(en.fetchModels))
+    await screen.findByText(en.fetchTitle)
+    fireEvent.click(screen.getByText(en.fetchAdopt))
+
+    // The disclosure is what the model CAN emit; the stored field is what
+    // every request reserves, so the capability rides along only up to the
+    // route's per-request default. A smaller capability is protective and stays.
+    expandModel(1)
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).value).toBe('32768')
+    expandModel(2)
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 2`).value).toBe('4096')
+    fireEvent.click(screen.getByText(en.apply))
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops[0]?.value).toEqual([
+      { id: 'huge', contextWindow: 500_000, maxTokens: 32_768 },
+      { id: 'small', maxTokens: 4096 },
+    ])
+  })
+
+  it('clamps to a stored route override and mirrors it as the blank placeholder', async () => {
+    const discover = vi.fn(() => Promise.resolve(ok([{ id: 'huge', maxTokens: 393_000 }])))
+    await mountSection({
+      discover,
+      providers: { openai: { baseURL: 'https://proxy.example/v1', defaultMaxTokens: 65_536 } },
+    })
+    openEditor('openai')
+
+    fireEvent.click(screen.getByText(en.fetchModels))
+    await screen.findByText(en.fetchTitle)
+    fireEvent.click(screen.getByText(en.fetchAdopt))
+
+    expandModel(1)
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).value).toBe('65536')
+    // A new blank row promises the same number the clamp uses.
+    fireEvent.click(screen.getByRole('button', { name: en.addModel }))
+    expandModel(2)
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 2`).placeholder).toBe('65536')
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.contextWindow} 2`).placeholder).toBe('256K')
+  })
+
+  it('mirrors the schema default as the blank output placeholder', async () => {
+    await mountSection()
+    openEditor('openai')
+    fireEvent.click(screen.getByRole('button', { name: en.addModel }))
+    expandModel(1)
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).placeholder).toBe('32768')
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.contextWindow} 1`).placeholder).toBe('256K')
+  })
+
+  it('clamps adopted disclosures on the create card to the schema default', async () => {
+    const discover = vi.fn(() => Promise.resolve(ok([{ id: 'huge', maxTokens: 393_000 }])))
+    await mountSection({ discover })
+    openCustomMode()
+    fireEvent.change(screen.getByLabelText(en.customRoute), { target: { value: 'acme' } })
+    fireEvent.change(screen.getByLabelText(en.baseUrl), { target: { value: 'https://acme.test/v1' } })
+
+    fireEvent.click(screen.getByText(en.fetchModels))
+    await screen.findByText(en.fetchTitle)
+    fireEvent.click(screen.getByText(en.fetchAdopt))
+
+    expandModel(1)
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).value).toBe('32768')
+  })
+
+  it('keeps a disclosure unchanged when no route default can be read', async () => {
+    const discover = vi.fn(() => Promise.resolve(ok([{ id: 'huge', maxTokens: 393_000 }])))
+    const scripted = scriptedFace({ discover })
+    render(
+      <CustomProviderCard
+        taken={[]} protocols={PROTOCOLS} reasoningLevels={LEVELS} revision={7} operations={operationsWith(scripted.face)}
+        t={t} readOnly={false} onClose={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText(en.baseUrl), { target: { value: 'https://acme.test/v1' } })
+    fireEvent.click(screen.getByText(en.fetchModels))
+    await screen.findByText(en.fetchTitle)
+    fireEvent.click(screen.getByText(en.fetchAdopt))
+
+    expandModel(1)
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).value).toBe('393K')
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).placeholder).toBe('32K')
+  })
+
+  it('leaves disclosures alone when the schema names no output default', async () => {
+    const bare = Schema.object({
+      providers: Schema.dict(Schema.object({
+        baseURL: Schema.string(),
+        models: Schema.array(Schema.object({ id: Schema.string().required(), maxTokens: Schema.number() })),
+      })),
+    })
+    const discover = vi.fn(() => Promise.resolve(ok([{ id: 'huge', maxTokens: 393_000 }])))
+    await mountSection({ discover, piAiSchema: bare })
+    openEditor('openai')
+
+    fireEvent.click(screen.getByText(en.fetchModels))
+    await screen.findByText(en.fetchTitle)
+    fireEvent.click(screen.getByText(en.fetchAdopt))
+
+    expandModel(1)
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).value).toBe('393K')
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).placeholder).toBe('32K')
+  })
+})
+
+describe('reservation readout', () => {
+  it('warns above the route default and adopts it with an explicit click', async () => {
+    const { mutate } = await mountSection({
+      providers: {
+        openai: {
+          baseURL: 'https://proxy.example/v1',
+          models: [{ id: 'huge', contextWindow: 500_000, maxTokens: 393_000 }],
+        },
+      },
+    })
+    openEditor('openai')
+    expandModel(1)
+    expect(screen.getByText(en.reservationMetaShare
+      .replace('{value}', '393K').replace('{percent}', '78.6'))).toBeTruthy()
+    expect(screen.getByText(en.reservationWarningDefault
+      .replace('{value}', '393K').replace('{default}', '32768'))).toBeTruthy()
+
+    // The remedy writes the field, so live keystroke text must go with it.
+    fireEvent.change(screen.getByLabelText(`${en.maxTokens} 1`), { target: { value: '393000' } })
+    fireEvent.click(screen.getByRole('button', { name: en.reservationAdopt.replace('{value}', '32768') }))
+    expect(screen.getByLabelText<HTMLInputElement>(`${en.maxTokens} 1`).value).toBe('32768')
+    expect(screen.getByText(en.reservationMetaShare
+      .replace('{value}', '32768').replace('{percent}', '6.6'))).toBeTruthy()
+    expect(screen.queryByRole('button', { name: en.reservationAdopt.replace('{value}', '32768') })).toBeNull()
+
+    fireEvent.click(screen.getByText(en.apply))
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops[0]?.value)
+      .toEqual([{ id: 'huge', contextWindow: 500_000, maxTokens: 32_768 }])
+  })
+
+  it('shows no reservation for a row that declares no output cap', async () => {
+    // An omitted pi-ai entry reserves nothing, unlike the DeepSeek family's
+    // connection fallback — there is no consequence to read out.
+    await mountSection({
+      providers: { openai: { baseURL: 'https://proxy.example/v1', models: [{ id: 'blank', contextWindow: 500_000 }] } },
+    })
+    openEditor('openai')
+    expandModel(1)
+    expect(screen.queryByText(/Output reservation/)).toBeNull()
+  })
+
+  it('warns on the window share alone when no route default is readable', async () => {
+    const bare = Schema.object({
+      providers: Schema.dict(Schema.object({
+        baseURL: Schema.string(),
+        models: Schema.array(Schema.object({
+          id: Schema.string().required(), contextWindow: Schema.number(), maxTokens: Schema.number(),
+        })),
+      })),
+    })
+    await mountSection({
+      piAiSchema: bare,
+      providers: {
+        openai: {
+          baseURL: 'https://proxy.example/v1',
+          models: [{ id: 'huge', contextWindow: 500_000, maxTokens: 393_000 }],
+        },
+      },
+    })
+    openEditor('openai')
+    expandModel(1)
+    expect(screen.getByText(en.reservationWarningShare.replace('{percent}', '78.6'))).toBeTruthy()
+    // No readable default means no value to adopt — the warning only informs.
+    expect(screen.queryByRole('button', { name: /Use / })).toBeNull()
   })
 })
 

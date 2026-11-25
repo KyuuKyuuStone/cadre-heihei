@@ -72,6 +72,12 @@ export interface CustomProviderCardProps {
   /** Reasoning levels the adapter's schema accepts, in escalation order; empty shows no reasoning control. */
   reasoningLevels: readonly string[]
   /**
+   * The schema's route-level output default a newly declared route inherits
+   * (the create writes no `defaultMaxTokens` of its own). The model list
+   * clamps an adopted model's disclosed output capability to it.
+   */
+  defaultMaxTokens?: number | undefined
+  /**
    * Revision of the `llm-pi-ai` user section this card opened at, sent with
    * the create so a route another tab declared meanwhile is a refusal rather
    * than a silent overwrite of its whole profile.
@@ -293,6 +299,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
         models={models}
         onChange={setModels}
         reasoningLevels={reasoningLevels}
+        defaultMaxTokens={props.defaultMaxTokens}
         probe={{
           settingsNs: NS,
           baseURL: normalizedBaseURL,

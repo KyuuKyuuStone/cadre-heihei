@@ -8,8 +8,10 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { IconPlusOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { formatCapacity, parseCapacity } from './capacity.ts'
 import type { en } from './locales.ts'
 import { ModelRow } from './ModelRow.tsx'
+import { reservationView } from './reservation.ts'
 import styles from './ModelsSection.module.css'
 
 /** One catalog entry kept structurally open so hidden or future fields survive an edit. */
@@ -26,46 +28,8 @@ function rowOf(key: string): number {
   return Number(key.slice(0, key.indexOf(':')))
 }
 
-/** Accepted capacity spellings: a decimal count with an optional K/M suffix. */
-const CAPACITY_PATTERN = /^(\d+(?:\.\d+)?)([km])?$/i
-
-/** Decimal suffix scales — `1M` is 1000K, matching how model capacities are quoted. */
-const CAPACITY_SCALE = { k: 1_000, m: 1_000_000 } as const
-
-/**
- * Read a typed capacity, so a user can write `256K` or `1M` instead of counting
- * zeroes. The stored value stays a plain token count.
- * @param text - raw field text.
- * @returns the count; `undefined` when blank (inherit), `NaN` when unreadable
- * (rejected by {@link validateDeepSeekModels} before any write).
- */
-export function parseCapacity(text: string): number | undefined {
-  const trimmed = text.trim()
-  if (trimmed.length === 0) return undefined
-  const match = CAPACITY_PATTERN.exec(trimmed)
-  if (match === null) return Number.NaN
-  const suffix = match[2]?.toLowerCase()
-  const scale = suffix === 'k' || suffix === 'm' ? CAPACITY_SCALE[suffix] : 1
-  const scaled = Number(match[1]) * scale
-  // A decimal multiple is exact in intent but not in binary floating point
-  // (2.3 * 1e6 lands a few ULPs high), so an integral intent snaps back.
-  const rounded = Math.round(scaled)
-  return Math.abs(scaled - rounded) < 1e-6 ? rounded : scaled
-}
-
-/**
- * Spell a stored count back in the shortest form that survives a round trip
- * through {@link parseCapacity}; a count that is not a whole number of
- * thousands stays written out.
- * @param value - stored capacity.
- * @returns the field text.
- */
-export function formatCapacity(value: number): string {
-  if (!Number.isInteger(value) || value <= 0) return String(value)
-  if (value % CAPACITY_SCALE.m === 0) return `${String(value / CAPACITY_SCALE.m)}M`
-  if (value % CAPACITY_SCALE.k === 0) return `${String(value / CAPACITY_SCALE.k)}K`
-  return String(value)
-}
+/** Accepted capacity spellings and their scales live in {@link capacity}. */
+export { formatCapacity, parseCapacity } from './capacity.ts'
 
 /** A localized validation failure for one user-owned model array. */
 export interface DeepSeekModelsValidationFailure {
@@ -270,27 +234,50 @@ export function DeepSeekModelsEditor(props: DeepSeekModelsEditorProps): ReactNod
         ? <p className={styles['modelEmpty']}>{props.t('modelsEmpty')}</p>
         : (
           <div className={styles['modelList']}>
-            {props.models.map((model, index) => (
-              <ModelRow
-                key={index}
-                model={model}
-                position={index + 1}
-                inputField="inputModalities"
-                expanded={expanded.has(index)}
-                disabled={props.disabled}
-                t={props.t}
-                contextWindow={capacityInput(model, index, 'contextWindow', props.defaultContextWindow)}
-                maxTokens={capacityInput(model, index, 'maxTokens', props.defaultMaxTokens)}
-                onFieldChange={(field, value) => { update(index, field, value) }}
-                onIdBlur={(value) => {
-                  const trimmed = value.trim()
-                  if (trimmed !== value) update(index, 'id', trimmed)
-                }}
-                onChange={(next) => { props.onChange(props.models.map((row, at) => at === index ? next : row)) }}
-                onToggle={() => { toggle(index) }}
-                onRemove={() => { remove(index) }}
-              />
-            ))}
+            {props.models.map((model, index) => {
+              // Unlike pi-ai, a DeepSeek row that omits maxTokens still reserves
+              // the connection default (model-info falls back to it), so the
+              // fallback is part of the readout, marked as inherited.
+              const reservation = reservationView({
+                stored: model['maxTokens'],
+                inherited: props.defaultMaxTokens,
+                contextWindow: model['contextWindow'] ?? props.defaultContextWindow,
+                outputDefault: props.defaultMaxTokens,
+              })
+              const suggested = reservation?.suggested
+              return (
+                <ModelRow
+                  key={index}
+                  model={model}
+                  position={index + 1}
+                  inputField="inputModalities"
+                  expanded={expanded.has(index)}
+                  disabled={props.disabled}
+                  t={props.t}
+                  contextWindow={capacityInput(model, index, 'contextWindow', props.defaultContextWindow)}
+                  maxTokens={capacityInput(model, index, 'maxTokens', props.defaultMaxTokens)}
+                  reservation={reservation}
+                  onReservationAdopt={suggested === undefined ? undefined : () => {
+                    // The remedy writes the field, so the keystroke buffer must
+                    // go with it — otherwise the field keeps showing stale text.
+                    setEditing((current) => {
+                      const next = new Map(current)
+                      next.delete(`${String(index)}:maxTokens`)
+                      return next
+                    })
+                    update(index, 'maxTokens', suggested)
+                  }}
+                  onFieldChange={(field, value) => { update(index, field, value) }}
+                  onIdBlur={(value) => {
+                    const trimmed = value.trim()
+                    if (trimmed !== value) update(index, 'id', trimmed)
+                  }}
+                  onChange={(next) => { props.onChange(props.models.map((row, at) => at === index ? next : row)) }}
+                  onToggle={() => { toggle(index) }}
+                  onRemove={() => { remove(index) }}
+                />
+              )
+            })}
           </div>
         )}
       <button
