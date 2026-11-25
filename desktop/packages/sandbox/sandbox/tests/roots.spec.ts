@@ -36,16 +36,16 @@ describe('workspaceWritableRoots', () => {
     expect(workspaceWritableRoots({ mode: 'workspace-write', workspaceRoot: ws })).toEqual([realpathSync.native(ws)])
   })
 
-  it('workspace-write adds every explicit extra directory, canonical and deduplicated', () => {
+  it('workspace-write deduplicates physical extra directories and rejects symlink aliases', () => {
     const ws = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
-    const extra = mkdtempSync(join(tmpdir(), 'dsh-extra-'))
-    const alias = `${extra}-alias`
+    const extra = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-extra-')))
+    const alias = join(ws, 'alias')
     symlinkSync(extra, alias, 'dir')
-    roots.push(ws, extra, alias)
+    roots.push(ws, extra)
     const grants = workspaceWritableRoots({
       mode: 'workspace-write',
       workspaceRoot: ws,
-      additionalWritableRoots: [alias, extra],
+      additionalWritableRoots: [extra, extra],
     })
     expect(grants).toEqual([realpathSync.native(ws), realpathSync.native(extra)])
     expect(() => workspaceWritableRoots({ mode: 'workspace-write', workspaceRoot: ws, additionalWritableRoots: [alias] }))
@@ -101,7 +101,7 @@ describe('writableRoots', () => {
 
   it('workspace-write includes an explicit extra directory beside the temp areas', () => {
     const ws = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
-    const extra = mkdtempSync(join(tmpdir(), 'dsh-extra-'))
+    const extra = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-extra-')))
     roots.push(ws, extra)
     expect(writableRoots({
       mode: 'workspace-write',
