@@ -36,7 +36,14 @@ async function fixture(): Promise<{ api: ReturnType<typeof createMcpApi>; ledger
   insert.run('p1', 'gone-1', 'worker', 'departed')
   writer.close()
   const db = openLedger(ledgerPath)
-  return { api: createMcpApi({ db, ledgerPath, scanCatalog: async () => scan }), ledgerPath, db }
+  const api = createMcpApi({
+    db,
+    ledgerPath,
+    serversRoot: root,
+    scanCatalog: async () => scan,
+    probe: async () => ({ tools: [], instructionBytes: 0 }),
+  })
+  return { api, ledgerPath, db }
 }
 
 async function codeOf(run: () => Promise<unknown>): Promise<string> {

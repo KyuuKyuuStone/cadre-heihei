@@ -16,6 +16,11 @@ import type { StdioServerFixture } from './real-composition.ts'
 const CATALOG = '/cadre/mcp/catalog'
 const GET = '/cadre/mcp/get'
 const SET = '/cadre/mcp/set'
+const PREVIEW = '/cadre/mcp/preview'
+const ADD = '/cadre/mcp/add'
+const EDIT = '/cadre/mcp/edit'
+const REMOVE = '/cadre/mcp/remove'
+const TEST = '/cadre/mcp/test'
 
 /** Roster the authorization matrix is checked against. */
 const ROSTER = [
@@ -243,4 +248,106 @@ describe('cadre MCP routes over real HTTP', () => {
       await booted.cleanup()
     }
   }, 90_000)
+
+  it('runs the CRUD and probe routes over real HTTP behind the supervisor and confirm gates', async () => {
+    const admission = { reject: false }
+    const booted = await bootRoutes(admission, [{
+      id: 'probe', name: 'Probe', command: process.execPath, args: ['-e', 'process.exit(0)'],
+    }])
+    try {
+      const added = await callRoute(booted.origin, ADD, {
+        projectId: 'p1', actorSessionId: 's-sup',
+        manifest: {
+          id: 'fresh', name: 'Fresh', transport: 'stdio', command: process.execPath,
+          args: ['-e', 'process.exit(0)'],
+          env: { API_TOKEN: { fromEnv: 'API_TOKEN' }, LOG_LEVEL: 'debug' },
+        },
+      })
+      expect(added.status).toBe(200)
+      expect(added.result).toEqual({ id: 'fresh', created: true, overwritten: false })
+
+      // A worker cannot touch the machine-wide directory, even naming itself.
+      const refusedAdd = await callRoute(booted.origin, ADD, {
+        projectId: 'p1', actorSessionId: 'w-worker',
+        manifest: { id: 'nope', transport: 'stdio', command: 'x' },
+      })
+      expect(refusedAdd.status).toBe(403)
+      expect(refusedAdd).toMatchObject({ code: 'MCP_FORBIDDEN' })
+
+      // The catalog now serves it, and preview masks the secret to its reference.
+      const catalog = await callRoute(booted.origin, CATALOG, { projectId: 'p1', actorSessionId: 's-sup' })
+      expect(catalog.result).toMatchObject({ servers: [{ id: 'fresh' }, { id: 'probe' }] })
+      const preview = await callRoute(booted.origin, PREVIEW, {
+        projectId: 'p1', actorSessionId: 'w-worker', serverId: 'fresh',
+      })
+      expect(preview.status).toBe(200)
+      expect(preview.result).toMatchObject({
+        id: 'fresh', envKeys: [{ name: 'API_TOKEN', fromEnv: 'API_TOKEN' }, { name: 'LOG_LEVEL' }],
+      })
+      // The reference NAME travels; the literal a non-secret entry carries does not.
+      expect(preview.text).toContain('API_TOKEN')
+      expect(preview.text).not.toContain('debug')
+
+      const editWithoutConfirm = await callRoute(booted.origin, EDIT, {
+        projectId: 'p1', actorSessionId: 's-sup', serverId: 'fresh', patch: { description: 'x' },
+      })
+      expect(editWithoutConfirm.status).toBe(409)
+      expect(editWithoutConfirm).toMatchObject({ code: 'MCP_CONFIRM_REQUIRED' })
+      const edited = await callRoute(booted.origin, EDIT, {
+        projectId: 'p1', actorSessionId: 's-sup', serverId: 'fresh',
+        patch: { description: 'edited' }, confirm: true,
+      })
+      expect(edited.status).toBe(200)
+      expect(edited.result).toEqual({ id: 'fresh', updated: true })
+
+      // A conflicting id needs overwrite+confirm; a rename is an input error.
+      const conflict = await callRoute(booted.origin, ADD, {
+        projectId: 'p1', actorSessionId: 's-sup',
+        manifest: { id: 'fresh', transport: 'stdio', command: 'x' },
+      })
+      expect(conflict.status).toBe(409)
+      expect(conflict).toMatchObject({ code: 'MCP_NAME_CONFLICT' })
+      const rename = await callRoute(booted.origin, EDIT, {
+        projectId: 'p1', actorSessionId: 's-sup', serverId: 'fresh', patch: { id: 'other' }, confirm: true,
+      })
+      expect(rename.status).toBe(400)
+      expect(rename).toMatchObject({ code: 'MCP_INVALID' })
+
+      // `test` executes, so it needs the supervisor confirmation too.
+      const testWithoutConfirm = await callRoute(booted.origin, TEST, {
+        projectId: 'p1', actorSessionId: 's-sup', serverId: 'probe',
+      })
+      expect(testWithoutConfirm.status).toBe(409)
+      expect(testWithoutConfirm).toMatchObject({ code: 'MCP_CONFIRM_REQUIRED' })
+      const unknownTest = await callRoute(booted.origin, TEST, {
+        projectId: 'p1', actorSessionId: 's-sup', serverId: 'missing', confirm: true,
+      })
+      expect(unknownTest.status).toBe(503)
+      expect(unknownTest).toMatchObject({ code: 'MCP_SERVER_UNAVAILABLE' })
+
+      // Removing drops the entry from the catalog and leaves the selection inert.
+      await callRoute(booted.origin, SET, {
+        projectId: 'p1', actorSessionId: 'w-worker', targetSessionId: 'w-worker',
+        servers: [{ id: 'fresh', enabled: true }],
+      })
+      const removeWithoutConfirm = await callRoute(booted.origin, REMOVE, {
+        projectId: 'p1', actorSessionId: 's-sup', serverId: 'fresh',
+      })
+      expect(removeWithoutConfirm.status).toBe(400)
+      expect(removeWithoutConfirm).toMatchObject({ code: 'MCP_INVALID' })
+      const removed = await callRoute(booted.origin, REMOVE, {
+        projectId: 'p1', actorSessionId: 's-sup', serverId: 'fresh', confirm: true,
+      })
+      expect(removed.status).toBe(200)
+      expect(removed.result).toEqual({ removed: true })
+      const afterRemove = await callRoute(booted.origin, CATALOG, { projectId: 'p1', actorSessionId: 's-sup' })
+      expect(afterRemove.result).toMatchObject({ servers: [{ id: 'probe' }] })
+      const orphanRead = await callRoute(booted.origin, GET, {
+        projectId: 'p1', actorSessionId: 'w-worker', targetSessionId: 'w-worker',
+      })
+      expect(orphanRead.result).toEqual({ servers: [] })
+    } finally {
+      await booted.cleanup()
+    }
+  }, 120_000)
 })

@@ -138,11 +138,119 @@ export interface McpSetInput {
   readonly servers: unknown
 }
 
-/** The catalog/get/set surface the routes and the sidebar share. */
+/** `preview` input: one catalog entry to describe without connecting. */
+export interface McpPreviewInput {
+  readonly projectId: string
+  readonly actorSessionId: string
+  readonly serverId: string
+  readonly locale?: string
+}
+
+/** One `env` or `headers` entry of a preview: the name and its masked `fromEnv` reference. */
+export interface McpPreviewSecret {
+  readonly name: string
+  readonly fromEnv?: string
+}
+
+/**
+ * `preview` result: the fields an editor needs, with every secret reduced to its
+ * reference name. No literal value ever leaves the host.
+ */
+export interface McpPreviewResult {
+  readonly id: string
+  readonly name: string
+  readonly description: string
+  readonly transport: McpTransport
+  readonly tags: readonly string[]
+  readonly envKeys: readonly McpPreviewSecret[]
+  readonly headerKeys: readonly McpPreviewSecret[]
+  readonly command?: string
+  readonly args?: readonly string[]
+  readonly url?: string
+  readonly toolCallTimeoutMs?: number
+  readonly author?: string
+  readonly homepage?: string
+  readonly license?: string
+}
+
+/** `add` input; `manifest` stays `unknown` because it crosses the wire. */
+export interface McpAddInput {
+  readonly projectId: string
+  readonly actorSessionId: string
+  readonly manifest: unknown
+  readonly overwrite?: unknown
+  readonly confirm?: unknown
+}
+
+/** `add` result: the id written, and which way it landed. */
+export interface McpAddResult {
+  readonly id: string
+  readonly created: boolean
+  readonly overwritten: boolean
+}
+
+/** `edit` input; `patch` stays `unknown` because it crosses the wire. */
+export interface McpEditInput {
+  readonly projectId: string
+  readonly actorSessionId: string
+  readonly serverId: string
+  readonly patch: unknown
+  readonly confirm?: unknown
+}
+
+/** `edit` result: the id whose manifest was replaced. */
+export interface McpEditResult {
+  readonly id: string
+  readonly updated: true
+}
+
+/** `remove` input. */
+export interface McpRemoveInput {
+  readonly projectId: string
+  readonly actorSessionId: string
+  readonly serverId: string
+  readonly confirm?: unknown
+}
+
+/** `remove` result: the entry was moved to `.backups`, never destroyed. */
+export interface McpRemoveResult {
+  readonly removed: true
+}
+
+/** `test` input. */
+export interface McpTestInput {
+  readonly projectId: string
+  readonly actorSessionId: string
+  readonly serverId: string
+  readonly confirm?: unknown
+}
+
+/** `test` result: the tools a one-shot probe discovered. */
+export interface McpTestResult {
+  readonly ok: true
+  readonly tools: readonly string[]
+  readonly instructionBytes: number
+}
+
+/** What a one-shot probe observes about one server. */
+export interface McpProbeOutcome {
+  readonly tools: readonly string[]
+  readonly instructionBytes: number
+}
+
+/** One-shot connectivity probe; injected so route tests pin its answer. */
+export type McpProbe = (manifest: McpServerManifest) => Promise<McpProbeOutcome>
+
+/** The catalog/get/set/preview/add/edit/remove/test surface the routes and the sidebar share. */
 export interface McpApi {
   catalog(input: McpCatalogInput): Promise<McpCatalogResult>
   get(input: McpGetInput): Promise<McpSelectionView>
   set(input: McpSetInput): Promise<McpSelectionView>
+  preview(input: McpPreviewInput): Promise<McpPreviewResult>
+  add(input: McpAddInput): Promise<McpAddResult>
+  edit(input: McpEditInput): Promise<McpEditResult>
+  remove(input: McpRemoveInput): Promise<McpRemoveResult>
+  test(input: McpTestInput): Promise<McpTestResult>
 }
 
 /** Catalog scan result: manifests keyed by id plus the rows that failed. */

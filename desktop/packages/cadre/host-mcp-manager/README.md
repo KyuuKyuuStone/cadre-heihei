@@ -65,23 +65,41 @@ surfaces readable text.
 
 ## Routes
 
-`POST /cadre/mcp/catalog`, `/cadre/mcp/get`, `/cadre/mcp/set` behind
+`POST /cadre/mcp/catalog`, `/cadre/mcp/get`, `/cadre/mcp/set`, `/cadre/mcp/preview`,
+`/cadre/mcp/add`, `/cadre/mcp/edit`, `/cadre/mcp/remove`, and `/cadre/mcp/test` behind
 `connection.admit`, a 16 KiB body limit, and `{ok:false, code, message,
-remediation}` failures. `catalog` and `get` accept an optional `locale` and
-localize descriptions as described above. Reads tolerate a session the ledger
+remediation}` failures. `catalog`, `get`, and `preview` accept an optional `locale`
+and localize descriptions as described above. Reads tolerate a session the ledger
 cannot prove (an
 empty team owns the project id first); cross-member reads and writes are
 supervisor-only, departed members are refused, and a session may only override
 `toolCallTimeoutMs` and `env` references — never the command, arguments, URL, or
 headers of a catalog entry.
 
+`preview` describes one entry with every secret reduced to its `fromEnv` name.
+`add`, `edit`, `remove`, and `test` act on the machine-wide directory, so they are
+supervisor-only; a worker is refused even with `confirm: true`. `add` needs
+`overwrite` plus `confirm` to replace an existing id, `edit` cannot change `id`,
+and `remove` moves the directory under `.backups` instead of deleting it, leaving
+referencing selections as inert orphans. `test` connects once, reads the tool
+list, and disposes; it reports `MCP_CONNECT_FAILED`, `MCP_TIMEOUT`, and
+`MCP_SERVER_UNAVAILABLE` instead of changing any state.
+
+A write stages its manifest under `<root>/.backups/.<id>.tmp-<uuid>`, moves the
+previous generation to `.backups/<id>.old-<uuid>`, then renames the staging
+directory into place; a failure restores the previous generation before the
+error surfaces. Dot-directories are never scanned, so neither staging nor a
+removed entry can revive.
+
 ## Known Limitations and Deferred Work
 
-- P1 covers the catalog, the selection, the pre-step mount, and the three routes
-  above. The global library page and the member dialog (add/remove/test/preview)
-  are P2: the manager exposes no route that writes the catalog yet.
+- The global library page and the member dialog that call `add`/`edit`/`remove`/
+  `preview`/`test` are front-end work: the routes above are the whole host side.
 - The step mounts what the ledger says; it does not probe a server to decide
   whether the selection is still valid. A server that fails to start is reported
   by `mcp-client` on its own channel and leaves the step running.
 - Mount state lives in this plugin instance. A restart re-derives mounts from
   `session_mcp` on the next step, which is the intended recovery path.
+- `MCP_PROJECT_REQUIRED` is declared but unreachable: the roster matrix already
+  answers off-roster callers (reads served, directory writes refused), so no
+  route needs a separate "session belongs to no project" verdict.

@@ -12,6 +12,7 @@ import { readCatalog, resolveServersRoot } from './catalog.ts'
 import { McpError } from './errors.ts'
 import { createMcpApi, type McpIpcDeps } from './ipc.ts'
 import { resolveServer, SelectionMounter } from './mount.ts'
+import { createMcpProbe } from './probe.ts'
 import { openLedger, readSelection } from './selection.ts'
 import type { AgentSurface, HostContext, PreStepPayload, ResolvedServer } from './types.ts'
 
@@ -126,6 +127,38 @@ function registerRoutes(scope: unknown, deps: McpIpcDeps): void {
     targetSessionId: required(body, 'targetSessionId'),
     servers: body.servers,
   }))
+  route('/cadre/mcp/preview', body => api.preview({
+    projectId: required(body, 'projectId'),
+    actorSessionId: required(body, 'actorSessionId'),
+    serverId: required(body, 'serverId'),
+    ...(typeof body.locale === 'string' ? { locale: body.locale } : {}),
+  }))
+  route('/cadre/mcp/add', body => api.add({
+    projectId: required(body, 'projectId'),
+    actorSessionId: required(body, 'actorSessionId'),
+    manifest: body.manifest,
+    overwrite: body.overwrite,
+    confirm: body.confirm,
+  }))
+  route('/cadre/mcp/edit', body => api.edit({
+    projectId: required(body, 'projectId'),
+    actorSessionId: required(body, 'actorSessionId'),
+    serverId: required(body, 'serverId'),
+    patch: body.patch,
+    confirm: body.confirm,
+  }))
+  route('/cadre/mcp/remove', body => api.remove({
+    projectId: required(body, 'projectId'),
+    actorSessionId: required(body, 'actorSessionId'),
+    serverId: required(body, 'serverId'),
+    confirm: body.confirm,
+  }))
+  route('/cadre/mcp/test', body => api.test({
+    projectId: required(body, 'projectId'),
+    actorSessionId: required(body, 'actorSessionId'),
+    serverId: required(body, 'serverId'),
+    confirm: body.confirm,
+  }))
 }
 
 /**
@@ -178,7 +211,7 @@ export function apply(ctx: HostContext, config: Config = {}): void {
   })
 
   ctx.inject?.(['webServer', 'connection'], (scope) => {
-    registerRoutes(scope, { db, ledgerPath, scanCatalog })
+    registerRoutes(scope, { db, ledgerPath, serversRoot, scanCatalog, probe: createMcpProbe() })
   })
 
   ctx.effect?.(() => () => {
