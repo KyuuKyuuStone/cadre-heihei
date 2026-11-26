@@ -1,7 +1,7 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   /* border-box: the inset stays inside the capped width so neither the
      override fields nor the save button escape a narrow conversation
      scrollport. Mirrors CadreSkillTab `.page`. */
@@ -9,7 +9,7 @@
   min-width: 0;
   width: min(100%, 880px);
   margin: 0 auto;
-  padding: 24px;
+  padding: 20px;
   color: var(--dsw-alias-label-primary);
 }
 
@@ -17,7 +17,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-bottom: 12px;
+  padding-bottom: 10px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l1);
 }
 
@@ -67,7 +67,7 @@
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
-  gap: 12px;
+  gap: 8px;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -76,11 +76,11 @@
 .card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
-  padding: 16px;
+  padding: 10px 12px;
   border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 16px;
+  border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-1);
   transition: border-color 200ms cubic-bezier(0.22, 1, 0.36, 1), background 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -118,11 +118,15 @@
 }
 
 .cardDescription {
+  display: -webkit-box;
+  overflow: hidden;
   margin: 0;
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   line-height: 16px;
   text-wrap: pretty;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .references {
@@ -188,18 +192,18 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 40px 16px;
+  gap: 4px;
+  padding: 14px 16px;
   border: 0.5px dashed var(--dsw-alias-border-l2);
-  border-radius: 16px;
+  border-radius: var(--dsw-radius-md);
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: 13px;
+  line-height: 18px;
 }
 
 .empty span {
-  font-size: 20px;
-  line-height: 28px;
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .empty p {
@@ -255,7 +259,7 @@
 .footer {
   display: flex;
   justify-content: flex-end;
-  padding-top: 12px;
+  padding-top: 10px;
   border-top: 0.5px solid var(--dsw-alias-border-l1);
 }
 

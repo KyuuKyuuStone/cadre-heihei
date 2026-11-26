@@ -8,15 +8,20 @@
 
 .page {
   display: flex;
+  flex: 0 1 auto;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
   box-sizing: border-box;
   width: 100%;
   max-width: 960px;
   min-width: 0;
-  min-height: 100%;
+  /* Shrink to the pane instead of a percentage floor: a short catalog stops
+     stretching to the full pane height, and the page scrolls only once its
+     content outgrows the pane (the centre column clips, so this box owns the
+     scroll). */
+  min-height: 0;
   margin: 0 auto;
-  padding: 28px 24px 32px;
+  padding: 20px 24px 24px;
   overflow: auto;
   color: var(--dsw-alias-label-primary);
 }
@@ -33,8 +38,8 @@
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px 24px;
-  padding-bottom: 20px;
+  gap: 12px 24px;
+  padding-bottom: 10px;
   border-bottom: 0.5px solid var(--dsw-alias-border-l1);
 }
 
@@ -189,8 +194,10 @@
 
 .list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 12px;
+  /* min(300px, 100%) keeps the track inside a pane narrower than the card floor
+     instead of overflowing it horizontally. */
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: 10px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -199,11 +206,11 @@
 .card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
-  padding: 16px;
+  padding: 12px;
   border: 0.5px solid var(--dsw-alias-border-l1);
-  border-radius: var(--dsw-radius-lg);
+  border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-1);
 }
 
@@ -264,13 +271,16 @@
 }
 
 .cardDescription {
-  min-height: 40px;
+  display: -webkit-box;
+  overflow: hidden;
   margin: 0;
   color: var(--dsw-alias-label-secondary);
   font-size: 13px;
   line-height: 20px;
   text-wrap: pretty;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .cardBody {
@@ -415,11 +425,11 @@
 .loadingCard {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  min-height: 156px;
-  padding: 16px;
+  gap: 8px;
+  min-height: 96px;
+  padding: 12px;
   border: 0.5px solid var(--dsw-alias-border-l1);
-  border-radius: var(--dsw-radius-lg);
+  border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-1);
   animation: skillLibraryLoading 1.2s ease-in-out infinite alternate;
 }
@@ -444,9 +454,9 @@
 .emptyState {
   box-sizing: border-box;
   margin: 0;
-  padding: 32px 20px;
+  padding: 16px 20px;
   border: 0.5px dashed var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-lg);
+  border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-secondary);
   text-align: center;
@@ -590,14 +600,14 @@
 .categoryCards {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
 }
 
 .categoryRow {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   max-width: 100%;
 }
@@ -609,7 +619,7 @@
 
 .categoryLabel {
   flex: none;
-  margin-top: 10px;
+  margin-top: 3px;
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
   line-height: 16px;
@@ -618,14 +628,14 @@
 .categoryCard {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  gap: 6px;
+  padding: 3px 9px;
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
-  font-size: 13px;
-  line-height: 18px;
+  font-size: 12px;
+  line-height: 16px;
   cursor: pointer;
 }
 
@@ -650,7 +660,7 @@
 }
 
 .categoryCardCount {
-  padding: 0 6px;
+  padding: 0 5px;
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: var(--dsw-radius-md);
   color: var(--dsw-alias-label-secondary);
